@@ -1180,7 +1180,16 @@ int APIENTRY WinMain_impl(HINSTANCE hInstance,
 			xr_delete(pTmp);
 		}
 #else
+        // MP fork (R1): match the statically-linked renderer's token
+#if defined(STATIC_RENDERER_R4)
+        Console->Execute("renderer renderer_r4");
+#elif defined(STATIC_RENDERER_R3)
+        Console->Execute("renderer renderer_r3");
+#elif defined(STATIC_RENDERER_R2)
+        Console->Execute("renderer renderer_r2");
+#else
         Console->Execute("renderer renderer_r1");
+#endif
 #endif
 		//. InitInput ( );
 		Engine.External.Initialize();

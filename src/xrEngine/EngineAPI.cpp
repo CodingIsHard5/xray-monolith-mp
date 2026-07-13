@@ -119,7 +119,10 @@ ENGINE_API bool is_enough_address_space_available()
 	//    return (*(u32*)&system_info.lpMaximumApplicationAddress) > 0x90000000;
 }
 
-#ifndef DEDICATED_SERVER
+// MP fork (R1): this region was #ifndef DEDICATED_SERVER, but the
+// all-in-one build statically links the renderers in every config, and
+// the dedicated exe still needs its one static renderer attached
+// (otherwise ConnectToRender is half-wired and boot hangs at the splash).
 
 extern BOOL DllMainXrRenderR1(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserved);
 extern BOOL DllMainXrRenderR2(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserved);
@@ -202,7 +205,6 @@ void CEngineAPI::InitializeNotDedicated()
     }
 #endif
 }
-#endif // DEDICATED_SERVER
 
 extern BOOL DllMainXrGame(HANDLE hModule, u32 ul_reason_for_call, LPVOID lpReserved);
 
@@ -218,9 +220,7 @@ void CEngineAPI::Initialize(void)
 	// render
 	LPCSTR r1_name = "xrRender_R1.dll";
 
-#ifndef DEDICATED_SERVER
-	InitializeNotDedicated();
-#endif // DEDICATED_SERVER
+	InitializeNotDedicated(); // MP fork (R1): also in dedicated builds
 
 #ifdef STATIC_RENDERER_R1
 	//if (0 == hRender)
@@ -282,9 +282,7 @@ void CEngineAPI::Destroy(void)
 	//if (hGame) { FreeLibrary(hGame); hGame = 0; }
 	DllMainXrGame(NULL, DLL_PROCESS_DETACH, NULL);
 	//if (hRender) { FreeLibrary(hRender); hRender = 0; }
-#ifndef DEDICATED_SERVER
 	DLL_MAIN_RENDERER(NULL, DLL_PROCESS_DETACH, NULL);
-#endif
 	pCreate = 0;
 	pDestroy = 0;
 	Engine.Event._destroy();
@@ -317,7 +315,17 @@ void CEngineAPI::CreateRendererList()
     vid_quality_token = xr_alloc<xr_token>(2);
 
     vid_quality_token[0].id = 0;
+    // MP fork (R1): the token must name the statically-linked renderer,
+    // or user.ltx / WinMain "renderer ..." executes never match it
+#if defined(STATIC_RENDERER_R4)
+    vid_quality_token[0].name = xr_strdup("renderer_r4");
+#elif defined(STATIC_RENDERER_R3)
+    vid_quality_token[0].name = xr_strdup("renderer_r3");
+#elif defined(STATIC_RENDERER_R2)
+    vid_quality_token[0].name = xr_strdup("renderer_r2");
+#else
     vid_quality_token[0].name = xr_strdup("renderer_r1");
+#endif
 
     vid_quality_token[1].id = -1;
     vid_quality_token[1].name = NULL;
