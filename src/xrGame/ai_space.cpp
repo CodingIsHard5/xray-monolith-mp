@@ -43,8 +43,10 @@ CAI_Space::CAI_Space()
 
 void CAI_Space::init()
 {
-	if (g_dedicated_server)
-		return;
+	// MP fork (R1): GSC's dedicated server ran no AI or Lua at all — ours
+	// IS the authoritative A-Life simulation, so the dedicated build gets
+	// the full AI space (this early-return left script_engine() NULL and
+	// stat_memory's ai().script_engine().lua() was the boot crash).
 
 #ifndef NO_SINGLE
 	VERIFY(!m_ef_storage);
@@ -144,8 +146,7 @@ void CAI_Space::load(LPCSTR level_name)
 
 void CAI_Space::unload(bool reload)
 {
-	if (g_dedicated_server)
-		return;
+	// MP fork (R1): full AI space exists in dedicated builds — unload it
 
 	script_engine().unload();
 
@@ -191,8 +192,7 @@ void CAI_Space::validate			(const u32 level_id) const
 
 void CAI_Space::patrol_path_storage_raw(IReader& stream)
 {
-	if (g_dedicated_server)
-		return;
+	// MP fork (R1): A-Life logic needs patrol paths on the server
 
 	xr_delete(m_patrol_path_storage);
 	m_patrol_path_storage = xr_new<CPatrolPathStorage>();
@@ -202,8 +202,7 @@ void CAI_Space::patrol_path_storage_raw(IReader& stream)
 
 void CAI_Space::patrol_path_storage(IReader& stream)
 {
-	if (g_dedicated_server)
-		return;
+	// MP fork (R1): A-Life logic needs patrol paths on the server
 
 	xr_delete(m_patrol_path_storage);
 	m_patrol_path_storage = xr_new<CPatrolPathStorage>();

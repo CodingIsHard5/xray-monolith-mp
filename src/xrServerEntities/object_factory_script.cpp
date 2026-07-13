@@ -70,10 +70,9 @@ extern ENGINE_API bool g_dedicated_server;
 
 void CObjectFactory::register_script_classes()
 {
-#ifndef NO_XR_GAME
-	if (!g_dedicated_server)
-#endif // NO_XR_GAME
-		ai();
+	// MP fork (R1): the authoritative server runs the full Lua stack —
+	// script classes register exactly like the normal game
+	ai();
 }
 
 using namespace luabind;

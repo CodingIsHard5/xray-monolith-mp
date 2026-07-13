@@ -605,6 +605,15 @@ void CScriptStorage::print_stack()
 #endif //-DEBUG
 
 	lua_State* L = lua();
+	// MP fork (R1): asserts that fire before the Lua VM exists route
+	// through here; lua_getstack(NULL) AVs, which re-enters the error
+	// handler and recurses to a stack overflow that eats the real error
+	if (!L)
+	{
+		script_log_no_stack(ScriptStorage::eLuaMessageTypeError,
+		                    "print_stack: lua VM not initialized yet");
+		return;
+	}
 	lua_Debug l_tDebugInfo;
 	for (int i = 0; lua_getstack(L, i, &l_tDebugInfo); ++i)
 	{

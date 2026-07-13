@@ -431,12 +431,10 @@ void CObjectFactory::register_classes()
 	ADD(CWeaponSSRS, CSE_ALifeItemWeaponMagazined, CLSID_OBJECT_W_SSRS, "wpn_ssrs");
 
 #ifndef NO_XR_GAME
-	// hack, for dedicated server only
-	// because we do not have scripts
-	// and script functionality is not
-	// needed here
-	if (!g_dedicated_server)
-		return;
+	// MP fork (R1): GSC's dedicated build hardcoded C++ stand-ins for
+	// script classes ("because we do not have scripts") — we DO have
+	// scripts, so always take the normal path and let Lua register them
+	return;
 
 	ADD(CElectricBall, CSE_ALifeItemArtefact, TEXT2CLSID("SCRPTART"), "artefact_s");
 	//	ADD(CtaGameArtefact			,CSE_ALifeItemArtefact			,TEXT2CLSID("AF_CTA")			,"ctaartefact_s");

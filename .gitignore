@@ -37,4 +37,4 @@ compressor/mod/
 
 # emacs temp file
 \#*\#
-*~
+*~src/prefix/
