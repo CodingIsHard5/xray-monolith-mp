@@ -50,9 +50,9 @@ public:
 	VTResume* tune_resume;
 	void Initialize();
 
-#ifndef DEDICATED_SERVER
+	// MP fork (R1): also declared for dedicated builds — the static
+	// renderer must attach in every configuration
 	void InitializeNotDedicated();
-#endif // DEDICATED_SERVER
 
 	void Destroy();
 
