@@ -282,7 +282,9 @@ void CEngineAPI::Destroy(void)
 	//if (hGame) { FreeLibrary(hGame); hGame = 0; }
 	DllMainXrGame(NULL, DLL_PROCESS_DETACH, NULL);
 	//if (hRender) { FreeLibrary(hRender); hRender = 0; }
+#ifndef DEDICATED_SERVER
 	DLL_MAIN_RENDERER(NULL, DLL_PROCESS_DETACH, NULL);
+#endif
 	pCreate = 0;
 	pDestroy = 0;
 	Engine.Event._destroy();
