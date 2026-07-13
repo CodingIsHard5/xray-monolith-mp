@@ -1,0 +1,65 @@
+# R0 renderless recon (STALKER MP mod, dev/RENDERLESS_PLAN.md):
+# build DX11 with DEDICATED_SERVER force-defined via the MSVC `CL` env var
+# (prepended to every cl.exe invocation — zero source patches) purely to
+# inventory which of the ~19 files with dedicated-server heritage still
+# compile and which rotted. Failure is expected and IS the recon data, so
+# the build continues on error and the full msbuild log is always uploaded.
+
+name: R0-DedicatedRecon
+
+on:
+  push:
+    branches: [ "renderless-r0" ]
+  workflow_dispatch:
+
+env:
+  SOLUTION_FILE_PATH: src/engine-vs2022.sln
+
+jobs:
+  build:
+    name: recon-DX11-dedicated
+    runs-on: windows-latest
+
+    steps:
+    - name: Configure Pagefile
+      uses: al-cheb/configure-pagefile-action@v1.3
+      with:
+        minimum-size: 8GB
+        maximum-size: 8GB
+        disk-root: "C:"
+
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: setup-msbuild
+      uses: microsoft/setup-msbuild@v1.3.1
+      with:
+        msbuild-architecture: "x64"
+
+    - name: Build DX11 with DEDICATED_SERVER defined
+      continue-on-error: true
+      env:
+        CL: /DDEDICATED_SERVER
+      run: msbuild /m /p:Configuration=DX11 /flp:"logfile=r0_build.log;verbosity=normal" ${{ env.SOLUTION_FILE_PATH }}
+
+    - name: Upload build log
+      if: always()
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: r0_build_log
+        path: r0_build.log
+        if-no-files-found: "error"
+        retention-days: 7
+
+    - name: Upload binaries (if any linked)
+      if: always()
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: r0_DX11_dedicated_bin
+        path: |
+          ./_build/_game/bin_dbg/*.exe
+          ./_build/_game/bin_dbg/*.pdb
+        if-no-files-found: "warn"
+        retention-days: 7
