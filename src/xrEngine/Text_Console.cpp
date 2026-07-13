@@ -33,8 +33,15 @@ void CTextConsole::CreateConsoleWnd()
 {
 	HINSTANCE hInstance = (HINSTANCE)GetModuleHandle(0);
 	//----------------------------------
-	RECT cRc;
-	GetClientRect(*m_pMainWnd, &cRc);
+	// MP fork (R1): the modern init order calls InitConsole() long before
+	// Device.Create() makes the main window, so under DEDICATED_SERVER
+	// there is no parent yet — GetClientRect(NULL) + a WS_CHILD window
+	// with a NULL parent can never succeed. Fall back to a top-level
+	// console window in that case.
+	HWND hParent = m_pMainWnd ? *m_pMainWnd : NULL;
+	RECT cRc = {0, 0, 1024, 600};
+	if (hParent)
+		GetClientRect(hParent, &cRc);
 	INT lX = cRc.left;
 	INT lY = cRc.top;
 	INT lWidth = cRc.right - cRc.left;
@@ -53,7 +60,9 @@ void CTextConsole::CreateConsoleWnd()
 	RegisterClass(&wndClass);
 
 	// Set the window's initial style
-	u32 dwWindowStyle = WS_OVERLAPPED | WS_CHILD | WS_VISIBLE; // | WS_CLIPSIBLINGS;// | WS_CLIPCHILDREN;
+	u32 dwWindowStyle = hParent
+		? (WS_OVERLAPPED | WS_CHILD | WS_VISIBLE) // | WS_CLIPSIBLINGS;// | WS_CLIPCHILDREN;
+		: (WS_OVERLAPPEDWINDOW | WS_VISIBLE); // top-level dedicated console
 
 	// Set the window's initial width
 	RECT rc;
@@ -63,7 +72,7 @@ void CTextConsole::CreateConsoleWnd()
 	// Create the render window
 	m_hConsoleWnd = CreateWindow(wndclass, "XRAY Text Console", dwWindowStyle,
 	                             lX, lY,
-	                             lWidth, lHeight, *m_pMainWnd,
+	                             lWidth, lHeight, hParent,
 	                             0, hInstance, 0L);
 	//---------------------------------------------------------------------------
 	R_ASSERT2(m_hConsoleWnd, "Unable to Create TextConsole Window!");
