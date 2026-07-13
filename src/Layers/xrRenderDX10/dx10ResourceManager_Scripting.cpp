@@ -469,6 +469,10 @@ void CResourceManager::LS_Load()
 	xr_vector<char*>* folder = FS.file_list_open("$game_shaders$", ::Render->getShaderPath(),
 	                                             FS_ListFiles | FS_RootOnly);
 	VERIFY(folder);
+	// MP fork (R1): no shader folder under the dedicated fake renderer —
+	// VERIFY is a no-op in release and folder->size() AV'd (SEH swallowed)
+	if (!folder)
+		return;
 	for (u32 it = 0; it < folder->size(); it++)
 	{
 		string_path namesp, fn;
