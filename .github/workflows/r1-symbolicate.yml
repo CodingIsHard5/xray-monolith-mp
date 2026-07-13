@@ -1,0 +1,41 @@
+# R1 helper: symbolicate exe RVAs against the PDB from a previous build's
+# artifact (llvm-symbolizer is preinstalled on windows-latest and reads
+# PDBs natively). Used to turn wine +seh crash addresses into
+# file:line without a local Windows toolchain.
+
+name: R1-Symbolicate
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Actions run id whose artifact holds the exe+pdb"
+        required: true
+      artifact:
+        description: "Artifact name"
+        default: "r0_DX11_dedicated_bin"
+      addresses:
+        description: "Space-separated RVAs (hex, e.g. 0x1E8439)"
+        required: true
+
+jobs:
+  symbolicate:
+    runs-on: windows-latest
+    steps:
+    - name: Download artifact
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh run download ${{ inputs.run_id }} --repo ${{ github.repository }} --name "${{ inputs.artifact }}" -D art
+        Get-ChildItem art
+
+    - name: Symbolicate
+      shell: pwsh
+      run: |
+        $exe = (Get-ChildItem art\*.exe | Select-Object -First 1).FullName
+        "exe: $exe"
+        foreach ($a in "${{ inputs.addresses }}".Split(" ")) {
+          "=== $a ==="
+          llvm-symbolizer --obj="$exe" --relative-address $a
+        }
