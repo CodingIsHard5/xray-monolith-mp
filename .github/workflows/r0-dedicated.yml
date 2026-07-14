@@ -119,3 +119,49 @@ jobs:
           ./nullout/*.pdb
         if-no-files-found: "warn"
         retention-days: 7
+
+  build-client:
+    name: client-DX11 (non-dedicated, ENet)
+    runs-on: windows-latest
+
+    steps:
+    - name: Configure Pagefile
+      uses: al-cheb/configure-pagefile-action@v1.3
+      with:
+        minimum-size: 8GB
+        maximum-size: 8GB
+        disk-root: "C:"
+
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: setup-msbuild
+      uses: microsoft/setup-msbuild@v1.3.1
+      with:
+        msbuild-architecture: "x64"
+
+    - name: Build DX11 client (no DEDICATED_SERVER; ENet is in xrNetServer)
+      continue-on-error: true
+      run: msbuild /m /p:Configuration=DX11 /flp:"logfile=client_build.log;verbosity=normal" ${{ env.SOLUTION_FILE_PATH }}
+
+    - name: Upload build log
+      if: always()
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: client_build_log
+        path: client_build.log
+        if-no-files-found: "error"
+        retention-days: 7
+
+    - name: Upload client binaries
+      if: always()
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: client_DX11_bin
+        path: |
+          ./_build/_game/bin_dbg/*.exe
+          ./_build/_game/bin_dbg/*.pdb
+        if-no-files-found: "warn"
+        retention-days: 7
