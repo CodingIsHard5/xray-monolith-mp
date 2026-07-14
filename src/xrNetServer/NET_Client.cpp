@@ -439,13 +439,17 @@ BOOL IPureClient::Connect(LPCSTR options)
 		// same option grammar: client(ADDR/name=X/pass=Y/port=N)
 		if (xr_enet::enabled())
 		{
+			u32 enet_port = u32(psSV_Port);
+			if (const char* mp = strstr(Core.Params, "-mp_port "))
+				enet_port = atol(mp + 9);
+
 			SClientConnectData cl_data;
 			cl_data.process_id = GetCurrentProcessId();
 			xr_strcpy(cl_data.name, user_name_str);
 			xr_strcpy(cl_data.pass, user_pass);
 
 			m_enet = xr_new<xr_enet::client_transport>(this);
-			if (!m_enet->connect(server_name, u32(psSV_Port), cl_data))
+			if (!m_enet->connect(server_name, enet_port, cl_data))
 			{
 				xr_delete(m_enet);
 				return FALSE;

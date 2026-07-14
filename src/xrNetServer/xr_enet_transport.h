@@ -46,6 +46,7 @@ namespace xr_enet
 		void send_to(u32 client_id, void* data, u32 size, u32 dpnsend_flags);
 		void kick(u32 client_id);
 		bool running() const { return m_host != nullptr; }
+		bool owns(u32 client_id) const; // is this id one of our ENet peers
 
 	private:
 		static void pump_thread(void* self);

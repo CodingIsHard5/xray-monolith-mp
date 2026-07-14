@@ -119,6 +119,19 @@ namespace xr_enet
 		}
 	}
 
+	bool server_transport::owns(u32 client_id) const
+	{
+		if (!m_host) return false;
+		ENetHost* h = (ENetHost*)m_host;
+		for (size_t i = 0; i < h->peerCount; ++i)
+		{
+			const ENetPeer* p = &h->peers[i];
+			if (p->state == ENET_PEER_STATE_CONNECTED && (u32)(uintptr_t)p->data == client_id)
+				return true;
+		}
+		return false;
+	}
+
 	void server_transport::kick(u32 client_id)
 	{
 		if (!m_host) return;

@@ -256,26 +256,25 @@ IPureServer::EConnect IPureServer::Connect(LPCSTR options, GameDescriptionData& 
 	// real network session anyway — the co-op dedicated server is a
 	// single-player game world that remote clients join. Opt-in flag so
 	// every accepted boot configuration stays byte-identical without it.
-	if (strstr(Core.Params, "-mp_host"))
-		psNET_direct_connect = FALSE;
-
-	// MP fork: ENet transport replaces the whole DirectPlay session when
-	// -xrnet_udp is set (wine cannot host dpnet; see CLOCK_NETCODE_PLAN)
-	if (!psNET_direct_connect && xr_enet::enabled())
+	// MP fork: -mp_host opens an ENet listen socket for REMOTE clients
+	// while the single/alife world keeps its in-process host-client
+	// (psNET_direct_connect stays TRUE — no DirectPlay, no local-client
+	// round trip over the network). Remote clients attach as non-local.
+	if (strstr(Core.Params, "-mp_host") && xr_enet::enabled())
 	{
 		u32 enet_port = START_PORT_LAN_SV;
-		if (strstr(options, "portsv="))
+		if (const char* mp = strstr(Core.Params, "-mp_port "))
+			enet_port = atol(mp + 9);
+		else if (strstr(options, "portsv="))
 			enet_port = atol(strstr(options, "portsv=") + 7);
-		u32 enet_maxpl = 32;
-		if (strstr(options, "maxplayers="))
-			enet_maxpl = atol(strstr(options, "maxplayers=") + 11);
 		m_enet = xr_new<xr_enet::server_transport>(this);
-		if (!m_enet->host(enet_port, enet_maxpl))
+		if (!m_enet->host(enet_port, 32))
 		{
 			xr_delete(m_enet);
-			return ErrConnect;
+			m_enet = nullptr;
+			// non-fatal: the world still runs, just no remote clients
+			Msg("! XRNET: -mp_host failed to open ENet socket; continuing solo");
 		}
-		return ErrNoError;
 	}
 
 	// Parse options
@@ -646,8 +645,9 @@ void IPureServer::SendTo_Buf(ClientID id, void* data, u32 size, u32 dwFlags, u32
 
 void IPureServer::SendTo_LL(ClientID ID/*DPNID ID*/, void* data, u32 size, u32 dwFlags, u32 dwTimeout)
 {
-	// MP fork: ENet path
-	if (m_enet && m_enet->running())
+	// MP fork: route remote (ENet) clients over the socket; the local
+	// in-process host-client falls through to normal delivery
+	if (m_enet && m_enet->running() && m_enet->owns(ID.value()))
 	{
 		m_enet->send_to(ID.value(), data, size, dwFlags);
 		return;
@@ -859,8 +859,8 @@ bool IPureServer::DisconnectClient(IClient* C, LPCSTR Reason)
 {
 	if (!C) return false;
 
-	// MP fork: ENet path
-	if (m_enet && m_enet->running())
+	// MP fork: ENet path (remote clients only)
+	if (m_enet && m_enet->running() && m_enet->owns(C->ID.value()))
 	{
 		m_enet->kick(C->ID.value());
 		return true;
