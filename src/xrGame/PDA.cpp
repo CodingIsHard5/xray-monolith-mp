@@ -49,6 +49,12 @@ BOOL CPda::net_Spawn(CSE_Abstract* DC)
 	return (res);
 }
 
+// headless dedicated server has no game UI; PDA hud/menu touchpoints no-op
+static CUIPdaWnd* PdaMenu()
+{
+	return CurrentGameUI() ? &CurrentGameUI()->GetPdaMenu() : nullptr;
+}
+
 void CPda::net_Destroy()
 {
 	inherited::net_Destroy();
@@ -131,9 +137,9 @@ void CPda::OnStateSwitch(u32 S, u32 oldState)
 			PlayHUDMotion(!m_bNoticedEmptyBattery ? "anm_hide" : "anm_hide_empty", TRUE, this, GetState());
 			SetPending(TRUE);
 			m_bZoomed = false;
-			CurrentGameUI()->GetPdaMenu().Enable(false);
+			if (CUIPdaWnd* w = PdaMenu()) w->Enable(false);
 			g_player_hud->reset_thumb(false);
-			CurrentGameUI()->GetPdaMenu().ResetJoystick(false);
+			if (CUIPdaWnd* w = PdaMenu()) w->ResetJoystick(false);
 			if (joystick != BI_NONE)
 				HudItemData()->m_model->LL_GetBoneInstance(joystick).reset_callback();
 			target_screen_switch = Device.fTimeGlobal + m_screen_off_delay;
@@ -146,9 +152,9 @@ void CPda::OnStateSwitch(u32 S, u32 oldState)
 		{
 			m_bZoomed = false;
 			m_fZoomfactor = 0.f;
-			CUIPdaWnd* pda = &CurrentGameUI()->GetPdaMenu();
+			CUIPdaWnd* pda = PdaMenu();
 
-			if (pda->IsShown())
+			if (pda && pda->IsShown())
 			{
 				if (!psActorFlags.test(AF_3D_PDA))
 					pda->Enable(true);
@@ -157,7 +163,7 @@ void CPda::OnStateSwitch(u32 S, u32 oldState)
 			}
 
 			g_player_hud->reset_thumb(true);
-			pda->ResetJoystick(true);
+			if (pda) pda->ResetJoystick(true);
 		}
 		SetPending(FALSE);
 	}
@@ -222,7 +228,8 @@ void CPda::OnAnimationEnd(u32 state)
 void CPda::JoystickCallback(CBoneInstance* B)
 {
 	CPda* Pda = static_cast<CPda*>(B->callback_param());
-	CUIPdaWnd* pda = &CurrentGameUI()->GetPdaMenu();
+	CUIPdaWnd* pda = PdaMenu();
+	if (!pda) return;
 
 	static float fAvgTimeDelta = Device.fTimeDelta;
 	fAvgTimeDelta = _inertion(fAvgTimeDelta, Device.fTimeDelta, 0.8f);
@@ -289,7 +296,8 @@ void CPda::UpdateCL()
 
 	// For battery icon
 	float condition = GetCondition();
-	CUIPdaWnd* pda = &CurrentGameUI()->GetPdaMenu();
+	CUIPdaWnd* pda = PdaMenu();
+	if (!pda) return;
 	pda->m_power = condition;
 
 	if (!psActorFlags.test(AF_3D_PDA))
@@ -425,8 +433,8 @@ void CPda::OnMovementChanged(ACTOR_DEFS::EMoveCommand cmd)
 		CEntity::SEntityState st;
 		Actor()->g_State(st);
 
-		CUIPdaWnd* pda = &CurrentGameUI()->GetPdaMenu();
-		if (pda->IsShown() && pda->IsEnabled() && st.bSprint)
+		CUIPdaWnd* pda = PdaMenu();
+		if (pda && pda->IsShown() && pda->IsEnabled() && st.bSprint)
 		{
 			m_bZoomed = false;
 			pda->Enable(false);
@@ -436,7 +444,9 @@ void CPda::OnMovementChanged(ACTOR_DEFS::EMoveCommand cmd)
 
 bool CPda::Action(u16 cmd, u32 flags)
 {
-	CUIPdaWnd* pda = &CurrentGameUI()->GetPdaMenu();
+	CUIPdaWnd* pda = PdaMenu();
+	if (!pda)
+		return inherited::Action(cmd, flags);
 
 	switch (cmd)
 	{
@@ -531,8 +541,8 @@ void CPda::OnMoveToRuck(const SInvItemPlace& prev)
 			HudItemData()->m_model->LL_GetBoneInstance(joystick).reset_callback();
 		g_player_hud->detach_item(this);
 	}
-	CUIPdaWnd* pda = &CurrentGameUI()->GetPdaMenu();
-	if (pda->IsShown()) pda->HideDialog();
+	CUIPdaWnd* pda = PdaMenu();
+	if (pda && pda->IsShown()) pda->HideDialog();
 	StopCurrentAnimWithoutCallback();
 	SetPending(FALSE);
 }
@@ -547,9 +557,9 @@ void CPda::UpdateHudAdditional(Fmatrix& trans)
 
 	if (pActor->cam_freelook == eflEnabled || pActor->cam_freelook == eflEnabling || g_player_hud->script_anim_part != u8(-1))
 	{
-		CUIPdaWnd* pda = &CurrentGameUI()->GetPdaMenu();
+		CUIPdaWnd* pda = PdaMenu();
 
-		if (pda->IsEnabled())
+		if (pda && pda->IsEnabled())
 		{
 			if (m_bZoomed)
 			{
@@ -1029,10 +1039,10 @@ void CPda::OnH_B_Independent(bool just_before_destroy)
 	m_bZoomed = false;
 	m_fZoomfactor = 0.f;
 
-	CUIPdaWnd* pda = &CurrentGameUI()->GetPdaMenu();
-	if (pda->IsShown()) pda->HideDialog();
+	CUIPdaWnd* pda = PdaMenu();
+	if (pda && pda->IsShown()) pda->HideDialog();
 	g_player_hud->reset_thumb(true);
-	pda->ResetJoystick(true);
+	if (pda) pda->ResetJoystick(true);
 
 	if (joystick != BI_NONE)
 		HudItemData()->m_model->LL_GetBoneInstance(joystick).reset_callback();
