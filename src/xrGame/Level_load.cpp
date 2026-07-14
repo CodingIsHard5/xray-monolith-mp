@@ -171,7 +171,7 @@ bool CLevel::Load_GameSpecific_After()
 		}
 	}
 
-	if (!g_dedicated_server)
+	// dedicated too: level scripts are the A-Life logic this server exists to run
 	{
 		// loading scripts
 		ai().script_engine().remove_script_process(ScriptEngine::eScriptProcessorLevel);

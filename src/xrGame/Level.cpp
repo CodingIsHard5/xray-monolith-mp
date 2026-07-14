@@ -242,18 +242,21 @@ CLevel::CLevel() :
     eEnvironment = Engine.Event.Handler_Attach("LEVEL:Environment", this);
     eEntitySpawn = Engine.Event.Handler_Attach("LEVEL:spawn", this);
     m_pBulletManager = xr_new<CBulletManager>();
-    if (!g_dedicated_server)
+    // dedicated too: A-Life scripts drive map spots and tasks, and
+    // OnAlifeSimulator(Un)Loaded derefs both managers unconditionally
     {
         m_map_manager = xr_new<CMapManager>();
         m_game_task_manager = xr_new<CGameTaskManager>();
     }
     m_dwDeltaUpdate = u32(fixed_step * 1000);
     m_seniority_hierarchy_holder = xr_new<CSeniorityHierarchyHolder>();
+    // dedicated too: space restrictors gate NPC pathfinding and client
+    // spawn callbacks are used by script binders — both pure logic
+    m_space_restriction_manager = xr_new<CSpaceRestrictionManager>();
+    m_client_spawn_manager = xr_new<CClientSpawnManager>();
     if (!g_dedicated_server)
     {
         m_level_sound_manager = xr_new<CLevelSoundManager>();
-        m_space_restriction_manager = xr_new<CSpaceRestrictionManager>();
-        m_client_spawn_manager = xr_new<CClientSpawnManager>();
         m_autosave_manager = xr_new<CAutosaveManager>();
         m_debug_renderer = xr_new<CDebugRenderer>();
 #ifdef DEBUG
@@ -323,8 +326,8 @@ CLevel::~CLevel()
 	xr_delete(m_autosave_manager);
     xr_delete(m_debug_renderer);
     delete_data(m_debug_render_queue);
-    if (!g_dedicated_server)
-        ai().script_engine().remove_script_process(ScriptEngine::eScriptProcessorLevel);
+    // dedicated too: the level script processor is registered there as well now
+    ai().script_engine().remove_script_process(ScriptEngine::eScriptProcessorLevel);
     xr_delete(game);
     xr_delete(game_events);
 
@@ -1031,7 +1034,7 @@ void CLevel::OnFrame()
 
 	if (m_bNeed_CrPr)
 		make_NetCorrectionPrediction();
-	if (!g_dedicated_server)
+	// dedicated too: the managers exist there now (scripts drive both)
 	{
 		if (g_mt_config.test(mtMap))
 			Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(m_map_manager, &CMapManager::Update));
@@ -1138,8 +1141,8 @@ void CLevel::OnFrame()
 #endif
 	g_pGamePersistent->Environment().SetGameTime(GetEnvironmentGameDayTimeSec(),
 	                                             game->GetEnvironmentGameTimeFactor());
-	if (!g_dedicated_server)
-		ai().script_engine().script_process(ScriptEngine::eScriptProcessorLevel)->update();
+	// dedicated too: level scripts ARE the A-Life logic this server runs
+	ai().script_engine().script_process(ScriptEngine::eScriptProcessorLevel)->update();
 	m_ph_commander->update();
 	m_ph_commander_scripts->update();
 	Device.Statistic->TEST0.Begin();
@@ -1157,8 +1160,7 @@ void CLevel::OnFrame()
 			m_level_sound_manager->Update();
 	}
 
-	// defer LUA-GC-STEP
-	if (!g_dedicated_server)
+	// defer LUA-GC-STEP (dedicated too — the server runs the full Lua stack)
 	{
 		if (g_mt_config.test(mtLUA_GC))
 			Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CLevel::script_gc));
