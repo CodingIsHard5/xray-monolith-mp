@@ -1,6 +1,8 @@
 #include "stdafx.h"
 #include "poltergeist.h"
 #include "poltergeist_state_manager.h"
+
+extern ENGINE_API bool g_dedicated_server;
 #include "../../../characterphysicssupport.h"
 #include "../../../PHMovementControl.h"
 #include "../../../PhysicsShellHolder.h"
@@ -330,7 +332,10 @@ void CPoltergeist::UpdateCL()
 
 	ability()->update_frame();
 
-	if (Actor()->memory().visual().visible_now(this) &&
+	// MP fork: actor memory is null on the dedicated server — no
+	// rendering player means "not visible"
+	if (!g_dedicated_server &&
+		Actor()->memory().visual().visible_now(this) &&
 		Actor()->Position().distance_to(Position()) < 85.f)
 	{
 		MakeMeCrow();

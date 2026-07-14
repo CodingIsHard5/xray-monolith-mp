@@ -1,5 +1,7 @@
 #include "stdafx.h"
 #include "monster_enemy_manager.h"
+
+extern ENGINE_API bool g_dedicated_server;
 #include "BaseMonster/base_monster.h"
 #include "../ai_monsters_misc.h"
 #include "../../ai_object_location.h"
@@ -244,6 +246,9 @@ bool CMonsterEnemyManager::enemy_see_me_now()
 {
 	if (Actor() == enemy)
 	{
+		// MP fork: actor memory is null on the dedicated server
+		if (g_dedicated_server)
+			return false;
 		return (Actor()->memory().visual().visible_right_now(monster));
 	}
 	else

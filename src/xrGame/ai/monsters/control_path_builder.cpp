@@ -285,10 +285,13 @@ void CControlPathBuilder::make_inactual()
 }
 
 extern CActor* g_actor;
+extern ENGINE_API bool g_dedicated_server;
 
 bool CControlPathBuilder::can_use_distributed_computations(u32 option) const
 {
-	if (!g_actor)
+	// MP fork: actor memory is null on the dedicated server (Actor.cpp
+	// nulls it there by GSC design) — boot 23 jump_to_level crash
+	if (!g_actor || g_dedicated_server)
 		return true;
 
 	VERIFY(Actor());

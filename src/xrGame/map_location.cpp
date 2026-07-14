@@ -3,6 +3,8 @@
 #include "map_spot.h"
 #include "map_manager.h"
 
+extern ENGINE_API bool g_dedicated_server;
+
 #include "level.h"
 #include "../xrEngine/xr_object.h"
 #include "ai_space.h"
@@ -819,10 +821,12 @@ bool CRelationMapLocation::Update()
 					if (pAct->Position().distance_to(pObj->Position()) < helm->m_fShowNearestEnemiesDistance)
 						vis_res = true;
 					else
-						vis_res = Actor()->memory().visual().visible_now(pObj);
+						// MP fork: actor memory is null on the dedicated server
+						vis_res = !g_dedicated_server && Actor()->memory().visual().visible_now(pObj);
 				}
 				else
-					vis_res = Actor()->memory().visual().visible_now(pObj);
+					// MP fork: actor memory is null on the dedicated server
+					vis_res = !g_dedicated_server && Actor()->memory().visual().visible_now(pObj);
 			}
 		}
 		else

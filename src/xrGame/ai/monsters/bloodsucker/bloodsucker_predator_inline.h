@@ -8,6 +8,8 @@
 #include "../monster_home.h"
 
 #include "../../../actor.h"
+
+extern ENGINE_API bool g_dedicated_server;
 #include "../../../actor_memory.h"
 #include "../../../visual_memory_manager.h"
 
@@ -93,7 +95,9 @@ void CStateBloodsuckerPredatorAbstract::critical_finalize()
 TEMPLATE_SPECIALIZATION
 bool CStateBloodsuckerPredatorAbstract::check_start_conditions()
 {
-	if (Actor()->memory().visual().visible_now(object)) return false;
+	// MP fork: actor memory is null on the dedicated server — "not
+	// visible" there
+	if (!g_dedicated_server && Actor()->memory().visual().visible_now(object)) return false;
 	return true;
 }
 
