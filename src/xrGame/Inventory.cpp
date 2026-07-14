@@ -1136,10 +1136,13 @@ bool CInventory::Eat(PIItem pIItem)
 		if (IsGameTypeSingle())
 			Actor()->callback(GameObject::eUseObject)((smart_cast<CGameObject*>(pIItem))->lua_game_object());
 
-		if (pItemToEat->IsUsingCondition() && pItemToEat->GetRemainingUses() < 1 && pItemToEat->CanDelete())
-			CurrentGameUI()->GetActorMenu().RefreshCurrentItemCell();
+		if (CurrentGameUI()) // headless server has no game UI
+		{
+			if (pItemToEat->IsUsingCondition() && pItemToEat->GetRemainingUses() < 1 && pItemToEat->CanDelete())
+				CurrentGameUI()->GetActorMenu().RefreshCurrentItemCell();
 
-		CurrentGameUI()->GetActorMenu().SetCurrentItem(NULL);
+			CurrentGameUI()->GetActorMenu().SetCurrentItem(NULL);
+		}
 	}
 
 	if (pItemToEat->Empty())
