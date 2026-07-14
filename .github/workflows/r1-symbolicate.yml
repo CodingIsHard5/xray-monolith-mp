@@ -33,7 +33,7 @@ jobs:
     - name: Symbolicate
       shell: pwsh
       run: |
-        $exe = (Get-ChildItem art\*.exe | Select-Object -First 1).FullName
+        $exe = (Get-ChildItem art -Recurse -Filter *.exe | Select-Object -First 1).FullName
         "exe: $exe"
         foreach ($a in "${{ inputs.addresses }}".Split(" ")) {
           "=== $a ==="
