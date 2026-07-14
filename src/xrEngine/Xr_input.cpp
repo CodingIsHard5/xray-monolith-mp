@@ -67,6 +67,13 @@ CInput::CInput(BOOL bExclusive, int deviceForInit)
 	//===================== Dummy pack
 	iCapture(&dummyController);
 
+#ifdef DEDICATED_SERVER
+	// headless server: no window and possibly no display driver at all —
+	// run with null input devices (every consumer null-checks pKeyboard/
+	// pMouse below)
+	deviceForInit = 0;
+#endif
+
 	if (!pDI)
 		CHK_DX(DirectInput8Create(GetModuleHandle(NULL), DIRECTINPUT_VERSION, IID_IDirectInput8, (void**)&pDI, NULL));
 
@@ -189,6 +196,8 @@ BOOL b_altF4 = FALSE;
 
 void CInput::KeyUpdate()
 {
+	if (!pKeyboard) return;
+
 	if (b_altF4) return;
 
 	HRESULT hr;
@@ -322,6 +331,7 @@ void CInput::resetMouseState()
 
 bool CInput::get_dik_name(int dik, LPSTR dest_str, int dest_sz)
 {
+	if (!pKeyboard) return false;
 	DIPROPSTRING keyname;
 	keyname.diph.dwSize = sizeof(DIPROPSTRING);
 	keyname.diph.dwHeaderSize = sizeof(DIPROPHEADER);
@@ -433,6 +443,8 @@ BOOL CInput::iGetAsyncBtnState(int btn)
 
 void CInput::MouseUpdate()
 {
+	if (!pMouse) return;
+
 	HRESULT hr;
 	DWORD dwElements = MOUSEBUFFERSIZE;
 	auto od = std::make_unique<DIDEVICEOBJECTDATA[]>(MOUSEBUFFERSIZE);
@@ -737,12 +749,13 @@ IInputReceiver* CInput::CurrentIR()
 
 void CInput::unacquire()
 {
-	pKeyboard->Unacquire();
-	pMouse->Unacquire();
+	if (pKeyboard) pKeyboard->Unacquire();
+	if (pMouse) pMouse->Unacquire();
 }
 
 void CInput::acquire(const bool& exclusive)
 {
+	if (!pKeyboard || !pMouse) return;
 	pKeyboard->SetCooperativeLevel(
 #ifdef INGAME_EDITOR
         Device.editor() ? Device.editor()->main_handle() :
