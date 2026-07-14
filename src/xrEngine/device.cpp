@@ -580,6 +580,15 @@ void CRenderDevice::on_idle()
     u32 DSUpdateDelta = 1000 / g_svDedicateServerUpdateReate;
     if (FrameTime < DSUpdateDelta)
         Sleep(DSUpdateDelta - FrameTime);
+
+    // the render-side flush points are gated off on the server, so flush the
+    // in-memory log on a timer or crashes/hangs leave a 0-byte log behind
+    static u32 s_LastLogFlush = 0;
+    if (FrameEndTime - s_LastLogFlush > 3000)
+    {
+        s_LastLogFlush = FrameEndTime;
+        FlushLog();
+    }
 #endif
 	if (!b_is_Active)
 		Sleep(1);

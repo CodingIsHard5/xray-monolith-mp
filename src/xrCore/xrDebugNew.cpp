@@ -811,10 +811,24 @@ LONG WINAPI UnhandledFilter(_EXCEPTION_POINTERS* pExceptionInfo)
     if (Debug.get_crashhandler())
         Debug.get_crashhandler()();
 
+	if (pExceptionInfo->ExceptionRecord)
+	{
+		Msg("!! unhandled exception 0x%08X at address 0x%p",
+			pExceptionInfo->ExceptionRecord->ExceptionCode,
+			pExceptionInfo->ExceptionRecord->ExceptionAddress);
+	}
+	FlushLog();
+
 	if (shared_str_initialized)
 		Msg("stack trace:\n");
 
+#ifdef DEDICATED_SERVER
+	// dbghelp stack walking parses the full PDB, which hangs for the better
+	// part of an hour under wine; the raw address above is symbolicated
+	// offline against the CI artifact PDB instead.
+#else
     LogStackTrace(nullptr, true);
+#endif
 
 	if (!IsDebuggerPresent())
 	{
@@ -859,6 +873,12 @@ LONG WINAPI UnhandledFilter(_EXCEPTION_POINTERS* pExceptionInfo)
 
     if (IsDebuggerPresent())
         DebugBreak();
+
+#ifdef DEDICATED_SERVER
+	// no interactive session to dismiss a dialog; a system-modal MessageBox
+	// leaves a zombie process on a headless host, so die immediately instead
+	TerminateProcess(GetCurrentProcess(), 1);
+#endif
 
 	ShowCursor(true);
 	ShowWindow(GetActiveWindow(), SW_FORCEMINIMIZE);
