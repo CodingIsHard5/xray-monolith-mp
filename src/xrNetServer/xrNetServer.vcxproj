@@ -351,7 +351,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="xr_enet_transport.cpp" />
+    <ClCompile Include="xr_enet_transport.cpp">
+      <AdditionalIncludeDirectories>..\3rd party\enet\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
     <ClCompile Include="..\3rd party\enet\callbacks.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <CompileAs>CompileAsC</CompileAs>

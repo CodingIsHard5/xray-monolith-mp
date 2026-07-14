@@ -7,6 +7,8 @@
 #include "NET_Client.h"
 #include "NET_Messages.h"
 
+#pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "winmm.lib")
 #include "../3rd party/enet/include/enet/enet.h"
 
 namespace xr_enet
