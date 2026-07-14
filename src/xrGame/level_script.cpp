@@ -1891,6 +1891,14 @@ const float get_env_rads()
 
 //Alundaio: namespace level exports extension
 #ifdef NAMESPACE_LEVEL_EXPORTS
+// MP fork (§5.1): attention anchors for A-Life switching on the
+// headless server — lets a script move anchors before netcode exists
+#include "mp_anchors.h"
+void mp_anchor_set(u32 idx, const Fvector& pos) { mp_anchors::set(idx, pos); }
+void mp_anchor_clear(u32 idx) { mp_anchors::clear(idx); }
+void mp_anchor_clear_all() { mp_anchors::clear_all(); }
+u32 mp_anchor_count() { return mp_anchors::count(); }
+
 //ability to update level netpacket
 void g_send(NET_Packet& P, bool bReliable = 0, bool bSequential = 1, bool bHighPriority = 0, bool bSendImmediately = 0)
 {
@@ -2811,6 +2819,12 @@ void CLevel::script_register(lua_State* L)
 		def("change_game_news_show_time", &change_game_news_show_time),
 		def("update_pda_news_from_uiwindow", &update_pda_news_from_uiwindow),
 
-        def("get_actor_alcohol", &GetActorAlcohol)
+        def("get_actor_alcohol", &GetActorAlcohol),
+
+        // MP fork: A-Life attention anchors (§5.1)
+        def("mp_anchor_set", &mp_anchor_set),
+        def("mp_anchor_clear", &mp_anchor_clear),
+        def("mp_anchor_clear_all", &mp_anchor_clear_all),
+        def("mp_anchor_count", &mp_anchor_count)
 	];
 }

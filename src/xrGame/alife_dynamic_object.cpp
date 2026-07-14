@@ -9,6 +9,7 @@
 #include "stdafx.h"
 #include "xrServer_Objects_ALife.h"
 #include "alife_simulator.h"
+#include "mp_anchors.h"
 #include "alife_schedule_registry.h"
 #include "alife_graph_registry.h"
 #include "alife_object_registry.h"
@@ -157,7 +158,9 @@ void CSE_ALifeDynamicObject::try_switch_online()
 		return;
 	}
 
-	if (alife().graph().actor()->o_Position.distance_to(o_Position) > alife().online_distance())
+	// MP fork (§5.1): min distance to ANY attention anchor; with no
+	// anchors registered this degrades to the legacy actor distance
+	if (mp_anchors::min_distance_to(o_Position, alife().graph().actor()->o_Position) > alife().online_distance())
 	{
 		on_failed_switch_online();
 		return;
@@ -177,7 +180,7 @@ void CSE_ALifeDynamicObject::try_switch_offline()
 		return;
 	}
 
-	if (alife().graph().actor()->o_Position.distance_to(o_Position) <= alife().offline_distance())
+	if (mp_anchors::min_distance_to(o_Position, alife().graph().actor()->o_Position) <= alife().offline_distance())
 		return;
 
 	alife().switch_offline(this);

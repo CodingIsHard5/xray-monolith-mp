@@ -16,6 +16,54 @@
 #include "xrserver.h"
 #include "ai_space.h"
 #include "level_graph.h"
+#include "mp_anchors.h"
+
+// MP fork: attention-anchor registry (design doc §5.1). Kept here to
+// avoid a new translation unit in the vcxproj.
+namespace mp_anchors
+{
+	struct anchor { Fvector position; bool used; };
+	static anchor s_anchors[max_anchors] = {};
+	static u32 s_count = 0;
+
+	void set(u32 idx, const Fvector& position)
+	{
+		if (idx >= max_anchors) return;
+		if (!s_anchors[idx].used) ++s_count;
+		s_anchors[idx].position = position;
+		s_anchors[idx].used = true;
+	}
+
+	void clear(u32 idx)
+	{
+		if (idx >= max_anchors || !s_anchors[idx].used) return;
+		s_anchors[idx].used = false;
+		--s_count;
+	}
+
+	void clear_all()
+	{
+		for (u32 i = 0; i < max_anchors; ++i)
+			s_anchors[i].used = false;
+		s_count = 0;
+	}
+
+	u32 count() { return s_count; }
+
+	float min_distance_to(const Fvector& pos, const Fvector& fallback_pos)
+	{
+		if (!s_count)
+			return fallback_pos.distance_to(pos);
+		float best = flt_max;
+		for (u32 i = 0; i < max_anchors; ++i)
+			if (s_anchors[i].used)
+			{
+				float d = s_anchors[i].position.distance_to(pos);
+				if (d < best) best = d;
+			}
+		return best;
+	}
+}
 
 #ifdef DEBUG
 #	include "level.h"
