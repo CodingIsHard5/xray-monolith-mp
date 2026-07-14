@@ -146,7 +146,7 @@ CActor::pickup_result_t CActor::PickupModeUpdate()
 
 	feel_touch_update(Position(), m_fPickupInfoRadius);
 
-	if (!CurrentGameUI()->GetPdaMenu().IsShown())
+	if (!CurrentGameUI() || !CurrentGameUI()->GetPdaMenu().IsShown()) // null UI on headless server
 		DrawPickupItems();
 	else
 		m_bDelayDrawPickupItems = true;
@@ -174,7 +174,8 @@ void CActor::PickupModeUpdate_COD(pickup_result_t pickup_result)
 
 	if (!g_Alive() || eacFirstEye != cam_active || !psDeviceFlags2.test(rsCODPickup))
 	{
-		CurrentGameUI()->UIMainIngameWnd->SetPickUpItem(nullptr);
+		if (CurrentGameUI())
+			CurrentGameUI()->UIMainIngameWnd->SetPickUpItem(nullptr);
 		return;
 	};
 
@@ -237,7 +238,8 @@ void CActor::PickupModeUpdate_COD(pickup_result_t pickup_result)
 			pNearestItem = NULL;
 	}
 
-	CurrentGameUI()->UIMainIngameWnd->SetPickUpItem(pNearestItem);
+	if (CurrentGameUI())
+		CurrentGameUI()->UIMainIngameWnd->SetPickUpItem(pNearestItem);
 
 	{
 		::luabind::functor<void> func;

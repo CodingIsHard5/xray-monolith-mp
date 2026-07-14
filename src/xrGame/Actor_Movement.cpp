@@ -646,7 +646,7 @@ bool CActor::CanMove()
 {
 	if (conditions().IsCantWalk())
 	{
-		if (mstate_wishful & mcAnyMove)
+		if ((mstate_wishful & mcAnyMove) && CurrentGameUI())
 		{
 			CurrentGameUI()->AddCustomStatic("cant_walk", true);
 		}
@@ -654,7 +654,7 @@ bool CActor::CanMove()
 	}
 	else if (conditions().IsCantWalkWeight())
 	{
-		if (mstate_wishful & mcAnyMove)
+		if ((mstate_wishful & mcAnyMove) && CurrentGameUI())
 		{
 			CurrentGameUI()->AddCustomStatic("cant_walk_weight", true);
 		}
