@@ -111,6 +111,11 @@ void dx103DFluidManager::Initialize(int width, int height, int depth)
 	if (!RImplementation.o.volumetricfog)
 		return;
 
+	// dedicated: shader creation is gated off, so shader->E[i] below would
+	// deref null — volumetric smoke is a pure client-side visual anyway
+	if (g_dedicated_server)
+		return;
+
 	Destroy();
 
 	m_iTextureWidth = width;
