@@ -250,6 +250,13 @@ IPureServer::EConnect IPureServer::Connect(LPCSTR options, GameDescriptionData& 
 	if (strstr(options, "/single"))
 		psNET_direct_connect = TRUE;
 
+	// MP fork step 4 (N0): -mp_host makes a single/alife server host a
+	// real network session anyway — the co-op dedicated server is a
+	// single-player game world that remote clients join. Opt-in flag so
+	// every accepted boot configuration stays byte-identical without it.
+	if (strstr(Core.Params, "-mp_host"))
+		psNET_direct_connect = FALSE;
+
 	// Parse options
 	string4096 session_name;
 

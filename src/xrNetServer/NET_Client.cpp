@@ -1100,7 +1100,16 @@ void IPureClient::Sync_Thread()
 	for (; NET && !net_Disconnected;)
 	{
 		// Waiting for queue empty state
-		if (net_Syncronised) break; // Sleep(2000);
+		// MP fork (step 3 / doc §4.2): the stock thread synced ONCE on
+		// connect and exited — clock drift over a long co-op session was
+		// never re-corrected. Keep the thread alive and re-ping
+		// periodically; Sync_Average keeps refining the EWMA.
+		if (net_Syncronised)
+		{
+			for (u32 slept = 0; slept < 30000 && NET && !net_Disconnected; slept += 100)
+				Sleep(100);
+			if (!NET || net_Disconnected) break;
+		}
 		else
 		{
 			DWORD dwPending = 0;
