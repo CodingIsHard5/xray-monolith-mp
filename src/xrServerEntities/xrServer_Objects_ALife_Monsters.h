@@ -348,6 +348,13 @@ SERVER_ENTITY_DECLARE_BEGIN3(CSE_ALifeCreatureActor, CSE_ALifeCreatureAbstract, 
 	virtual CSE_Abstract* init();
 	virtual void load(NET_Packet& tNetPacket);
 	virtual bool can_save() const { return true; }
+	// MP fork (§5.1): an actor entity is a person, not a world object —
+	// never cull it offline via anchor-driven switching. In SP this is a
+	// no-op (distance to self = 0 keeps it online anyway); on the
+	// dedicated server the offline->online respawn round trip corrupts
+	// actor state (boot 21: garbage o_Position, health check fails),
+	// which is exactly the boot-19/20 "second flip never happens" bug.
+	virtual bool can_switch_offline() const { return false; }
 	virtual bool natural_weapon() const { return false; }
 	virtual bool natural_detector() const { return false; }
 #ifdef XRGAME_EXPORTS
