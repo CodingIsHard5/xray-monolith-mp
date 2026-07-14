@@ -127,11 +127,12 @@ void CActor::RunTalkDialog(CInventoryOwner* talk_partner, bool disable_break)
 	{
 		StartTalk(talk_partner);
 
-		if (CurrentGameUI()->TopInputReceiver())
+		if (CurrentGameUI() && CurrentGameUI()->TopInputReceiver())
 			CurrentGameUI()->TopInputReceiver()->HideDialog();
 
 		//		smart_cast<CUIGameSP*>(CurrentGameUI())->StartTalk(disable_break);
-		smart_cast<CUIGameSP*>(CurrentGameUI())->StartTalk(talk_partner->bDisableBreakDialog);
+		if (CUIGameSP* sp = smart_cast<CUIGameSP*>(CurrentGameUI()))
+			sp->StartTalk(talk_partner->bDisableBreakDialog);
 	}
 }
 
@@ -150,7 +151,8 @@ void CActor::NewPdaContact(CInventoryOwner* pInvOwner)
 	if (!IsGameTypeSingle()) return;
 
 	bool b_alive = !!(smart_cast<CEntityAlive*>(pInvOwner))->g_Alive();
-	CurrentGameUI()->UIMainIngameWnd->AnimateContacts(b_alive);
+	if (CurrentGameUI()) // null UI on headless server; map relation logic below still runs
+		CurrentGameUI()->UIMainIngameWnd->AnimateContacts(b_alive);
 
 	Level().MapManager().AddRelationLocation(pInvOwner);
 }

@@ -268,7 +268,7 @@ void CWeaponMagazined::FireStart()
 #endif
 		//-Alundaio
 
-		if (smart_cast<CActor*>(this->H_Parent()) && (Level().CurrentViewEntity() == H_Parent()))
+		if (smart_cast<CActor*>(this->H_Parent()) && (Level().CurrentViewEntity() == H_Parent()) && CurrentGameUI())
 			CurrentGameUI()->AddCustomStatic("gun_jammed", true);
 
 		OnEmptyClick();

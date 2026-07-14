@@ -1058,10 +1058,13 @@ public:
 #ifdef DEBUG
 		Msg("Game save overhead  : %f milliseconds", timer.GetElapsed_sec()*1000.f);
 #endif
-		StaticDrawableWrapper* _s = CurrentGameUI()->AddCustomStatic("game_saved", true);
-		LPSTR save_name;
-		STRCONCAT(save_name, CStringTable().translate("st_game_saved").c_str(), ": ", S);
-		_s->wnd()->TextItemControl()->SetText(save_name);
+		if (CurrentGameUI()) // null UI on headless server; the save itself already happened
+		{
+			StaticDrawableWrapper* _s = CurrentGameUI()->AddCustomStatic("game_saved", true);
+			LPSTR save_name;
+			STRCONCAT(save_name, CStringTable().translate("st_game_saved").c_str(), ": ", S);
+			_s->wnd()->TextItemControl()->SetText(save_name);
+		}
 
 		xr_strcat(S, ".dds");
 		FS.update_path(S1, "$game_saves$", S);
