@@ -977,7 +977,8 @@ void CActor::Die(CObject* who)
 		else
 			cam_Set(eacFreeLook);
 
-		CurrentGameUI()->HideShownDialogs();
+		if (CurrentGameUI()) // null UI on headless server
+			CurrentGameUI()->HideShownDialogs();
 
 		/* avo: attempt to set camera on timer */
 		/*CTimer T;
@@ -1401,7 +1402,7 @@ void CActor::UpdateCL()
 	//g_pGamePersistent->actor_data.helmet = !GetOutfit()->bIsHelmetAvaliable || inventory().ItemFromSlot(HELMET_SLOT) ? 1 : 0;
 
 	// Update environment radiation value if hud is not shown
-	if (!psHUD_Flags.test(HUD_DRAW))
+	if (!psHUD_Flags.test(HUD_DRAW) && CurrentGameUI()) // null UI on headless server
 		CurrentGameUI()->UIMainIngameWnd->get_hud_states()->UpdateZones();
 }
 

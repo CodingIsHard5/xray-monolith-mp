@@ -337,7 +337,7 @@ void CActorCondition::UpdateBoosters()
 		}
 	}
 
-	if (m_object == Level().CurrentViewEntity())
+	if (m_object == Level().CurrentViewEntity() && CurrentGameUI()) // null UI on headless server
 		CurrentGameUI()->UIMainIngameWnd->UpdateBoosterIndicators(m_booster_influences);
 }
 
