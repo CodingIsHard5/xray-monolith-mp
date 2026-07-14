@@ -684,6 +684,14 @@ void CMainMenu::OnDownloadPatchSuccess()
 
 void CMainMenu::OnSessionTerminate(LPCSTR reason)
 {
+	// MP fork: a headless/dedicated build has no error dialogs; the
+	// session-terminate UI would deref a null CUIMessageBox
+	if (!m_pMB_ErrDlgs[SessionTerminate])
+	{
+		Msg("! session terminated (no UI): %s", reason ? reason : "");
+		return;
+	}
+
 	if (m_NeedErrDialog == SessionTerminate && (Device.dwTimeGlobal - m_start_time) < 8000)
 		return;
 

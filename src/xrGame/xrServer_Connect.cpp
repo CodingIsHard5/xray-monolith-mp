@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "xrserver.h"
+#include "../xrNetServer/xr_enet_transport.h"
 #include "game_sv_single.h"
 #include "game_sv_deathmatch.h"
 #include "game_sv_teamdeathmatch.h"
@@ -115,7 +116,13 @@ void xrServer::AttachNewClient(IClient* CL)
 	msgConfig.sign1 = 0x12071980;
 	msgConfig.sign2 = 0x26111975;
 
-	if (psNET_direct_connect) //single_game
+	// MP fork: a -mp_host server keeps psNET_direct_connect TRUE for its
+	// in-process host-client, but REMOTE ENet clients must take the
+	// network branch (else the last remote client clobbers SV_Client and
+	// gets marked local). Classify by whether ENet owns this client.
+	bool is_remote = m_enet && m_enet->running() && m_enet->owns(CL->ID.value());
+
+	if (psNET_direct_connect && !is_remote) //single_game / local host-client
 	{
 		SV_Client = CL;
 		CL->flags.bLocal = 1;
