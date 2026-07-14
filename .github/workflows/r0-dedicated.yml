@@ -63,3 +63,59 @@ jobs:
           ./_build/_game/bin_dbg/*.pdb
         if-no-files-found: "warn"
         retention-days: 7
+
+  build-dx8:
+    name: recon-DX8-dedicated
+    runs-on: windows-latest
+
+    steps:
+    - name: Configure Pagefile
+      uses: al-cheb/configure-pagefile-action@v1.3
+      with:
+        minimum-size: 8GB
+        maximum-size: 8GB
+        disk-root: "C:"
+
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: setup-msbuild
+      uses: microsoft/setup-msbuild@v1.3.1
+      with:
+        msbuild-architecture: "x64"
+
+    - name: Build DX8 with DEDICATED_SERVER defined
+      continue-on-error: true
+      env:
+        CL: /DDEDICATED_SERVER
+      run: msbuild /m /p:Configuration=DX8 /flp:"logfile=r0_dx8_build.log;verbosity=normal" ${{ env.SOLUTION_FILE_PATH }}
+
+    - name: Build xrD3D9-Null (GSC null device, ported from CoC-Xray)
+      continue-on-error: true
+      run: msbuild /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 /p:OutDir=${{ github.workspace }}\nullout\ /flp:"logfile=null_build.log;verbosity=normal" src/xrD3D9-Null/xrD3D9-Null.vcxproj
+
+    - name: Upload build logs
+      if: always()
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: r0_dx8_build_logs
+        path: |
+          r0_dx8_build.log
+          null_build.log
+        if-no-files-found: "error"
+        retention-days: 7
+
+    - name: Upload binaries (if any linked)
+      if: always()
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: r0_DX8_dedicated_bin
+        path: |
+          ./_build/_game/bin_dbg/*.exe
+          ./_build/_game/bin_dbg/*.pdb
+          ./nullout/*.dll
+          ./nullout/*.pdb
+        if-no-files-found: "warn"
+        retention-days: 7
