@@ -1374,11 +1374,13 @@ void CActor::save(NET_Packet& output_packet)
 	inherited::save(output_packet);
 	CInventoryOwner::save(output_packet);
 	output_packet.w_u8(u8(m_bOutBorder));
-	CUITaskWnd* task_wnd = HUD().GetGameUI()->GetPdaMenu().pUITaskWnd;
-	output_packet.w_u8(task_wnd->IsTreasuresEnabled() ? 1 : 0);
-	output_packet.w_u8(task_wnd->IsQuestNpcsEnabled() ? 1 : 0);
-	output_packet.w_u8(task_wnd->IsSecondaryTasksEnabled() ? 1 : 0);
-	output_packet.w_u8(task_wnd->IsPrimaryObjectsEnabled() ? 1 : 0);
+	// headless server has no game UI; keep the save format and write the
+	// defaults (all PDA task filters shown)
+	CUITaskWnd* task_wnd = HUD().GetGameUI() ? HUD().GetGameUI()->GetPdaMenu().pUITaskWnd : nullptr;
+	output_packet.w_u8(!task_wnd || task_wnd->IsTreasuresEnabled() ? 1 : 0);
+	output_packet.w_u8(!task_wnd || task_wnd->IsQuestNpcsEnabled() ? 1 : 0);
+	output_packet.w_u8(!task_wnd || task_wnd->IsSecondaryTasksEnabled() ? 1 : 0);
+	output_packet.w_u8(!task_wnd || task_wnd->IsPrimaryObjectsEnabled() ? 1 : 0);
 
 	output_packet.w_stringZ(g_quick_use_slots[0]);
 	output_packet.w_stringZ(g_quick_use_slots[1]);
@@ -1391,11 +1393,19 @@ void CActor::load(IReader& input_packet)
 	inherited::load(input_packet);
 	CInventoryOwner::load(input_packet);
 	m_bOutBorder = !!(input_packet.r_u8());
-	CUITaskWnd* task_wnd = HUD().GetGameUI()->GetPdaMenu().pUITaskWnd;
-	task_wnd->TreasuresEnabled(!!input_packet.r_u8());
-	task_wnd->QuestNpcsEnabled(!!input_packet.r_u8());
-	task_wnd->SecondaryTasksEnabled(!!input_packet.r_u8());
-	task_wnd->PrimaryObjectsEnabled(!!input_packet.r_u8());
+	CUITaskWnd* task_wnd = HUD().GetGameUI() ? HUD().GetGameUI()->GetPdaMenu().pUITaskWnd : nullptr;
+	// keep reading the four filter bytes even with no UI (save format)
+	bool b_treasures = !!input_packet.r_u8();
+	bool b_quest_npcs = !!input_packet.r_u8();
+	bool b_secondary = !!input_packet.r_u8();
+	bool b_primary = !!input_packet.r_u8();
+	if (task_wnd)
+	{
+		task_wnd->TreasuresEnabled(b_treasures);
+		task_wnd->QuestNpcsEnabled(b_quest_npcs);
+		task_wnd->SecondaryTasksEnabled(b_secondary);
+		task_wnd->PrimaryObjectsEnabled(b_primary);
+	}
 	//need_quick_slot_reload = true;
 
 	input_packet.r_stringZ(g_quick_use_slots[0], sizeof(g_quick_use_slots[0]));
