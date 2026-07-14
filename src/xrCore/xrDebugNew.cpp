@@ -813,22 +813,28 @@ LONG WINAPI UnhandledFilter(_EXCEPTION_POINTERS* pExceptionInfo)
 
 	if (pExceptionInfo->ExceptionRecord)
 	{
-		Msg("!! unhandled exception 0x%08X at address 0x%p",
+		Msg("!! unhandled exception 0x%08X at address 0x%p (accessing 0x%p)",
 			pExceptionInfo->ExceptionRecord->ExceptionCode,
-			pExceptionInfo->ExceptionRecord->ExceptionAddress);
+			pExceptionInfo->ExceptionRecord->ExceptionAddress,
+			pExceptionInfo->ExceptionRecord->NumberParameters > 1
+				? (void*)pExceptionInfo->ExceptionRecord->ExceptionInformation[1]
+				: (void*)0);
 	}
 	FlushLog();
-
-	if (shared_str_initialized)
-		Msg("stack trace:\n");
 
 #ifdef DEDICATED_SERVER
 	// dbghelp stack walking parses the full PDB, which hangs for the better
 	// part of an hour under wine; the raw address above is symbolicated
-	// offline against the CI artifact PDB instead.
-#else
-    LogStackTrace(nullptr, true);
+	// offline against the CI artifact PDB instead. Die NOW: letting other
+	// threads keep hitting the fault turns one crash into a minutes-long
+	// storm of filters deadlocking on the log critical section.
+	TerminateProcess(GetCurrentProcess(), 1);
 #endif
+
+	if (shared_str_initialized)
+		Msg("stack trace:\n");
+
+    LogStackTrace(nullptr, true);
 
 	if (!IsDebuggerPresent())
 	{

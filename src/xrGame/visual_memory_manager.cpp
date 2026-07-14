@@ -942,8 +942,9 @@ void CVisualMemoryManager::load(IReader& packet)
 			delayed_object.m_object_id,
 			m_object->ID());
 		if (!spawn_callback || !spawn_callback->m_object_callback)
-			if (!g_dedicated_server)
-				Level().client_spawn_manager().add(delayed_object.m_object_id, m_object->ID(), callback);
+			// dedicated too: the manager exists there now and NPC visual
+			// memory needs the delayed-object spawn callback
+			Level().client_spawn_manager().add(delayed_object.m_object_id, m_object->ID(), callback);
 #ifdef DEBUG
 		else {
 			if (spawn_callback && spawn_callback->m_object_callback) {

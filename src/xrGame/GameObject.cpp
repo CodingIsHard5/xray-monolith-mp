@@ -57,7 +57,9 @@ CGameObject::CGameObject()
 	m_bCrPr_Activated = false;
 	m_dwCrPr_ActivationStep = 0;
 	m_spawn_time = 0;
-	m_ai_location = !g_dedicated_server ? xr_new<CAI_ObjectLocation>() : 0;
+	// dedicated too: A-Life objects use AI locations on this server
+	// (net_Spawn derefs ai_location() for any object with a valid node)
+	m_ai_location = xr_new<CAI_ObjectLocation>();
 	m_server_flags.one();
 
 	m_callbacks = xr_new<CALLBACK_MAP>();
@@ -99,8 +101,7 @@ void CGameObject::Load(LPCSTR section)
 void CGameObject::reinit()
 {
 	m_visual_callback.clear();
-	if (!g_dedicated_server)
-		ai_location().reinit();
+	ai_location().reinit();
 
 	// clear callbacks	
 	for (CALLBACK_MAP_IT it = m_callbacks->begin(); it != m_callbacks->end(); ++it) it->second.clear();
@@ -385,12 +386,11 @@ BOOL CGameObject::net_Spawn(CSE_Abstract* DC)
 	}
 
 	reload(*cNameSect());
-	if (!g_dedicated_server)
-		CScriptBinder::reload(*cNameSect());
+	// dedicated too: script binders attach the logic schemes this server runs
+	CScriptBinder::reload(*cNameSect());
 
 	reinit();
-	if (!g_dedicated_server)
-		CScriptBinder::reinit();
+	CScriptBinder::reinit();
 #ifdef DEBUG
 	if(ph_dbg_draw_mask1.test(ph_m1_DbgTrackObject)&&stricmp(PH_DBG_ObjectTrackName(),*cName())==0)
 	{
@@ -1088,8 +1088,7 @@ void CGameObject::shedule_Update(u32 dt)
 	// Msg							("-SUB-:[%x][%s] CGameObject::shedule_Update",smart_cast<void*>(this),*cName());
 	inherited::shedule_Update(dt);
 
-	if (!g_dedicated_server)
-		CScriptBinder::shedule_Update(dt);
+	CScriptBinder::shedule_Update(dt);
 }
 
 BOOL CGameObject::net_SaveRelevant()
