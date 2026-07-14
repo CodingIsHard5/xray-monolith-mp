@@ -154,10 +154,10 @@ void CALifeSwitchManager::remove_online(CSE_ALifeDynamicObject* object, bool upd
 void CALifeSwitchManager::switch_online(CSE_ALifeDynamicObject* object)
 {
 	START_PROFILE("ALife/switch/switch_online")
-#ifdef DEBUG
-//	if (psAI_Flags.test(aiALife))
+	// MP fork: was #ifdef DEBUG only — Release builds logged no manager
+	// switches at all (boot 20's "zero [LSS] lines" mystery)
+	if (strstr(Core.Params, "-dbg"))
 		Msg						("[LSS][%d] Going online [%d][%s][%d] ([%f][%f][%f] : [%f][%f][%f]), on '%s'",Device.dwFrame,Device.dwTimeGlobal,object->name_replace(), object->ID,VPUSH(graph().actor()->o_Position),VPUSH(object->o_Position), "*SERVER*");
-#endif
 		object->switch_online();
 	STOP_PROFILE
 }
@@ -165,10 +165,9 @@ void CALifeSwitchManager::switch_online(CSE_ALifeDynamicObject* object)
 void CALifeSwitchManager::switch_offline(CSE_ALifeDynamicObject* object)
 {
 	START_PROFILE("ALife/switch/switch_offline")
-#ifdef DEBUG
-//	if (psAI_Flags.test(aiALife))
+	// MP fork: was #ifdef DEBUG only (see switch_online above)
+	if (strstr(Core.Params, "-dbg"))
 		Msg							("[LSS][%d] Going offline [%d][%s][%d] ([%f][%f][%f] : [%f][%f][%f]), on '%s'",Device.dwFrame,Device.dwTimeGlobal,object->name_replace(), object->ID,VPUSH(graph().actor()->o_Position),VPUSH(object->o_Position), "*SERVER*");
-#endif
 		object->switch_offline();
 	STOP_PROFILE
 }
@@ -283,7 +282,13 @@ void CALifeSwitchManager::switch_object(CSE_ALifeDynamicObject* I)
 	}
 
 	if (!synchronize_location(I))
+	{
+		// MP fork: an online object silently skipped here would explain a
+		// "refuses to switch offline" state — make the skip visible
+		if (I->m_bOnline && strstr(Core.Params, "-dbg"))
+			Msg("[MPSW] [%d][%s] online but skipped: synchronize_location failed", I->ID, I->name_replace());
 		return;
+	}
 
 	if (I->m_bOnline)
 		try_switch_offline(I);

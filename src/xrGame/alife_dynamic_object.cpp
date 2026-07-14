@@ -171,18 +171,36 @@ void CSE_ALifeDynamicObject::try_switch_online()
 
 void CSE_ALifeDynamicObject::try_switch_offline()
 {
+	// MP fork: online set is tiny, so tracing every offline decision under
+	// -dbg is cheap and pins down which check keeps an object online
+	// (boot 19/20: second offline flip after a round trip never happens)
+	bool const dbg = !!strstr(Core.Params, "-dbg");
+
 	if (!can_switch_offline())
+	{
+		if (dbg)
+			Msg("[MPSW] [%d][%s] stays online: can_switch_offline=0 (match_configuration=%d)", ID, name_replace(), match_configuration() ? 1 : 0);
 		return;
+	}
 
 	if (!can_switch_online())
 	{
+		if (dbg)
+			Msg("[MPSW] [%d][%s] forced offline: can_switch_online=0", ID, name_replace());
 		alife().switch_offline(this);
 		return;
 	}
 
-	if (mp_anchors::min_distance_to(o_Position, alife().graph().actor()->o_Position) <= alife().offline_distance())
+	float const d = mp_anchors::min_distance_to(o_Position, alife().graph().actor()->o_Position);
+	if (d <= alife().offline_distance())
+	{
+		if (dbg)
+			Msg("[MPSW] [%d][%s] stays online: d=%.0f <= offline_dist=%.0f (anchors=%d)", ID, name_replace(), d, alife().offline_distance(), mp_anchors::count());
 		return;
+	}
 
+	if (dbg)
+		Msg("[MPSW] [%d][%s] going offline: d=%.0f > offline_dist=%.0f (anchors=%d)", ID, name_replace(), d, alife().offline_distance(), mp_anchors::count());
 	alife().switch_offline(this);
 }
 
