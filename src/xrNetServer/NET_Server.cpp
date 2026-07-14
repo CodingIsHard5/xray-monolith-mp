@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "xr_enet_transport.h"
 #include "dxerr.h"
 #include "NET_Common.h"
 #include "net_server.h"
@@ -216,6 +217,7 @@ IPureServer::IPureServer(CTimer* timer, BOOL Dedicated)
 	,csMessage(MUTEX_PROFILE_ID(IPureServer::csMessage))
 #endif // PROFILE_CRITICAL_SECTIONS
 {
+	m_enet = nullptr;
 	device_timer = timer;
 	stats.clear();
 	stats.dwSendTime = TimeGlobal(device_timer);
@@ -256,6 +258,25 @@ IPureServer::EConnect IPureServer::Connect(LPCSTR options, GameDescriptionData& 
 	// every accepted boot configuration stays byte-identical without it.
 	if (strstr(Core.Params, "-mp_host"))
 		psNET_direct_connect = FALSE;
+
+	// MP fork: ENet transport replaces the whole DirectPlay session when
+	// -xrnet_udp is set (wine cannot host dpnet; see CLOCK_NETCODE_PLAN)
+	if (!psNET_direct_connect && xr_enet::enabled())
+	{
+		u32 enet_port = START_PORT_LAN_SV;
+		if (strstr(options, "portsv="))
+			enet_port = atol(strstr(options, "portsv=") + 7);
+		u32 enet_maxpl = 32;
+		if (strstr(options, "maxplayers="))
+			enet_maxpl = atol(strstr(options, "maxplayers=") + 11);
+		m_enet = xr_new<xr_enet::server_transport>(this);
+		if (!m_enet->host(enet_port, enet_maxpl))
+		{
+			xr_delete(m_enet);
+			return ErrConnect;
+		}
+		return ErrNoError;
+	}
 
 	// Parse options
 	string4096 session_name;
@@ -460,6 +481,11 @@ void IPureServer::Disconnect()
 		IpList_Unload();
 	}
 
+	if (m_enet)
+	{
+		m_enet->stop();
+		xr_delete(m_enet);
+	}
 	if (NET) NET->Close(0);
 
 	// Release interfaces
@@ -620,6 +646,13 @@ void IPureServer::SendTo_Buf(ClientID id, void* data, u32 size, u32 dwFlags, u32
 
 void IPureServer::SendTo_LL(ClientID ID/*DPNID ID*/, void* data, u32 size, u32 dwFlags, u32 dwTimeout)
 {
+	// MP fork: ENet path
+	if (m_enet && m_enet->running())
+	{
+		m_enet->send_to(ID.value(), data, size, dwFlags);
+		return;
+	}
+
 	//	if (psNET_Flags.test(NETFLAG_LOG_SV_PACKETS)) pSvNetLog->LogData(TimeGlobal(device_timer), data, size);
 	if (psNET_Flags.test(NETFLAG_LOG_SV_PACKETS))
 	{
@@ -791,7 +824,7 @@ void IPureServer::UpdateClientStatistic(IClient* C)
 	DPN_CONNECTION_INFO CI;
 	ZeroMemory(&CI, sizeof(CI));
 	CI.dwSize = sizeof(CI);
-	if (!psNET_direct_connect)
+	if (!psNET_direct_connect && !m_enet) // MP fork: no DirectPlay stats on ENet
 	{
 		HRESULT hr = NET->GetConnectionInfo(C->ID.value(), &CI, 0);
 		if (FAILED(hr)) return;
@@ -825,6 +858,13 @@ void IPureServer::ClearStatistic()
 bool IPureServer::DisconnectClient(IClient* C, LPCSTR Reason)
 {
 	if (!C) return false;
+
+	// MP fork: ENet path
+	if (m_enet && m_enet->running())
+	{
+		m_enet->kick(C->ID.value());
+		return true;
+	}
 
 	HRESULT res = NET->DestroyClient(C->ID.value(), Reason, xr_strlen(Reason) + 1, 0);
 	CHK_DX(res);

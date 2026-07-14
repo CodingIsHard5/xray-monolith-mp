@@ -25,6 +25,8 @@ public:
 
 //==============================================================================
 
+namespace xr_enet { class client_transport; }
+
 class XRNETSERVER_API
 	IPureClient
 	: private MultipacketReciever,
@@ -48,6 +50,10 @@ protected:
 
 	GameDescriptionData m_game_description;
 	CTimer* device_timer;
+
+	// MP fork: opt-in ENet transport (-xrnet_udp); null when disabled
+	friend class xr_enet::client_transport;
+	xr_enet::client_transport* m_enet;
 protected:
 	IDirectPlay8Client* NET;
 	IDirectPlay8Address* net_Address_device;

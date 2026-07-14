@@ -22,6 +22,7 @@ struct SClientConnectData
 // -----------------------------------------------------
 
 class IPureServer;
+namespace xr_enet { class server_transport; class client_transport; }
 
 struct XRNETSERVER_API ip_address
 {
@@ -190,6 +191,10 @@ protected:
 	// Statistic
 	IServerStatistic stats;
 	CTimer* device_timer;
+
+	// MP fork: opt-in ENet transport (-xrnet_udp); null when disabled
+	friend class xr_enet::server_transport;
+	xr_enet::server_transport* m_enet;
 	BOOL m_bDedicated;
 
 	IClient* ID_to_client(ClientID ID, bool ScanAll = false);

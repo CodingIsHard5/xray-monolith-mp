@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "xr_enet_transport.h"
 #include "NET_Common.h"
 #include "net_client.h"
 #include "net_server.h"
@@ -355,6 +356,7 @@ IPureClient::IPureClient(CTimer* timer): net_Statistic(timer)
 	,net_csEnumeration(MUTEX_PROFILE_ID(IPureClient::net_csEnumeration))
 #endif // PROFILE_CRITICAL_SECTIONS
 {
+	m_enet = nullptr;
 	NET = NULL;
 	net_Address_server = NULL;
 	net_Address_device = NULL;
@@ -369,6 +371,11 @@ IPureClient::IPureClient(CTimer* timer): net_Statistic(timer)
 
 IPureClient::~IPureClient()
 {
+	if (m_enet)
+	{
+		m_enet->stop();
+		xr_delete(m_enet);
+	}
 	xr_delete(pClNetLog);
 	pClNetLog = NULL;
 	psNET_direct_connect = FALSE;
@@ -427,6 +434,25 @@ BOOL IPureClient::Connect(LPCSTR options)
 			psSV_Port = atol(portstr);
 			clamp(psSV_Port, int(START_PORT), int(END_PORT));
 		};
+
+		// MP fork: ENet transport (see xr_enet_transport.h). Uses the
+		// same option grammar: client(ADDR/name=X/pass=Y/port=N)
+		if (xr_enet::enabled())
+		{
+			SClientConnectData cl_data;
+			cl_data.process_id = GetCurrentProcessId();
+			xr_strcpy(cl_data.name, user_name_str);
+			xr_strcpy(cl_data.pass, user_pass);
+
+			m_enet = xr_new<xr_enet::client_transport>(this);
+			if (!m_enet->connect(server_name, u32(psSV_Port), cl_data))
+			{
+				xr_delete(m_enet);
+				return FALSE;
+			}
+			net_Connected = EnmConnectionWait; // MSYS_CONFIG completes it
+			return TRUE;
+		}
 
 		BOOL bPortWasSet = FALSE;
 		int psCL_Port = START_PORT_LAN_CL;
@@ -989,6 +1015,14 @@ void IPureClient::SendTo_LL(void* data, u32 size, u32 dwFlags, u32 dwTimeout)
 {
 	if (net_Disconnected)
 		return;
+
+	// MP fork: ENet path
+	if (m_enet && m_enet->running())
+	{
+		m_enet->send(data, size, dwFlags);
+		net_Statistic.dwBytesSended += size;
+		return;
+	}
 
 	if (psNET_Flags.test(NETFLAG_LOG_CL_PACKETS))
 	{
