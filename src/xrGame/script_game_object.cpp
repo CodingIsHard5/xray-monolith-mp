@@ -50,6 +50,8 @@
 #include "script_attachment_manager.h"
 #include "CustomDevice.h"
 
+extern ENGINE_API bool g_dedicated_server;
+
 class CScriptBinderObject;
 
 //////////////////////////////////////////////////////////////////////////
@@ -328,7 +330,8 @@ bool CScriptGameObject::CheckObjectVisibility(const CScriptGameObject* tpLuaGame
 			                                "CScriptGameObject : cannot access class member CheckObjectVisibility!");
 			return (false);
 		}
-		return (actor->memory().visual().visible_now(&tpLuaGameObject->object()));
+		// MP fork: actor memory is null on the dedicated server
+		return (!g_dedicated_server && actor->memory().visual().visible_now(&tpLuaGameObject->object()));
 	}
 
 	return (script_entity->CheckObjectVisibility(&tpLuaGameObject->object()));

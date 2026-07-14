@@ -1,5 +1,7 @@
 #include "pch_script.h"
 #include "monster_enemy_memory.h"
+
+extern ENGINE_API bool g_dedicated_server;
 #include "BaseMonster/base_monster.h"
 #include "../../memory_manager.h"
 #include "../../visual_memory_manager.h"
@@ -61,7 +63,8 @@ void CMonsterEnemyMemory::update()
 		}
 	}
 
-	if (monster->SoundMemory.IsRememberSound() && g_actor
+	// MP fork: actor memory is null on the dedicated server (boot 24)
+	if (monster->SoundMemory.IsRememberSound() && g_actor && !g_dedicated_server
 		&& g_actor->memory().visual().visible_now(monster))
 	{
 		SoundElem sound;
@@ -113,6 +116,8 @@ void CMonsterEnemyMemory::update()
 		if (xz_dist < feel_enemy_max_distance &&
 			y_dist < 10 &&
 			monster->memory().enemy().is_useful(g_actor) &&
+			// MP fork: actor memory is null on the dedicated server
+			!g_dedicated_server &&
 			g_actor->memory().visual().visible_now(monster))
 		{
 			add_enemy(g_actor);

@@ -151,7 +151,8 @@ float CEnemyManager::evaluate(const CEntityAlive* object) const
 
 	// if object is actor and he/she sees us
 	if (actor) {
-		if (actor->memory().visual().visible_now(m_object))
+		// MP fork: actor memory is null on the dedicated server
+		if (!g_dedicated_server && actor->memory().visual().visible_now(m_object))
 			penalty -= 900.f;
 	}
 	else {

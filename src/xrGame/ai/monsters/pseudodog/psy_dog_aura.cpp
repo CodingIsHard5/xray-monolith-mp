@@ -1,5 +1,7 @@
 #include "stdafx.h"
 #include "psy_dog_aura.h"
+
+extern ENGINE_API bool g_dedicated_server;
 #include "psy_dog.h"
 #include "../../../actor.h"
 #include "../../../ActorEffector.h"
@@ -68,15 +70,19 @@ void CPsyDogAura::update_schedule()
 	m_time_phantom_saw_actor = 0;
 
 	// check memory of actor and check memory of phantoms
-	CVisualMemoryManager::VISIBLES::const_iterator I = m_actor->memory().visual().objects().begin();
-	CVisualMemoryManager::VISIBLES::const_iterator E = m_actor->memory().visual().objects().end();
-	for (; I != E; ++I)
+	// MP fork: actor memory is null on the dedicated server
+	if (!g_dedicated_server)
 	{
-		const CGameObject* obj = (*I).m_object;
-		if (smart_cast<const CPsyDogPhantom *>(obj))
+		CVisualMemoryManager::VISIBLES::const_iterator I = m_actor->memory().visual().objects().begin();
+		CVisualMemoryManager::VISIBLES::const_iterator E = m_actor->memory().visual().objects().end();
+		for (; I != E; ++I)
 		{
-			if (m_actor->memory().visual().visible_now(obj))
-				m_time_actor_saw_phantom = time();
+			const CGameObject* obj = (*I).m_object;
+			if (smart_cast<const CPsyDogPhantom *>(obj))
+			{
+				if (m_actor->memory().visual().visible_now(obj))
+					m_time_actor_saw_phantom = time();
+			}
 		}
 	}
 

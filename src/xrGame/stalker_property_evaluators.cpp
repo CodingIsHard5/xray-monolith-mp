@@ -37,6 +37,8 @@
 #include "stalker_animation_manager.h"
 #include "weapon.h"
 
+extern ENGINE_API bool g_dedicated_server;
+
 using namespace StalkerDecisionSpace;
 
 typedef CStalkerPropertyEvaluator::_value_type _value_type;
@@ -152,7 +154,8 @@ _value_type CStalkerPropertyEvaluatorEnemySeeMe::evaluate()
 
 	const CActor* actor = smart_cast<const CActor*>(enemy);
 	if (actor)
-		return (actor->memory().visual().visible_now(m_object));
+		// MP fork: actor memory is null on the dedicated server
+		return (!g_dedicated_server && actor->memory().visual().visible_now(m_object));
 
 	return (false);
 }
