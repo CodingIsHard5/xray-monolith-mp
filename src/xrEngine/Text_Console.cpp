@@ -75,6 +75,15 @@ void CTextConsole::CreateConsoleWnd()
 	                             lWidth, lHeight, hParent,
 	                             0, hInstance, 0L);
 	//---------------------------------------------------------------------------
+#ifdef DEDICATED_SERVER
+	// X-less server: no display driver, CreateWindow can legitimately fail —
+	// run windowless (log file + future RCON are the interface)
+	if (!m_hConsoleWnd)
+	{
+		Msg("! TextConsole: no display driver, running windowless");
+		return;
+	}
+#endif
 	R_ASSERT2(m_hConsoleWnd, "Unable to Create TextConsole Window!");
 };
 //-------------------------------------------------------------------------------------------
@@ -174,10 +183,13 @@ void CTextConsole::Initialize()
 	m_last_time = Device.dwTimeGlobal;
 
 	CreateConsoleWnd();
-	CreateLogWnd();
+	if (m_hConsoleWnd)
+	{
+		CreateLogWnd();
 
-	ShowWindow(m_hConsoleWnd, SW_SHOW);
-	UpdateWindow(m_hConsoleWnd);
+		ShowWindow(m_hConsoleWnd, SW_SHOW);
+		UpdateWindow(m_hConsoleWnd);
+	}
 
 	m_server_info.ResetData();
 }
@@ -186,8 +198,11 @@ void CTextConsole::Destroy()
 {
 	inherited::Destroy();
 
-	SelectObject(m_hDC_LogWnd_BackBuffer, m_hPrevFont);
-	SelectObject(m_hDC_LogWnd_BackBuffer, m_hOld_BM);
+	if (m_hDC_LogWnd_BackBuffer)
+	{
+		SelectObject(m_hDC_LogWnd_BackBuffer, m_hPrevFont);
+		SelectObject(m_hDC_LogWnd_BackBuffer, m_hOld_BM);
+	}
 
 	if (m_hBB_BM) DeleteObject(m_hBB_BM);
 	if (m_hOld_BM) DeleteObject(m_hOld_BM);
@@ -195,11 +210,14 @@ void CTextConsole::Destroy()
 	if (m_hPrevFont) DeleteObject(m_hPrevFont);
 	if (m_hBackGroundBrush) DeleteObject(m_hBackGroundBrush);
 
-	ReleaseDC(m_hLogWnd, m_hDC_LogWnd_BackBuffer);
-	ReleaseDC(m_hLogWnd, m_hDC_LogWnd);
-
-	DestroyWindow(m_hLogWnd);
-	DestroyWindow(m_hConsoleWnd);
+	if (m_hLogWnd)
+	{
+		ReleaseDC(m_hLogWnd, m_hDC_LogWnd_BackBuffer);
+		ReleaseDC(m_hLogWnd, m_hDC_LogWnd);
+		DestroyWindow(m_hLogWnd);
+	}
+	if (m_hConsoleWnd)
+		DestroyWindow(m_hConsoleWnd);
 }
 
 void CTextConsole::OnRender()
@@ -355,6 +373,7 @@ void CTextConsole::OnFrame()
 	 return;
 	 }
 	 */
+	if (!m_hConsoleWnd) return; // windowless X-less server
 	InvalidateRect(m_hConsoleWnd, NULL, FALSE);
 	SetCursor(LoadCursor(NULL, IDC_ARROW));
 	// m_bNeedUpdate = true;
