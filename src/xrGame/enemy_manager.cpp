@@ -213,7 +213,9 @@ void CEnemyManager::set_ready_to_save()
 		return;
 
 	//	Msg							("%6d %s DEcreased enemy counter for player (%d -> %d)",Device.dwTimeGlobal,*m_object->cName(),Level().autosave_manager().not_ready_count(),Level().autosave_manager().not_ready_count()-1);
-	Level().autosave_manager().dec_not_ready();
+	// MP fork: no autosave manager on the dedicated server (client-only)
+	if (!g_dedicated_server)
+		Level().autosave_manager().dec_not_ready();
 	m_ready_to_save = true;
 }
 
@@ -454,7 +456,9 @@ void CEnemyManager::update()
 		if (!m_ready_to_save)
 		{
 			//		Msg						("%6d %s DEcreased enemy counter for player (%d -> %d)",Device.dwTimeGlobal,*m_object->cName(),Level().autosave_manager().not_ready_count(),Level().autosave_manager().not_ready_count()-1);
-			Level().autosave_manager().dec_not_ready();
+			// MP fork: no autosave manager on the dedicated server
+			if (!g_dedicated_server)
+				Level().autosave_manager().dec_not_ready();
 		}
 
 		m_ready_to_save = true;
@@ -470,7 +474,9 @@ void CEnemyManager::update()
 		if (!m_ready_to_save)
 		{
 			//		Msg						("%6d %s INcreased enemy counter for player (%d -> %d)",Device.dwTimeGlobal,*m_object->cName(),Level().autosave_manager().not_ready_count(),Level().autosave_manager().not_ready_count()+1);
-			Level().autosave_manager().inc_not_ready();
+			// MP fork: no autosave manager on the dedicated server
+			if (!g_dedicated_server)
+				Level().autosave_manager().inc_not_ready();
 		}
 
 #if 0//def _DEBUG

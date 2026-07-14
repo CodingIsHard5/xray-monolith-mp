@@ -163,7 +163,10 @@ void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR fil
 	if (!g_pGameLevel)
 		return;
 
-	Level().autosave_manager().on_game_loaded();
+	// MP fork: autosave manager is client-only (its save path drives
+	// MainMenu()/CurrentGameUI()); boot 22's jump_to_level crash was here
+	if (!g_dedicated_server)
+		Level().autosave_manager().on_game_loaded();
 }
 
 bool CALifeStorageManager::load(LPCSTR save_name_no_check)
