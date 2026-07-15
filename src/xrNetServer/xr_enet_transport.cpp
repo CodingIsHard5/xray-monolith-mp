@@ -127,6 +127,30 @@ namespace xr_enet
 		if (trace) Msg("- XRNET(trace): sv send_to id=%d size=%d NO PEER FOUND (peerCount=%d)", client_id, size, (int)h->peerCount);
 	}
 
+	void server_transport::send_descriptor(u32 client_id, const GameDescriptionData& descr)
+	{
+		if (!m_host) return;
+		// packet = [descr_sign1][descr_sign2][GameDescriptionData]
+		u8 buf[2 * sizeof(u32) + sizeof(GameDescriptionData)];
+		((u32*)buf)[0] = descr_sign1;
+		((u32*)buf)[1] = descr_sign2;
+		memcpy(buf + 2 * sizeof(u32), &descr, sizeof(GameDescriptionData));
+
+		ENetHost* h = (ENetHost*)m_host;
+		xrCriticalSectionGuard g(m_lock);
+		for (size_t i = 0; i < h->peerCount; ++i)
+		{
+			ENetPeer* p = &h->peers[i];
+			if (p->state == ENET_PEER_STATE_CONNECTED && (u32)(uintptr_t)p->data == client_id)
+			{
+				ENetPacket* pkt = enet_packet_create(buf, sizeof(buf), ENET_PACKET_FLAG_RELIABLE);
+				if (pkt) enet_peer_send(p, 0, pkt);
+				Msg("- XRNET(enet): sent GameDescriptor to client id %d (map='%s')", client_id, descr.map_name);
+				return;
+			}
+		}
+	}
+
 	bool server_transport::owns(u32 client_id) const
 	{
 		if (!m_host) return false;
@@ -409,6 +433,18 @@ namespace xr_enet
 					// _Recieve (friend access); framed game messages go through
 					// the multipacket reassembler as before.
 					const MSYS_PING* sys = (const MSYS_PING*)data;
+					// server->client GameDescriptionData (level name etc.)
+					if (size == 2 * sizeof(u32) + sizeof(GameDescriptionData)
+						&& ((const u32*)data)[0] == descr_sign1
+						&& ((const u32*)data)[1] == descr_sign2)
+					{
+						memcpy(&m_owner->m_game_description, (const u8*)data + 2 * sizeof(u32),
+							sizeof(GameDescriptionData));
+						Msg("- XRNET(enet): got GameDescriptor: map='%s' ver='%s'",
+							m_owner->m_game_description.map_name, m_owner->m_game_description.map_version);
+						enet_packet_destroy(ev.packet);
+						break;
+					}
 					if (size >= 2 * sizeof(u32) && sys->sign1 == 0x12071980 && sys->sign2 == 0x26111975)
 					{
 						if (trace) Msg("- XRNET(trace): cl recv RAW-sys size=%d (->_Recieve)", size);

@@ -21,6 +21,7 @@ class IPureServer;
 class IPureClient;
 class xrCriticalSection;
 struct SClientConnectData;
+struct GameDescriptionData;
 
 namespace xr_enet
 {
@@ -28,6 +29,12 @@ namespace xr_enet
 
 	static const u32 hello_sign1 = 0x4D50484C; // 'MPHL'
 	static const u32 hello_sign2 = 0x4F480001;
+
+	// server->client GameDescriptionData (DirectPlay carried it as the app's
+	// reserved data during host-enum; ENet has no enum, so we send it on the
+	// accept). Carries the current level name so the client can resolve+load.
+	static const u32 descr_sign1 = 0x4D504453; // 'MPDS'
+	static const u32 descr_sign2 = 0x4752FF01;
 
 	struct hello_packet
 	{
@@ -45,6 +52,7 @@ namespace xr_enet
 		bool host(u32 port, u32 max_players);
 		void stop();
 		void send_to(u32 client_id, void* data, u32 size, u32 dpnsend_flags);
+		void send_descriptor(u32 client_id, const GameDescriptionData& descr);
 		void kick(u32 client_id);
 		bool running() const { return m_host != nullptr; }
 		bool owns(u32 client_id) const; // is this id one of our ENet peers

@@ -131,6 +131,18 @@ void xrServer::AttachNewClient(IClient* CL)
 	else
 	{
 		Msg("- XRNET(dbg): AttachNewClient remote id %d -> MSYS_CONFIG + Server_Client_Check", CL->ID.value());
+		// MP fork: ENet has no host-enum, so the client's GameDescriptionData
+		// (map name/version) is never populated the DirectPlay way and stays
+		// empty -> net_start_client3 Level_ID fails. Send the CURRENT level to
+		// the joining remote client so it can resolve + load it.
+		if (is_remote && g_pGameLevel)
+		{
+			GameDescriptionData descr;
+			ZeroMemory(&descr, sizeof(descr));
+			xr_strcpy(descr.map_name, Level().name().c_str());
+			xr_strcpy(descr.map_version, "1.0");
+			m_enet->send_descriptor(CL->ID.value(), descr);
+		}
 		SendTo_LL(CL->ID, &msgConfig, sizeof(msgConfig), net_flags(TRUE, TRUE, TRUE, TRUE));
 		Server_Client_Check(CL);
 	}
