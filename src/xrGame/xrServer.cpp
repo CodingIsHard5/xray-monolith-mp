@@ -4,6 +4,7 @@
 
 #include "pch_script.h"
 #include "xrServer.h"
+#include "../xrNetServer/xr_enet_transport.h"
 #include "xrMessages.h"
 #include "xrServer_Objects_ALife_All.h"
 #include "level.h"
@@ -796,6 +797,17 @@ bool xrServer::CheckAdminRights(const shared_str& user, const shared_str& pass, 
 
 void xrServer::SendTo_LL(ClientID ID, void* data, u32 size, u32 dwFlags, u32 dwTimeout)
 {
+	// MP fork: a -mp_host server keeps psNET_direct_connect TRUE for its
+	// in-process host-client, which makes the "optimize local traffic" branch
+	// below swallow EVERY client's messages into the local Level().OnMessage —
+	// including a REMOTE ENet client's (e.g. its raw MSYS_CONFIG connect-
+	// complete), so the remote client never gets them and times out. Route
+	// remote clients over the socket first.
+	if (m_enet && m_enet->running() && m_enet->owns(ID.value()))
+	{
+		m_enet->send_to(ID.value(), data, size, dwFlags);
+		return;
+	}
 	if ((SV_Client && SV_Client->ID == ID) || (psNET_direct_connect))
 	{
 		// optimize local traffic
