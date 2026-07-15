@@ -73,6 +73,12 @@ bool CLevel::net_start_client2()
 
 void rescan_mp_archives()
 {
+	// MP fork: Anomaly does not define the $game_arch_mp$ alias (stock MP used
+	// it for downloadable maps). get_path() asserts fatally on a missing path,
+	// so guard it — a co-op client already has the level locally and never
+	// downloads maps, so there is nothing to rescan.
+	if (!FS.path_exist("$game_arch_mp$"))
+		return;
 	FS_Path* mp_archs_path = FS.get_path("$game_arch_mp$");
 	FS.rescan_path(mp_archs_path->m_Path,
 	               mp_archs_path->m_Flags.is(FS_Path::flRecurse)
