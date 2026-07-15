@@ -52,6 +52,8 @@ bool CLevel::net_start_client1()
 
 bool CLevel::net_start_client2()
 {
+	Msg("- XRNET(dbg): net_start_client2 entered (direct_connect=%d) opts='%s'",
+		psNET_direct_connect, m_caClientOptions.c_str());
 	if (psNET_direct_connect)
 	{
 		Server->create_direct_client();

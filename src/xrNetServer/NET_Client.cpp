@@ -439,6 +439,7 @@ BOOL IPureClient::Connect(LPCSTR options)
 		// same option grammar: client(ADDR/name=X/pass=Y/port=N)
 		if (xr_enet::enabled())
 		{
+			Msg("- XRNET(enet): client Connect() entered, server='%s'", server_name);
 			u32 enet_port = u32(psSV_Port);
 			if (const char* mp = strstr(Core.Params, "-mp_port "))
 				enet_port = atol(mp + 9);
@@ -1134,8 +1135,10 @@ void IPureClient::Sync_Thread()
 
 	//***** Ping server
 	net_DeltaArray.clear();
-	R_ASSERT(NET);
-	for (; NET && !net_Disconnected;)
+	// MP fork: on the ENet path NET (DirectPlay) is null; the transport
+	// carries MSYS_PING instead. Either transport must be present.
+	R_ASSERT(NET || m_enet);
+	for (; (NET || m_enet) && !net_Disconnected;)
 	{
 		// Waiting for queue empty state
 		// MP fork (step 3 / doc §4.2): the stock thread synced ONCE on
@@ -1144,11 +1147,11 @@ void IPureClient::Sync_Thread()
 		// periodically; Sync_Average keeps refining the EWMA.
 		if (net_Syncronised)
 		{
-			for (u32 slept = 0; slept < 30000 && NET && !net_Disconnected; slept += 100)
+			for (u32 slept = 0; slept < 30000 && (NET || m_enet) && !net_Disconnected; slept += 100)
 				Sleep(100);
-			if (!NET || net_Disconnected) break;
+			if ((!NET && !m_enet) || net_Disconnected) break;
 		}
-		else
+		else if (NET)
 		{
 			DWORD dwPending = 0;
 			do
@@ -1165,7 +1168,13 @@ void IPureClient::Sync_Thread()
 		clPing.dwTime_ClientSend = TimerAsync(device_timer);
 
 		// Send it
-		__try
+		if (m_enet)
+		{
+			// MP fork: clock ping over ENet (channel 1, unreliable-sequenced)
+			if (net_Disconnected) break;
+			m_enet->send(&clPing, sizeof(clPing), net_flags(FALSE, FALSE, TRUE));
+		}
+		else __try
 		{
 			DPN_BUFFER_DESC desc;
 			DPNHANDLE hAsync = 0;
