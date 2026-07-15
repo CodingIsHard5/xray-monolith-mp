@@ -590,6 +590,13 @@ void CMainMenu::SetErrorDialog(EErrorDlg ErrDlg)
 void CMainMenu::CheckForErrorDlg()
 {
 	if (m_NeedErrDialog == ErrNoError) return;
+	// MP fork: a headless/dedicated build has no error dialogs — clear the
+	// pending error instead of dereferencing a null CUIMessageBox.
+	if (!m_pMB_ErrDlgs[m_NeedErrDialog])
+	{
+		m_NeedErrDialog = ErrNoError;
+		return;
+	}
 	m_pMB_ErrDlgs[m_NeedErrDialog]->ShowDialog(false);
 	m_NeedErrDialog = ErrNoError;
 };
