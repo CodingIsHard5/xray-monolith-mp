@@ -391,11 +391,30 @@ namespace xr_enet
 			switch (ev.type)
 			{
 			case ENET_EVENT_TYPE_RECEIVE:
-				// _Recieve handles MSYS_PING replies, MSYS_CONFIG (the
-				// "connection completed" handshake) and game messages —
-				// the exact same entry DirectPlay's RECEIVE fed
-				m_owner->RecievePacket(ev.packet->data, (u32)ev.packet->dataLength, 0);
-				enet_packet_destroy(ev.packet);
+				{
+					const void* data = ev.packet->data;
+					u32 size = (u32)ev.packet->dataLength;
+					// Framing split (mirrors the server RECEIVE handler,
+					// NET_Server.cpp): raw MSYS_* system messages (MSYS_CONFIG
+					// = connect-complete, MSYS_PING reply = clock sync) carry
+					// no MultipacketHeader, so RecievePacket would drop them
+					// (tag != NET_TAG_MERGED/NONMERGED). Route them straight to
+					// _Recieve (friend access); framed game messages go through
+					// the multipacket reassembler as before.
+					const MSYS_PING* sys = (const MSYS_PING*)data;
+					u32 head = size >= sizeof(u32) ? *(const u32*)data : 0;
+					if (size >= 2 * sizeof(u32) && sys->sign1 == 0x12071980 && sys->sign2 == 0x26111975)
+					{
+						Msg("- XRNET(dbg): cl recv RAW-sys size=%d (->_Recieve)", size);
+						m_owner->_Recieve(data, size, 0);
+					}
+					else
+					{
+						Msg("- XRNET(dbg): cl recv framed size=%d head=0x%08x (->RecievePacket)", size, head);
+						m_owner->RecievePacket(data, size, 0);
+					}
+					enet_packet_destroy(ev.packet);
+				}
 				break;
 
 			case ENET_EVENT_TYPE_DISCONNECT:
