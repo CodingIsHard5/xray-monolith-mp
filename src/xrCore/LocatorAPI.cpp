@@ -213,6 +213,7 @@ CLocatorAPI::CLocatorAPI()
 	dwAllocGranularity = sys_inf.dwAllocationGranularity;
 	m_iLockRescan = 0;
 	dwOpenCounter = 0;
+	m_auth_code = 0; // MP fork: was uninitialized; deterministic 0 when auth is skipped
 }
 
 CLocatorAPI::~CLocatorAPI()

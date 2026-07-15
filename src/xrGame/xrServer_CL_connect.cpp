@@ -220,7 +220,12 @@ void xrServer::OnBuildVersionRespond(IClient* CL, NET_Packet& P)
 	_our = MP_DEBUG_AUTH;
 #endif // USE_DEBUG_AUTH
 
-	if (_our != _him)
+	// MP fork: -mp_noauth relaxes the file-CRC match for a trusted
+	// loopback/LAN co-op session. The auth-challenge message flow is kept
+	// intact (skipping it entirely via g_SV_Disable_Auth_Check crashes the
+	// in-process host-client) — only the value comparison is bypassed, and
+	// only for a non-local client (the local host-client always matches).
+	if (_our != _him && !(CL->flags.bLocal || strstr(Core.Params, "-mp_noauth")))
 	{
 		SendConnectResult(CL, 0, ecr_data_verification_failed, "Data verification failed. Cheater?");
 	}
