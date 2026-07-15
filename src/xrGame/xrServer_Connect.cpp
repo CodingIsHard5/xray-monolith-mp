@@ -38,11 +38,19 @@ LPCSTR xrServer::get_map_download_url(LPCSTR level_name, LPCSTR level_version)
 	return ret_url;
 }
 
+extern BOOL g_SV_Disable_Auth_Check;
+
 xrServer::EConnect xrServer::Connect(shared_str& session_name, GameDescriptionData& game_descr)
 {
 #ifdef DEBUG
 	Msg						("* sv_Connect: %s",	*session_name);
 #endif
+
+	// MP fork: on a trusted loopback/LAN co-op session, skip the file-CRC
+	// auth challenge (see Connect2Server) so no-auth clients aren't rejected
+	// with "Data verification failed. Cheater?".
+	if (strstr(Core.Params, "-mp_noauth"))
+		g_SV_Disable_Auth_Check = TRUE;
 
 	// Parse options and create game
 	if (0 == strchr(*session_name, '/'))

@@ -355,7 +355,14 @@ bool CLevel::Connect2Server(const char* options)
 	m_bConnectResultReceived = false;
 	m_bConnectResult = true;
 
-	if (!psNET_direct_connect)
+	// MP fork: auth_generate CRC32s every $game_config$/$game_scripts$/
+	// $game_shaders$ file (tens of thousands in Anomaly) while holding the
+	// FS lock — minutes of 100%-CPU that stalls the whole connect BEFORE
+	// the transport is even touched. The single-hosted co-op server already
+	// skips its own auth_generate (eGameIDSingle) and -mp_noauth disables
+	// the server's auth challenge, so on a trusted loopback session the
+	// client's digest is never requested. Skip it there.
+	if (!psNET_direct_connect && !strstr(Core.Params, "-mp_noauth"))
 	{
 		xr_auth_strings_t tmp_ignore;
 		xr_auth_strings_t tmp_check;
