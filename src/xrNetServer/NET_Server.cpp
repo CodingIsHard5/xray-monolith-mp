@@ -859,6 +859,8 @@ bool IPureServer::DisconnectClient(IClient* C, LPCSTR Reason)
 {
 	if (!C) return false;
 
+	Msg("- XRNET(dbg): DisconnectClient id %d reason='%s'", C->ID.value(), Reason ? Reason : "");
+
 	// MP fork: ENet path (remote clients only)
 	if (m_enet && m_enet->running() && m_enet->owns(C->ID.value()))
 	{
