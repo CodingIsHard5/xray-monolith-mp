@@ -110,6 +110,7 @@ namespace xr_enet
 		ENetHost* h = (ENetHost*)m_host;
 		u8 channel; u32 pflags;
 		flags_to_enet(dpnsend_flags, channel, pflags);
+		const bool trace = !!strstr(Core.Params, "-xrnet_trace");
 		// ENetHost is not thread-safe; the pump thread services it concurrently.
 		xrCriticalSectionGuard g(m_lock);
 		for (size_t i = 0; i < h->peerCount; ++i)
@@ -118,10 +119,12 @@ namespace xr_enet
 			if (p->state == ENET_PEER_STATE_CONNECTED && (u32)(uintptr_t)p->data == client_id)
 			{
 				ENetPacket* pkt = enet_packet_create(data, size, pflags);
-				if (pkt) enet_peer_send(p, channel, pkt);
+				int rc = pkt ? enet_peer_send(p, channel, pkt) : -999;
+				if (trace) Msg("- XRNET(trace): sv send_to id=%d size=%d ch=%d rc=%d", client_id, size, channel, rc);
 				return;
 			}
 		}
+		if (trace) Msg("- XRNET(trace): sv send_to id=%d size=%d NO PEER FOUND (peerCount=%d)", client_id, size, (int)h->peerCount);
 	}
 
 	bool server_transport::owns(u32 client_id) const
@@ -381,6 +384,7 @@ namespace xr_enet
 		// -xrnet_trace: per-packet wire logging (off by default — it floods
 		// once game messages flow, like the -dbg [MPSW] spam).
 		const bool trace = !!strstr(Core.Params, "-xrnet_trace");
+		if (trace) Msg("- XRNET(trace): cl pump started (servicing)");
 
 		while (!m_stop)
 		{
