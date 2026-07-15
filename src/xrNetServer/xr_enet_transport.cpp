@@ -378,6 +378,9 @@ namespace xr_enet
 	{
 		ENetHost* h = (ENetHost*)m_host;
 		ENetEvent ev;
+		// -xrnet_trace: per-packet wire logging (off by default — it floods
+		// once game messages flow, like the -dbg [MPSW] spam).
+		const bool trace = !!strstr(Core.Params, "-xrnet_trace");
 
 		while (!m_stop)
 		{
@@ -402,15 +405,15 @@ namespace xr_enet
 					// _Recieve (friend access); framed game messages go through
 					// the multipacket reassembler as before.
 					const MSYS_PING* sys = (const MSYS_PING*)data;
-					u32 head = size >= sizeof(u32) ? *(const u32*)data : 0;
 					if (size >= 2 * sizeof(u32) && sys->sign1 == 0x12071980 && sys->sign2 == 0x26111975)
 					{
-						Msg("- XRNET(dbg): cl recv RAW-sys size=%d (->_Recieve)", size);
+						if (trace) Msg("- XRNET(trace): cl recv RAW-sys size=%d (->_Recieve)", size);
 						m_owner->_Recieve(data, size, 0);
 					}
 					else
 					{
-						Msg("- XRNET(dbg): cl recv framed size=%d head=0x%08x (->RecievePacket)", size, head);
+						if (trace) Msg("- XRNET(trace): cl recv framed size=%d head=0x%08x (->RecievePacket)",
+							size, size >= sizeof(u32) ? *(const u32*)data : 0);
 						m_owner->RecievePacket(data, size, 0);
 					}
 					enet_packet_destroy(ev.packet);
