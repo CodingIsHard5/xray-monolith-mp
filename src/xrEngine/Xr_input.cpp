@@ -74,6 +74,17 @@ CInput::CInput(BOOL bExclusive, int deviceForInit)
 	deviceForInit = 0;
 #endif
 
+	// MP fork: -noinput forces null input devices on a *client* build too,
+	// for automated/headless netcode testing under wine (DirectInput
+	// SetCooperativeLevel fails with an invalid window handle when the
+	// window is parked/unfocused). Every consumer null-checks pKeyboard/
+	// pMouse, and -start client(...) auto-connects without menu input.
+	if (strstr(Core.Params, "-noinput"))
+	{
+		Log("! INPUT: -noinput -> running with null input devices");
+		deviceForInit = 0;
+	}
+
 	if (!pDI)
 		CHK_DX(DirectInput8Create(GetModuleHandle(NULL), DIRECTINPUT_VERSION, IID_IDirectInput8, (void**)&pDI, NULL));
 
