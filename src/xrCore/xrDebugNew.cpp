@@ -243,11 +243,55 @@ void xrDebug::do_exit(const std::string& message)
 	TerminateProcess(GetCurrentProcess(), 1);
 }
 
+// MP fork: deadlock-proof crash breadcrumb. A dedicated-server crash often
+// faults while the log critical section is already held (a thread was mid-Msg
+// during the heavy A-Life logging), so the crash handlers' own Msg()/FlushLog()
+// deadlock and the fault line is never written -> a SILENT TerminateProcess(1)
+// (observed as intermittent rc=1 server deaths with a clean-looking log).
+// This writes the reason to crash_breadcrumb.txt next to the exe using RAW
+// Win32 only (no Msg, no log CS, no heap alloc), so it survives even when the
+// log is wedged. Appends, so multiple crashing threads each leave a line.
+static void write_crash_breadcrumb(const char* text)
+{
+	char path[MAX_PATH];
+	DWORD n = GetModuleFileNameA(NULL, path, MAX_PATH);
+	if (!n || n >= MAX_PATH) return;
+	char* slash = strrchr(path, '\\');
+	if (!slash) return;
+	lstrcpynA(slash + 1, "crash_breadcrumb.txt", (int)(MAX_PATH - (slash + 1 - path)));
+
+	HANDLE h = CreateFileA(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+	                       OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return;
+
+	SYSTEMTIME st;
+	GetLocalTime(&st);
+	char line[1024];
+	int len = wsprintfA(line, "[%04d-%02d-%02d %02d:%02d:%02d] %s\r\n",
+	                    st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+	                    text ? text : "(null)");
+	DWORD written = 0;
+	if (len > 0) WriteFile(h, line, (DWORD)len, &written, NULL);
+	FlushFileBuffers(h);
+	CloseHandle(h);
+}
+
 #ifdef NO_BUG_TRAP
 //AVO: simplified function
 void xrDebug::backend(const char* expression, const char* description, const char* argument0, const char* argument1,
                       const char* file, int line, const char* function, bool& ignore_always)
 {
+    // MP fork: breadcrumb FIRST, before crash_saving/CS/Msg (any of which can
+    // deadlock on a wedged log CS during a crash).
+    {
+        char bc[1024];
+        xr_sprintf(bc, "ASSERT/FATAL %s(%d) [%s]: %s %s %s",
+                   file ? file : "?", line, function ? function : "?",
+                   description ? description : "", expression ? expression : "",
+                   argument0 ? argument0 : "");
+        write_crash_breadcrumb(bc);
+    }
+
     // we save first
     crash_saving::save();
     
@@ -801,6 +845,21 @@ void format_message(LPSTR buffer, const u32& buffer_size)
 //AVO: simplify function
 LONG WINAPI UnhandledFilter(_EXCEPTION_POINTERS* pExceptionInfo)
 {
+	// MP fork: breadcrumb FIRST (raw Win32), before the crash handler / Msg,
+	// so the fault survives a wedged log CS. Symbolicate the address offline
+	// against the CI PDB (base 0x140000000).
+	if (pExceptionInfo && pExceptionInfo->ExceptionRecord)
+	{
+		char bc[512];
+		xr_sprintf(bc, "EXCEPTION 0x%08X at 0x%p (accessing 0x%p)",
+		           pExceptionInfo->ExceptionRecord->ExceptionCode,
+		           pExceptionInfo->ExceptionRecord->ExceptionAddress,
+		           pExceptionInfo->ExceptionRecord->NumberParameters > 1
+		               ? (void*)pExceptionInfo->ExceptionRecord->ExceptionInformation[1]
+		               : (void*)0);
+		write_crash_breadcrumb(bc);
+	}
+
 	string256 error_message;
 	format_message(error_message, sizeof(error_message));
 
