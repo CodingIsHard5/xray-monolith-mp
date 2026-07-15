@@ -20,6 +20,16 @@ void xrServer::OnProcessClientMapData(NET_Packet& P, ClientID const& clientID)
 	LPCSTR server_map_name = Level().get_net_DescriptionData().map_name;
 	LPCSTR server_map_version = Level().get_net_DescriptionData().map_version;
 
+	// MP fork: on an ENet -mp_host server the in-process host-client's
+	// m_game_description is never populated (no DirectPlay host-enum), so it is
+	// empty and mismatches every remote client -> endless "Incorect map"
+	// reconnect. Fall back to the actual loaded level, matching what the
+	// server sends a joining ENet client (Level().name(), ver "1.0").
+	if (!server_map_name || !server_map_name[0])
+		server_map_name = Level().name().c_str();
+	if (!server_map_version || !server_map_version[0])
+		server_map_version = "1.0";
+
 	responseP.w_begin(M_SV_MAP_NAME);
 
 	if ((xr_strcmp(server_map_name, client_map_name)) ||
