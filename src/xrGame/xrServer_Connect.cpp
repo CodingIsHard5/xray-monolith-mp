@@ -130,6 +130,7 @@ void xrServer::AttachNewClient(IClient* CL)
 	}
 	else
 	{
+		Msg("- XRNET(dbg): AttachNewClient remote id %d -> MSYS_CONFIG + Server_Client_Check", CL->ID.value());
 		SendTo_LL(CL->ID, &msgConfig, sizeof(msgConfig), net_flags(TRUE, TRUE, TRUE, TRUE));
 		Server_Client_Check(CL);
 	}

@@ -19,6 +19,7 @@
 
 class IPureServer;
 class IPureClient;
+class xrCriticalSection;
 struct SClientConnectData;
 
 namespace xr_enet
@@ -54,6 +55,7 @@ namespace xr_enet
 
 		IPureServer* m_owner;
 		void* m_host; // ENetHost*
+		xrCriticalSection* m_lock; // serializes ENetHost access (not thread-safe)
 		volatile bool m_stop;
 		bool m_thread_up;
 	};
@@ -76,6 +78,7 @@ namespace xr_enet
 		IPureClient* m_owner;
 		void* m_host; // ENetHost*
 		void* m_peer; // ENetPeer*
+		xrCriticalSection* m_lock; // serializes ENetHost access (not thread-safe)
 		volatile bool m_stop;
 		bool m_thread_up;
 	};

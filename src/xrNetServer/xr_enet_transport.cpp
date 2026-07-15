@@ -6,6 +6,7 @@
 #include "NET_Server.h"
 #include "NET_Client.h"
 #include "NET_Messages.h"
+#include "../xrCore/xrSyncronize.h"
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "winmm.lib")
@@ -58,13 +59,15 @@ namespace xr_enet
 	//======================================================================
 
 	server_transport::server_transport(IPureServer* owner)
-		: m_owner(owner), m_host(nullptr), m_stop(false), m_thread_up(false)
+		: m_owner(owner), m_host(nullptr), m_lock(xr_new<xrCriticalSection>()),
+		  m_stop(false), m_thread_up(false)
 	{
 	}
 
 	server_transport::~server_transport()
 	{
 		stop();
+		xr_delete(m_lock);
 	}
 
 	bool server_transport::host(u32 port, u32 max_players)
@@ -107,6 +110,8 @@ namespace xr_enet
 		ENetHost* h = (ENetHost*)m_host;
 		u8 channel; u32 pflags;
 		flags_to_enet(dpnsend_flags, channel, pflags);
+		// ENetHost is not thread-safe; the pump thread services it concurrently.
+		xrCriticalSectionGuard g(m_lock);
 		for (size_t i = 0; i < h->peerCount; ++i)
 		{
 			ENetPeer* p = &h->peers[i];
@@ -123,6 +128,7 @@ namespace xr_enet
 	{
 		if (!m_host) return false;
 		ENetHost* h = (ENetHost*)m_host;
+		xrCriticalSectionGuard g(m_lock);
 		for (size_t i = 0; i < h->peerCount; ++i)
 		{
 			const ENetPeer* p = &h->peers[i];
@@ -136,6 +142,7 @@ namespace xr_enet
 	{
 		if (!m_host) return;
 		ENetHost* h = (ENetHost*)m_host;
+		xrCriticalSectionGuard g(m_lock);
 		for (size_t i = 0; i < h->peerCount; ++i)
 		{
 			ENetPeer* p = &h->peers[i];
@@ -161,14 +168,22 @@ namespace xr_enet
 
 		while (!m_stop)
 		{
-			int rc = enet_host_service(h, &ev, 50);
-			if (rc <= 0) continue;
+			// ENetHost is not thread-safe: service it under the lock, but run
+			// engine callbacks (new_client/RecievePacket/OnCL_Disconnected)
+			// OUTSIDE it. Other threads only ever take m_lock (never while
+			// holding an engine lock -> host lock), so no lock-order cycle.
+			m_lock->Enter();
+			int rc = enet_host_service(h, &ev, 0);
+			m_lock->Leave();
+			if (rc <= 0) { Sleep(1); continue; }
 
 			switch (ev.type)
 			{
 			case ENET_EVENT_TYPE_CONNECT:
 				// pending until the hello packet delivers SClientConnectData
+				m_lock->Enter();
 				ev.peer->data = (void*)(uintptr_t)0;
+				m_lock->Leave();
 				Msg("- XRNET(enet): incoming connection, awaiting hello");
 				break;
 
@@ -188,10 +203,12 @@ namespace xr_enet
 							{
 								SClientConnectData cl_data = *(const SClientConnectData*)((const u8*)data + sizeof(hello_packet));
 								id = next_id++;
+								m_lock->Enter();
 								ev.peer->data = (void*)(uintptr_t)id;
+								m_lock->Leave();
 								cl_data.clientID.set(id);
 								Msg("- XRNET(enet): hello from '%s' -> client id %d", cl_data.name, id);
-								m_owner->new_client(&cl_data);
+								m_owner->new_client(&cl_data); // engine call, no host access
 							}
 						}
 						enet_packet_destroy(ev.packet);
@@ -204,11 +221,15 @@ namespace xr_enet
 						// clock sync: stamp + reply (doc §4.2)
 						ping->dwTime_Server = TimerAsync(m_owner->device_timer);
 						ENetPacket* pkt = enet_packet_create(ping, sizeof(MSYS_PING), 0);
-						if (pkt) enet_peer_send(ev.peer, 1, pkt);
+						if (pkt)
+						{
+							xrCriticalSectionGuard g(m_lock);
+							enet_peer_send(ev.peer, 1, pkt);
+						}
 					}
 					else
 					{
-						m_owner->RecievePacket(data, size, id);
+						m_owner->RecievePacket(data, size, id); // engine call
 					}
 					enet_packet_destroy(ev.packet);
 				}
@@ -230,7 +251,9 @@ namespace xr_enet
 							m_owner->client_Destroy(c);
 						}
 					}
+					m_lock->Enter();
 					ev.peer->data = nullptr;
+					m_lock->Leave();
 				}
 				break;
 
@@ -245,13 +268,15 @@ namespace xr_enet
 	//======================================================================
 
 	client_transport::client_transport(IPureClient* owner)
-		: m_owner(owner), m_host(nullptr), m_peer(nullptr), m_stop(false), m_thread_up(false)
+		: m_owner(owner), m_host(nullptr), m_peer(nullptr),
+		  m_lock(xr_new<xrCriticalSection>()), m_stop(false), m_thread_up(false)
 	{
 	}
 
 	client_transport::~client_transport()
 	{
 		stop();
+		xr_delete(m_lock);
 	}
 
 	bool client_transport::connect(const char* address, u32 port, const SClientConnectData& cl_data)
@@ -335,7 +360,12 @@ namespace xr_enet
 		u8 channel; u32 pflags;
 		flags_to_enet(dpnsend_flags, channel, pflags);
 		ENetPacket* pkt = enet_packet_create(data, size, pflags);
-		if (pkt) enet_peer_send((ENetPeer*)m_peer, channel, pkt);
+		// ENetHost is not thread-safe; the pump thread services it concurrently.
+		if (pkt)
+		{
+			xrCriticalSectionGuard g(m_lock);
+			enet_peer_send((ENetPeer*)m_peer, channel, pkt);
+		}
 	}
 
 	void client_transport::pump_thread(void* self)
@@ -351,8 +381,12 @@ namespace xr_enet
 
 		while (!m_stop)
 		{
-			int rc = enet_host_service(h, &ev, 50);
-			if (rc <= 0) continue;
+			// ENetHost is not thread-safe: service under the lock, run the
+			// engine callback (RecievePacket/OnSessionTerminate) outside it.
+			m_lock->Enter();
+			int rc = enet_host_service(h, &ev, 0);
+			m_lock->Leave();
+			if (rc <= 0) { Sleep(1); continue; }
 
 			switch (ev.type)
 			{
