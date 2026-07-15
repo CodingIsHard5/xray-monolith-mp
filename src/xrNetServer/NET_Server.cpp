@@ -647,6 +647,12 @@ void IPureServer::SendTo_LL(ClientID ID/*DPNID ID*/, void* data, u32 size, u32 d
 {
 	// MP fork: route remote (ENet) clients over the socket; the local
 	// in-process host-client falls through to normal delivery
+	if (m_enet && strstr(Core.Params, "-xrnet_trace"))
+	{
+		Msg("- XRNET(trace): SendTo_LL id=%d size=%d running=%d owns=%d",
+			ID.value(), size, m_enet->running() ? 1 : 0,
+			m_enet->running() ? (m_enet->owns(ID.value()) ? 1 : 0) : -1);
+	}
 	if (m_enet && m_enet->running() && m_enet->owns(ID.value()))
 	{
 		m_enet->send_to(ID.value(), data, size, dwFlags);
