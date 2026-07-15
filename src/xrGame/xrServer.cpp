@@ -800,25 +800,26 @@ void xrServer::SendTo_LL(ClientID ID, void* data, u32 size, u32 dwFlags, u32 dwT
 	// MP fork: a -mp_host server keeps psNET_direct_connect TRUE for its
 	// in-process host-client, which makes the "optimize local traffic" branch
 	// below swallow EVERY client's messages into the local Level().OnMessage —
-	// including a REMOTE ENet client's (e.g. its raw MSYS_CONFIG connect-
-	// complete), so the remote client never gets them and times out. Route
-	// remote clients over the socket first.
-	if (m_enet && m_enet->running() && m_enet->owns(ID.value()))
-	{
-		m_enet->send_to(ID.value(), data, size, dwFlags);
-		return;
-	}
-	if ((SV_Client && SV_Client->ID == ID) || (psNET_direct_connect))
+	// including a REMOTE ENet client's, so the remote client never gets them
+	// and times out. A remote client must take the network (framed SendTo_Buf)
+	// path instead: the client's MultipacketReciever expects a MultipacketHeader
+	// on every packet, so raw sends get dropped; SendTo_Buf frames them and the
+	// base IPureServer::SendTo_LL then routes the framed bytes over ENet.
+	const bool is_remote = m_enet && m_enet->running() && m_enet->owns(ID.value());
+	if (!is_remote && ((SV_Client && SV_Client->ID == ID) || (psNET_direct_connect)))
 	{
 		// optimize local traffic
 		Level().OnMessage(data, size);
 	}
 	else
 	{
-		IClient* pClient = ID_to_client(ID);
-		VERIFY2(pClient && pClient->flags.bConnected, "trying to send packet to disconnected client");
-		if (!pClient || !pClient->flags.bConnected)
-			return;
+		if (!is_remote)
+		{
+			IClient* pClient = ID_to_client(ID);
+			VERIFY2(pClient && pClient->flags.bConnected, "trying to send packet to disconnected client");
+			if (!pClient || !pClient->flags.bConnected)
+				return;
+		}
 
 		IPureServer::SendTo_Buf(ID, data, size, dwFlags, dwTimeout);
 	}
