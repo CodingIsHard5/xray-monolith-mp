@@ -32,24 +32,34 @@ void xrServer::OnProcessClientMapData(NET_Packet& P, ClientID const& clientID)
 
 	responseP.w_begin(M_SV_MAP_NAME);
 
+	// MP fork diag: this is where the server decides a joining client's fate,
+	// and stock says nothing about it outside #ifdef DEBUG — so a rejected
+	// client just stalls silently on its loading screen with no clue on either
+	// side. Log the actual comparison unconditionally (one line per join).
+	LPCSTR verdict = "SuccessSync";
+
 	if ((xr_strcmp(server_map_name, client_map_name)) ||
 		(xr_strcmp(server_map_version, client_map_version)))
 	{
 		responseP.w_u8(static_cast<u8>(YouHaveOtherMap));
-#ifdef DEBUG
-		Msg("--- Client [0x%08x] has incorrect map [%s] or version [%s]",
-			client_map_name, client_map_version);
-#endif // #ifdef DEBUG
+		verdict = "YouHaveOtherMap";
 		//here we can make hard disconnect of this client...
 	}
 	else if (!Level().IsChecksumsEqual(client_geom_crc32))
 	{
 		responseP.w_u8(static_cast<u8>(InvalidChecksum));
+		verdict = "InvalidChecksum";
 	}
 	else
 	{
 		responseP.w_u8(static_cast<u8>(SuccessSync));
 	}
+
+	Msg("- XRNET(dbg): map-sync from client 0x%08x -> %s | map: client='%s' ver='%s' "
+		"server='%s' ver='%s' | geom crc32: client=0x%08x server=0x%08x",
+		clientID.value(), verdict, client_map_name, client_map_version,
+		server_map_name, server_map_version,
+		client_geom_crc32, Level().GetLevelGeomCrc32());
 
 	SendTo(clientID, responseP, net_flags(TRUE, TRUE));
 }

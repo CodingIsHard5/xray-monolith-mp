@@ -190,6 +190,15 @@ protected:
 	LevelMapSyncData map_data;
 	bool synchronize_map_data();
 	bool synchronize_client();
+	// MP fork diag: map-sync / config handshake is silent under MASTER_GOLD
+	// (its progress Msgs are #ifndef MASTER_GOLD / #ifdef DEBUG), and two of
+	// its failure paths return false forever with no message at all. These
+	// one-shot latches let those paths report themselves without flooding the
+	// log from the per-5ms loading loop.
+	bool m_xrnet_dbg_bad_crc_logged = false;
+	bool m_xrnet_dbg_sync_ok_logged = false;
+	bool m_xrnet_dbg_configured_logged = false;
+	u32 m_xrnet_dbg_cfg_waits = 0;
 	bool xr_stdcall net_start1();
 	bool xr_stdcall net_start2();
 	bool xr_stdcall net_start3();
@@ -206,6 +215,12 @@ protected:
 	void CalculateLevelCrc32();
 public:
 	bool IsChecksumsEqual(u32 check_sum) const;
+	// MP fork diag: read-only peek at the server's own level.geom crc32, so the
+	// map-sync verdict can log BOTH sides of the comparison it just made.
+	// NOTE: CalculateLevelCrc32() is only invoked when !IsGameTypeSingle()
+	// (Level_network_start_client.cpp), so on a single/alife co-op world this
+	// is expected to read 0 on both server and client.
+	u32 GetLevelGeomCrc32() const { return map_data.m_level_geom_crc32; }
 	// sounds
 	xr_vector<ref_sound*> static_Sounds;
 	// startup options

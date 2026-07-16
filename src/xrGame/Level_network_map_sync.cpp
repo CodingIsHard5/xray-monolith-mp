@@ -78,8 +78,28 @@ bool CLevel::synchronize_map_data()
 	}
 	if (map_data.IsInvalidClientChecksum())
 	{
+		// MP fork diag: this path is a SILENT infinite stall in stock — no
+		// message, no timeout, just `return false` forever, which presents as
+		// a client parked on the loading screen at idle CPU with a dead log.
+		// Say so once (MASTER_GOLD compiles out every other Msg around here).
+		if (!m_xrnet_dbg_bad_crc_logged)
+		{
+			m_xrnet_dbg_bad_crc_logged = true;
+			Msg("! XRNET(dbg): map-sync REJECTED by server: invalid geom checksum "
+				"(client crc32=0x%08x, map='%s' ver='%s'). Client will stall here.",
+				map_data.m_level_geom_crc32, map_data.m_name.c_str(),
+				map_data.m_map_version.c_str());
+		}
 		connected_to_server = FALSE;
 		return false; //!!!
+	}
+	if (!m_xrnet_dbg_sync_ok_logged)
+	{
+		m_xrnet_dbg_sync_ok_logged = true;
+		Msg("- XRNET(dbg): map-sync ACCEPTED (client crc32=0x%08x, map='%s' ver='%s') "
+			"-> waiting for server configuration",
+			map_data.m_level_geom_crc32, map_data.m_name.c_str(),
+			map_data.m_map_version.c_str());
 	}
 	return synchronize_client();
 }
@@ -98,18 +118,32 @@ bool CLevel::synchronize_client()
 	//---------------------------------------------------------------------------
 	if (game_configured)
 	{
+		if (!m_xrnet_dbg_configured_logged)
+		{
+			m_xrnet_dbg_configured_logged = true;
+			Msg("- XRNET(dbg): game_configured -> proceeding to spawn");
+		}
 		deny_m_spawn = FALSE;
 		return true;
 	}
 #ifdef DEBUG
 	Msg("--- Waiting for server configuration...");
 #endif // #ifdef DEBUG
+	// MP fork diag: the other SILENT stall. If the server never answers
+	// M_CLIENT_REQUEST_CONNECTION_DATA, game_configured stays false and this
+	// spins forever with no message under MASTER_GOLD. Heartbeat it so the log
+	// distinguishes "stuck waiting for config" from "stuck on checksum".
+	if ((m_xrnet_dbg_cfg_waits++ % 400) == 0) // ~ every 2s at Sleep(5)
+	{
+		Msg("- XRNET(dbg): waiting for server configuration... (waits=%u, Server=%s)",
+			m_xrnet_dbg_cfg_waits, Server ? "yes" : "no");
+	}
 	if (Server)
 	{
 		ClientReceive();
 		Server->Update();
 	} // if OnClient ClientReceive method called in upper invokation
-	//Sleep(5); 
+	//Sleep(5);
 	return !!game_configured;
 }
 
