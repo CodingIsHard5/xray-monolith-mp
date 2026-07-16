@@ -7,6 +7,7 @@
 
 #include "ai_space.h"
 #include "game_cl_base.h"
+#include "../xrNetServer/xr_enet_transport.h" // MP fork: xr_enet::enabled()
 #include "NET_Queue.h"
 #include "file_transfer.h"
 #include "hudmanager.h"
@@ -133,7 +134,27 @@ bool CLevel::net_start_client3()
 		// Load level
 		R_ASSERT2(Load(level_id), "Loading failed.");
 		map_data.m_level_geom_crc32 = 0;
-		if (!IsGameTypeSingle())
+		// MP fork: stock computes the level.geom crc ONLY for a non-single game.
+		// That silently breaks ENet co-op, because the two sides evaluate
+		// IsGameTypeSingle() (g_pGamePersistent->GameType(), Level.h) at
+		// DIFFERENT times:
+		//   - the server's in-process host-client is already eGameIDSingle here
+		//     -> skips -> its crc stays 0;
+		//   - a remote client only learns the game type from
+		//     M_SV_CONFIG_NEW_CLIENT (Export_game_type), which the server sends
+		//     from OnCL_Connected — i.e. AFTER map-sync -> it is NOT single yet
+		//     -> it DOES compute a real crc.
+		// The server then compares its 0 against the client's real crc, answers
+		// InvalidChecksum, and the client dies on the silent no-message
+		// no-timeout stall in synchronize_map_data() (Level_network_map_sync.cpp).
+		// Measured before this fix: client=0x8cb187d1 vs server=0x00000000 on a
+		// byte-identical l01_escape.
+		//
+		// So: whenever the fork's transport is active, BOTH sides compute it —
+		// which keeps the consistency check real (it will matter once clients can
+		// have mismatched/modded levels) instead of bypassing it. Plain
+		// single-player is untouched: without -xrnet_udp this is the stock guard.
+		if (!IsGameTypeSingle() || xr_enet::enabled())
 			CalculateLevelCrc32();
 	}
 	return true;

@@ -47,8 +47,26 @@ void xrServer::OnProcessClientMapData(NET_Packet& P, ClientID const& clientID)
 	}
 	else if (!Level().IsChecksumsEqual(client_geom_crc32))
 	{
-		responseP.w_u8(static_cast<u8>(InvalidChecksum));
-		verdict = "InvalidChecksum";
+		// MP fork: -mp_trusted — accept a geom-checksum mismatch anyway.
+		// OPT-IN ONLY, and deliberately NOT the default: this is the
+		// consistency gate that catches a peer running different level
+		// geometry, and silently accepting a mismatch means desyncs that
+		// present as unexplainable gameplay bugs rather than a clean refusal.
+		// It exists for trusted-peer co-op debugging — it lets a session get
+		// PAST this gate to find the next blocker while a real fix is built.
+		// The real fix is symmetric crc computation (Level_network_start_client
+		// .cpp): with -xrnet_udp both sides now compute, so this flag should
+		// not be needed.
+		if (strstr(Core.Params, "-mp_trusted"))
+		{
+			responseP.w_u8(static_cast<u8>(SuccessSync));
+			verdict = "SuccessSync (MISMATCH ACCEPTED: -mp_trusted)";
+		}
+		else
+		{
+			responseP.w_u8(static_cast<u8>(InvalidChecksum));
+			verdict = "InvalidChecksum";
+		}
 	}
 	else
 	{
