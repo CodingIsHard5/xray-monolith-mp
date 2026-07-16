@@ -207,7 +207,9 @@ void CTorch::LoadLightParams()
 
 	xr_string light_definition = *m_light_section;
 
-	if (parent_id() == g_actor->ID())
+	// MP fork: g_actor can be null (e.g. a torch loading before the co-op
+	// client's actor spawns) — guard the "is this the player's torch?" check.
+	if (g_actor && parent_id() == g_actor->ID())
 	{
 		light_definition += "_actor";
 

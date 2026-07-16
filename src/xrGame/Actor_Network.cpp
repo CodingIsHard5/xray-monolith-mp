@@ -1,5 +1,7 @@
 #include "pch_script.h"
 #include "actor.h"
+#include "ai_space.h"                             // MP fork: ai().get_alife()
+#include "../xrNetServer/xr_enet_transport.h"     // MP fork: xr_enet::enabled()
 #include "hudmanager.h"
 #include "Actor_Flags.h"
 #include "inventory.h"
@@ -529,6 +531,15 @@ BOOL CActor::net_Spawn(CSE_Abstract* DC)
 	}
 
 	if (TRUE == E->s_flags.test(M_SPAWN_OBJECT_LOCAL) && TRUE == E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER))
+		g_actor = this;
+	// MP fork (§14 co-op thin client): the server STRIPS M_SPAWN_OBJECT_LOCAL
+	// and _ASPLAYER when sending an entity to a remote client
+	// (xrServer_Object_Base.cpp:217), so the stock condition above never fires
+	// and g_actor stays null — which crashes the huge amount of code that uses
+	// g_actor / Actor() (e.g. CTorch::LoadLightParams derefs g_actor->ID()).
+	// A co-op client controls exactly one actor (its player), so set g_actor to
+	// it. TODO(multi-client): pick the LOCAL player among several actors.
+	else if (xr_enet::enabled() && !ai().get_alife())
 		g_actor = this;
 
 	VERIFY(m_pActorEffector == NULL);
