@@ -88,12 +88,24 @@ void CMonsterSquadManager::register_member(u8 team_id, u8 squad_id, u8 group_id,
 
 void CMonsterSquadManager::remove_member(u8 team_id, u8 squad_id, u8 group_id, CEntity* e)
 {
-	get_squad(team_id, squad_id, group_id)->RemoveMember(e);
+	// MP fork (§14 co-op thin client): get_squad may legitimately be null on a
+	// client that spawns the server's monsters (a member whose squad slot was
+	// never registered here). Removing from a non-existent squad is a no-op.
+	CMonsterSquad* const squad = get_squad(team_id, squad_id, group_id);
+	if (squad)
+		squad->RemoveMember(e);
 }
 
 CMonsterSquad* CMonsterSquadManager::get_squad(u8 team_id, u8 squad_id, u8 group_id)
 {
+	// The VERIFY documents the invariant, but it is compiled out under
+	// MASTER_GOLD, so an out-of-bounds team/squad/group id (as happens on a
+	// co-op client whose monster squads aren't all registered) reads past the
+	// vectors -> garbage/nullptr -> caller crash. Honour the bounds in release:
+	// return null on OOB and let callers (which already null-check) handle it.
 	VERIFY((team_id < team.size()) && (squad_id < team[team_id].size()) && (group_id < team[team_id][squad_id].size()));
+	if (team_id >= team.size() || squad_id >= team[team_id].size() || group_id >= team[team_id][squad_id].size())
+		return nullptr;
 	return team[team_id][squad_id][group_id];
 }
 
