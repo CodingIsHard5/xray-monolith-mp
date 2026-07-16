@@ -34,7 +34,17 @@ SPAWN_STORY_PAIRS spawn_story_ids;
 
 CALifeSimulator* alife()
 {
-	return (const_cast<CALifeSimulator*>(ai().get_alife()));
+	CALifeSimulator* real = const_cast<CALifeSimulator*>(ai().get_alife());
+	if (real)
+		return real;
+	// MP fork (§14 co-op thin client): the co-op CLIENT has no server-owned
+	// simulator (ai().get_alife() is null, as on any MP client). Expose the
+	// INERT empty simulator to Lua so gamedata's alife() reads resolve to
+	// "nothing here" instead of crashing on nil. This is ONLY the Lua surface
+	// — C++ ai().get_alife() stays null, so engine behaviour is unchanged.
+	// Returns nullptr when no inert sim exists (normal single-player/MP), so
+	// there is no behaviour change outside co-op.
+	return CALifeSimulator::client_inert_instance();
 }
 
 CSE_ALifeDynamicObject* alife_object(const CALifeSimulator* self, ALife::_OBJECT_ID object_id)

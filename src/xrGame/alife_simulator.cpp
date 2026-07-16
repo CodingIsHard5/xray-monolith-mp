@@ -77,6 +77,53 @@ CALifeSimulator::CALifeSimulator(xrServer* server, shared_str* command_line) :
 	load(p.m_game_or_spawn, !xr_strcmp(p.m_new_or_load, "load") ? false : true, !xr_strcmp(p.m_new_or_load, "new"));
 }
 
+// MP fork (§14 co-op thin client): the inert client simulator. See the header.
+// Runs only the cheap base ctors + reload() (empty registries, m_initialized
+// = true). Crucially does NOT call restart_all()/setup_command_line()/load()
+// (no world) and does NOT call ai().set_alife() (kept out of C++ ai(), so the
+// 84 engine sites that gate on ai().get_alife() see the client as world-less,
+// exactly as a stock MP client). Only the Lua alife() binding exposes it.
+CALifeSimulator::CALifeSimulator(xrServer* server, EClientInert) :
+	CALifeUpdateManager(server, alife_section),
+	CALifeInteractionManager(server, alife_section),
+	CALifeSimulatorBase(server, alife_section)
+{
+	reload(alife_section);
+}
+
+static CALifeSimulator* g_client_inert_alife = nullptr;
+
+void CALifeSimulator::create_client_inert()
+{
+	if (g_client_inert_alife)
+		return;
+	// server may be null on a pure network client — the base ctor only stores
+	// it, and the inert sim's read-only methods never dereference it.
+	g_client_inert_alife = xr_new<CALifeSimulator>((xrServer*)nullptr, client_inert);
+	// The CALifeUpdateManager ctor shedule_register()s the sim, and reload()
+	// left m_initialized=true, so shedule_Update() would NOT early-return and
+	// would drive update()/update_switch() on a client with a null server ->
+	// crash. Unregister immediately: the inert sim must never simulate; the
+	// server owns simulation. (dtor's shedule_unregister() then no-ops.)
+	g_client_inert_alife->shedule_unregister();
+	Msg("- XRNET(dbg): co-op client inert alife() created (empty, world lives on server)");
+}
+
+void CALifeSimulator::destroy_client_inert()
+{
+	if (!g_client_inert_alife)
+		return;
+	// inert sim was never registered in ai(); tear down its empty registries
+	// directly (unload() clears m_initialized so the base dtor assert passes).
+	g_client_inert_alife->unload();
+	xr_delete(g_client_inert_alife);
+}
+
+CALifeSimulator* CALifeSimulator::client_inert_instance()
+{
+	return g_client_inert_alife;
+}
+
 CALifeSimulator::~CALifeSimulator()
 {
 	VERIFY(!ai().get_alife());

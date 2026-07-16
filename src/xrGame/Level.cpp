@@ -290,6 +290,9 @@ extern CAI_Space* g_ai_space;
 CLevel::~CLevel()
 {
 	//crash_saving::save_impl = nullptr; // CLevel not available, disable crash save
+	// MP fork (§14 co-op thin client): drop the inert client simulator, if this
+	// was a co-op client. No-op otherwise.
+	CALifeSimulator::destroy_client_inert();
 	xr_delete(g_player_hud);
 	delete_data(m_script_attachments);
 	delete_data(hud_zones_list);

@@ -3,6 +3,9 @@
 #include "Level_Bullet_Manager.h"
 #include "xrserver.h"
 #include "game_cl_base.h"
+#include "ai_space.h"                          // MP fork: ai().get_alife()
+#include "alife_simulator.h"                   // MP fork: client-inert alife
+#include "../xrNetServer/xr_enet_transport.h"  // MP fork: xr_enet::enabled()
 #include "xrmessages.h"
 #include "xrGameSpyServer.h"
 #include "../xrEngine/x_ray.h"
@@ -353,6 +356,17 @@ void CLevel::InitializeClientGame(NET_Packet& P)
 	game->set_type_name(game_type_name);
 	game->Init();
 	m_bGameConfigStarted = TRUE;
+
+	// MP fork (§14 co-op thin client): a co-op CLIENT inherits game type Single
+	// (the server runs server(save/single/alife/load)) and so loads the full
+	// single-player gamedata, which calls alife() everywhere. But a network
+	// client has no server-owned simulator (ai().get_alife() is null), so those
+	// calls crash. Give Lua an inert empty simulator here — early enough (config
+	// runs before the actor's net_spawn). Gate strictly: ENet co-op transport
+	// AND no real simulator (so the host/dedicated server and plain SP/MP are
+	// untouched).
+	if (xr_enet::enabled() && !ai().get_alife())
+		CALifeSimulator::create_client_inert();
 
 	if (!IsGameTypeSingle())
 	{
