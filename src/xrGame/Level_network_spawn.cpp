@@ -151,8 +151,16 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
 			client_spawn_manager().callback(O);
 		//Msg			("--spawn--SPAWN: %f ms",1000.f*T.GetAsync());
 
-		if ((E->s_flags.is(M_SPAWN_OBJECT_LOCAL)) &&
-			(E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER)))
+		// MP fork (§14 co-op thin client): the server strips M_SPAWN_OBJECT_LOCAL
+		// and _ASPLAYER for remote clients, so the stock "this is my player"
+		// gate never fires and the client gets NO control entity — then anything
+		// that reads Level().CurrentControlEntity() (e.g. CCustomZone::
+		// shedule_Update -> ->Position()) derefs null. Also take control of the
+		// actor a co-op client spawns (it has exactly one — its player).
+		const bool _coop_client_actor =
+			xr_enet::enabled() && !ai().get_alife() && !!smart_cast<CSE_ALifeCreatureActor*>(E);
+		if (((E->s_flags.is(M_SPAWN_OBJECT_LOCAL)) &&
+			(E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER))) || _coop_client_actor)
 		{
 			if (IsDemoPlayStarted())
 			{
