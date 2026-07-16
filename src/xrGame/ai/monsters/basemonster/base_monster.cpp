@@ -584,7 +584,10 @@ void CBaseMonster::set_state_sound(u32 type, bool once)
 		else
 		{
 			// get count of monsters in squad
-			u8 objects_count = monster_squad().get_squad(this)->get_count(this, 20.f);
+			// MP fork: get_squad can be null on a co-op client (unregistered
+			// squad) — treat "no squad" as 0 nearby members (just myself below).
+			CMonsterSquad* const _sq = monster_squad().get_squad(this);
+			u8 objects_count = _sq ? _sq->get_count(this, 20.f) : 0;
 
 			// include myself
 			objects_count++;
