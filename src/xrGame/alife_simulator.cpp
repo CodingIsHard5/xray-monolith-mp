@@ -15,6 +15,8 @@
 #include "mainmenu.h"
 #include "object_factory.h"
 #include "alife_object_registry.h"
+#include "alife_graph_registry.h"                 // MP fork: graph().set_actor()
+#include "xrServer_Objects_ALife_Monsters.h"      // MP fork: CSE_ALifeCreatureActor
 #include "../xrEngine/xr_ioconsole.h"
 
 #ifdef DEBUG
@@ -92,6 +94,39 @@ CALifeSimulator::CALifeSimulator(xrServer* server, EClientInert) :
 }
 
 static CALifeSimulator* g_client_inert_alife = nullptr;
+// A persistent snapshot of the co-op client's actor CSE. The real actor CSE is
+// transient (cl_Process_Spawn F_entity_Destroys it right after net_Spawn), so
+// we clone it once into this owned copy for Lua alife():actor() to read.
+static CSE_Abstract*	g_client_actor_stub = nullptr;
+
+void CALifeSimulator::set_client_actor(CSE_Abstract* actor_cse)
+{
+	if (!g_client_inert_alife || !actor_cse)
+		return;
+	if (g_client_actor_stub)                    // once per level
+		return;
+
+	// Clone actor_cse into an owned entity via the spawn wire-format (the same
+	// path cl_Process_Spawn uses). bLocal=TRUE preserves the ASPLAYER flag so
+	// the clone is recognised as the actor. Spawn_Read does its own r_begin, so
+	// no manual name handling is needed.
+	CSE_Abstract* stub = F_entity_Create(actor_cse->s_name.c_str());
+	if (!stub)
+		return;
+	NET_Packet packet;
+	actor_cse->Spawn_Write(packet, TRUE);
+	stub->Spawn_Read(packet);
+
+	CSE_ALifeCreatureActor* actor = smart_cast<CSE_ALifeCreatureActor*>(stub);
+	if (!actor)
+	{
+		F_entity_Destroy(stub);
+		return;
+	}
+	g_client_actor_stub = stub;
+	g_client_inert_alife->graph().set_actor(actor);
+	Msg("- XRNET(dbg): co-op client actor snapshot registered (id=%u)", actor->ID);
+}
 
 void CALifeSimulator::create_client_inert()
 {
@@ -113,6 +148,11 @@ void CALifeSimulator::destroy_client_inert()
 {
 	if (!g_client_inert_alife)
 		return;
+	// Drop the actor snapshot first (clear the dangling-able pointer in the
+	// graph registry, then free the owned clone).
+	g_client_inert_alife->graph().set_actor(nullptr);
+	if (g_client_actor_stub)
+		F_entity_Destroy(g_client_actor_stub);
 	// inert sim was never registered in ai(); tear down its empty registries
 	// directly (unload() clears m_initialized so the base dtor assert passes).
 	g_client_inert_alife->unload();

@@ -78,6 +78,11 @@ public:
 	IC bool level_exists() const;
 	IC void set_process_time(const float& process_time);
 	IC CSE_ALifeCreatureActor* actor() const;
+	// MP fork (§14 co-op thin client): designate the client-side actor CSE
+	// directly, WITHOUT update()'s side effects (setup_current_level() /
+	// m_bDirectControl gating). Used only by the inert client simulator so
+	// Lua alife():actor() resolves on a co-op client.
+	IC void set_actor(CSE_ALifeCreatureActor* a) { m_actor = a; }
 	IC const GRAPH_REGISTRY& objects() const;
 	template <typename F>
 	IC void iterate_objects(GameGraph::_GRAPH_ID game_vertex_id, const F& f);

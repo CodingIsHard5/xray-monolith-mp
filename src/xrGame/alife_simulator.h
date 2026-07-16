@@ -44,6 +44,10 @@ public:
 	static void			create_client_inert	();
 	static void			destroy_client_inert	();
 	static CALifeSimulator*	client_inert_instance	();
+	// Give the inert client sim a persistent snapshot of the actor's CSE so
+	// Lua alife():actor() resolves (the actor's real CSE is transient — freed
+	// right after net_Spawn). Called from CActor::net_Spawn on a co-op client.
+	static void			set_client_actor	(CSE_Abstract* actor_cse);
 
 #if 0//def DEBUG
 			void	validate			();
