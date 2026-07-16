@@ -5,6 +5,7 @@
 #include "game_cl_base.h"
 #include "ai_space.h"                          // MP fork: ai().get_alife()
 #include "alife_simulator.h"                   // MP fork: client-inert alife
+#include "script_engine.h"                     // MP fork: client-init functor
 #include "../xrNetServer/xr_enet_transport.h"  // MP fork: xr_enet::enabled()
 #include "xrmessages.h"
 #include "xrGameSpyServer.h"
@@ -366,7 +367,20 @@ void CLevel::InitializeClientGame(NET_Packet& P)
 	// AND no real simulator (so the host/dedicated server and plain SP/MP are
 	// untouched).
 	if (xr_enet::enabled() && !ai().get_alife())
+	{
 		CALifeSimulator::create_client_inert();
+
+		// MP fork (§14 co-op thin client): single-player gamedata lazily creates
+		// server-side globals (SIMBOARD, ...) from init paths that don't run on a
+		// thin client, so raw references to them (e.g. bind_campfire.script:273
+		// SIMBOARD.smarts_by_names) crash. Give the mod ONE client-init hook here
+		// (config, before any binder/spawn) where gamedata initialises the
+		// globals a thin client needs. Optional: absent -> no-op, so this hooks
+		// only the co-op mod's own mp_client.script and nothing else.
+		::luabind::functor<void> client_init;
+		if (ai().script_engine().functor("mp_client.on_client_level_start", client_init))
+			client_init();
+	}
 
 	if (!IsGameTypeSingle())
 	{
