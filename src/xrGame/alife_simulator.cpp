@@ -112,7 +112,10 @@ void CALifeSimulator::set_client_actor(CSE_Abstract* actor_cse)
 	// no manual name handling is needed.
 	CSE_Abstract* stub = F_entity_Create(actor_cse->s_name.c_str());
 	if (!stub)
+	{
+		Msg("! XRNET(dbg): set_client_actor: F_entity_Create('%s') failed", actor_cse->s_name.c_str());
 		return;
+	}
 	NET_Packet packet;
 	actor_cse->Spawn_Write(packet, TRUE);
 	stub->Spawn_Read(packet);
@@ -120,6 +123,7 @@ void CALifeSimulator::set_client_actor(CSE_Abstract* actor_cse)
 	CSE_ALifeCreatureActor* actor = smart_cast<CSE_ALifeCreatureActor*>(stub);
 	if (!actor)
 	{
+		Msg("! XRNET(dbg): set_client_actor: clone of '%s' is not a CSE_ALifeCreatureActor", actor_cse->s_name.c_str());
 		F_entity_Destroy(stub);
 		return;
 	}

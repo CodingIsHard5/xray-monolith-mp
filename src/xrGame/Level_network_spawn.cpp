@@ -7,6 +7,8 @@
 #include "game_level_cross_table.h"
 #include "level_graph.h"
 #include "client_spawn_manager.h"
+#include "alife_simulator.h"                       // MP fork: set_client_actor
+#include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
 #include "../xrEngine/xr_object.h"
 #include "../xrEngine/IGame_Persistent.h"
 
@@ -40,6 +42,20 @@ void CLevel::cl_Process_Spawn(NET_Packet& P)
 	{
 		E->s_flags.set(M_SPAWN_OBJECT_LOCAL, TRUE);
 	};
+
+	// MP fork (§14 co-op thin client): snapshot the actor's CSE into the inert
+	// client simulator so Lua alife():actor() resolves, BEFORE g_sv_Spawn runs
+	// the actor's binders (actor_proxy, actor_binder), which call alife():actor().
+	// E is fully read here and freed just below, so we must clone it now.
+	// Co-op client only; set_client_actor is once-per-level. (ASPLAYER is not
+	// usable — Spawn_Write strips it for remote clients — so we key on the actor
+	// class; single-client N1 has exactly one actor.)
+	if (xr_enet::enabled() && !ai().get_alife() && smart_cast<CSE_ALifeCreatureActor*>(E))
+	{
+		Msg("- XRNET(dbg): actor spawn on co-op client (flags=0x%x id=%u) -> snapshot",
+			E->s_flags.flags, E->ID);
+		CALifeSimulator::set_client_actor(E);
+	}
 
 	/*
 	game_spawn_queue.push_back(E);

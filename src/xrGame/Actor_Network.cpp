@@ -1,8 +1,5 @@
 #include "pch_script.h"
 #include "actor.h"
-#include "alife_simulator.h"                      // MP fork: set_client_actor
-#include "ai_space.h"                             // MP fork: ai().get_alife()
-#include "../xrNetServer/xr_enet_transport.h"     // MP fork: xr_enet::enabled()
 #include "hudmanager.h"
 #include "Actor_Flags.h"
 #include "inventory.h"
@@ -533,16 +530,6 @@ BOOL CActor::net_Spawn(CSE_Abstract* DC)
 
 	if (TRUE == E->s_flags.test(M_SPAWN_OBJECT_LOCAL) && TRUE == E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER))
 		g_actor = this;
-
-	// MP fork (§14 co-op thin client): give the inert client simulator a
-	// persistent snapshot of THIS player's actor CSE so Lua alife():actor()
-	// resolves (the real CSE 'e' is freed right after this net_Spawn). Gate on
-	// ASPLAYER so NPC actors (and, later, other players' actors) don't get
-	// snapshotted; set_client_actor itself is once-per-level. Co-op client only.
-	// TODO(multi-client): distinguish the LOCAL player's actor from remote
-	// players' actors once >1 client is supported.
-	if (xr_enet::enabled() && !ai().get_alife() && E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER))
-		CALifeSimulator::set_client_actor(e);
 
 	VERIFY(m_pActorEffector == NULL);
 
