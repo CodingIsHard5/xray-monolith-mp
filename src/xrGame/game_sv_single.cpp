@@ -115,12 +115,28 @@ void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
 		return;
 	}
 
-	CSE_Abstract* E = spawn_begin(base->s_name.c_str());
+	// Clone the save actor's CSE (via the spawn wire-format, same as set_client_actor)
+	// so the new actor inherits a real VISUAL/character — a bare spawn_begin("actor")
+	// has no model and would be invisible to the other player (and trips scripts that
+	// assume a full actor). Inventory items are separate child entities, so they are
+	// NOT cloned; the actor is visible but without gear.
+	CSE_Abstract* E = F_entity_Create(base->s_name.c_str());
 	if (!E)
 	{
-		Msg("! XRNET(dbg): coop_spawn_actor_for: spawn_begin('%s') failed", base->s_name.c_str());
+		Msg("! XRNET(dbg): coop_spawn_actor_for: F_entity_Create('%s') failed", base->s_name.c_str());
 		return;
 	}
+	{
+		NET_Packet clone_packet;
+		base->Spawn_Write(clone_packet, TRUE);
+		E->Spawn_Read(clone_packet);
+	}
+	// reset identity so spawn_end/Process_spawn assigns a fresh server ID (not id 0)
+	E->ID = 0xffff;
+	E->ID_Parent = 0xffff;
+	E->ID_Phantom = 0xffff;
+	E->s_RP = 0xFE;
+	E->RespawnTime = 0;
 
 	// position slightly offset from the base actor so co-op players don't overlap
 	static int s_coop_actor_seq = 0;
