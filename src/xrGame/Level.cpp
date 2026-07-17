@@ -686,7 +686,8 @@ void CLevel::ProcessSpawnEvents()
         {
             if (spawn_data_it->second.hasAlifeObject)
             {
-                auto obj = ai().alife().objects().object(obj_id);
+                // MP fork: ai().alife() is null on a co-op client.
+                auto obj = ai().get_alife() ? ai().alife().objects().object(obj_id) : nullptr;
                 if (!obj || !obj->m_bOnline)
                 {
                     if (spawn_antifreeze_debug) Msg("![ProcessSpawnEvents] object absent or offline, do not spawn, section %s, obj_id %d, parent_id %d, event_id %d", section.c_str(), obj_id, parent_id, dest);
@@ -698,7 +699,8 @@ void CLevel::ProcessSpawnEvents()
 		// If there is a parent of this object, check if its still in alife
 		if (parent_id != 0xffff)
 		{
-			auto parent_obj = ai().alife().objects().object(parent_id);
+			// MP fork: ai().alife() is null on a co-op client.
+			auto parent_obj = ai().get_alife() ? ai().alife().objects().object(parent_id) : nullptr;
 			if (!parent_obj || !parent_obj->m_bOnline)
 			{
 				if (spawn_antifreeze_debug) Msg("![ProcessSpawnEvents] parent object is not in alife, do not spawn, section %s, obj_id %d, parent_id %d, event_id %d", section.c_str(), obj_id, parent_id, dest);
@@ -821,7 +823,12 @@ void CLevel::ProcessGameEvents()
 							safe_insert(models, pSettings->r_string(section, "Predator_Visual"));
 						}*/
 
-						auto obj = ai().alife().objects().object(obj_id);
+						// MP fork (§14 co-op thin client): ai().alife() is null on
+						// a co-op client (world lives on the server). This prefetch
+						// just wants the alife object's visual; skip it when there
+						// is no local simulator — the section visual below still
+						// covers the model, and hasAlifeObject becomes false.
+						auto obj = ai().get_alife() ? ai().alife().objects().object(obj_id) : nullptr;
 
 						// Actual visual from alife object
 						if (obj && obj->visual())
