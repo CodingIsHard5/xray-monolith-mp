@@ -539,11 +539,14 @@ BOOL CActor::net_Spawn(CSE_Abstract* DC)
 	// g_actor / Actor() (e.g. CTorch::LoadLightParams derefs g_actor->ID()).
 	// A co-op client controls exactly one actor (its player), so set g_actor to
 	// it. TODO(multi-client): pick the LOCAL player among several actors.
-	// Multi-client co-op: only OUR OWN actor (ASPLAYER, kept by the server for the
-	// owner) is g_actor; peers arrive with ASPLAYER stripped and stay remote. (For a
-	// single co-op client the stock LOCAL+ASPLAYER branch above already fires; this
-	// covers the case where only ASPLAYER survived.)
-	else if (xr_enet::enabled() && !ai().get_alife() && E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER))
+	// Multi-client co-op: g_actor (Actor()) must be non-null all through world load —
+	// devices like CCustomDevice::UpdateVisibility deref Actor()->MovingState() every
+	// frame. But our OWN actor (LOCAL+ASPLAYER, handled by the stock branch above) is
+	// spawned by the server only AFTER we're ready, i.e. after load. So seed g_actor
+	// with the FIRST actor we receive (the world's save actor) when it's still null;
+	// the stock branch then UPGRADES g_actor to our owned actor the moment it arrives.
+	// (!g_actor so a peer's actor never steals it once seeded.)
+	else if (xr_enet::enabled() && !ai().get_alife() && !g_actor)
 		g_actor = this;
 
 	VERIFY(m_pActorEffector == NULL);

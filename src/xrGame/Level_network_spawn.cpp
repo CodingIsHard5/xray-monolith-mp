@@ -164,12 +164,14 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
 		// that reads Level().CurrentControlEntity() (e.g. CCustomZone::
 		// shedule_Update -> ->Position()) derefs null. Also take control of the
 		// actor a co-op client spawns (it has exactly one — its player).
-		// Own actor only (ASPLAYER). Stock '(LOCAL && ASPLAYER)' below already covers
-		// this once the server sends per-client actors with ownership flags; kept as a
-		// belt-and-braces gate so a peer's (stripped) actor never grabs our control entity.
+		// Control entity must be non-null through load (CCustomZone::shedule_Update etc.
+		// deref CurrentControlEntity()). Our owned actor (ASPLAYER) arrives only after
+		// we're ready, so seed the control entity with the FIRST actor while none is set,
+		// then let the owned actor take over when it spawns (SetControlEntity handles the
+		// switch via On_B_NotCurrentEntity). A peer's actor never grabs it once seeded.
 		const bool _coop_client_actor =
 			xr_enet::enabled() && !ai().get_alife() && !!smart_cast<CSE_ALifeCreatureActor*>(E)
-			&& E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER);
+			&& (E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER) || !CurrentControlEntity());
 		if (((E->s_flags.is(M_SPAWN_OBJECT_LOCAL)) &&
 			(E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER))) || _coop_client_actor)
 		{
