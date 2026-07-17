@@ -4,6 +4,7 @@
 
 class xrServer;
 class CALifeSimulator;
+class xrClientData;
 
 class game_sv_Single : public game_sv_GameState
 {
@@ -23,10 +24,16 @@ public:
 
 
 	virtual void OnCreate(u16 id_who);
-	// MP fork (§14 co-op): spawn a per-client actor when a co-op client finishes
-	// connecting, so each player controls their own character (the single game
-	// type otherwise has only the save's one actor, which all clients collide on).
+	// MP fork (§14 co-op): spawn a per-client actor so each player controls their own
+	// character (the single game type otherwise has only the save's one actor, which
+	// all clients collide on). The M_CLIENTREADY hook is unreliable for co-op clients,
+	// so we also POLL from Update() for ready clients that still lack an actor.
 	virtual void OnPlayerConnectFinished(ClientID id_who);
+private:
+	void coop_poll_spawns();                 // spawn actors for ready, actorless clients
+	void coop_spawn_actor_for(xrClientData* CL);
+	xr_map<u32, u32> m_coop_seen;            // client id -> first-seen time (grace for load)
+public:
 	virtual BOOL OnTouch(u16 eid_who, u16 eid_what, BOOL bForced = FALSE);
 	virtual void OnDetach(u16 eid_who, u16 eid_what);
 

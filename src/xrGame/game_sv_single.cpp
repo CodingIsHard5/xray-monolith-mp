@@ -102,34 +102,23 @@ void game_sv_Single::OnCreate(u16 id_who)
 void game_sv_Single::OnPlayerConnectFinished(ClientID id_who)
 {
 	inherited::OnPlayerConnectFinished(id_who);
+	coop_poll_spawns(); // in case M_CLIENTREADY did fire; the poll also runs each Update
+}
 
-	if (!xr_enet::enabled())
-		return; // co-op (ENet) only; stock single-player is untouched
-	if (!ai().get_alife())
-		return;
-
-	xrClientData* CL = m_server->ID_to_client(id_who);
-	if (!CL)
-		return;
-	// Skip the dedicated server's own local client (SV_Client) — it has no player.
-	if (CL == m_server->GetServerClient())
-	{
-		Msg("- XRNET(dbg): OnPlayerConnectFinished skipping server-local client 0x%08x", id_who.value());
-		return;
-	}
-
-	// reference the save actor for a valid spawn position + graph vertices
+// Spawn a co-op actor for one ready, actorless client at the save actor's position.
+void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
+{
 	CSE_ALifeCreatureActor* base = ai().alife().graph().actor();
 	if (!base)
 	{
-		Msg("! XRNET(dbg): OnPlayerConnectFinished: no base actor to clone spawn from");
+		Msg("! XRNET(dbg): coop_spawn_actor_for: no base actor to clone spawn from");
 		return;
 	}
 
 	CSE_Abstract* E = spawn_begin(base->s_name.c_str());
 	if (!E)
 	{
-		Msg("! XRNET(dbg): OnPlayerConnectFinished: spawn_begin('%s') failed", base->s_name.c_str());
+		Msg("! XRNET(dbg): coop_spawn_actor_for: spawn_begin('%s') failed", base->s_name.c_str());
 		return;
 	}
 
@@ -150,9 +139,48 @@ void game_sv_Single::OnPlayerConnectFinished(ClientID id_who)
 	// LOCAL+ASPLAYER: Process_spawn keeps these for the owner, strips for peers
 	E->s_flags.assign(M_SPAWN_OBJECT_LOCAL | M_SPAWN_OBJECT_ASPLAYER);
 
-	CSE_Abstract* N = spawn_end(E, id_who);
+	CSE_Abstract* N = spawn_end(E, CL->ID); // sets CL->owner = N
 	Msg("- XRNET(dbg): co-op actor spawned for client 0x%08x -> entity id %u (seq %d)",
-		id_who.value(), N ? N->ID : u16(-1), s_coop_actor_seq);
+		CL->ID.value(), N ? N->ID : u16(-1), s_coop_actor_seq);
+}
+
+// MP fork (§14 co-op): the single game type has only the save's one actor, so every
+// client would collide on it and players couldn't see each other. Give each connected
+// client its OWN actor. M_CLIENTREADY is unreliable for co-op clients, so poll here:
+// any client that is net_Ready (in the world, sending updates) but does not yet own an
+// entity (CL->owner == NULL) gets a fresh actor. spawn_end/Process_spawn replicates it
+// with per-recipient ownership (owner LOCAL+ASPLAYER, peers stripped -> remote render).
+void game_sv_Single::coop_poll_spawns()
+{
+	if (!xr_enet::enabled() || !ai().get_alife())
+		return; // co-op (ENet) only; stock single-player untouched
+
+	// A co-op client never reliably sends M_CLIENTREADY, and it can't be net_Ready
+	// before it has a Local actor to export (chicken-and-egg). So use a grace period:
+	// once we've seen an actorless client for GRACE_MS (time to finish loading the
+	// level), spawn its actor.
+	const u32 now = Device.dwTimeGlobal; // grace: spawn 6s after first sighting (load time)
+
+	struct collector
+	{
+		game_sv_Single* self;
+		u32 now;
+		xr_vector<xrClientData*> pending;
+		void operator()(IClient* client)
+		{
+			xrClientData* CL = static_cast<xrClientData*>(client);
+			if (CL == self->m_server->GetServerClient()) return; // no player on the server
+			if (CL->owner) return;                               // already has an actor
+			u32& seen = self->m_coop_seen[CL->ID.value()];
+			if (seen == 0) { seen = now; return; }               // first sighting: start grace
+			if (now - seen < 6000) return;                       // still loading
+			pending.push_back(CL);
+		}
+	};
+	collector c; c.self = this; c.now = now;
+	m_server->ForEachClientDo(c);
+	for (xrClientData* CL : c.pending)
+		coop_spawn_actor_for(CL);
 }
 
 BOOL game_sv_Single::OnTouch(u16 eid_who, u16 eid_what, BOOL bForced)
@@ -238,6 +266,7 @@ void game_sv_Single::OnDetach(u16 eid_who, u16 eid_what)
 void game_sv_Single::Update()
 {
 	inherited::Update();
+	coop_poll_spawns(); // MP fork (§14 co-op): give ready clients their own actor
 	/*	switch(phase) 	{
 			case GAME_PHASE_PENDING : {
 				OnRoundStart();
