@@ -158,6 +158,33 @@ void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
 	CSE_Abstract* N = spawn_end(E, CL->ID); // sets CL->owner = N
 	Msg("- XRNET(dbg): co-op actor spawned for client 0x%08x -> entity id %u (seq %d)",
 		CL->ID.value(), N ? N->ID : u16(-1), s_coop_actor_seq);
+
+	// MP fork (§13 co-op late-join snapshot): Process_spawn only BROADCASTS this new
+	// actor to clients that are ALREADY connected — it is a one-shot event with no
+	// replay for late joiners. Clients start staggered, so client 2 connects after
+	// client 1's actor already spawned and never learns of it (client 1 sees client 2,
+	// but not the reverse). Fix: right after giving CL its actor, replay every OTHER
+	// client's existing actor to CL as a stripped (=> remote) spawn, so the new client
+	// gets a snapshot of the peers that spawned before it joined.
+	struct peer_replay
+	{
+		game_sv_Single* self;
+		xrClientData* target;
+		void operator()(IClient* client)
+		{
+			xrClientData* other = static_cast<xrClientData*>(client);
+			if (other == target) return;         // don't replay the actor to its own owner
+			if (!other->owner) return;            // client without an actor yet
+			CSE_Abstract* peer = other->owner;
+			NET_Packet Packet;
+			peer->Spawn_Write(Packet, FALSE);     // FALSE strips LOCAL/ASPLAYER => remote peer
+			self->m_server->SendTo(target->ID, Packet, net_flags(TRUE, TRUE));
+			Msg("- XRNET(dbg): late-join replay: peer actor id %u -> client 0x%08x",
+				peer->ID, target->ID.value());
+		}
+	};
+	peer_replay pr; pr.self = this; pr.target = CL;
+	m_server->ForEachClientDo(pr);
 }
 
 // MP fork (§14 co-op): the single game type has only the save's one actor, so every

@@ -36,6 +36,7 @@
 #include "HudItem.h"
 #include "ai_sounds.h"
 #include "ai_space.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork: xr_enet::enabled()
 #include "trade.h"
 #include "inventory.h"
 //#include "Physics.h"
@@ -1771,6 +1772,13 @@ void CActor::set_state_box(u32 mstate)
 		character_physics_support()->movement()->ActivateBox(0, true);
 }
 
+// MP fork (§13): true on a co-op thin client (ENet transport, no local A-Life sim).
+// The server owns the world; peer actors are rendered as kinematic puppets.
+static inline bool coop_thin_client()
+{
+	return xr_enet::enabled() && !ai().get_alife();
+}
+
 void CActor::shedule_Update(u32 DT)
 {
 	setSVU(OnServer());
@@ -1897,6 +1905,36 @@ void CActor::shedule_Update(u32 DT)
 				}
 			}
 		}
+	}
+	else if (coop_thin_client() && Remote())
+	{
+		// MP fork (§13): a co-op PEER actor is a kinematic puppet. The stock MP
+		// interpolation path (make_Interpolation / m_bInInterpolation) is driven by
+		// physics-shell prediction (NET_A), which our thin client never populates —
+		// the owner exports no physics state under the single game-id. So drive the
+		// puppet straight from the latest imported base update: snap position, copy
+		// torso/model aim, and feed the movement state into the animator. Without
+		// this the peer freezes at its spawn point ("model doesn't follow").
+		if (NET.size())
+		{
+			net_update& N = NET.back();
+
+			mstate_real = mstate_wishful = N.mstate;
+			NET_SavedAccel = N.p_accel;
+			r_torso = N.o_torso;
+			unaffected_r_torso = N.o_torso;
+			r_model_yaw = angle_normalize(N.o_model);
+
+			// snap the physical capsule + object to the networked position
+			if (character_physics_support() && character_physics_support()->movement())
+				character_physics_support()->movement()->SetPosition(N.p_pos);
+			Position().set(N.p_pos);
+
+			g_Orientate(mstate_real, dt);
+			g_SetAnimation(mstate_real);
+			set_state_box(N.mstate);
+		}
+		mstate_old = mstate_real;
 	}
 	else
 	{
