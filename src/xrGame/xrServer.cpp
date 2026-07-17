@@ -527,6 +527,15 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 			//-------------------------------------------------------------------
 			if (SV_Client)
 				SendTo(SV_Client->ID, P, net_flags(TRUE, TRUE));
+			// MP fork (§14 co-op player-to-player): a dedicated server has no
+			// SV_Client to bounce a player's movement through, and nothing else
+			// relays it to the OTHER clients — so without this each player sees the
+			// others frozen at spawn. Fan this client's update out to every other
+			// connected client (SendBroadcast excludes the sender); their
+			// M_CL_UPDATE handler applies net_Import to that player's remote actor.
+			// Unreliable/sequenced (newest-wins) like the normal object update path.
+			if (xr_enet::enabled())
+				SendBroadcast(sender, P, net_flags(FALSE, TRUE));
 #ifdef DEBUG
 			VERIFY(verify_entities());
 #endif

@@ -7,6 +7,7 @@
 #include "net_queue.h"
 //#include "Physics.h"
 #include "xrServer.h"
+#include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
 #include "Actor.h"
 #include "Artefact.h"
 #include "game_cl_base_weapon_usage_statistic.h"
@@ -169,7 +170,14 @@ void CLevel::ClientReceive()
 					Msg("! WARNING: ignoring game event [%d] - game not configured...", m_type);
 					break;
 				}*/
-				if (OnClient()) break;
+				// MP fork (§14 co-op player-to-player): stock clients never receive
+				// M_CL_UPDATE (only the listen-server host does, to apply peer
+				// updates). On a co-op dedicated setup the server relays each
+				// player's update to the OTHER clients (xrServer.cpp), so a co-op
+				// client MUST run this handler to see peers move. The sender is
+				// excluded server-side, and our own actor is Local() (net_Import
+				// early-returns for it), so this only moves remote peers.
+				if (OnClient() && !xr_enet::enabled()) break;
 				P->r_u16(ID);
 				u32 Ping = P->r_u32();
 				CGameObject* O = smart_cast<CGameObject*>(Objects.net_Find(ID));
