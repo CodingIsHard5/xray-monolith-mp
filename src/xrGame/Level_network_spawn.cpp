@@ -50,9 +50,13 @@ void CLevel::cl_Process_Spawn(NET_Packet& P)
 	// Co-op client only; set_client_actor is once-per-level. (ASPLAYER is not
 	// usable — Spawn_Write strips it for remote clients — so we key on the actor
 	// class; single-client N1 has exactly one actor.)
-	if (xr_enet::enabled() && !ai().get_alife() && smart_cast<CSE_ALifeCreatureActor*>(E))
+	// Only snapshot OUR OWN actor (LOCAL+ASPLAYER kept by the server for the owner);
+	// a peer's actor arrives with those stripped and must stay a remote object, not
+	// become alife():actor(). (Multi-client: each client has exactly one ASPLAYER actor.)
+	if (xr_enet::enabled() && !ai().get_alife() && smart_cast<CSE_ALifeCreatureActor*>(E)
+		&& E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER))
 	{
-		Msg("- XRNET(dbg): actor spawn on co-op client (flags=0x%x id=%u) -> snapshot",
+		Msg("- XRNET(dbg): OWN actor spawn on co-op client (flags=0x%x id=%u) -> snapshot",
 			E->s_flags.flags, E->ID);
 		CALifeSimulator::set_client_actor(E);
 	}
@@ -157,8 +161,12 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
 		// that reads Level().CurrentControlEntity() (e.g. CCustomZone::
 		// shedule_Update -> ->Position()) derefs null. Also take control of the
 		// actor a co-op client spawns (it has exactly one — its player).
+		// Own actor only (ASPLAYER). Stock '(LOCAL && ASPLAYER)' below already covers
+		// this once the server sends per-client actors with ownership flags; kept as a
+		// belt-and-braces gate so a peer's (stripped) actor never grabs our control entity.
 		const bool _coop_client_actor =
-			xr_enet::enabled() && !ai().get_alife() && !!smart_cast<CSE_ALifeCreatureActor*>(E);
+			xr_enet::enabled() && !ai().get_alife() && !!smart_cast<CSE_ALifeCreatureActor*>(E)
+			&& E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER);
 		if (((E->s_flags.is(M_SPAWN_OBJECT_LOCAL)) &&
 			(E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER))) || _coop_client_actor)
 		{

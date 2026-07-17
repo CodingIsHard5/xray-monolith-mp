@@ -539,7 +539,11 @@ BOOL CActor::net_Spawn(CSE_Abstract* DC)
 	// g_actor / Actor() (e.g. CTorch::LoadLightParams derefs g_actor->ID()).
 	// A co-op client controls exactly one actor (its player), so set g_actor to
 	// it. TODO(multi-client): pick the LOCAL player among several actors.
-	else if (xr_enet::enabled() && !ai().get_alife())
+	// Multi-client co-op: only OUR OWN actor (ASPLAYER, kept by the server for the
+	// owner) is g_actor; peers arrive with ASPLAYER stripped and stay remote. (For a
+	// single co-op client the stock LOCAL+ASPLAYER branch above already fires; this
+	// covers the case where only ASPLAYER survived.)
+	else if (xr_enet::enabled() && !ai().get_alife() && E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER))
 		g_actor = this;
 
 	VERIFY(m_pActorEffector == NULL);
@@ -570,8 +574,10 @@ BOOL CActor::net_Spawn(CSE_Abstract* DC)
 	// its player, so force it Local: input is processed and net_Export() (which
 	// returns getLocal()) ships our actor state to the server. Server-side
 	// reconciliation / correction is the decision-replication netcode (§14 step
-	// 4). TODO(multi-client): only the LOCAL player's actor should be forced.
-	if (xr_enet::enabled() && !ai().get_alife())
+	// 4). Multi-client: force Local ONLY for our own actor (ASPLAYER kept by the server
+	// for the owner). A peer's actor must stay Remote() so it is driven by the relayed
+	// M_CL_UPDATE (net_Import), not by local input.
+	if (xr_enet::enabled() && !ai().get_alife() && E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER))
 		setLocal(TRUE);
 
 	CSE_ALifeTraderAbstract* pTA = smart_cast<CSE_ALifeTraderAbstract*>(e);

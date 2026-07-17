@@ -23,6 +23,10 @@ public:
 
 
 	virtual void OnCreate(u16 id_who);
+	// MP fork (§14 co-op): spawn a per-client actor when a co-op client finishes
+	// connecting, so each player controls their own character (the single game
+	// type otherwise has only the save's one actor, which all clients collide on).
+	virtual void OnPlayerConnectFinished(ClientID id_who);
 	virtual BOOL OnTouch(u16 eid_who, u16 eid_what, BOOL bForced = FALSE);
 	virtual void OnDetach(u16 eid_who, u16 eid_what);
 

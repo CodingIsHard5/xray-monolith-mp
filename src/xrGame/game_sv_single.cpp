@@ -8,6 +8,8 @@
 #include "object_broker.h"
 #include "gamepersistent.h"
 #include "xrServer.h"
+#include "ai_space.h"                              // MP fork: ai().alife()
+#include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
 #include "../xrEngine/x_ray.h"
 #include "../xrEngine/dedicated_server_only.h"
 #include "../xrEngine/no_single.h"
@@ -87,6 +89,64 @@ void game_sv_Single::OnCreate(u16 id_who)
 	}
 	else
 		alife().create(alife_object);
+}
+
+// MP fork (§14 co-op): give each connecting co-op client its OWN actor. The single
+// game type has only the save's one actor (id 0), which every client would bind and
+// collide on -> players can't see each other. Spawn a fresh actor per client at the
+// save actor's position (SP levels have no MP respawn points, so we can't assign_RP),
+// owned by that client. spawn_end() -> Process_spawn() replicates it to all clients
+// with per-recipient ownership flags: the owner receives it LOCAL+ASPLAYER (controls
+// it), peers receive it stripped (render it as a remote player). Player position sync
+// then rides the inherited M_CL_UPDATE path + our FIX-A relay.
+void game_sv_Single::OnPlayerConnectFinished(ClientID id_who)
+{
+	inherited::OnPlayerConnectFinished(id_who);
+
+	if (!xr_enet::enabled())
+		return; // co-op (ENet) only; stock single-player is untouched
+	if (!ai().get_alife())
+		return;
+
+	xrClientData* CL = m_server->ID_to_client(id_who);
+	if (!CL)
+		return;
+
+	// reference the save actor for a valid spawn position + graph vertices
+	CSE_ALifeCreatureActor* base = ai().alife().graph().actor();
+	if (!base)
+	{
+		Msg("! XRNET(dbg): OnPlayerConnectFinished: no base actor to clone spawn from");
+		return;
+	}
+
+	CSE_Abstract* E = spawn_begin(base->s_name.c_str());
+	if (!E)
+	{
+		Msg("! XRNET(dbg): OnPlayerConnectFinished: spawn_begin('%s') failed", base->s_name.c_str());
+		return;
+	}
+
+	// position slightly offset from the base actor so co-op players don't overlap
+	static int s_coop_actor_seq = 0;
+	++s_coop_actor_seq;
+	E->o_Position = base->o_Position;
+	E->o_Position.x += 1.5f * float(s_coop_actor_seq);
+	E->o_Angle = base->o_Angle;
+
+	CSE_ALifeCreatureActor* na = smart_cast<CSE_ALifeCreatureActor*>(E);
+	if (na)
+	{
+		na->m_tNodeID = base->m_tNodeID;
+		na->m_tGraphID = base->m_tGraphID;
+		na->m_bALifeControl = false; // client-driven, not A-Life
+	}
+	// LOCAL+ASPLAYER: Process_spawn keeps these for the owner, strips for peers
+	E->s_flags.assign(M_SPAWN_OBJECT_LOCAL | M_SPAWN_OBJECT_ASPLAYER);
+
+	CSE_Abstract* N = spawn_end(E, id_who);
+	Msg("- XRNET(dbg): co-op actor spawned for client 0x%08x -> entity id %u (seq %d)",
+		id_who.value(), N ? N->ID : u16(-1), s_coop_actor_seq);
 }
 
 BOOL game_sv_Single::OnTouch(u16 eid_who, u16 eid_what, BOOL bForced)
