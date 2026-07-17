@@ -561,6 +561,19 @@ BOOL CActor::net_Spawn(CSE_Abstract* DC)
 	if (!CInventoryOwner::net_Spawn(DC)) return FALSE;
 	if (!inherited::net_Spawn(DC)) return FALSE;
 
+	// MP fork (§14 co-op thin client): the server STRIPS M_SPAWN_OBJECT_LOCAL for
+	// a remote client (xrServer_Object_Base.cpp:217), so CGameObject::net_Spawn
+	// just set us Remote() -> the engine drives this actor by network
+	// interpolation and every CActor input path (which gates on Local(), e.g.
+	// Actor.cpp:1058) is skipped, so keyboard/mouse do nothing. A co-op client
+	// OWNS and locally drives its one actor exactly like a stock MP client owns
+	// its player, so force it Local: input is processed and net_Export() (which
+	// returns getLocal()) ships our actor state to the server. Server-side
+	// reconciliation / correction is the decision-replication netcode (§14 step
+	// 4). TODO(multi-client): only the LOCAL player's actor should be forced.
+	if (xr_enet::enabled() && !ai().get_alife())
+		setLocal(TRUE);
+
 	CSE_ALifeTraderAbstract* pTA = smart_cast<CSE_ALifeTraderAbstract*>(e);
 	set_money(pTA->m_dwMoney, false);
 
@@ -621,6 +634,14 @@ BOOL CActor::net_Spawn(CSE_Abstract* DC)
 	{
 		setEnabled(TRUE);
 	}
+
+	// MP fork (§14 co-op thin client): our server boots the level as the "single"
+	// game type, so IsGameTypeSingle() is true and the block above does NOT run;
+	// combined with the stripped M_SPAWN_OBJECT_LOCAL flag, setEnabled() above
+	// left our own actor DISABLED (renders, but no physics/collision/input). Force
+	// it enabled so the locally-driven co-op actor actually moves and collides.
+	if (xr_enet::enabled() && !ai().get_alife())
+		setEnabled(TRUE);
 
 	m_hit_slowmo = 0.f;
 
