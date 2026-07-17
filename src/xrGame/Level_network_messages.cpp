@@ -181,7 +181,20 @@ void CLevel::ClientReceive()
 				P->r_u16(ID);
 				u32 Ping = P->r_u32();
 				CGameObject* O = smart_cast<CGameObject*>(Objects.net_Find(ID));
-				if (0 == O) break;
+				if (0 == O)
+				{
+					if (xr_enet::enabled() && (Device.dwFrame % 120 == 0))
+					{
+						Msg("- XRNET(diag): peer M_CL_UPDATE id=%u NOT FOUND on this client", ID);
+						FlushLog();
+					}
+					break;
+				}
+				if (xr_enet::enabled() && (Device.dwFrame % 120 == 0))
+				{
+					Msg("- XRNET(diag): APPLYING peer M_CL_UPDATE id=%u (%s)", ID, O->cName().c_str());
+					FlushLog();
+				}
 				O->net_Import(*P);
 				//---------------------------------------------------
 				UpdateDeltaUpd(timeServer());

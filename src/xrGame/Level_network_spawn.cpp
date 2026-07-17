@@ -59,8 +59,9 @@ void CLevel::cl_Process_Spawn(NET_Packet& P)
 	// (Control/g_actor/Local are gated on ASPLAYER separately, so peers stay remote.)
 	if (xr_enet::enabled() && !ai().get_alife() && smart_cast<CSE_ALifeCreatureActor*>(E))
 	{
-		Msg("- XRNET(dbg): actor spawn on co-op client (flags=0x%x id=%u asplayer=%d) -> snapshot",
+		Msg("- XRNET(diag): ACTOR SPAWN received on co-op client (flags=0x%x id=%u asplayer=%d)",
 			E->s_flags.flags, E->ID, E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER) ? 1 : 0);
+		FlushLog();
 		CALifeSimulator::set_client_actor(E);
 	}
 

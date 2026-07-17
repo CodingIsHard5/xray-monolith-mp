@@ -535,7 +535,15 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 			// M_CL_UPDATE handler applies net_Import to that player's remote actor.
 			// Unreliable/sequenced (newest-wins) like the normal object update path.
 			if (xr_enet::enabled())
+			{
 				SendBroadcast(sender, P, net_flags(FALSE, TRUE));
+				if (Device.dwFrame % 120 == 0)
+				{
+					Msg("- XRNET(diag): SV relayed M_CL_UPDATE from client 0x%08x (clients=%u)",
+						sender.value(), GetClientsCount());
+					FlushLog();
+				}
+			}
 #ifdef DEBUG
 			VERIFY(verify_entities());
 #endif

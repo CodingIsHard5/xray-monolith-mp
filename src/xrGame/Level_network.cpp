@@ -206,9 +206,34 @@ void CLevel::ClientSend()
 				if (P.B.count > 9)
 				{
 					if (!OnServer())
+					{
 						Send(P, net_flags(FALSE));
+						// MP fork co-op diag: confirm the thin client ships its actor update
+						if (xr_enet::enabled() && (Device.dwFrame % 120 == 0))
+						{
+							Msg("- XRNET(diag): CL SENT M_CL_UPDATE ctrl-entity id=%u size=%d local=%d",
+								pObj->ID(), P.B.count, pObj->Local() ? 1 : 0);
+							FlushLog();
+						}
+					}
+				}
+				else if (xr_enet::enabled() && (Device.dwFrame % 120 == 0))
+				{
+					Msg("- XRNET(diag): CL update too small (count=%d) id=%u — NOT sent",
+						P.B.count, pObj->ID());
+					FlushLog();
 				}
 			}
+			else if (xr_enet::enabled() && (Device.dwFrame % 120 == 0))
+			{
+				Msg("- XRNET(diag): ClientSend: ctrl-entity not net_Relevant/destroyed — NOT sent");
+				FlushLog();
+			}
+		}
+		else if (xr_enet::enabled() && (Device.dwFrame % 120 == 0))
+		{
+			Msg("- XRNET(diag): ClientSend: NO CurrentControlEntity — NOT sent");
+			FlushLog();
 		}
 	};
 	if (m_file_transfer)
