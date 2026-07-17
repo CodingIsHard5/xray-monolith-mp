@@ -103,8 +103,23 @@ void CALifeSimulator::set_client_actor(CSE_Abstract* actor_cse)
 {
 	if (!g_client_inert_alife || !actor_cse)
 		return;
-	if (g_client_actor_stub)                    // once per level
-		return;
+
+	// Multi-client co-op: alife():actor() must be OUR OWN actor (ASPLAYER). But the
+	// world's save actor arrives before the server spawns our owned actor, so we
+	// snapshot the first actor (any) to keep alife():actor() non-nil for the early
+	// binders, then UPGRADE to the owned actor when it arrives. Never downgrade.
+	const bool new_is_asplayer = actor_cse->s_flags.is(M_SPAWN_OBJECT_ASPLAYER);
+	if (g_client_actor_stub)
+	{
+		const bool cur_is_asplayer = g_client_actor_stub->s_flags.is(M_SPAWN_OBJECT_ASPLAYER);
+		if (cur_is_asplayer || !new_is_asplayer)
+			return;                             // keep current (already owned, or no upgrade)
+		// replace the non-owned snapshot with the owned (ASPLAYER) one
+		g_client_inert_alife->graph().set_actor(nullptr);
+		F_entity_Destroy(g_client_actor_stub);
+		g_client_actor_stub = nullptr;
+		Msg("- XRNET(dbg): upgrading alife():actor() snapshot to owned actor id=%u", actor_cse->ID);
+	}
 
 	// Clone actor_cse into an owned entity via the spawn wire-format (the same
 	// path cl_Process_Spawn uses). bLocal=TRUE preserves the ASPLAYER flag so

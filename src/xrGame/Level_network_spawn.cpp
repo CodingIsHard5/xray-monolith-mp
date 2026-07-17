@@ -50,14 +50,17 @@ void CLevel::cl_Process_Spawn(NET_Packet& P)
 	// Co-op client only; set_client_actor is once-per-level. (ASPLAYER is not
 	// usable — Spawn_Write strips it for remote clients — so we key on the actor
 	// class; single-client N1 has exactly one actor.)
-	// Only snapshot OUR OWN actor (LOCAL+ASPLAYER kept by the server for the owner);
-	// a peer's actor arrives with those stripped and must stay a remote object, not
-	// become alife():actor(). (Multi-client: each client has exactly one ASPLAYER actor.)
-	if (xr_enet::enabled() && !ai().get_alife() && smart_cast<CSE_ALifeCreatureActor*>(E)
-		&& E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER))
+	// Snapshot an actor so Lua alife():actor() resolves before any actor binder runs
+	// (actor_proxy:init derefs it). This must NOT require ASPLAYER: the world's save
+	// actor arrives BEFORE our owned actor (which the server spawns only after we're
+	// ready), and its binder would crash on a nil alife():actor(). set_client_actor
+	// prefers an ASPLAYER (owned) actor and upgrades to it if a non-owned one was
+	// snapshotted first, so alife():actor() ends up as the local player's actor.
+	// (Control/g_actor/Local are gated on ASPLAYER separately, so peers stay remote.)
+	if (xr_enet::enabled() && !ai().get_alife() && smart_cast<CSE_ALifeCreatureActor*>(E))
 	{
-		Msg("- XRNET(dbg): OWN actor spawn on co-op client (flags=0x%x id=%u) -> snapshot",
-			E->s_flags.flags, E->ID);
+		Msg("- XRNET(dbg): actor spawn on co-op client (flags=0x%x id=%u asplayer=%d) -> snapshot",
+			E->s_flags.flags, E->ID, E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER) ? 1 : 0);
 		CALifeSimulator::set_client_actor(E);
 	}
 

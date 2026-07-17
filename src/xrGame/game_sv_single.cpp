@@ -111,6 +111,12 @@ void game_sv_Single::OnPlayerConnectFinished(ClientID id_who)
 	xrClientData* CL = m_server->ID_to_client(id_who);
 	if (!CL)
 		return;
+	// Skip the dedicated server's own local client (SV_Client) — it has no player.
+	if (CL == m_server->GetServerClient())
+	{
+		Msg("- XRNET(dbg): OnPlayerConnectFinished skipping server-local client 0x%08x", id_who.value());
+		return;
+	}
 
 	// reference the save actor for a valid spawn position + graph vertices
 	CSE_ALifeCreatureActor* base = ai().alife().graph().actor();
