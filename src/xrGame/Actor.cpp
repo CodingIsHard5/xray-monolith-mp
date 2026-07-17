@@ -2158,6 +2158,18 @@ void CActor::renderable_Render()
 {
 	VERIFY(_valid(XFORM()));
 
+	// MP fork (§14 co-op): a REMOTE actor (another player) must always draw its full
+	// third-person body. Remote actors default to cam_active==eacFirstEye, and co-op
+	// runs with show_actor_body 0, so the first-person branch below would draw nothing
+	// -> the peer is invisible to everyone else (the single game type has no remote-
+	// player render path). Only our OWN (Local) actor uses the first-person view.
+	if (Remote())
+	{
+		inherited::renderable_Render();
+		CInventoryOwner::renderable_Render();
+		return;
+	}
+
     // leg shadows are disabled for DX8 and DX9
     bool validRendererForShadow = (::Render->get_generation() == ::Render->GENERATION_R2) && (::Render->get_dx_level() != 0x00090000);
 
