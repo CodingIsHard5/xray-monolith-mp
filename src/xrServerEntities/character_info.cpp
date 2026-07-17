@@ -153,6 +153,15 @@ void CCharacterInfo::load_shared(LPCSTR)
 #ifdef XRGAME_EXPORTS
 void CCharacterInfo::Init(CSE_ALifeTraderAbstract* trader)
 {
+	// MP fork (§14 co-op thin client): a co-op PEER actor has no server-entity /
+	// character profile on this client (Level().Server->game / alife is inert), so the
+	// talk/dialog path resolves a null trader and this derefs null+0x14 (crash when a
+	// player targets another player to "talk"). Skip init on a null trader — the peer
+	// gets an empty character card instead of crashing. (Full peer character/dialog
+	// data is future work; for now interacting with a peer is a safe no-op.)
+	if (!trader)
+		return;
+
 	SetCommunity(trader->m_community_index);
 	SetRank(trader->m_rank);
 	SetReputation(trader->m_reputation);
