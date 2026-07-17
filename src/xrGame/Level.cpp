@@ -11,6 +11,7 @@
 #include "game_cl_base.h"
 #include "entity_alive.h"
 #include "ai_space.h"
+#include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
 #include "ai_debug.h"
 #include "ShootingObject.h"
 #include "GameTaskManager.h"
@@ -1763,9 +1764,24 @@ void CLevel::SetEnvironmentGameTimeFactor(u64 const& GameTime, float const& fTim
 	game->SetEnvironmentGameTimeFactor(GameTime, fTimeFactor);
 }
 
+// MP fork (§14): true only on a co-op ENet thin client — it opted into xrnet_udp and
+// has NO local A-Life (the real A-Life lives on the dedicated server). On the server
+// itself ai().get_alife() is non-null, so this is false there.
+static bool coop_thin_client()
+{
+	return xr_enet::enabled() && !ai().get_alife();
+}
+
 bool CLevel::IsServer()
 {
 	if (!Server || IsDemoPlayStarted())
+		return false;
+	// MP fork (§14 co-op thin client): the co-op client carries a listen-server stub
+	// (Server != null) and so is WRONGLY treated as the server here. That made it skip
+	// sending M_CL_UPDATE (ClientSend gates the send on !OnServer, Level_network.cpp:208),
+	// run a local A-Life (leaking entity IDs), and mis-route client/server logic. The
+	// dedicated server is authoritative; the thin client must be a pure CLIENT.
+	if (coop_thin_client())
 		return false;
 	return true;
 }
@@ -1773,6 +1789,8 @@ bool CLevel::IsServer()
 bool CLevel::IsClient()
 {
 	if (IsDemoPlayStarted())
+		return true;
+	if (coop_thin_client())
 		return true;
 	if (Server)
 		return false;
