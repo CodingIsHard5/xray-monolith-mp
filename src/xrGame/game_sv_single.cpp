@@ -10,6 +10,7 @@
 #include "xrServer.h"
 #include "ai_space.h"                              // MP fork: ai().alife()
 #include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
+#include "mp_anchors.h"                            // MP fork: A-Life attention anchors
 #include "../xrEngine/x_ray.h"
 #include "../xrEngine/dedicated_server_only.h"
 #include "../xrEngine/no_single.h"
@@ -106,6 +107,58 @@ void game_sv_Single::OnPlayerConnectFinished(ClientID id_who)
 }
 
 // Spawn a co-op actor for one ready, actorless client at the save actor's position.
+// MP fork (§17 co-op): clone every inventory item of the save actor `base` onto the
+// freshly-spawned player actor `owner` (owned by client CL). Items are separate CSE
+// entities (base->children); a bare actor clone has none, so peers see empty hands and
+// no outfit. We re-spawn each child parented to `owner` — Process_spawn attaches it via
+// OnTouch, replicates it (LOCAL to the owning client, stripped/remote to peers), and the
+// item's third-person visual then rides along on the peer body.
+void game_sv_Single::coop_clone_inventory_for(CSE_ALifeCreatureActor* base, CSE_Abstract* owner, xrClientData* CL)
+{
+	if (!base || !owner)
+		return;
+
+	// snapshot the id list first: spawning mutates registries/child vectors.
+	xr_vector<u16> item_ids = base->children;
+	int cloned = 0;
+	for (u16 child_id : item_ids)
+	{
+		CSE_ALifeDynamicObject* src = ai().alife().objects().object(child_id, true);
+		if (!src)
+			continue;
+		// only carry actual inventory items (skip anything odd parented under the actor)
+		if (!src->cast_inventory_item())
+			continue;
+
+		CSE_Abstract* copy = F_entity_Create(src->s_name.c_str());
+		if (!copy)
+		{
+			Msg("! XRNET(dbg): coop_clone_inventory: F_entity_Create('%s') failed", src->s_name.c_str());
+			continue;
+		}
+		{
+			NET_Packet pk;
+			src->Spawn_Write(pk, TRUE);
+			copy->Spawn_Read(pk);
+		}
+		// fresh identity, parented to the new player actor
+		copy->ID = 0xffff;
+		copy->ID_Phantom = 0xffff;
+		copy->ID_Parent = owner->ID;
+		copy->s_RP = 0xFE;
+		copy->RespawnTime = 0;
+		copy->o_Position = owner->o_Position;
+		// LOCAL to the owning client (so they can fire/reload); peers get it stripped.
+		copy->s_flags.assign(M_SPAWN_OBJECT_LOCAL);
+
+		CSE_Abstract* NI = spawn_end(copy, CL->ID);
+		if (NI)
+			++cloned;
+	}
+	Msg("- XRNET(dbg): coop_clone_inventory: cloned %d item(s) onto actor id %u for client 0x%08x",
+		cloned, owner->ID, CL->ID.value());
+}
+
 void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
 {
 	CSE_ALifeCreatureActor* base = ai().alife().graph().actor();
@@ -158,6 +211,13 @@ void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
 	CSE_Abstract* N = spawn_end(E, CL->ID); // sets CL->owner = N
 	Msg("- XRNET(dbg): co-op actor spawned for client 0x%08x -> entity id %u (seq %d)",
 		CL->ID.value(), N ? N->ID : u16(-1), s_coop_actor_seq);
+
+	// MP fork (§17 co-op): clone the save actor's inventory (weapons/outfit/ammo) onto
+	// this player's actor, so players spawn with the starting gear AND peers can SEE the
+	// held weapon / worn outfit (the third-person visual is driven by the child item
+	// entities, which the bare actor clone lacks). Each item is re-spawned parented to N.
+	if (N)
+		coop_clone_inventory_for(base, N, CL);
 
 	// MP fork (§13 co-op late-join snapshot): Process_spawn only BROADCASTS this new
 	// actor to clients that are ALREADY connected — it is a one-shot event with no
@@ -308,10 +368,43 @@ void game_sv_Single::OnDetach(u16 eid_who, u16 eid_what)
 }
 
 
+// MP fork (§15 co-op A-Life): feed each connected player's position into the A-Life
+// attention-anchor registry so online/offline switching centres on the REAL players
+// (min distance to any anchor) instead of the static save-actor. Without this, NPCs
+// and monsters only spawn/despawn around the save-actor's fixed spot and never follow
+// the players. Rebuilt each tick (players move / join / leave). Anchors already wire
+// into alife_dynamic_object / alife_online_offline_group switching via
+// mp_anchors::min_distance_to().
+void game_sv_Single::coop_update_anchors()
+{
+	if (!xr_enet::enabled() || !ai().get_alife())
+		return; // co-op (ENet) only; stock single-player uses the actor entity
+
+	struct anchor_feeder
+	{
+		u32 idx;
+		game_sv_Single* self;
+		void operator()(IClient* client)
+		{
+			xrClientData* CL = static_cast<xrClientData*>(client);
+			if (CL == self->m_server->GetServerClient()) return; // no player on the server
+			if (!CL->owner) return;                              // client without an actor yet
+			if (idx >= mp_anchors::max_anchors) return;
+			mp_anchors::set(idx, CL->owner->o_Position);
+			++idx;
+		}
+	};
+
+	mp_anchors::clear_all();
+	anchor_feeder f; f.idx = 0; f.self = this;
+	m_server->ForEachClientDo(f);
+}
+
 void game_sv_Single::Update()
 {
 	inherited::Update();
-	coop_poll_spawns(); // MP fork (§14 co-op): give ready clients their own actor
+	coop_poll_spawns();    // MP fork (§14 co-op): give ready clients their own actor
+	coop_update_anchors(); // MP fork (§15 co-op): re-centre A-Life on the players
 	/*	switch(phase) 	{
 			case GAME_PHASE_PENDING : {
 				OnRoundStart();

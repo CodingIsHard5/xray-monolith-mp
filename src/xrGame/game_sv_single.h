@@ -5,6 +5,8 @@
 class xrServer;
 class CALifeSimulator;
 class xrClientData;
+class CSE_ALifeCreatureActor;
+class CSE_Abstract;
 
 class game_sv_Single : public game_sv_GameState
 {
@@ -32,6 +34,8 @@ public:
 private:
 	void coop_poll_spawns();                 // spawn actors for ready, actorless clients
 	void coop_spawn_actor_for(xrClientData* CL);
+	void coop_clone_inventory_for(CSE_ALifeCreatureActor* base, CSE_Abstract* owner, xrClientData* CL);
+	void coop_update_anchors();              // feed player positions to A-Life anchors
 	xr_map<u32, u32> m_coop_seen;            // client id -> first-seen time (grace for load)
 public:
 	virtual BOOL OnTouch(u16 eid_who, u16 eid_what, BOOL bForced = FALSE);

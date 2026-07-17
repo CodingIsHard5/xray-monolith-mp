@@ -1132,6 +1132,14 @@ float CActor::currentFOV()
 
 #include "UI\UIInventoryUtilities.h"
 
+// MP fork (§13): true on a co-op thin client (ENet transport, no local A-Life sim).
+// The server owns the world; peer actors are rendered as kinematic puppets. Defined
+// here (above the first use in UpdateCL) so it is visible to all co-op paths below.
+static inline bool coop_thin_client()
+{
+	return xr_enet::enabled() && !ai().get_alife();
+}
+
 void CActor::UpdateCL()
 {
 	if (g_Alive() && Level().CurrentViewEntity() == this)
@@ -1780,13 +1788,6 @@ void CActor::set_state_box(u32 mstate)
 	}
 	else
 		character_physics_support()->movement()->ActivateBox(0, true);
-}
-
-// MP fork (§13): true on a co-op thin client (ENet transport, no local A-Life sim).
-// The server owns the world; peer actors are rendered as kinematic puppets.
-static inline bool coop_thin_client()
-{
-	return xr_enet::enabled() && !ai().get_alife();
 }
 
 // MP fork (§13 co-op): per-frame smoothing for a remote peer puppet. shedule_Update
