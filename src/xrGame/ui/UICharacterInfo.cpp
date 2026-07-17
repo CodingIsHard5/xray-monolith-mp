@@ -17,10 +17,12 @@
 
 
 #include "../alife_simulator.h"
+#include "../alife_graph_registry.h"               // MP fork: inert sim graph().actor()
 #include "../ai_space.h"
 #include "../alife_object_registry.h"
 #include "../xrServer.h"
 #include "../../xrServerEntities/xrServer_Objects_ALife_Monsters.h"
+#include "../../xrNetServer/xr_enet_transport.h"    // MP fork: xr_enet::enabled()
 
 using namespace InventoryUtilities;
 
@@ -30,10 +32,24 @@ CSE_ALifeTraderAbstract* ch_info_get_from_id(u16 id)
 	{
 		return smart_cast<CSE_ALifeTraderAbstract*>(ai().alife().objects().object(id));
 	}
-	else
+	// MP fork (§14 co-op thin client): no local A-Life sim AND no local server
+	// (Level().Server->game is null on a pure ENet client), so the stock else
+	// branch derefs null and crashes the moment the inventory / character-info
+	// panel opens. Resolve the player's char-info from the inert client sim's
+	// actor snapshot; any other id we can't resolve client-side -> return null
+	// (blank panel, no crash). Server-owned char data arrives with the netcode.
+	if (xr_enet::enabled() && !ai().get_alife())
 	{
-		return smart_cast<CSE_ALifeTraderAbstract*>(Level().Server->game->get_entity_from_eid(id));
+		CALifeSimulator* inert = CALifeSimulator::client_inert_instance();
+		if (inert)
+		{
+			CSE_ALifeCreatureActor* a = inert->graph().actor();
+			if (a && a->ID == id)
+				return smart_cast<CSE_ALifeTraderAbstract*>(a);
+		}
+		return nullptr;
 	}
+	return smart_cast<CSE_ALifeTraderAbstract*>(Level().Server->game->get_entity_from_eid(id));
 }
 
 CUICharacterInfo::CUICharacterInfo()
