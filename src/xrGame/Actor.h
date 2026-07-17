@@ -307,6 +307,13 @@ protected:
 	float r_model_yaw; // orientation of model
 	float r_model_yaw_delta; // effect on multiple "strafe"+"something"
 
+	// MP fork (§13 co-op): remote PEER puppet interpolation. shedule_Update (low
+	// rate) stores the latest networked pose as a target; UpdateCL (per frame) glides
+	// the visual toward it so peers move smoothly instead of teleporting each update.
+	Fvector   m_coop_pos_target;
+	float     m_coop_yaw_target;
+	SRotation m_coop_torso_target;
+	bool      m_coop_puppet_active;
 
 public:
 	SActorMotions* m_anims;
@@ -447,6 +454,7 @@ public:
 	void g_cl_Orientate(u32 mstate_rl, float dt);
 	void g_sv_Orientate(u32 mstate_rl, float dt);
 	void g_Orientate(u32 mstate_rl, float dt);
+	void coop_puppet_interpolate(); // MP fork (§13): smooth remote-peer motion
 	bool g_LadderOrient();
 	//	void					UpdateMotionIcon		(u32 mstate_rl);
 

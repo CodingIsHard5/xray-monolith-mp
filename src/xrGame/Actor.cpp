@@ -169,6 +169,11 @@ CActor::CActor() : CEntityAlive(), current_ik_cam_shift(0)
 	r_model_yaw_delta = 0;
 	r_model_yaw_dest = 0;
 
+	// MP fork (§13 co-op): remote peer puppet interpolation state
+	m_coop_pos_target.set(0, 0, 0);
+	m_coop_yaw_target = 0.f;
+	m_coop_puppet_active = false;
+
 	b_DropActivated = 0;
 	f_DropPower = 0.f;
 
@@ -1171,6 +1176,11 @@ void CActor::UpdateCL()
 	inherited::UpdateCL();
 	m_pPhysics_support->in_UpdateCL();
 
+	// MP fork (§13 co-op): glide a remote peer puppet toward its networked target
+	// pose each frame (targets are refreshed at network rate in shedule_Update).
+	if (m_coop_puppet_active && Remote() && coop_thin_client())
+		coop_puppet_interpolate();
+
 	pickup_result_t pickup_result = {true, false};
 	if (g_Alive())
 		pickup_result = PickupModeUpdate();
@@ -1779,6 +1789,43 @@ static inline bool coop_thin_client()
 	return xr_enet::enabled() && !ai().get_alife();
 }
 
+// MP fork (§13 co-op): per-frame smoothing for a remote peer puppet. shedule_Update
+// records the networked target pose (m_coop_*_target); here we glide the current
+// visual toward it with a time-based factor and rebuild the render transform, so the
+// peer moves fluidly between the ~10 Hz network updates instead of stepping.
+void CActor::coop_puppet_interpolate()
+{
+	const float dt = Device.fTimeDelta;
+	// smoothing factor: higher rate = snappier/less lag, lower = smoother/more float.
+	// clamp keeps it stable at low frame rates.
+	float k = dt * 12.f;
+	clamp(k, 0.f, 1.f);
+
+	Fvector cur = Position();
+	// big gap (e.g. respawn/teleport, >3m): snap so we don't slowly drift across the map;
+	// otherwise glide toward the networked position.
+	if (cur.distance_to_sqr(m_coop_pos_target) > 9.f)
+		cur.set(m_coop_pos_target);
+	else
+		cur.lerp(cur, m_coop_pos_target, k);
+
+	Position().set(cur);
+	if (character_physics_support() && character_physics_support()->movement())
+		character_physics_support()->movement()->SetPosition(cur);
+
+	r_model_yaw = angle_lerp(r_model_yaw, m_coop_yaw_target, k);
+	unaffected_r_torso.yaw = angle_lerp(unaffected_r_torso.yaw, m_coop_torso_target.yaw, k);
+	unaffected_r_torso.pitch = angle_lerp(unaffected_r_torso.pitch, m_coop_torso_target.pitch, k);
+	unaffected_r_torso.roll = angle_lerp(unaffected_r_torso.roll, m_coop_torso_target.roll, k);
+	r_torso = unaffected_r_torso;
+
+	// rebuild the object transform (same as g_Orientate's matrix build)
+	Fmatrix mXFORM;
+	mXFORM.rotateY(-(r_model_yaw + r_model_yaw_delta));
+	mXFORM.c.set(Position());
+	XFORM().set(mXFORM);
+}
+
 void CActor::shedule_Update(u32 DT)
 {
 	setSVU(OnServer());
@@ -1912,25 +1959,32 @@ void CActor::shedule_Update(u32 DT)
 		// interpolation path (make_Interpolation / m_bInInterpolation) is driven by
 		// physics-shell prediction (NET_A), which our thin client never populates —
 		// the owner exports no physics state under the single game-id. So drive the
-		// puppet straight from the latest imported base update: snap position, copy
-		// torso/model aim, and feed the movement state into the animator. Without
-		// this the peer freezes at its spawn point ("model doesn't follow").
+		// puppet from the latest imported base update. This (low-rate) tick sets the
+		// movement STATE for animation and records the target pose; UpdateCL glides
+		// the visual toward it each frame (coop_puppet_interpolate) so the peer moves
+		// smoothly instead of teleporting once per network update.
 		if (NET.size())
 		{
 			net_update& N = NET.back();
 
 			mstate_real = mstate_wishful = N.mstate;
 			NET_SavedAccel = N.p_accel;
-			r_torso = N.o_torso;
-			unaffected_r_torso = N.o_torso;
-			r_model_yaw = angle_normalize(N.o_model);
 
-			// snap the physical capsule + object to the networked position
-			if (character_physics_support() && character_physics_support()->movement())
-				character_physics_support()->movement()->SetPosition(N.p_pos);
-			Position().set(N.p_pos);
+			m_coop_pos_target.set(N.p_pos);
+			m_coop_yaw_target = angle_normalize(N.o_model);
+			m_coop_torso_target = N.o_torso;
 
-			g_Orientate(mstate_real, dt);
+			if (!m_coop_puppet_active)
+			{
+				// first update: snap so the peer doesn't glide in from the origin
+				m_coop_puppet_active = true;
+				Position().set(N.p_pos);
+				r_model_yaw = m_coop_yaw_target;
+				r_torso = unaffected_r_torso = N.o_torso;
+				if (character_physics_support() && character_physics_support()->movement())
+					character_physics_support()->movement()->SetPosition(N.p_pos);
+			}
+
 			g_SetAnimation(mstate_real);
 			set_state_box(N.mstate);
 		}
@@ -2203,6 +2257,15 @@ void CActor::renderable_Render()
 	// player render path). Only our OWN (Local) actor uses the first-person view.
 	if (Remote())
 	{
+		// MP fork (§13 co-op): the server's save-actor (the world's original actor,
+		// which we clone to make each player) is Remote here too but is NOT a player —
+		// it never receives an M_CL_UPDATE, so its puppet never activates. Skip drawing
+		// any co-op remote actor that has never been networked, so that static "server
+		// actor" dummy doesn't appear in the world. Real peers activate on their first
+		// update (effectively immediately) and render normally.
+		if (coop_thin_client() && !m_coop_puppet_active)
+			return;
+
 		inherited::renderable_Render();
 		CInventoryOwner::renderable_Render();
 		return;

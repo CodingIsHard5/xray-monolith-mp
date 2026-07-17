@@ -174,6 +174,8 @@ void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
 		{
 			xrClientData* other = static_cast<xrClientData*>(client);
 			if (other == target) return;         // don't replay the actor to its own owner
+			if (other == self->m_server->GetServerClient()) return; // skip the server's
+			                                      // own save-actor (id 0) — not a player
 			if (!other->owner) return;            // client without an actor yet
 			CSE_Abstract* peer = other->owner;
 			NET_Packet Packet;
