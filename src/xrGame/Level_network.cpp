@@ -9,6 +9,7 @@
 #include "MainMenu.h"
 #include "space_restriction_manager.h"
 #include "ai_space.h"
+#include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
 #include "script_engine.h"
 #include "stalker_animation_data_storage.h"
 #include "client_spawn_manager.h"
@@ -329,7 +330,14 @@ void CLevel::net_Update()
 		Device.Statistic->netClient2.End();
 	}
 	// If server - perform server-update
-	if (Server && OnServer())
+	// MP fork (§14 co-op thin client): the co-op client is wrongly OnServer() because
+	// CLevel::IsServer() returns true whenever Server!=null (Level.cpp:1768) and the
+	// client carries a listen-server stub. Running Server->Update() here drives the
+	// A-Life respawn queue -> Process_spawn -> PerformIDgen locally, leaking entity IDs
+	// until "Not enough IDs" (id_generator.h:100) after a few minutes. The dedicated
+	// server is authoritative; the thin client must NOT run server updates. Skip them.
+	const bool coop_thin_client = xr_enet::enabled() && !ai().get_alife();
+	if (Server && OnServer() && !coop_thin_client)
 	{
 		Device.Statistic->netServer.Begin();
 		Server->Update();
