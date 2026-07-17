@@ -52,6 +52,11 @@ namespace xr_enet
 		bool host(u32 port, u32 max_players);
 		void stop();
 		void send_to(u32 client_id, void* data, u32 size, u32 dpnsend_flags);
+		// MP fork (§14 co-op): fan a packet out to every connected peer, optionally
+		// skipping one (the sender). Needed for the dedicated-server player-to-
+		// player relay and for decision-replication broadcast — no listen-server
+		// SV_Client to bounce through. except_client_id==0xffffffff sends to all.
+		void broadcast_except(u32 except_client_id, void* data, u32 size, u32 dpnsend_flags);
 		void send_descriptor(u32 client_id, const GameDescriptionData& descr);
 		void kick(u32 client_id);
 		bool running() const { return m_host != nullptr; }

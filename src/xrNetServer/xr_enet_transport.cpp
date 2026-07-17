@@ -127,6 +127,30 @@ namespace xr_enet
 		if (trace) Msg("- XRNET(trace): sv send_to id=%d size=%d NO PEER FOUND (peerCount=%d)", client_id, size, (int)h->peerCount);
 	}
 
+	void server_transport::broadcast_except(u32 except_client_id, void* data, u32 size, u32 dpnsend_flags)
+	{
+		if (!m_host) return;
+		ENetHost* h = (ENetHost*)m_host;
+		u8 channel; u32 pflags;
+		flags_to_enet(dpnsend_flags, channel, pflags);
+		const bool trace = !!strstr(Core.Params, "-xrnet_trace");
+		// ENetHost is not thread-safe; the pump thread services it concurrently.
+		xrCriticalSectionGuard g(m_lock);
+		int sent = 0;
+		for (size_t i = 0; i < h->peerCount; ++i)
+		{
+			ENetPeer* p = &h->peers[i];
+			if (p->state != ENET_PEER_STATE_CONNECTED) continue;
+			if ((u32)(uintptr_t)p->data == except_client_id) continue;
+			// Each peer needs its own packet: enet_peer_send takes ownership and
+			// frees on delivery, so one shared packet across peers double-frees.
+			ENetPacket* pkt = enet_packet_create(data, size, pflags);
+			if (pkt && enet_peer_send(p, channel, pkt) == 0) ++sent;
+		}
+		if (trace) Msg("- XRNET(trace): sv broadcast_except id=%d size=%d ch=%d -> %d peers",
+			except_client_id, size, channel, sent);
+	}
+
 	void server_transport::send_descriptor(u32 client_id, const GameDescriptionData& descr)
 	{
 		if (!m_host) return;
