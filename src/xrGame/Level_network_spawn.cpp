@@ -34,6 +34,20 @@ void CLevel::cl_Process_Spawn(NET_Packet& P)
 		F_entity_Destroy(E);
 		return;
 	}
+
+	// MP fork (§14 co-op): the co-op actor is delivered to its OWNER twice — once as
+	// our own player (LOCAL+ASPLAYER via spawn_end/Process_spawn), then again as a normal
+	// A-Life online object (stripped). The second creates a static "ghost" duplicate of
+	// ourselves at spawn that renders as a third-person body. Our own ASPLAYER copy
+	// arrives first, so drop any later actor spawn whose id we already have.
+	if (xr_enet::enabled() && !ai().get_alife()
+		&& smart_cast<CSE_ALifeCreatureActor*>(E) && Objects.net_Find(E->ID))
+	{
+		Msg("- XRNET(diag): DROPPING duplicate actor spawn id=%u (already present)", E->ID);
+		FlushLog();
+		F_entity_Destroy(E);
+		return;
+	}
 	//-------------------------------------------------
 	//.	Msg ("M_SPAWN - %s[%d][%x] - %d %d", *s_name,  E->ID, E,E->ID_Parent, Device.dwFrame);
 	//-------------------------------------------------
