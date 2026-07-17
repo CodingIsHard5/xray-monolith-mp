@@ -362,7 +362,13 @@ void CRender::create()
 	o.sunfilter = (strstr(Core.Params, "-sunfilter")) ? TRUE : FALSE;
 	//.	o.sunstatic			= (strstr(Core.Params,"-sunstatic"))?	TRUE	:FALSE	;
 	o.sunstatic = r2_sun_static;
-	o.advancedpp = r2_advanced_pp;
+	// MP fork: r2_advanced_pp is set by the `renderer` command (renderer_r4 -> TRUE),
+	// but that runs AFTER this R4 setState, so it reads the FALSE default here and the
+	// advanced-PP render targets (rt_Generic_2 et al.) are never created — the SSFX
+	// blur/volumetric phases then deref a null RT (rendertarget_phase_blur.cpp:342,
+	// crash on world entry once SSFX terrain shaders are active). The R4/DX11 path
+	// always uses advanced PP + the SSFX pipeline, so force it on here.
+	o.advancedpp = TRUE;
 	o.volumetricfog = ps_r2_ls_flags.test(R3FLAG_VOLUMETRIC_SMOKE);
 	o.sjitter = (strstr(Core.Params, "-sjitter")) ? TRUE : FALSE;
 	o.depth16 = (strstr(Core.Params, "-depth16")) ? TRUE : FALSE;
