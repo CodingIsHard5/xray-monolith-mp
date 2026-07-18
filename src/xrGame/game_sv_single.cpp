@@ -151,6 +151,18 @@ void game_sv_Single::coop_clone_inventory_for(CSE_ALifeCreatureActor* base, CSE_
 		// LOCAL to the owning client (so they can fire/reload); peers get it stripped.
 		copy->s_flags.assign(M_SPAWN_OBJECT_LOCAL);
 
+		// Clear the story ids: cloning a UNIQUE story item (e.g. the PDA, whose section
+		// prints as device_pdaNNNN where NNNN is its story id) otherwise makes duplicate
+		// story objects. The client's story registry maps a story id to ONE object, so
+		// the second copy collides ("Object with ID already exists ... device_pda",
+		// "Failed to spawn entity 'device_pda'") -> that player's PDA never spawns and
+		// the PDA is broken. Each player gets a plain, functional (non-story) copy.
+		if (CSE_ALifeObject* copy_alife = smart_cast<CSE_ALifeObject*>(copy))
+		{
+			copy_alife->m_story_id = INVALID_STORY_ID;
+			copy_alife->m_spawn_story_id = INVALID_SPAWN_STORY_ID;
+		}
+
 		CSE_Abstract* NI = spawn_end(copy, CL->ID);
 		if (NI)
 			++cloned;
