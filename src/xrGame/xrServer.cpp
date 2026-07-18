@@ -518,6 +518,7 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 			xrClientData* CL = ID_to_client(sender);
 			if (!CL) break;
 			CL->net_Ready = TRUE;
+			const u32 cl_update_body = P.r_tell(); // start of [u16 id][u32 ping][net_Export]
 
 			if (!CL->net_PassUpdates)
 				break;
@@ -537,6 +538,29 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 			if (xr_enet::enabled())
 			{
 				SendBroadcast(sender, P, net_flags(FALSE, TRUE));
+
+				// MP fork (§15 co-op): the dedicated server keeps only a CSE for each
+				// player and never decodes their movement, so CL->owner->o_Position
+				// would stay pinned at the spawn point. A-Life attention anchoring (and
+				// level saves) need the LIVE position, so peek it out of the update
+				// without disturbing the relay. Body layout (CActor::net_Export):
+				// [u16 id][u32 ping][f32 health][u32 timestamp][u8 flags][vec3 pos]...
+				if (CL->owner)
+				{
+					const u32 save_cursor = P.r_tell();
+					P.r_seek(cl_update_body);
+					P.r_u16();               // entity id
+					P.r_u32();               // ping (reserved)
+					P.r_float();             // health
+					P.r_u32();               // timestamp
+					P.r_u8();                // flags
+					Fvector pos;
+					P.r_vec3(pos);
+					if (_valid(pos))
+						CL->owner->o_Position = pos;
+					P.r_seek(save_cursor);
+				}
+
 				if (Device.dwFrame % 120 == 0)
 				{
 					Msg("- XRNET(diag): SV relayed M_CL_UPDATE from client 0x%08x (clients=%u)",
