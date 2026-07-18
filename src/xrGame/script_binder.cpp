@@ -12,6 +12,7 @@
 #include "script_engine.h"
 #include "script_binder.h"
 #include "xrServer_Objects_ALife.h"
+#include "xrServer_Objects_ALife_Monsters.h"   // MP fork (§19): CSE_ALifeCreatureAbstract/Actor
 #include "script_binder_object.h"
 #include "script_game_object.h"
 #include "gameobject.h"
@@ -143,14 +144,27 @@ BOOL CScriptBinder::net_Spawn(CSE_Abstract* DC)
 	CSE_ALifeObject* object = smart_cast<CSE_ALifeObject*>(abstract);
 	if (object && m_object)
 	{
+		// MP fork (§19 co-op thin client): the server owns A-Life. A CREATURE's Lua binder
+		// (bind_monster / bind_stalker) net_spawn does A-Life-dependent setup that fails
+		// PARTWAY on the client, so forcing it to succeed left broken Lua state that crashed
+		// on update. Instead, SKIP the binder entirely for co-op creatures (NOT the actor,
+		// NOT items): drop m_object so every binder callback no-ops (all guard `if
+		// (m_object)`), and report success. The creature then spawns as a Remote() render
+		// puppet — CCustomMonster::shedule_Update already skips AI for Remote() — driven by
+		// the server's position/animation updates (net_Import). The actor's binder (which
+		// sets db.actor) and item binders are untouched.
+		if (xr_enet::enabled() && !ai().get_alife())
+		{
+			const bool is_creature = !!smart_cast<CSE_ALifeCreatureAbstract*>(abstract);
+			const bool is_actor = !!smart_cast<CSE_ALifeCreatureActor*>(abstract);
+			if (is_creature && !is_actor)
+			{
+				clear();
+				return TRUE;
+			}
+		}
 		try
 		{
-			// MP fork (§19): forcing binder-false -> TRUE for co-op creatures (to render
-			// them as puppets) crashed — the binder returns false only PARTWAY through
-			// setup, so the C++ creature then runs broken Lua logic (null+8 deref). Proper
-			// client-side creature rendering needs the creature's AI/update logic gated
-			// like the actor puppet; deferred. For now creatures fail net_Spawn gracefully
-			// (no render, no crash) — the world lives on the server.
 			return ((BOOL)m_object->net_Spawn(object));
 		}
 		catch (...)
