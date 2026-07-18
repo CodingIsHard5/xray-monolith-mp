@@ -35,17 +35,19 @@ using namespace InventoryUtilities;
 
 #include "../xrNetServer/xr_enet_transport.h"   // MP fork (§20): xr_enet::enabled()
 
-// MP fork (§20 co-op thin client): the local player's own inventory/weapon handling
-// is client-authoritative — the server owns A-Life, but our hands are ours. Stock
-// gates slot Activate()/Update() on OnServer() (false on a thin client), so weapons
-// never leave the slot and never draw. Let the LOCAL controlled player's inventory
-// run its slot state machine locally. Peers' inventories aren't input-driven here,
-// so this only newly-enables our own player.
+// MP fork (§20/§17 co-op thin client): inventory slot Activate()/Update() are gated on
+// OnServer() in stock (false on a thin client), so weapons never leave the slot and
+// never draw. On a thin client the ACTORS are client-authoritative for their own gear:
+//  - the LOCAL player drives their inventory by input;
+//  - a PEER actor is driven by CActor::net_Import_Base, which calls
+//    inventory().Activate(ActiveSlot) from the relayed M_CL_UPDATE — that must run too,
+//    else peers render empty-handed (§17).
+// Limit to actors so world items / NPCs are unaffected.
 static inline bool coop_local_authority(CObject* owner)
 {
 	if (!xr_enet::enabled() || ai().get_alife() || !g_pGameLevel || !owner)
 		return false;
-	return (Level().CurrentViewEntity() == owner) || (Level().CurrentEntity() == owner);
+	return !!smart_cast<CActor*>(owner);
 }
 
 // what to block
