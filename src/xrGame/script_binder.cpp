@@ -144,25 +144,13 @@ BOOL CScriptBinder::net_Spawn(CSE_Abstract* DC)
 	CSE_ALifeObject* object = smart_cast<CSE_ALifeObject*>(abstract);
 	if (object && m_object)
 	{
-		// MP fork (§19 co-op thin client): the server owns A-Life. A CREATURE's Lua binder
-		// (bind_monster / bind_stalker) net_spawn does A-Life-dependent setup that fails
-		// PARTWAY on the client, so forcing it to succeed left broken Lua state that crashed
-		// on update. Instead, SKIP the binder entirely for co-op creatures (NOT the actor,
-		// NOT items): drop m_object so every binder callback no-ops (all guard `if
-		// (m_object)`), and report success. The creature then spawns as a Remote() render
-		// puppet — CCustomMonster::shedule_Update already skips AI for Remote() — driven by
-		// the server's position/animation updates (net_Import). The actor's binder (which
-		// sets db.actor) and item binders are untouched.
-		if (xr_enet::enabled() && !ai().get_alife())
-		{
-			const bool is_creature = !!smart_cast<CSE_ALifeCreatureAbstract*>(abstract);
-			const bool is_actor = !!smart_cast<CSE_ALifeCreatureActor*>(abstract);
-			if (is_creature && !is_actor)
-			{
-				clear();
-				return TRUE;
-			}
-		}
+		// MP fork (§19): rendering replicated creatures on the thin client as puppets needs
+		// the FULL AI space (level_graph, cross_table, moving_objects quadtree, covers) —
+		// CBaseMonster::net_Spawn R_ASSERT2's the level graph, and creatures register in the
+		// moving_objects quadtree — none of which the thin client loads (no ai().load). So
+		// skipping the binder alone isn't enough; creatures fail net_Spawn gracefully for
+		// now (no render), and the world lives on the server. Loading the AI space on the
+		// client is the proper fix — deferred (a focused effort).
 		try
 		{
 			return ((BOOL)m_object->net_Spawn(object));
