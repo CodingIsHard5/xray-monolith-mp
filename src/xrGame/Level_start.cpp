@@ -370,13 +370,33 @@ void CLevel::InitializeClientGame(NET_Packet& P)
 	{
 		CALifeSimulator::create_client_inert();
 
+		// MP fork (§20 co-op thin client): fire the game-start Lua callback the client
+		// otherwise never runs. In stock SP it is fired by the A-Life simulator's
+		// setup_command_line (alife_simulator.cpp) — the inert client sim skips that, so
+		// on_game_start never runs for ANY script. Features that initialise there stay
+		// broken (weapons won't draw, HUD/item scripts, etc.). Fire it here at config
+		// time (before the actor spawns — the same ordering stock uses). Safe now that
+		// local A-Life spawning is a no-op on the client (coop_client_no_spawn), so the
+		// world-simulation scripts this wakes can't exhaust the client ID pool.
+		if (pSettings->line_exist("alife", "start_game_callback"))
+		{
+			LPCSTR sgc = pSettings->r_string("alife", "start_game_callback");
+			::luabind::functor<void> start_game;
+			if (sgc && *sgc && ai().script_engine().functor(sgc, start_game))
+			{
+				Msg("- XRNET(dbg): co-op client firing start_game_callback '%s'", sgc);
+				start_game();
+			}
+		}
+
 		// MP fork (§14 co-op thin client): single-player gamedata lazily creates
 		// server-side globals (SIMBOARD, ...) from init paths that don't run on a
 		// thin client, so raw references to them (e.g. bind_campfire.script:273
 		// SIMBOARD.smarts_by_names) crash. Give the mod ONE client-init hook here
 		// (config, before any binder/spawn) where gamedata initialises the
 		// globals a thin client needs. Optional: absent -> no-op, so this hooks
-		// only the co-op mod's own mp_client.script and nothing else.
+		// only the co-op mod's own mp_client.script and nothing else. Runs AFTER the
+		// start_game_callback above so the PDA patch (pda.pda_use) re-applies last.
 		::luabind::functor<void> client_init;
 		if (ai().script_engine().functor("mp_client.on_client_level_start", client_init))
 			client_init();

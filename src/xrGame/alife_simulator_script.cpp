@@ -19,6 +19,7 @@
 #include "alife_registry_container.h"
 #include "xrServer.h"
 #include "level.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§21): xr_enet::enabled()
 
 #include <luabind/iterator_policy.hpp>
 #include <luabind/iterator_pair_policy.hpp>
@@ -162,8 +163,22 @@ u32 get_level_id(CALifeSimulator* self)
 	return (self->graph().level().level_id());
 }
 
+// MP fork (§21 co-op thin client): the client owns NO A-Life — the server spawns the
+// world. But the client runs the full single-player gamedata, whose scripts spawn
+// objects locally (e.g. xr_box.script loot, itms_manager). On a thin client those calls
+// hit the inert simulator's server()->PerformIDgen and exhaust the client's tiny ID pool
+// -> FATAL "Not enough IDs" crash. Make every Lua alife():create/spawn_* a no-op on the
+// co-op client (return nil): the server is authoritative and replicates the real objects.
+// Gate: ENet transport AND no real simulator (ai().get_alife() is null on any MP client),
+// so the server and stock SP/MP are untouched.
+static inline bool coop_client_no_spawn()
+{
+	return xr_enet::enabled() && !ai().get_alife();
+}
+
 CSE_ALifeDynamicObject* CALifeSimulator__create(CALifeSimulator* self, ALife::_SPAWN_ID spawn_id)
 {
+	if (coop_client_no_spawn()) return nullptr;
 	const CALifeSpawnRegistry::SPAWN_GRAPH::CVertex* vertex = ai().alife().spawns().spawns().vertex(spawn_id);
 	THROW2(vertex, "Invalid spawn id!");
 
@@ -178,12 +193,14 @@ CSE_ALifeDynamicObject* CALifeSimulator__create(CALifeSimulator* self, ALife::_S
 
 CSE_Abstract* CALifeSimulator__spawn_item(CALifeSimulator* self, LPCSTR section, const Fvector& position, u32 level_vertex_id, GameGraph::_GRAPH_ID game_vertex_id)
 {
+	if (coop_client_no_spawn()) return nullptr;
 	THROW(self);
 	return (self->spawn_item(section, position, level_vertex_id, game_vertex_id, ALife::_OBJECT_ID(-1)));
 }
 
 CSE_Abstract* CALifeSimulator__spawn_item2(CALifeSimulator* self, LPCSTR section, const Fvector& position, u32 level_vertex_id, GameGraph::_GRAPH_ID game_vertex_id, ALife::_OBJECT_ID id_parent)
 {
+	if (coop_client_no_spawn()) return nullptr;
 	if (id_parent == ALife::_OBJECT_ID(-1))
 		return (self->spawn_item(section, position, level_vertex_id, game_vertex_id, id_parent));
 
@@ -218,6 +235,7 @@ CSE_Abstract* CALifeSimulator__spawn_item2(CALifeSimulator* self, LPCSTR section
 //Alundaio: Allows to call alife():register(se_obj) manually afterward so that packet editing can be done safely when spawning object with a parent
 CSE_Abstract* CALifeSimulator__spawn_item3(CALifeSimulator* self, LPCSTR section, const Fvector& position, u32 level_vertex_id, GameGraph::_GRAPH_ID game_vertex_id, ALife::_OBJECT_ID id_parent, bool reg = true)
 {
+	if (coop_client_no_spawn()) return nullptr;
 	if (reg == true)
 		return CALifeSimulator__spawn_item2(self, section, position, level_vertex_id, game_vertex_id, id_parent);
 
@@ -241,6 +259,7 @@ CSE_Abstract* CALifeSimulator__spawn_item3(CALifeSimulator* self, LPCSTR section
 
 CSE_Abstract* CALifeSimulator__spawn_ammo(CALifeSimulator* self, LPCSTR section, const Fvector& position, u32 level_vertex_id, GameGraph::_GRAPH_ID game_vertex_id, ALife::_OBJECT_ID id_parent, int ammo_to_spawn)
 {
+	if (coop_client_no_spawn()) return nullptr;
 	//	if (id_parent == ALife::_OBJECT_ID(-1))
 	//		return							(self->spawn_item(section,position,level_vertex_id,game_vertex_id,id_parent));
 	CSE_ALifeDynamicObject* object = 0;
