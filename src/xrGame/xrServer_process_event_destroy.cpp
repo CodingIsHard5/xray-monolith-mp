@@ -7,6 +7,7 @@
 #include "game_cl_base.h"
 #include "ai_space.h"
 #include "alife_object_registry.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§20): xr_enet::enabled()
 
 xr_string xrServer::ent_name_safe(u16 eid)
 {
@@ -41,8 +42,18 @@ void xrServer::Process_event_destroy(NET_Packet& P, ClientID sender, u32 time, u
 
 	R_ASSERT(e_dest);
 	xrClientData* c_dest = e_dest->owner; // клиент, чей юнит
-	R_ASSERT(c_dest);
 	xrClientData* c_from = ID_to_client(sender); // клиент, кто прислал
+	// MP fork (§20 co-op thin client): the thin client runs weapon/inventory logic
+	// client-authoritatively (fire/reload), so it emits GE_DESTROY for spent ammo etc.
+	// whose server-side owner doesn't match the sender the way stock MP guarantees.
+	// A client must never be able to crash the server: on mismatch, skip the destroy
+	// instead of the fatal R_ASSERT. The client already consumed the item locally.
+	if (xr_enet::enabled() && c_dest != c_from)
+	{
+		Msg("! MP co-op: ge_destroy ownership mismatch %s (skipped)", ent_name_safe(id_dest).c_str());
+		return;
+	}
+	R_ASSERT(c_dest);
 	R_ASSERT(c_dest == c_from); // assure client ownership of event
 	u16 parent_id = e_dest->ID_Parent;
 

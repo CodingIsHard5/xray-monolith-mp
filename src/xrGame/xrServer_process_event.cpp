@@ -9,6 +9,7 @@
 #include "alife_object_registry.h"
 #include "xrServer_Objects_ALife_Items.h"
 #include "xrServer_Objects_ALife_Monsters.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§20): xr_enet::enabled()
 
 void xrServer::Process_event(NET_Packet& P, ClientID sender)
 {
@@ -130,6 +131,15 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
 			if (0xffff != e_entity->ID_Parent) break; // this item already taken
 			xrClientData* c_parent = e_parent->owner;
 			xrClientData* c_from = ID_to_client(sender);
+			// MP fork (§20 co-op): client-authoritative reload/ammo transfer on the thin
+			// client emits GE_TRANSFER_AMMO whose ownership need not match the sender the
+			// way stock MP guarantees. Don't let a client crash the server — skip on
+			// mismatch instead of the fatal assert.
+			if (xr_enet::enabled() && c_from != c_parent)
+			{
+				Msg("! MP co-op: ge_transfer_ammo ownership mismatch [%d] (skipped)", id_entity);
+				break;
+			}
 			R_ASSERT(c_from == c_parent); // assure client ownership of event
 
 			// Signal to everyone (including sender)
