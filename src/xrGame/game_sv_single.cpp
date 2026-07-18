@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "game_sv_single.h"
 #include "xrserver_objects_alife_monsters.h"
+#include "xrServer_Objects_ALife_Items.h"          // MP fork (§20): CSE_ALifeItemWeapon (kit mag pre-load)
 #include "alife_simulator.h"
 #include "alife_object_registry.h"
 #include "alife_graph_registry.h"
@@ -154,6 +155,23 @@ void game_sv_Single::coop_give_starting_kit(CSE_Abstract* owner, xrClientData* C
 		{
 			al->m_story_id = INVALID_STORY_ID;
 			al->m_spawn_story_id = INVALID_SPAWN_STORY_ID;
+		}
+		// MP fork (§20): pre-load kit weapons so they're immediately usable on the thin
+		// client. Reloading pulls ammo from inventory via server-authoritative transfer
+		// the client can't drive, so a freshly spawned weapon would sit at 0/mag. Set the
+		// magazine full of ammo_type 0 (the weapon's first/default ammo section) on spawn;
+		// the client clamps a_elapsed to the real mag size in net_Import.
+		if (CSE_ALifeItemWeapon* wpn = smart_cast<CSE_ALifeItemWeapon*>(it))
+		{
+			if (pSettings->line_exist(sec, "ammo_mag_size"))
+			{
+				int mag = pSettings->r_s32(sec, "ammo_mag_size");
+				if (mag > 0)
+				{
+					wpn->a_elapsed = (u16)mag;
+					wpn->ammo_type = 0;
+				}
+			}
 		}
 		if (spawn_end(it, CL->ID))
 			++given;
