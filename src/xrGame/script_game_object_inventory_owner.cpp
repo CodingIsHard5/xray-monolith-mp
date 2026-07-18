@@ -58,6 +58,7 @@
 #include "xrserver_objects_alife_items.h"
 #include "./xrServerEntities/inventory_space.h"
 #include "ai_space.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§20): xr_enet::enabled()
 #include "ActorBackpack.h"
 
 //
@@ -2160,6 +2161,13 @@ bool CScriptGameObject::death_sound_enabled() const
 
 void CScriptGameObject::register_door()
 {
+	// MP fork (§20 co-op thin client): doors are registered with the AI doors manager for
+	// NPC pathfinding (a server-side concern). On a thin client the object may not resolve
+	// to a CPhysicObject / the doors manager isn't set up, so this errors — and the error
+	// corrupts the script engine into "Busy Hands" state, which BLOCKS weapon drawing.
+	// No-op on the co-op client; the server owns AI door logic.
+	if (xr_enet::enabled() && !ai().get_alife())
+		return;
 	//VERIFY2(!m_door, make_string("object %s has been registered as a door already", m_game_object->cName().c_str()));
 	if (!m_door)
 		m_door = ai().doors().register_door(*smart_cast<CPhysicObject*>(m_game_object));

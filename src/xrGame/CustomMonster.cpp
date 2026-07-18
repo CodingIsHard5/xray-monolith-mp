@@ -6,6 +6,7 @@
 #include "ai_debug.h"
 #include "CustomMonster.h"
 #include "ai_space.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§19 diag): xr_enet::enabled()
 #include "ai/monsters/BaseMonster/base_monster.h"
 #include "xrserver_objects_alife_monsters.h"
 #include "xrserver.h"
@@ -745,8 +746,22 @@ BOOL CCustomMonster::net_Spawn(CSE_Abstract* DC)
 	memory().reload(*cNameSect());
 	memory().reinit();
 
-	if (!movement().net_Spawn(DC) || !inherited::net_Spawn(DC) || !CScriptEntity::net_Spawn(DC))
-		return (FALSE);
+	// MP fork (§19 co-op diag): creatures replicated from the server fail net_Spawn on
+	// the thin client ("Failed to spawn entity"). Pin WHICH sub-spawn fails. Preserves
+	// the original short-circuit (inherited runs only if movement ok, etc.). Temp.
+	{
+		const bool _coop = xr_enet::enabled() && !ai().get_alife();
+		const bool mv = !!movement().net_Spawn(DC);
+		const bool inh = mv && !!inherited::net_Spawn(DC);
+		const bool scr = inh && !!CScriptEntity::net_Spawn(DC);
+		if (!scr)
+		{
+			if (_coop)
+				Msg("- XRNET(diag): monster net_Spawn FAIL '%s': movement=%d inherited=%d script=%d",
+					cNameSect().c_str(), mv ? 1 : 0, inh ? 1 : 0, scr ? 1 : 0);
+			return (FALSE);
+		}
+	}
 
 	ISpatial* self = smart_cast<ISpatial*>(this);
 	if (self)

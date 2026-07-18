@@ -122,6 +122,14 @@ void CActor::TryToTalk()
 
 void CActor::RunTalkDialog(CInventoryOwner* talk_partner, bool disable_break)
 {
+	// MP fork (§16 co-op): never start a dialog with another PLAYER (a peer). A peer
+	// actor has no character/dialog data on this client (CharacterInfo is inert), so
+	// the dialog path asserts (UpdateAvailableDialogs -> ActorDialogs() ->
+	// R_ASSERT(m_SpecificCharacterId.size())) and crashes. Talking to a peer (or a null
+	// partner) is a safe no-op for now; NPCs (CAI_Stalker, not CActor) are unaffected.
+	if (!talk_partner || smart_cast<CActor*>(talk_partner))
+		return;
+
 	//предложить поговорить с нами
 	if (talk_partner->OfferTalk(this))
 	{
