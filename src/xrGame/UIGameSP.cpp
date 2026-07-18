@@ -99,24 +99,6 @@ bool CUIGameSP::IR_UIOnKeyboardPress(int dik)
 	attach_adjust_mode_keyb	(dik);
 #endif
 
-	// MP fork (§18 co-op diag): trace why the PDA "does nothing" when opened. Fires only
-	// for the PDA action on a co-op client. The early returns below (CurrentEntity not an
-	// alive CActor) are prime suspects, so log BEFORE them. Remove once the PDA works.
-	const bool _coop_pda_diag = xr_enet::enabled() && !ai().get_alife();
-	if (_coop_pda_diag && get_binded_action(dik) == kACTIVE_JOBS)
-	{
-		CObject* ce = Level().CurrentEntity();
-		CObject* cve = Level().CurrentViewEntity();
-		CObject* cc = Level().CurrentControlEntity();
-		CActor* a = smart_cast<CActor*>(ce);
-		Msg("- XRNET(diag): PDA-key: CurrentEntity id=%d name=%s isActor=%d alive=%d | View id=%d | Control id=%d | AF_3D_PDA=%d",
-			ce ? (int)ce->ID() : -1, ce ? ce->cName().c_str() : "NULL",
-			a ? 1 : 0, (a && a->g_Alive()) ? 1 : 0,
-			cve ? (int)cve->ID() : -1, cc ? (int)cc->ID() : -1,
-			psActorFlags.test(AF_3D_PDA) ? 1 : 0);
-		FlushLog();
-	}
-
 	CInventoryOwner* pInvOwner = smart_cast<CInventoryOwner*>(Level().CurrentEntity());
 	if (!pInvOwner) return false;
 	CEntityAlive* EA = smart_cast<CEntityAlive*>(Level().CurrentEntity());
@@ -136,26 +118,11 @@ bool CUIGameSP::IR_UIOnKeyboardPress(int dik)
 			if (!psActorFlags.test(AF_3D_PDA) && !pActor->inventory_disabled())
 			{
 				::luabind::functor<bool> funct;
-				bool have = ai().script_engine().functor("pda.pda_use", funct);
-				if (_coop_pda_diag)
-				{
-					bool r = have ? funct() : false;
-					Msg("- XRNET(diag): PDA kACTIVE_JOBS: functor_found=%d pda_use()=%d -> ShowPdaMenu %s",
-						have ? 1 : 0, r ? 1 : 0, r ? "YES" : "skip");
-					FlushLog();
-					if (r) ShowPdaMenu();
-				}
-				else if (have)
+				if (ai().script_engine().functor("pda.pda_use", funct))
 				{
 					if (funct())
 						ShowPdaMenu();
 				}
-			}
-			else if (_coop_pda_diag)
-			{
-				Msg("- XRNET(diag): PDA kACTIVE_JOBS blocked: AF_3D_PDA=%d inv_disabled=%d",
-					psActorFlags.test(AF_3D_PDA) ? 1 : 0, pActor->inventory_disabled() ? 1 : 0);
-				FlushLog();
 			}
 			break;
 		}

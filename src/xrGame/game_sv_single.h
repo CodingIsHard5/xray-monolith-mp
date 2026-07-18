@@ -35,6 +35,7 @@ private:
 	void coop_poll_spawns();                 // spawn actors for ready, actorless clients
 	void coop_spawn_actor_for(xrClientData* CL);
 	void coop_clone_inventory_for(CSE_ALifeCreatureActor* base, CSE_Abstract* owner, xrClientData* CL);
+	void coop_give_starting_kit(CSE_Abstract* owner, xrClientData* CL);
 	void coop_update_anchors();              // feed player positions to A-Life anchors
 	xr_map<u32, u32> m_coop_seen;            // client id -> first-seen time (grace for load)
 public:

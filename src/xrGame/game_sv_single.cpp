@@ -113,6 +113,55 @@ void game_sv_Single::OnPlayerConnectFinished(ClientID id_who)
 // no outfit. We re-spawn each child parented to `owner` — Process_spawn attaches it via
 // OnTouch, replicates it (LOCAL to the owning client, stripped/remote to peers), and the
 // item's third-person visual then rides along on the peer body.
+// MP fork (§17 co-op): give a freshly-spawned player actor a basic starting kit. The
+// co-op test save (n1-autosave) ships an almost-empty actor (only the PDA), so cloning
+// its inventory leaves players with nothing to use. Spawn a small set of standard items
+// straight into the actor's inventory (parented => Process_spawn attaches + replicates,
+// LOCAL to the owner). Invalid sections are skipped (logged), so the list is safe to
+// tune. A save that already has gear still gets it via coop_clone_inventory_for.
+void game_sv_Single::coop_give_starting_kit(CSE_Abstract* owner, xrClientData* CL)
+{
+	if (!owner)
+		return;
+
+	static const char* kit[] = {
+		"wpn_knife", "wpn_pm", "ammo_9x18_fmj", "ammo_9x18_fmj",
+		"medkit", "bandage", "bread", "device_torch"
+	};
+
+	CSE_ALifeDynamicObject* od = smart_cast<CSE_ALifeDynamicObject*>(owner);
+	int given = 0;
+	for (const char* sec : kit)
+	{
+		CSE_Abstract* it = F_entity_Create(sec);
+		if (!it)
+		{
+			Msg("! XRNET(dbg): starting_kit: section '%s' invalid (skipped)", sec);
+			continue;
+		}
+		it->s_name = sec;
+		it->set_name_replace("");
+		it->s_RP = 0xFE;
+		it->ID = 0xffff;
+		it->ID_Phantom = 0xffff;
+		it->ID_Parent = owner->ID;
+		it->RespawnTime = 0;
+		it->o_Position = owner->o_Position;
+		it->s_flags.assign(M_SPAWN_OBJECT_LOCAL);
+		if (CSE_ALifeDynamicObject* dyn = smart_cast<CSE_ALifeDynamicObject*>(it))
+			if (od) { dyn->m_tNodeID = od->m_tNodeID; dyn->m_tGraphID = od->m_tGraphID; }
+		if (CSE_ALifeObject* al = smart_cast<CSE_ALifeObject*>(it))
+		{
+			al->m_story_id = INVALID_STORY_ID;
+			al->m_spawn_story_id = INVALID_SPAWN_STORY_ID;
+		}
+		if (spawn_end(it, CL->ID))
+			++given;
+	}
+	Msg("- XRNET(dbg): starting_kit: gave %d item(s) to actor id %u for client 0x%08x",
+		given, owner->ID, CL->ID.value());
+}
+
 void game_sv_Single::coop_clone_inventory_for(CSE_ALifeCreatureActor* base, CSE_Abstract* owner, xrClientData* CL)
 {
 	if (!base || !owner)
@@ -229,7 +278,10 @@ void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
 	// held weapon / worn outfit (the third-person visual is driven by the child item
 	// entities, which the bare actor clone lacks). Each item is re-spawned parented to N.
 	if (N)
+	{
 		coop_clone_inventory_for(base, N, CL);
+		coop_give_starting_kit(N, CL); // bare test save -> give players usable gear
+	}
 
 	// MP fork (§13 co-op late-join snapshot): Process_spawn only BROADCASTS this new
 	// actor to clients that are ALREADY connected — it is a one-shot event with no
@@ -395,7 +447,6 @@ void game_sv_Single::coop_update_anchors()
 	struct anchor_feeder
 	{
 		u32 idx;
-		Fvector first;
 		game_sv_Single* self;
 		void operator()(IClient* client)
 		{
@@ -404,31 +455,13 @@ void game_sv_Single::coop_update_anchors()
 			if (!CL->owner) return;                              // client without an actor yet
 			if (idx >= mp_anchors::max_anchors) return;
 			mp_anchors::set(idx, CL->owner->o_Position);
-			if (idx == 0) first = CL->owner->o_Position;
 			++idx;
 		}
 	};
 
 	mp_anchors::clear_all();
-	anchor_feeder f; f.idx = 0; f.first.set(0, 0, 0); f.self = this;
+	anchor_feeder f; f.idx = 0; f.self = this;
 	m_server->ForEachClientDo(f);
-
-	// MP fork (§15 co-op diag): the graph actor being OFFLINE on the headless server is
-	// the suspected root of "nothing switches online". Log its state + anchor tracking,
-	// throttled. Remove once co-op A-Life works.
-	static u32 s_anchor_diag_ms = 0;
-	const u32 now = Device.dwTimeGlobal;
-	if (now - s_anchor_diag_ms >= 5000)
-	{
-		s_anchor_diag_ms = now;
-		CSE_ALifeCreatureActor* ga = ai().alife().graph().actor();
-		if (ga)
-			Msg("- XRNET(diag): ANCHORS=%u | graph.actor id=%u online=%d gvid=%u pos=(%.0f,%.0f,%.0f) | anchor0=(%.0f,%.0f,%.0f)",
-				f.idx, ga->ID, ga->m_bOnline ? 1 : 0, ga->m_tGraphID,
-				ga->o_Position.x, ga->o_Position.y, ga->o_Position.z,
-				f.first.x, f.first.y, f.first.z);
-		FlushLog();
-	}
 }
 
 void game_sv_Single::Update()

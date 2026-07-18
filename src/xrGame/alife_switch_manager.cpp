@@ -274,39 +274,16 @@ void CALifeSwitchManager::try_switch_offline(CSE_ALifeDynamicObject* I)
 	STOP_PROFILE
 }
 
-// MP fork (§15 co-op diag): tally where objects drop out of the switch pipeline on
-// the headless co-op server (nothing ever goes online — find out why). Throttled,
-// co-op-gated. Remove once co-op A-Life switching works.
-namespace
-{
-	struct coop_switch_diag
-	{
-		u32 calls = 0, redundant = 0, sync_fail = 0, off_attempts = 0, on_attempts = 0;
-		u32 became_online = 0, became_offline = 0, first_lvl_id = 0xffffffff;
-		u32 last_log_ms = 0;
-	};
-	static coop_switch_diag s_csd;
-}
-
 void CALifeSwitchManager::switch_object(CSE_ALifeDynamicObject* I)
 {
-	const bool coop = xr_enet::enabled();
-	if (coop)
-	{
-		++s_csd.calls;
-		s_csd.first_lvl_id = ai().game_graph().vertex(I->m_tGraphID)->level_id();
-	}
-
 	if (I->redundant())
 	{
-		if (coop) ++s_csd.redundant;
 		release(I);
 		return;
 	}
 
 	if (!synchronize_location(I))
 	{
-		if (coop) ++s_csd.sync_fail;
 		// MP fork: an online object silently skipped here would explain a
 		// "refuses to switch offline" state — make the skip visible
 		if (I->m_bOnline && strstr(Core.Params, "-dbg"))
@@ -314,35 +291,10 @@ void CALifeSwitchManager::switch_object(CSE_ALifeDynamicObject* I)
 		return;
 	}
 
-	const bool was_online = !!I->m_bOnline;
 	if (I->m_bOnline)
-	{
-		if (coop) ++s_csd.off_attempts;
 		try_switch_offline(I);
-	}
 	else
-	{
-		if (coop) ++s_csd.on_attempts;
 		try_switch_online(I);
-	}
-
-	if (coop)
-	{
-		if (!was_online && I->m_bOnline) ++s_csd.became_online;
-		if (was_online && !I->m_bOnline) ++s_csd.became_offline;
-		const u32 now = Device.dwTimeGlobal;
-		if (now - s_csd.last_log_ms >= 5000)
-		{
-			s_csd.last_log_ms = now;
-			Msg("- XRNET(diag): SWITCH tally: calls=%u redundant=%u sync_fail=%u on_try=%u off_try=%u ->online=%u ->offline=%u lastLvl=%u anchors=%u online_dist=%.0f",
-				s_csd.calls, s_csd.redundant, s_csd.sync_fail, s_csd.on_attempts, s_csd.off_attempts,
-				s_csd.became_online, s_csd.became_offline, s_csd.first_lvl_id,
-				mp_anchors::count(), online_distance());
-			FlushLog();
-			s_csd.calls = s_csd.redundant = s_csd.sync_fail = 0;
-			s_csd.off_attempts = s_csd.on_attempts = s_csd.became_online = s_csd.became_offline = 0;
-		}
-	}
 
 	if (I->redundant())
 		release(I);
