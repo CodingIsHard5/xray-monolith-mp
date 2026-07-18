@@ -8,6 +8,7 @@
 
 #include "pch_script.h"
 #include "ai_space.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§19): xr_enet::enabled()
 #include "script_engine.h"
 #include "script_binder.h"
 #include "xrServer_Objects_ALife.h"
@@ -144,7 +145,17 @@ BOOL CScriptBinder::net_Spawn(CSE_Abstract* DC)
 	{
 		try
 		{
-			return ((BOOL)m_object->net_Spawn(object));
+			BOOL r = (BOOL)m_object->net_Spawn(object);
+			// MP fork (§19 co-op thin client): a creature's Lua object-binder net_spawn
+			// (bind_monster/bind_stalker) does A-Life-dependent setup that returns FALSE
+			// on the client (server owns A-Life). That false fails the whole spawn, so the
+			// replicated creature never instantiates/renders. On co-op, treat binder-false
+			// as success: the creature still spawns as a C++ render object driven by server
+			// updates (a puppet); its AI lives on the server. The actor's binder returns
+			// TRUE normally, so this only rescues the creatures that would otherwise drop.
+			if (!r && xr_enet::enabled() && !ai().get_alife())
+				return TRUE;
+			return r;
 		}
 		catch (...)
 		{
