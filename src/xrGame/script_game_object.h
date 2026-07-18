@@ -1277,6 +1277,9 @@ struct SafeWrapBase
     static auto execute(InstanceT instance, FuncT memFunc, Args&&... args)
         -> decltype((instance->*memFunc)(std::forward<Args>(args)...))
     {
+        // MP fork (§20): the return type is deduced (no `Ret` template param here), so
+        // name it for handle_invalid<> in the co-op suppression path below.
+        using ret_type = decltype((instance->*memFunc)(std::forward<Args>(args)...));
         if (lua_busy_hands_debug)
         {
             bool is_valid = false;
@@ -1299,7 +1302,7 @@ struct SafeWrapBase
                 // Silently return a default instead of the disruptive lua_error warning
                 // AND without calling through the invalid instance (which would crash).
                 if (script_coop_suppress_invalid_calls())
-                    return handle_invalid<Ret>();
+                    return handle_invalid<ret_type>();
                 log_and_callback("Accessing destroyed object");
             }
         }
