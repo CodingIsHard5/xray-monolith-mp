@@ -1235,14 +1235,6 @@ struct has_is_valid : std::false_type {};
 template <typename T>
 struct has_is_valid<T, std::void_t<decltype(std::declval<T>()->is_valid())>> : std::true_type {};
 
-// MP fork (§20 co-op thin client): true when running as a co-op ENet client with no real
-// A-Life simulator. On such a client the full single-player gamedata scripts routinely
-// call C methods on objects that don't exist here (server owns A-Life), which the SAFE_WRAP
-// guard would otherwise turn into a disruptive "Busy Hands"/UNSTABLE warning (lua_error) —
-// and, unguarded, a crash. Defined in script_game_object_inventory_owner.cpp to keep the
-// heavy xr_enet/ai_space includes out of this widely-included header.
-extern bool script_coop_suppress_invalid_calls();
-
 struct SafeWrapBase
 {
     template <typename Ret>
@@ -1277,9 +1269,6 @@ struct SafeWrapBase
     static auto execute(InstanceT instance, FuncT memFunc, Args&&... args)
         -> decltype((instance->*memFunc)(std::forward<Args>(args)...))
     {
-        // MP fork (§20): the return type is deduced (no `Ret` template param here), so
-        // name it for handle_invalid<> in the co-op suppression path below.
-        using ret_type = decltype((instance->*memFunc)(std::forward<Args>(args)...));
         if (lua_busy_hands_debug)
         {
             bool is_valid = false;
@@ -1296,15 +1285,7 @@ struct SafeWrapBase
 
             // Send one last call to Lua to warn users that Lua is about to die
             if (!is_valid)
-            {
-                // MP fork (§20 co-op): on the thin client, invalid-instance calls are
-                // expected (SP scripts run against a world the client doesn't own).
-                // Silently return a default instead of the disruptive lua_error warning
-                // AND without calling through the invalid instance (which would crash).
-                if (script_coop_suppress_invalid_calls())
-                    return handle_invalid<ret_type>();
                 log_and_callback("Accessing destroyed object");
-            }
         }
 
         // Sayonara
