@@ -145,17 +145,13 @@ BOOL CScriptBinder::net_Spawn(CSE_Abstract* DC)
 	{
 		try
 		{
-			BOOL r = (BOOL)m_object->net_Spawn(object);
-			// MP fork (§19 co-op thin client): a creature's Lua object-binder net_spawn
-			// (bind_monster/bind_stalker) does A-Life-dependent setup that returns FALSE
-			// on the client (server owns A-Life). That false fails the whole spawn, so the
-			// replicated creature never instantiates/renders. On co-op, treat binder-false
-			// as success: the creature still spawns as a C++ render object driven by server
-			// updates (a puppet); its AI lives on the server. The actor's binder returns
-			// TRUE normally, so this only rescues the creatures that would otherwise drop.
-			if (!r && xr_enet::enabled() && !ai().get_alife())
-				return TRUE;
-			return r;
+			// MP fork (§19): forcing binder-false -> TRUE for co-op creatures (to render
+			// them as puppets) crashed — the binder returns false only PARTWAY through
+			// setup, so the C++ creature then runs broken Lua logic (null+8 deref). Proper
+			// client-side creature rendering needs the creature's AI/update logic gated
+			// like the actor puppet; deferred. For now creatures fail net_Spawn gracefully
+			// (no render, no crash) — the world lives on the server.
+			return ((BOOL)m_object->net_Spawn(object));
 		}
 		catch (...)
 		{
