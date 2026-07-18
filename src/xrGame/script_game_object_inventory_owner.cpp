@@ -2159,6 +2159,14 @@ bool CScriptGameObject::death_sound_enabled() const
 	return (stalker->death_sound_enabled());
 }
 
+// MP fork (§20 co-op): see SafeWrapBase::execute in script_game_object.h. True on a co-op
+// ENet client with no real A-Life simulator, where SP-script calls on absent objects are
+// expected and must be swallowed silently rather than raising "Busy Hands"/crashing.
+bool script_coop_suppress_invalid_calls()
+{
+	return xr_enet::enabled() && !ai().get_alife();
+}
+
 void CScriptGameObject::register_door()
 {
 	// MP fork (§20 co-op thin client): doors are registered with the AI doors manager for
