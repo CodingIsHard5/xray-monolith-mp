@@ -33,6 +33,21 @@ using namespace InventoryUtilities;
 
 //-Alundaio
 
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§20): xr_enet::enabled()
+
+// MP fork (§20 co-op thin client): the local player's own inventory/weapon handling
+// is client-authoritative — the server owns A-Life, but our hands are ours. Stock
+// gates slot Activate()/Update() on OnServer() (false on a thin client), so weapons
+// never leave the slot and never draw. Let the LOCAL controlled player's inventory
+// run its slot state machine locally. Peers' inventories aren't input-driven here,
+// so this only newly-enables our own player.
+static inline bool coop_local_authority(CObject* owner)
+{
+	if (!xr_enet::enabled() || ai().get_alife() || !g_pGameLevel || !owner)
+		return false;
+	return (Level().CurrentViewEntity() == owner) || (Level().CurrentEntity() == owner);
+}
+
 // what to block
 u16 INV_STATE_LADDER = (1 << INV_SLOT_3 | 1 << BINOCULAR_SLOT);
 u16 INV_STATE_CAR = INV_STATE_LADDER;
@@ -553,7 +568,7 @@ void CInventory::Activate_deffered	(u32 slot, u32 _frame)
 
 void CInventory::Activate(u16 slot, bool bForce)
 {
-	if (!OnServer())
+	if (!OnServer() && !coop_local_authority(smart_cast<CObject*>(m_pOwner)))
 	{
 		return;
 	}
@@ -816,7 +831,7 @@ void CInventory::ActiveWeapon(u16 slot)
 
 void CInventory::Update()
 {
-	if (OnServer())
+	if (OnServer() || coop_local_authority(smart_cast<CObject*>(m_pOwner)))
 	{
 		if (m_iActiveSlot != m_iNextActiveSlot)
 		{

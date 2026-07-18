@@ -21,6 +21,20 @@
 #include "clsid_game.h"
 #include "weaponpistol.h"
 #include "HUDManager.h"
+#include "ai_space.h"                            // MP fork (§20): ai().get_alife()
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§20): xr_enet::enabled()
+
+// MP fork (§20 co-op thin client): stock CHudItem::SwitchState bails on OnClient()
+// because weapon state is server-authoritative in MP (server SwitchState -> event ->
+// client OnStateSwitch). On our thin client the local player owns their own hands, so
+// apply the state locally instead of waiting for a server round-trip that never drives
+// our HUD. True only for the LOCAL controlled player's own held item.
+static inline bool coop_local_hud_authority(CObject* parent)
+{
+	if (!xr_enet::enabled() || ai().get_alife() || !g_pGameLevel || !parent)
+		return false;
+	return (Level().CurrentViewEntity() == parent) || (Level().CurrentEntity() == parent);
+}
 
 ENGINE_API extern float psHUD_FOV_def;
 int g_nearwall = NW_FOV;
@@ -141,6 +155,16 @@ void CHudItem::renderable_Render()
 
 void CHudItem::SwitchState(u32 S)
 {
+	// MP fork (§20): the thin co-op client is authoritative for the LOCAL player's own
+	// weapon/HUD-item state. Apply the transition locally (stock relies on a server ->
+	// client GE_WPN_STATE_CHANGE round-trip that never reaches our own held item).
+	if (coop_local_hud_authority(object().H_Parent()))
+	{
+		SetNextState(S);
+		OnStateSwitch(S, GetState());
+		return;
+	}
+
 	if (OnClient())
 		return;
 
