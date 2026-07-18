@@ -383,6 +383,7 @@ void game_sv_Single::coop_update_anchors()
 	struct anchor_feeder
 	{
 		u32 idx;
+		Fvector first;
 		game_sv_Single* self;
 		void operator()(IClient* client)
 		{
@@ -391,13 +392,31 @@ void game_sv_Single::coop_update_anchors()
 			if (!CL->owner) return;                              // client without an actor yet
 			if (idx >= mp_anchors::max_anchors) return;
 			mp_anchors::set(idx, CL->owner->o_Position);
+			if (idx == 0) first = CL->owner->o_Position;
 			++idx;
 		}
 	};
 
 	mp_anchors::clear_all();
-	anchor_feeder f; f.idx = 0; f.self = this;
+	anchor_feeder f; f.idx = 0; f.first.set(0, 0, 0); f.self = this;
 	m_server->ForEachClientDo(f);
+
+	// MP fork (§15 co-op diag): the graph actor being OFFLINE on the headless server is
+	// the suspected root of "nothing switches online". Log its state + anchor tracking,
+	// throttled. Remove once co-op A-Life works.
+	static u32 s_anchor_diag_ms = 0;
+	const u32 now = Device.dwTimeGlobal;
+	if (now - s_anchor_diag_ms >= 5000)
+	{
+		s_anchor_diag_ms = now;
+		CSE_ALifeCreatureActor* ga = ai().alife().graph().actor();
+		if (ga)
+			Msg("- XRNET(diag): ANCHORS=%u | graph.actor id=%u online=%d gvid=%u pos=(%.0f,%.0f,%.0f) | anchor0=(%.0f,%.0f,%.0f)",
+				f.idx, ga->ID, ga->m_bOnline ? 1 : 0, ga->m_tGraphID,
+				ga->o_Position.x, ga->o_Position.y, ga->o_Position.z,
+				f.first.x, f.first.y, f.first.z);
+		FlushLog();
+	}
 }
 
 void game_sv_Single::Update()
