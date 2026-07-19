@@ -196,6 +196,10 @@ void CHudItem::OnEvent(NET_Packet& P, u16 type)
 
 void CHudItem::OnStateSwitch(u32 S, u32 oldState)
 {
+	// MP fork (§20 diag): trace state switches on the local co-op player's held item
+	if (xr_enet::enabled() && !ai().get_alife() && object().H_Parent() && object().H_Parent() == Level().CurrentEntity())
+		Msg("- XRNET(fire): OnStateSwitch %d -> %d (remote=%d)", oldState, S, object().Remote() ? 1 : 0);
+
 	m_lastState = oldState;
 	SetState(S);
 

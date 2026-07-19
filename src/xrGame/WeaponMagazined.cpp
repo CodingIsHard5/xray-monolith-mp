@@ -664,6 +664,12 @@ void CWeaponMagazined::UpdateCL()
 	inherited::UpdateCL();
 	float dt = Device.fTimeDelta;
 
+	// MP fork (§20 diag): trace the local co-op weapon's state when it's meant to be firing
+	if (xr_enet::enabled() && !ai().get_alife() && H_Parent() && H_Parent() == Level().CurrentEntity()
+		&& (GetState() == eFire || GetNextState() == eFire))
+		Msg("- XRNET(fire): UpdateCL state=%d next=%d working=%d single=%d ammo=%d",
+			GetState(), GetNextState(), IsWorking() ? 1 : 0, m_bFireSingleShot ? 1 : 0, iAmmoElapsed);
+
 	//когда происходит апдейт состояния оружия
 	//ничего другого не делать
 	if (GetNextState() == GetState())
