@@ -749,10 +749,6 @@ bool CWeaponMagazined::cycleDownCheck() {
 
 void CWeaponMagazined::state_Fire(float dt)
 {
-	// MP fork (§20 diag): does the LOCAL co-op player's fire loop actually run?
-	if (xr_enet::enabled() && !ai().get_alife() && H_Parent() && H_Parent() == Level().CurrentEntity())
-		Msg("- XRNET(fire): state_Fire ammo=%d mag=%d working=%d shotTime=%.3f shotNum=%d",
-			iAmmoElapsed, (int)m_magazine.size(), IsWorking() ? 1 : 0, fShotTimeCounter, m_iShotNum);
 	if (iAmmoElapsed > 0)
 	{
 		VERIFY(fOneShotTime > 0.f);
