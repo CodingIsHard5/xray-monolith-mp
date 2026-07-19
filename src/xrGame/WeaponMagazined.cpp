@@ -664,11 +664,15 @@ void CWeaponMagazined::UpdateCL()
 	inherited::UpdateCL();
 	float dt = Device.fTimeDelta;
 
-	// MP fork (§20 diag): trace the local co-op weapon's state when it's meant to be firing
-	if (xr_enet::enabled() && !ai().get_alife() && H_Parent() && H_Parent() == Level().CurrentEntity()
-		&& (GetState() == eFire || GetNextState() == eFire))
-		Msg("- XRNET(fire): UpdateCL state=%d next=%d working=%d single=%d ammo=%d",
-			GetState(), GetNextState(), IsWorking() ? 1 : 0, m_bFireSingleShot ? 1 : 0, iAmmoElapsed);
+	// MP fork (§20): the local co-op player fires client-authoritatively, but our
+	// synchronous SwitchState (needed for weapons to DRAW) applies the eFire->eIdle
+	// transition immediately, so by the time UpdateCL runs the weapon is already
+	// state==eFire / next==eIdle. Stock only runs a state when GetNextState()==GetState()
+	// (settled), so state_Fire never ran -> no first-person bullet/muzzle flash (ammo only
+	// dropped via the server echo). Run state_Fire whenever OUR weapon is in eFire so the
+	// local shot fires; state_Fire's StopShooting() then settles it to idle.
+	const bool coop_local_fire = xr_enet::enabled() && !ai().get_alife()
+		&& H_Parent() && H_Parent() == Level().CurrentEntity();
 
 	//когда происходит апдейт состояния оружия
 	//ничего другого не делать
@@ -692,6 +696,10 @@ void CWeaponMagazined::UpdateCL()
 			break;
 		//case eHidden: break; ???
 		}
+	}
+	else if (coop_local_fire && GetState() == eFire)
+	{
+		state_Fire(dt);
 	}
 
 	UpdateSounds();
