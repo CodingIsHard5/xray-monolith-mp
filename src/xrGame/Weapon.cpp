@@ -15,6 +15,8 @@
 #include "level.h"
 #include "xr_level_controller.h"
 #include "game_cl_base.h"
+#include "ai_space.h"                            // MP fork (§17): ai().get_alife()
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§17): xr_enet::enabled()
 #include "../Include/xrRender/Kinematics.h"
 #include "ai_object_location.h"
 #include "../xrphysics/mathutils.h"
@@ -1331,6 +1333,23 @@ bool CWeapon::AllowBore()
 void CWeapon::UpdateCL()
 {
 	inherited::UpdateCL();
+
+	// MP fork (§17 co-op thin client): render a PEER's active weapon in third person.
+	// UpdateXForm() already attaches a parented weapon to the owner's hand bone, so the
+	// only missing piece is visibility — the show-sequence that toggles it is gated for
+	// peers (and would wrongly bind to our own first-person g_player_hud). Drive it here:
+	// show the ACTIVE weapon of a remote co-op actor, hide it when it stops being active.
+	if (xr_enet::enabled() && !ai().get_alife() && H_Parent())
+	{
+		CActor* peer = smart_cast<CActor*>(H_Parent());
+		if (peer && peer->Remote())
+		{
+			const bool active = (peer->inventory().ActiveItem() == this);
+			if (active != !!getVisible())
+				setVisible(active ? TRUE : FALSE);
+		}
+	}
+
 	UpdateHUDAddonsVisibility();
 	//ïîäñâåòêà îò âûñòðåëà
 	UpdateLight();
