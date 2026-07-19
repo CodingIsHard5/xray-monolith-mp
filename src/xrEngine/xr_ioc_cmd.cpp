@@ -702,7 +702,7 @@ virtual void Save (IWriter *F) {};
 #endif
 */
 
-ENGINE_API BOOL r2_sun_static = TRUE;
+ENGINE_API BOOL r2_sun_static = FALSE; // co-op/GAMMA: DX11 client + SSFX require dynamic sun; static-sun path breaks GAMMA shaders (combine_1.ps). renderer cmd still overrides for r1/r2a.
 ENGINE_API BOOL r2_advanced_pp = FALSE; // advanced post process and effects
 
 u32 renderer_value = 3;
