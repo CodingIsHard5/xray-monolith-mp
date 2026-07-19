@@ -30,12 +30,21 @@ jobs:
         gh run download ${{ inputs.run_id }} --repo ${{ github.repository }} --name "${{ inputs.artifact }}" -D art
         Get-ChildItem art
 
+    - name: Install fresh LLVM
+      shell: pwsh
+      run: |
+        # The preinstalled llvm-symbolizer crashes parsing our PDB; install current LLVM.
+        choco install llvm -y --no-progress | Out-Null
+        $env:PATH = "C:\Program Files\LLVM\bin;$env:PATH"
+        & "C:\Program Files\LLVM\bin\llvm-symbolizer.exe" --version
+
     - name: Symbolicate
       shell: pwsh
       run: |
         $exe = (Get-ChildItem art -Recurse -Filter *.exe | Select-Object -First 1).FullName
         "exe: $exe"
+        $sym = "C:\Program Files\LLVM\bin\llvm-symbolizer.exe"
         foreach ($a in "${{ inputs.addresses }}".Split(" ")) {
           "=== $a ==="
-          llvm-symbolizer --obj="$exe" --relative-address $a
+          & $sym --obj="$exe" --relative-address --functions=linkage --demangle $a
         }
