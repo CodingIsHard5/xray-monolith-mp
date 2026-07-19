@@ -136,7 +136,16 @@ void CGamePersistent::RegisterModel(IRenderVisual* V)
 				CBoneData& bd = K->LL_GetData(k);
 				if (*(bd.game_mtl_name))
 				{
-					bd.game_mtl_idx = GMLib.GetMaterialIdx(*bd.game_mtl_name);
+					// co-op/GAMMA server tolerance: a skeleton bone may name a game material
+					// that isn't in the loaded gamemtl.xr. GetMaterialIdx() only VERIFYs
+					// (compiled out here), so it returns an out-of-range index and the
+					// GetMaterialByIdx()->Flags below dereferenced null, killing the server
+					// while A-Life built NPC visuals. Fall back to default_object (def_idx,
+					// asserted dynamic above) for an unknown name instead of crashing.
+					u16 mtl_idx = GMLib.GetMaterialIdx(*bd.game_mtl_name);
+					if (mtl_idx >= (u16)GMLib.CountMaterial())
+						mtl_idx = def_idx;
+					bd.game_mtl_idx = mtl_idx;
 					R_ASSERT2(GMLib.GetMaterialByIdx(bd.game_mtl_idx)->Flags.is(SGameMtl::flDynamic),
 					          "Required dynamic game material");
 				}

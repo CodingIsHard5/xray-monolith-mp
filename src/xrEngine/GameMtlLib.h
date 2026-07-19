@@ -354,7 +354,12 @@ public:
 
 	IC SGameMtl* GetMaterialByIdx(u16 idx)
 	{
-		VERIFY(idx < (u16)materials.size());
+		// co-op/GAMMA server tolerance: an out-of-range material index (e.g. a name that
+		// wasn't in the loaded gamemtl.xr, which GetMaterialIdx returns as size) previously
+		// read past the vector and callers dereferenced garbage/null. Fall back to the first
+		// material instead of crashing. No-op for valid indices (SP/MP unaffected).
+		if (idx >= (u16)materials.size())
+			return materials.empty() ? nullptr : materials.front();
 		return materials[idx];
 	}
 
