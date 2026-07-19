@@ -386,7 +386,19 @@ public:
 	// game
 	IC SGameMtlPair* GetMaterialPair(u16 idx0, u16 idx1)
 	{
-		R_ASSERT((idx0 < material_count) && (idx1 < material_count));
+		// co-op/GAMMA server tolerance: the headless co-op server runs full physics over
+		// GAMMA's world, where a collision occasionally presents a material index beyond the
+		// loaded material set (a path the client's render never exercises). This asserted and
+		// killed A-Life during startup. For a valid SP/MP game the indices are always in
+		// range, so the clamp below never triggers there (byte-identical behavior); when they
+		// aren't, fall back to a default material pair instead of crashing / reading OOB.
+		if (idx0 >= material_count || idx1 >= material_count)
+		{
+			if (!material_count)
+				return nullptr;
+			if (idx0 >= material_count) idx0 = 0;
+			if (idx1 >= material_count) idx1 = 0;
+		}
 		return material_pairs_rt[idx1 * material_count + idx0];
 	}
 #endif
