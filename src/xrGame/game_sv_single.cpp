@@ -10,6 +10,7 @@
 #include "gamepersistent.h"
 #include "xrServer.h"
 #include "ai_space.h"                              // MP fork: ai().alife()
+#include "script_engine.h"                         // MP fork: server-side Lua init hook
 #include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
 #include "mp_anchors.h"                            // MP fork: A-Life attention anchors
 #include "../xrEngine/x_ray.h"
@@ -35,6 +36,22 @@ void game_sv_Single::Create(shared_str& options)
 	if (strstr(*options, "/alife"))
 		m_alife_simulator = xr_new<CALifeSimulator>(&server(), &options);
 #endif //#ifndef NO_SINGLE
+
+	// MP fork (§14 co-op): the co-op server runs game_sv_single, so GAMMA's full
+	// single-player + client script env executes here (axr_main.on_game_start, per-mod
+	// on_game_load callbacks). Some GAMMA scripts reference globals that another mod's
+	// client-only script defines (e.g. nextTick from Spatial Audio's kute_common, which
+	// never loads on a -nosound headless server), and crash with "attempt to call global
+	// (nil)". Give the mod ONE server-init hook, symmetric to mp_client.on_client_level_start,
+	// where its overlay defines the server-safe globals/stubs it needs. Runs after the alife
+	// simulator (script engine ready) and before any on_game_load. Optional: absent -> no-op.
+	// Gated to ENet co-op so plain SP/MP are untouched.
+	if (xr_enet::enabled())
+	{
+		::luabind::functor<void> server_init;
+		if (ai().script_engine().functor("mp_client.on_server_game_start", server_init))
+			server_init();
+	}
 
 	switch_Phase(GAME_PHASE_INPROGRESS);
 }
