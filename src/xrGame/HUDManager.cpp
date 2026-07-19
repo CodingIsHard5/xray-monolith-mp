@@ -23,6 +23,8 @@
 #include "player_hud.h"
 #include "script_attachment_manager.h"
 
+extern ENGINE_API bool g_dedicated_server;
+
 extern CUIGameCustom* CurrentGameUI()
 {
 	return g_hud ? HUD().GetGameUI() : nullptr;
@@ -49,7 +51,12 @@ CFontManager::CFontManager()
 	for (; it != it_e; ++it)
 		(**it) = NULL;
 
-	InitializeFonts();
+	// co-op/GAMMA: the dedicated (null-GPU R1) server now allocates a CFontManager so
+	// UI().Font() is valid for client scripts that call font getters during load, but it
+	// must NOT load font textures (no real device). Leave all font pointers NULL; getters
+	// return NULL safely and nothing renders server-side.
+	if (!g_dedicated_server)
+		InitializeFonts();
 }
 
 void CFontManager::InitializeFonts()

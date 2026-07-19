@@ -214,13 +214,19 @@ ui_core::ui_core()
 	if (!g_dedicated_server)
 	{
 		m_pUICursor = xr_new<CUICursor>();
-		m_pFontManager = xr_new<CFontManager>();
 	}
 	else
 	{
 		m_pUICursor = NULL;
-		m_pFontManager = NULL;
 	}
+	// co-op/GAMMA: always create the font manager, even on the dedicated server.
+	// The server runs game_sv_single's full script env, and GAMMA client scripts
+	// (MCM, actor_status_*) call Lua font getters (GetFontSmall -> UI().Font().pFontStat)
+	// during on_game_start. With m_pFontManager==NULL that dereferenced *NULL and crashed.
+	// The manager is cheap; CFontManager's ctor skips GPU font loading on the dedicated
+	// server (see HUDManager.cpp), so the font pointers stay NULL and getters return NULL
+	// safely instead of faulting.
+	m_pFontManager = xr_new<CFontManager>();
 	m_bPostprocess = false;
 
 	OnDeviceReset();
