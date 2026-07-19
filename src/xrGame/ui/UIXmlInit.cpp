@@ -24,6 +24,7 @@
 #include "UILines.h"
 
 extern int keyname_to_dik(LPCSTR);
+extern ENGINE_API bool g_dedicated_server;
 
 #define ARIAL_FONT_NAME			"arial"
 
@@ -319,6 +320,13 @@ bool CUIXmlInit::InitText(CUIXml& xml_doc, LPCSTR path, int index, CUILines* pLi
 	CGameFont* pTmpFont = NULL;
 	InitFont(xml_doc, path, index, color, pTmpFont);
 	pLines->SetTextColor(color);
+	// co-op/GAMMA: on the headless dedicated server no font textures are loaded (ui_core's
+	// font manager exists but every font pointer is NULL), yet GAMMA UI scripts run through
+	// game_sv_single and init XML text server-side during level load. pTmpFont is then NULL
+	// and this R_ASSERT killed the server. Nothing renders server-side, so skip the font
+	// assignment instead of asserting. Client path is unaffected (fonts exist there).
+	if (!pTmpFont && g_dedicated_server)
+		return true;
 	R_ASSERT(pTmpFont);
 	pLines->SetFont(pTmpFont);
 
