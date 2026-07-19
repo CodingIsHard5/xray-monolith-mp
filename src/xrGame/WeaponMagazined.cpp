@@ -1,4 +1,7 @@
 #include "pch_script.h"
+#include "level.h"                               // MP fork (§20 diag): Level().CurrentEntity()
+#include "ai_space.h"                            // MP fork (§20 diag): ai().get_alife()
+#include "../xrNetServer/xr_enet_transport.h"    // MP fork (§20 diag): xr_enet::enabled()
 
 #include "WeaponMagazined.h"
 #include "actor.h"
@@ -732,6 +735,10 @@ bool CWeaponMagazined::cycleDownCheck() {
 
 void CWeaponMagazined::state_Fire(float dt)
 {
+	// MP fork (§20 diag): does the LOCAL co-op player's fire loop actually run?
+	if (xr_enet::enabled() && !ai().get_alife() && H_Parent() && H_Parent() == Level().CurrentEntity())
+		Msg("- XRNET(fire): state_Fire ammo=%d mag=%d working=%d shotTime=%.3f shotNum=%d",
+			iAmmoElapsed, (int)m_magazine.size(), IsWorking() ? 1 : 0, fShotTimeCounter, m_iShotNum);
 	if (iAmmoElapsed > 0)
 	{
 		VERIFY(fOneShotTime > 0.f);

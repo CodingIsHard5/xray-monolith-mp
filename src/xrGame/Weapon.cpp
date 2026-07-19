@@ -1476,6 +1476,10 @@ bool CWeapon::Action(u16 cmd, u32 flags)
 	switch (cmd)
 	{
 	case kWPN_FIRE:
+		// MP fork (§20 diag): trace the LOCAL co-op player's fire path
+		if (xr_enet::enabled() && !ai().get_alife() && H_Parent() && H_Parent() == Level().CurrentEntity())
+			Msg("- XRNET(fire): local FIRE flags=%d pending=%d misfire=%d state=%d ammo=%d working=%d",
+				flags, IsPending() ? 1 : 0, bMisfire ? 1 : 0, GetState(), iAmmoElapsed, IsWorking() ? 1 : 0);
 		if (IsPending())
 			return false;
 
