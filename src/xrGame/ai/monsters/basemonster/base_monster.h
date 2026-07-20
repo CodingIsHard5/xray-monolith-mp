@@ -101,6 +101,10 @@ public:
 	virtual BOOL net_SaveRelevant();
 	virtual void net_Export(NET_Packet& P);
 	virtual void net_Import(NET_Packet& P);
+	// MP fork (§19 co-op): the chosen EMotionAnim, carried in the network "flags" byte, so a
+	// replicated mutant plays the animation the server picked — see base_monster_net.cpp.
+	u8 coop_pack_animation();
+	void coop_apply_animation(u8 packed);
 	virtual void net_Relcase(CObject* O);
 
 	//save/load server serialization
