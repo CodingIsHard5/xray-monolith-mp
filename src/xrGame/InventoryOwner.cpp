@@ -431,25 +431,28 @@ u16 CInventoryOwner::object_id() const
 
 void CInventoryOwner::SetCommunity(CHARACTER_COMMUNITY_INDEX new_community)
 {
-	// MP fork (§19 co-op): a thin client has NO A-Life simulator — the inert one is
-	// deliberately never registered in ai(), so ai().alife() dereferences a null
-	// m_alife_simulator and .objects() faults (0xC0000005 accessing 0x18). These
-	// setters only exist to write back to the SERVER-side CSE trader record, which the
-	// server owns and replicates; there is nothing for a client to update. Bail out.
-	if (!ai().get_alife())
-		return;
-
+	// MP fork (§19 co-op): the earlier version of this guard bailed out of the WHOLE
+	// function on a thin client, on the reasoning that these setters only write back to the
+	// server-side CSE. That was wrong and it cost a crash: the local CharacterInfo update
+	// below is exactly what the client needs, and skipping it leaves the character card
+	// holding NO_COMMUNITY_INDEX — which CHARACTER_COMMUNITY::id() later turns into a hard
+	// fatal. Do the local half unconditionally; only the A-Life write-back is server-only.
 	CEntityAlive* EA = smart_cast<CEntityAlive*>(this);
 	VERIFY(EA);
-
-	CSE_Abstract* e_entity = ai().alife().objects().object(EA->ID(), false);
-	if (!e_entity) return;
 
 	CharacterInfo().SetCommunity(new_community);
 	if (EA->g_Alive())
 	{
 		EA->ChangeTeam(CharacterInfo().Community().team(), EA->g_Squad(), EA->g_Group());
 	}
+
+	// Server-side CSE trader record: only where an A-Life simulator exists. ai().alife()
+	// dereferences a null m_alife_simulator on a thin client (0xC0000005 accessing 0x18).
+	if (!ai().get_alife())
+		return;
+
+	CSE_Abstract* e_entity = ai().alife().objects().object(EA->ID(), false);
+	if (!e_entity) return;
 
 	CSE_ALifeTraderAbstract* trader = smart_cast<CSE_ALifeTraderAbstract*>(e_entity);
 	if (!trader) return;
@@ -462,55 +465,54 @@ void CInventoryOwner::SetCommunity(CHARACTER_COMMUNITY_INDEX new_community)
 
 void CInventoryOwner::SetRank(CHARACTER_RANK_VALUE rank)
 {
-	// MP fork (§19 co-op): a thin client has NO A-Life simulator — the inert one is
-	// deliberately never registered in ai(), so ai().alife() dereferences a null
-	// m_alife_simulator and .objects() faults (0xC0000005 accessing 0x18). These
-	// setters only exist to write back to the SERVER-side CSE trader record, which the
-	// server owns and replicates; there is nothing for a client to update. Bail out.
+	// MP fork (§19 co-op): local state first, server write-back second — see SetCommunity.
+	CEntityAlive* EA = smart_cast<CEntityAlive*>(this);
+	VERIFY(EA);
+
+	CharacterInfo().m_CurrentRank.set(rank);
+
 	if (!ai().get_alife())
 		return;
 
-	CEntityAlive* EA = smart_cast<CEntityAlive*>(this);
-	VERIFY(EA);
 	CSE_Abstract* e_entity = ai().alife().objects().object(EA->ID(), false);
 	if (!e_entity) return;
 	CSE_ALifeTraderAbstract* trader = smart_cast<CSE_ALifeTraderAbstract*>(e_entity);
 	if (!trader) return;
 
-	CharacterInfo().m_CurrentRank.set(rank);
 	trader->m_rank = rank;
 
-	if (EA->ID() == Actor()->ID())
+	if (Actor() && EA->ID() == Actor()->ID())
 		Actor()->RPC_UpdateRank();
 }
 
 void CInventoryOwner::ChangeRank(CHARACTER_RANK_VALUE delta)
 {
-	// MP fork (§19 co-op): a thin client has NO A-Life simulator — the inert one is
-	// deliberately never registered in ai(), so ai().alife() dereferences a null
-	// m_alife_simulator and .objects() faults (0xC0000005 accessing 0x18). These
-	// setters only exist to write back to the SERVER-side CSE trader record, which the
-	// server owns and replicates; there is nothing for a client to update. Bail out.
-	if (!ai().get_alife())
-		return;
-
 	SetRank(Rank() + delta);
 }
 
 void CInventoryOwner::SetReputation(CHARACTER_REPUTATION_VALUE reputation)
 {
+	// MP fork (§19 co-op): this is the sibling of SetCommunity/SetRank that was MISSED when
+	// those were guarded, and it crashed a thin client the moment anything adjusted
+	// reputation (0xC0000005 accessing 0x18 in ai().alife().objects()). Same shape as the
+	// others now: local state unconditionally, A-Life write-back only where a simulator exists.
 	CEntityAlive* EA = smart_cast<CEntityAlive*>(this);
 	VERIFY(EA);
+
+	CharacterInfo().m_CurrentReputation.set(reputation);
+
+	if (!ai().get_alife())
+		return;
+
 	CSE_Abstract* e_entity = ai().alife().objects().object(EA->ID(), false);
 	if (!e_entity) return;
 
 	CSE_ALifeTraderAbstract* trader = smart_cast<CSE_ALifeTraderAbstract*>(e_entity);
 	if (!trader) return;
 
-	CharacterInfo().m_CurrentReputation.set(reputation);
 	trader->m_reputation = reputation;
 
-	if (EA->ID() == Actor()->ID())
+	if (Actor() && EA->ID() == Actor()->ID())
 		Actor()->RPC_UpdateReputation();
 }
 

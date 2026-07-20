@@ -162,6 +162,16 @@ void RELATION_REGISTRY::ForceSetGoodwill(u16 from, u16 to, CHARACTER_GOODWILL go
 {
 	RELATION_DATA& relation_data = relation_registry().registry().objects(from);
 
+	// MP fork (§19 co-op): a thin client has no A-Life simulator, and ai().alife() derefs a
+	// null one (0xC0000005 accessing 0x18). Goodwill is server-authoritative anyway — the
+	// server runs the same script and replicates the result — so on a client just apply the
+	// personal goodwill without the community corrections it cannot look up.
+	if (!ai().get_alife())
+	{
+		relation_data.personal[to].SetGoodwill(goodwill);
+		return;
+	}
+
 	CSE_ALifeTraderAbstract* from_obj = smart_cast<CSE_ALifeTraderAbstract*>(ai().alife().objects().object(from));
 	CSE_ALifeTraderAbstract* to_obj = smart_cast<CSE_ALifeTraderAbstract*>(ai().alife().objects().object(to));
 
