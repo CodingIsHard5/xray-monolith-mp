@@ -1347,6 +1347,19 @@ void CWeapon::UpdateCL()
 			const bool active = (peer->inventory().ActiveItem() == this);
 			if (active != !!getVisible())
 				setVisible(active ? TRUE : FALSE);
+
+			// Position it on the peer's hand HERE, not only from renderable_Render.
+			// Instrumentation showed the visibility half already works (vis=1 with the
+			// slot synced), yet the gun is never seen: the transform is only refreshed in
+			// renderable_Render -> UpdateXForm, and that runs only if the object is drawn.
+			// With a stale transform the weapon sits away from its owner, gets frustum
+			// culled, never renders, and so never gets its transform fixed — a deadlock
+			// that keeps it permanently invisible. UpdateCL runs regardless of culling
+			// (the diagnostic fired here), so drive UpdateXForm from here to break it.
+			// UpdateXForm self-limits to once per frame via dwXF_Frame, so this is free
+			// when the weapon does get drawn.
+			if (active)
+				UpdateXForm();
 		}
 
 		// MP fork (§17): diagnostic removed — it answered the question and then crashed both
