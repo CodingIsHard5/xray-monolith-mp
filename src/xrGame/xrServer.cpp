@@ -305,7 +305,21 @@ void xrServer::MakeUpdatePackets()
 		if (0 == Test.owner) continue;
 		if (!Test.net_Ready) continue;
 		if (Test.s_flags.is(M_SPAWN_OBJECT_PHANTOM)) continue; // Surely: phantom
-		if (!Test.Net_Relevant()) continue;
+
+		// MP fork (§19 co-op): among creatures, stock X-Ray declares ONLY the actor
+		// net-relevant (CSE_ALifeCreatureActor::Net_Relevant is the single override) —
+		// vanilla MP has no A-Life, so NPCs and mutants never needed replicating and
+		// CSE_Abstract::Net_Relevant()'s FALSE default was never a problem. Under co-op
+		// the dedicated server simulates the whole population and must stream it, or every
+		// NPC stands frozen in a T-pose forever: CCustomMonster::UpdateCL bails out at
+		// "if (NET.empty()) return;" and only animates (SelectAnimation) once it has two
+		// network updates to interpolate between. Creatures already serialise everything a
+		// puppet needs (position, model yaw, torso yaw/pitch/roll, health) in
+		// CSE_ALifeCreatureAbstract::UPDATE_Write, so just let them through here rather
+		// than changing Net_Relevant() itself (which is multiply inherited by the human /
+		// monster CSE classes and would need per-class disambiguation).
+		if (!Test.Net_Relevant() && !(xr_enet::enabled() && Test.cast_creature_abstract()))
+			continue;
 
 		tmpPacket.B.count = 0;
 		// write specific data

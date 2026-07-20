@@ -18,7 +18,39 @@
 
 // MP fork (§14 co-op): keeps Lua errors non-fatal on the dedicated (co-op) server — see
 // lua_error / lua_pcall_failed / lua_cast_failed below.
+#include "../xrNetServer/xr_enet_transport.h"
 extern ENGINE_API bool g_dedicated_server;
+
+// MP fork (§19 co-op): the thin client needs the same protection as the server. It runs
+// GAMMA's full single-player script environment against a world it does not simulate, so
+// scripts routinely find half-built state (no A-Life simulator, server-owned NPCs, peers
+// with no db.storage entry) and raise a Lua error — which is fatal in stock X-Ray and drops
+// the player to the desktop mid-session. -xrnet_udp is only ever passed by this fork's
+// co-op server and clients, so plain SP and plain MP keep the stock fatal behaviour.
+static bool coop_lua_nonfatal() { return g_dedicated_server || xr_enet::enabled(); }
+static LPCSTR coop_lua_side() { return g_dedicated_server ? "server" : "client"; }
+
+// Once errors stop being fatal they stop being rare: a broken per-frame script raises one
+// EVERY frame, and the stock handler answers each with a full Lua stack dump plus a
+// FlushLog. That is how a cosmetic script bug becomes a multi-GB log and a stalled session
+// (this fork has already produced 379MB logs that way). Log the first burst verbatim —
+// that is what actually gets debugged — then thin out hard. Non-co-op builds are fatal on
+// the first error anyway, so they never reach the throttle.
+static u32 s_coop_lua_errors = 0;
+
+static bool coop_lua_log_this_one()
+{
+	++s_coop_lua_errors;
+	if (s_coop_lua_errors <= 100)
+		return true;
+	if (s_coop_lua_errors <= 10000)
+		return (s_coop_lua_errors % 100) == 0;
+	return (s_coop_lua_errors % 5000) == 0;
+}
+
+// Flushing forces a synchronous disk write; only the first errors are worth that (a later
+// crash is almost always explained by the first failure, not the ten-thousandth repeat).
+static bool coop_lua_flush() { return s_coop_lua_errors <= 20; }
 
 #ifdef USE_DEBUGGER
 #	ifndef USE_LUA_STUDIO
@@ -214,9 +246,20 @@ xr_vector<xr_string> get_lua_stack(lua_State* L)
 
 void CScriptEngine::lua_error(lua_State* L)
 {
-	ai().script_engine().print_stack();
-	print_output(L, "", LUA_ERRRUN);
+	// MP fork (§19 co-op): decide up front whether this occurrence is logged — the stack
+	// dump below is the expensive part, so throttling has to happen before it, not after.
+	const bool nonfatal = coop_lua_nonfatal();
+	const bool log_this = !nonfatal || coop_lua_log_this_one();
+
+	if (log_this)
+	{
+		ai().script_engine().print_stack();
+		print_output(L, "", LUA_ERRRUN);
+	}
 	ai().script_engine().on_error(L);
+
+	if (!log_this)
+		return; // non-fatal co-op path, throttled: skip the report and carry on
 
 	// demonized: print first line with lua error
 	auto stack = get_lua_stack(L);
@@ -235,10 +278,12 @@ void CScriptEngine::lua_error(lua_State* L)
 	// MP fork (§14 co-op): see lua_pcall_failed — client-only GAMMA scripts raise Lua errors
 	// on the headless server (no HUD/fonts/UI); those must not be fatal for the server that
 	// owns the world. Log and return so the offending script is skipped, not the session.
-	if (g_dedicated_server)
+	if (nonfatal)
 	{
-		Msg("! XRNET: LUA error on co-op server — CONTINUING (not fatal):%s", error_msg);
-		FlushLog();
+		Msg("! XRNET: LUA error #%u on co-op %s — CONTINUING (not fatal):%s",
+			s_coop_lua_errors, coop_lua_side(), error_msg);
+		if (coop_lua_flush())
+			FlushLog();
 		return;
 	}
 	Debug.fatal(DEBUG_INFO, error_msg);
@@ -278,9 +323,23 @@ void printLuaStack()
 
 int CScriptEngine::lua_pcall_failed(lua_State* L)
 {
-	ai().script_engine().print_stack();
-	print_output(L, "", LUA_ERRRUN);
+	// MP fork (§19 co-op): see lua_error — throttle before the expensive stack dump.
+	const bool nonfatal = coop_lua_nonfatal();
+	const bool log_this = !nonfatal || coop_lua_log_this_one();
+
+	if (log_this)
+	{
+		ai().script_engine().print_stack();
+		print_output(L, "", LUA_ERRRUN);
+	}
 	ai().script_engine().on_error(L);
+
+	if (!log_this)
+	{
+		if (lua_isstring(L, -1))
+			lua_pop(L, 1);
+		return (LUA_ERRRUN);
+	}
 
 	// demonized: print first line with lua error
 	auto stack = get_lua_stack(L);
@@ -304,10 +363,12 @@ int CScriptEngine::lua_pcall_failed(lua_State* L)
 	// Stubbing each offending script in the gamedata overlay is endless whack-a-mole, so on
 	// the dedicated server log it loudly and CONTINUE instead. A broken client-side visual
 	// script must not take down the server. Clients and plain SP/MP keep fatal behaviour.
-	if (g_dedicated_server)
+	if (nonfatal)
 	{
-		Msg("! XRNET: LUA error on co-op server — CONTINUING (not fatal):%s", error_msg);
-		FlushLog();
+		Msg("! XRNET: LUA error #%u on co-op %s — CONTINUING (not fatal):%s",
+			s_coop_lua_errors, coop_lua_side(), error_msg);
+		if (coop_lua_flush())
+			FlushLog();
 	}
 	else
 		Debug.fatal(DEBUG_INFO, error_msg);
@@ -319,15 +380,24 @@ int CScriptEngine::lua_pcall_failed(lua_State* L)
 
 void lua_cast_failed(lua_State* L, LUABIND_TYPE_INFO info)
 {
-	CScriptEngine::print_output(L, "", LUA_ERRRUN);
-
 	// MP fork (§14 co-op): same reasoning as lua_pcall_failed — a bad cast inside a
-	// client-only GAMMA script must not kill the authoritative co-op server.
-	if (g_dedicated_server)
+	// client-only GAMMA script must not kill the authoritative co-op server, and (§19)
+	// must not kill the thin client either. Throttled the same way.
+	const bool nonfatal = coop_lua_nonfatal();
+	const bool log_this = !nonfatal || coop_lua_log_this_one();
+
+	if (log_this)
+		CScriptEngine::print_output(L, "", LUA_ERRRUN);
+
+	if (nonfatal)
 	{
-		Msg("! XRNET: LUA cast error on co-op server — CONTINUING (not fatal): cannot cast lua value to %s",
-			info->name());
-		FlushLog();
+		if (log_this)
+		{
+			Msg("! XRNET: LUA cast error #%u on co-op %s — CONTINUING (not fatal): cannot cast lua value to %s",
+				s_coop_lua_errors, coop_lua_side(), info->name());
+			if (coop_lua_flush())
+				FlushLog();
+		}
 		return;
 	}
 

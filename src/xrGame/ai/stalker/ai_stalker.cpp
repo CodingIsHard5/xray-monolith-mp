@@ -922,8 +922,15 @@ void CAI_Stalker::net_Import(NET_Packet& P)
 
 	u8 flags;
 
-	P.r_float();
-	set_money(P.r_u32(), false);
+	// MP fork (§19 co-op): these two reads (total weight + money) have no writer. The
+	// matching lines in CAI_Stalker::net_Export above are commented out, and the server
+	// side that produces this packet — CSE_ALifeHumanStalker::UPDATE_Write ->
+	// CSE_ALifeTraderAbstract::UPDATE_Write — is an empty function. Vanilla MP never
+	// replicates stalkers, so the 8-byte over-read was dead code; once the co-op server
+	// streams NPC updates (xrServer::MakeUpdatePackets) it would shift the ENTIRE packet
+	// and feed garbage health/timestamp/position into the interpolator. Read nothing.
+	//	P.r_float					();							// inventory().TotalWeight()
+	//	set_money					(P.r_u32(), false);
 
 	float health;
 	P.r_float(health);

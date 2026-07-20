@@ -16,6 +16,7 @@
 #include "script_binder_object.h"
 #include "script_game_object.h"
 #include "gameobject.h"
+#include "CustomMonster.h"                     // MP fork (§19): creature test in reload()
 #include "level.h"
 
 // comment next string when commiting
@@ -91,6 +92,23 @@ void CScriptBinder::reload(LPCSTR section)
 	VERIFY(!m_object);
 	if (!pSettings->line_exist(section, "script_binding"))
 		return;
+
+	// MP fork (§19 co-op): the dedicated server owns every NPC and mutant — their schemes,
+	// smart-terrain jobs and A-Life state all live there and are replicated to us as pure
+	// render puppets. Attaching GAMMA's creature binders (bind_monster / xr_motivator) on
+	// the thin client as well makes them drive a creature that has no simulator behind it:
+	// db.storage entries are half-built and the binder dereferences them
+	// (bind_monster.script:185 "attempt to index field 'object'" -> client CTD). Stubbing
+	// each script in the gamedata overlay is whack-a-mole and would mean editing GAMMA's
+	// mods, so the thin client simply never binds creature logic. The actor is excluded:
+	// the local player's HUD/PDA/inventory logic lives in its binder. Creature binders are
+	// server-side AI, so nothing visual is lost.
+	if (xr_enet::enabled() && !ai().get_alife())
+	{
+		CGameObject* const game_object = smart_cast<CGameObject*>(this);
+		if (game_object && smart_cast<CCustomMonster*>(game_object))
+			return;
+	}
 
 	::luabind::functor<void> lua_function;
 	if (!ai().script_engine().functor(pSettings->r_string(section, "script_binding"), lua_function))
