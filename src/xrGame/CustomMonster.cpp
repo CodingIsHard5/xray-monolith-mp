@@ -363,6 +363,12 @@ void CCustomMonster::shedule_Update(u32 DT)
 	VERIFY(_valid(Position()));
 	u32 dwTimeCL = Level().timeServer() - NET_Latency;
 	VERIFY(!NET.empty());
+	// MP fork (§19 co-op): UpdateCL interpolates puppets with a wider, sample-spacing-derived
+	// window than NET_Latency, so culling against the stock 50ms cutoff would throw away the
+	// history it needs and leave the keyframe search with no bracketing pair. Cull those
+	// against the same worst-case window instead.
+	if (Remote() && xr_enet::enabled() && !ai().get_alife())
+		dwTimeCL = Level().timeServer() - 600;
 	// MP fork (§19 co-op): UpdateCL interpolates replicated creatures with a larger,
 	// sample-spacing-derived latency (see there), so trimming down to the stock two entries
 	// against the 50ms window would discard samples it still needs. Keep a deeper history —
@@ -564,6 +570,18 @@ void CCustomMonster::UpdateCL()
 
 			// distinguish interpolation/extrapolation
 			u32 dwTime = Level().timeServer() - latency;
+
+			// MP fork (§19 co-op): never ask the buffer for a time it cannot answer. The
+			// keyframe search below has NO fallback — if no pair brackets dwTime it leaves
+			// NET_Last untouched and skips SelectAnimation entirely, so the puppet freezes
+			// where it stands and its animation stops advancing. Widening the interpolation
+			// window made exactly that the common case (NPCs stationary and stuttering),
+			// because the trim in shedule_Update still culls against the stock 50ms cutoff.
+			// Clamping costs a little smoothing depth in the worst case and guarantees the
+			// search always has an answer.
+			if (coop_puppet && (dwTime < NET.front().dwTimeStamp))
+				dwTime = NET.front().dwTimeStamp;
+
 			net_update& N = NET.back();
 			if ((dwTime > N.dwTimeStamp) || (NET.size() < 2))
 			{
@@ -641,6 +659,18 @@ void CCustomMonster::UpdateCL()
 					// Signal, that last time we used interpolation
 					NET_WasInterpolating = TRUE;
 					NET_Time = dwTime;
+				}
+				else if (coop_puppet)
+				{
+					// MP fork (§19 co-op): belt and braces for the hole described above. The
+					// clamp should make this unreachable, but a puppet must never be left
+					// tracking nothing, so pin it to the nearest end of the buffer and keep
+					// its animation ticking rather than silently freezing.
+					NET_Last = (dwTime < NET.front().dwTimeStamp) ? NET.front() : NET.back();
+					movement().m_body.current.yaw = NET_Last.o_model;
+					movement().m_body.target.yaw = NET_Last.o_model;
+					if (!bfScriptAnimation())
+						SelectAnimation(XFORM().k, movement().detail().direction(), movement().speed());
 				}
 			}
 		STOP_PROFILE
