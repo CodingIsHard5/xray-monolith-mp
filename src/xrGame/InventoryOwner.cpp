@@ -431,6 +431,14 @@ u16 CInventoryOwner::object_id() const
 
 void CInventoryOwner::SetCommunity(CHARACTER_COMMUNITY_INDEX new_community)
 {
+	// MP fork (§19 co-op): a thin client has NO A-Life simulator — the inert one is
+	// deliberately never registered in ai(), so ai().alife() dereferences a null
+	// m_alife_simulator and .objects() faults (0xC0000005 accessing 0x18). These
+	// setters only exist to write back to the SERVER-side CSE trader record, which the
+	// server owns and replicates; there is nothing for a client to update. Bail out.
+	if (!ai().get_alife())
+		return;
+
 	CEntityAlive* EA = smart_cast<CEntityAlive*>(this);
 	VERIFY(EA);
 
@@ -454,6 +462,14 @@ void CInventoryOwner::SetCommunity(CHARACTER_COMMUNITY_INDEX new_community)
 
 void CInventoryOwner::SetRank(CHARACTER_RANK_VALUE rank)
 {
+	// MP fork (§19 co-op): a thin client has NO A-Life simulator — the inert one is
+	// deliberately never registered in ai(), so ai().alife() dereferences a null
+	// m_alife_simulator and .objects() faults (0xC0000005 accessing 0x18). These
+	// setters only exist to write back to the SERVER-side CSE trader record, which the
+	// server owns and replicates; there is nothing for a client to update. Bail out.
+	if (!ai().get_alife())
+		return;
+
 	CEntityAlive* EA = smart_cast<CEntityAlive*>(this);
 	VERIFY(EA);
 	CSE_Abstract* e_entity = ai().alife().objects().object(EA->ID(), false);
@@ -470,6 +486,14 @@ void CInventoryOwner::SetRank(CHARACTER_RANK_VALUE rank)
 
 void CInventoryOwner::ChangeRank(CHARACTER_RANK_VALUE delta)
 {
+	// MP fork (§19 co-op): a thin client has NO A-Life simulator — the inert one is
+	// deliberately never registered in ai(), so ai().alife() dereferences a null
+	// m_alife_simulator and .objects() faults (0xC0000005 accessing 0x18). These
+	// setters only exist to write back to the SERVER-side CSE trader record, which the
+	// server owns and replicates; there is nothing for a client to update. Bail out.
+	if (!ai().get_alife())
+		return;
+
 	SetRank(Rank() + delta);
 }
 
