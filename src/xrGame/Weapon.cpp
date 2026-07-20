@@ -1358,7 +1358,13 @@ void CWeapon::UpdateCL()
 			// (the diagnostic fired here), so drive UpdateXForm from here to break it.
 			// UpdateXForm self-limits to once per frame via dwXF_Frame, so this is free
 			// when the weapon does get drawn.
-			if (active)
+			//
+			// Guard the visual: UpdateXForm does smart_cast<IKinematics*>(E->Visual())
+			// behind only a VERIFY (compiled out here) and then dereferences it. From the
+			// render path that is safe — an object being drawn always has a visual — but
+			// we are now calling it every frame, including while a peer is still spawning
+			// and has no kinematics yet, which crashed both clients (0xC0000005 @ +0x40).
+			if (active && peer->Visual() && smart_cast<IKinematics*>(peer->Visual()))
 				UpdateXForm();
 		}
 
