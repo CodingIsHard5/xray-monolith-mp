@@ -347,7 +347,14 @@ void xrServer::SendUpdatePacketsToAll()
 
 void xrServer::SendUpdatesToAll()
 {
-	if (IsGameTypeSingle())
+	// MP fork (§19 co-op): the co-op server runs game_sv_single, so IsGameTypeSingle() is TRUE
+	// and this returned immediately — meaning the server has never sent the generic entity
+	// UPDATE stream at all. That is why replicated creatures spawn correctly and then stand
+	// frozen forever: nothing ever delivers their position/orientation to clients.
+	// Player actors were unaffected because the fork relays those through its own M_CL_UPDATE
+	// path, which is exactly why peers move but NPCs do not.
+	// Under ENet co-op the server owns the world and MUST feed entity updates to its clients.
+	if (IsGameTypeSingle() && !xr_enet::enabled())
 		return;
 
 	KickCheaters();
