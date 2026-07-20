@@ -329,7 +329,12 @@ void CCustomMonster::shedule_Update(u32 DT)
 	VERIFY(_valid(Position()));
 	u32 dwTimeCL = Level().timeServer() - NET_Latency;
 	VERIFY(!NET.empty());
-	while ((NET.size() > 2) && (NET[1].dwTimeStamp < dwTimeCL)) NET.pop_front();
+	// MP fork (§19 co-op): UpdateCL interpolates replicated creatures with a larger,
+	// sample-spacing-derived latency (see there), so trimming down to the stock two entries
+	// against the 50ms window would discard samples it still needs. Keep a deeper history —
+	// still bounded, so this cannot grow without limit.
+	const u32 keep = (Remote() && xr_enet::enabled() && !ai().get_alife()) ? 4u : 2u;
+	while ((NET.size() > keep) && (NET[1].dwTimeStamp < dwTimeCL)) NET.pop_front();
 
 	float dt = float(DT) / 1000.f;
 
@@ -491,13 +496,43 @@ void CCustomMonster::UpdateCL()
 
 			m_dwCurrentTime = Device.dwTimeGlobal;
 
+			// MP fork (§19 co-op): replicated creatures are NOT sampled at the packet rate.
+			// The server ships update packets at psNET_ServerUpdate (30Hz), but the payload is
+			// whatever CCustomMonster::shedule_Update last pushed into NET — and creatures run
+			// on the SCHEDULER, so consecutive samples are 100-250ms apart, more when they are
+			// distant or idle. Against a fixed 50ms NET_Latency the client's render time is
+			// then almost always past the newest sample, so it takes the extrapolation branch
+			// below: NET_Last snaps to the last sample and SelectAnimation is never called.
+			// That is the jerky, "tripping" look — the puppet teleports between samples while
+			// its walk cycle only advances in bursts. Buffer by the spacing we actually
+			// observe so it genuinely interpolates. The extra lag is a fraction of a second on
+			// creatures this client does not own, and is invisible next to the stutter it removes.
+			const bool coop_puppet = Remote() && xr_enet::enabled() && !ai().get_alife();
+			u32 latency = NET_Latency;
+			if (coop_puppet && (NET.size() >= 2))
+			{
+				const u32 spacing = NET.back().dwTimeStamp - NET[NET.size() - 2].dwTimeStamp;
+				// 1.5x the last gap, so an average-sized jitter still lands inside the buffer.
+				// Capped so a creature that was asleep for seconds cannot park us far in the past.
+				const u32 wanted = (spacing + (spacing / 2) < 600) ? (spacing + (spacing / 2)) : 600;
+				if (wanted > latency)
+					latency = wanted;
+			}
+
 			// distinguish interpolation/extrapolation
-			u32 dwTime = Level().timeServer() - NET_Latency;
+			u32 dwTime = Level().timeServer() - latency;
 			net_update& N = NET.back();
 			if ((dwTime > N.dwTimeStamp) || (NET.size() < 2))
 			{
 				// BAD.	extrapolation
 				NET_Last = N;
+
+				// MP fork (§19 co-op): keep the animation ticking while extrapolating. Stock
+				// code only advances it on the interpolation path, which is fine when that is
+				// the normal case; for a puppet whose samples are momentarily late it means
+				// freezing mid-stride and then snapping — half of the "tripping" look.
+				if (coop_puppet && !bfScriptAnimation())
+					SelectAnimation(XFORM().k, movement().detail().direction(), movement().speed());
 			}
 			else
 			{

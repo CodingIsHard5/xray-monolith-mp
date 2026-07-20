@@ -1348,10 +1348,17 @@ void CWeapon::UpdateCL()
 	// show the ACTIVE weapon of a remote co-op actor, hide it when it stops being active.
 	if (xr_enet::enabled() && !ai().get_alife() && H_Parent())
 	{
-		CActor* peer = smart_cast<CActor*>(H_Parent());
-		if (peer && peer->Remote())
+		// MP fork (§19 co-op): originally CActor-only, because peers were the only remote
+		// creatures that existed. NPCs are replicated now and hold weapons the same way —
+		// parented, slotted, and pointed at by inventory().ActiveItem() once the server's
+		// active slot arrives (CAI_Stalker::net_Import) — so key off CInventoryOwner and
+		// both players and stalkers get their third-person weapon. Without this an NPC
+		// walks around empty-handed while its rifle sits invisible inside it.
+		CInventoryOwner* owner = smart_cast<CInventoryOwner*>(H_Parent());
+		CGameObject* peer = smart_cast<CGameObject*>(H_Parent());
+		if (owner && peer && peer->Remote())
 		{
-			const bool active = (peer->inventory().ActiveItem() == this);
+			const bool active = (owner->inventory().ActiveItem() == this);
 			if (active != !!getVisible())
 				setVisible(active ? TRUE : FALSE);
 

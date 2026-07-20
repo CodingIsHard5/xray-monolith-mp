@@ -516,6 +516,15 @@ SERVER_ENTITY_DECLARE_END
 SERVER_ENTITY_DECLARE_BEGIN2(CSE_ALifeHumanStalker, CSE_ALifeHumanAbstract, CSE_PHSkeleton)
 	shared_str m_start_dialog;
 
+	// MP fork (§19 co-op): which inventory slot the stalker currently has in its hands.
+	// Replicated so a thin client can render the NPC's weapon — without it the client
+	// knows the NPC owns a rifle (it spawns parented and slots itself) but nothing says
+	// it is the ACTIVE item, so inventory().ActiveItem() is null and the gun stays hidden.
+	// UPDATE_* is a network-only format (save/load go through save()/load()), so appending
+	// here costs nothing but a byte per update and never touches save compatibility.
+	// NO_ACTIVE_SLOT (0) means empty hands.
+	u8 m_coop_active_slot;
+
 	CSE_ALifeHumanStalker(LPCSTR caSection);
 	virtual ~CSE_ALifeHumanStalker();
 	virtual void load(NET_Packet& tNetPacket);

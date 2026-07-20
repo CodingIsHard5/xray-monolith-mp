@@ -5,6 +5,7 @@
 
 #include "stdafx.h"
 #include "character_community.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§19 co-op)
 
 //////////////////////////////////////////////////////////////////////////
 COMMUNITY_DATA::COMMUNITY_DATA(CHARACTER_COMMUNITY_INDEX idx, CHARACTER_COMMUNITY_ID idn, LPCSTR team_str)
@@ -36,12 +37,30 @@ void CHARACTER_COMMUNITY::set(CHARACTER_COMMUNITY_ID id)
 
 CHARACTER_COMMUNITY_ID CHARACTER_COMMUNITY::id() const
 {
+	// MP fork (§19 co-op): defence in depth for the crash above. IndexToId asserts hard on an
+	// out-of-range index, and this is called from cosmetic paths — the crosshair info HUD, the
+	// character card, script queries — for every creature the player looks at. On a thin
+	// client any replicated creature whose character data has not arrived yet is momentarily
+	// index -1, and taking the whole session down for a missing HUD label is never the right
+	// trade. Ask without the assert and fall back to an empty id. Plain SP/MP keep the assert,
+	// where an unset community really is a content bug worth failing loudly on.
+	if (xr_enet::enabled())
+	{
+		const COMMUNITY_DATA* data = GetByIndex(m_current_index, true);
+		if (!data)
+			data = GetByIndex(0, true); // first configured faction: always a real, translatable id
+		if (data)
+			return data->id;
+	}
 	return IndexToId(m_current_index);
 }
 
 u8 CHARACTER_COMMUNITY::team() const
 {
-	return (*m_pItemDataVector)[m_current_index].team;
+	// Same reasoning as id(), except this one is a raw vector index — an unset community is
+	// an out-of-bounds read, not merely an assert. Team 0 is the neutral fallback.
+	const COMMUNITY_DATA* const data = GetByIndex(m_current_index, true);
+	return data ? data->team : u8(0);
 }
 
 

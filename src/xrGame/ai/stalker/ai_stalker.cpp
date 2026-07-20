@@ -963,6 +963,11 @@ void CAI_Stalker::net_Export(NET_Packet& P)
 	}
 
 	P.w_stringZ(m_sStartDialog);
+
+	// MP fork (§19 co-op): which slot is in the stalker's hands, so the thin client can
+	// render the NPC's weapon. Mirrors CActor::net_Export_Base, which has always sent this
+	// for players; stalkers never needed it because vanilla MP has no NPCs.
+	P.w_u8(u8(inventory().GetActiveSlot()));
 }
 
 void CAI_Stalker::net_Import(NET_Packet& P)
@@ -1015,6 +1020,18 @@ void CAI_Stalker::net_Import(NET_Packet& P)
 	P.r_float();
 
 	P.r_stringZ(m_sStartDialog);
+
+	// MP fork (§19 co-op): adopt the server's choice of active slot. The weapon itself is
+	// already here (it spawns parented to us and slots itself from its m_ItemCurrPlace), so
+	// this is the one missing fact that makes inventory().ActiveItem() resolve — and
+	// CWeapon::UpdateCL keys the third-person weapon off exactly that.
+	{
+		const u8 active_slot = P.r_u8();
+		if (active_slot == NO_ACTIVE_SLOT)
+			inventory().SetActiveSlot(NO_ACTIVE_SLOT);
+		else if (inventory().GetActiveSlot() != u16(active_slot))
+			inventory().Activate(active_slot);
+	}
 
 	setVisible(TRUE);
 	setEnabled(TRUE);

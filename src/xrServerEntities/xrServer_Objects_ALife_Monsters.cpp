@@ -2163,6 +2163,7 @@ CSE_ALifeHumanStalker::CSE_ALifeHumanStalker(LPCSTR caSection) : CSE_ALifeHumanA
 {
 	m_trader_flags.set(eTraderFlagInfiniteAmmo,TRUE);
 	m_start_dialog = "";
+	m_coop_active_slot = 0; // NO_ACTIVE_SLOT
 }
 
 CSE_ALifeHumanStalker::~CSE_ALifeHumanStalker()
@@ -2191,6 +2192,7 @@ void CSE_ALifeHumanStalker::UPDATE_Write(NET_Packet& tNetPacket)
 	inherited1::UPDATE_Write(tNetPacket);
 	inherited2::UPDATE_Write(tNetPacket);
 	tNetPacket.w_stringZ(m_start_dialog);
+	tNetPacket.w_u8(m_coop_active_slot); // MP fork (§19 co-op): see the header
 }
 
 void CSE_ALifeHumanStalker::UPDATE_Read(NET_Packet& tNetPacket)
@@ -2198,6 +2200,7 @@ void CSE_ALifeHumanStalker::UPDATE_Read(NET_Packet& tNetPacket)
 	inherited1::UPDATE_Read(tNetPacket);
 	inherited2::UPDATE_Read(tNetPacket);
 	tNetPacket.r_stringZ(m_start_dialog);
+	m_coop_active_slot = tNetPacket.r_u8(); // MP fork (§19 co-op): see the header
 }
 
 void CSE_ALifeHumanStalker::load(NET_Packet& tNetPacket)

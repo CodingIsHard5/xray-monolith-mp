@@ -160,7 +160,18 @@ void CCharacterInfo::Init(CSE_ALifeTraderAbstract* trader)
 	// gets an empty character card instead of crashing. (Full peer character/dialog
 	// data is future work; for now interacting with a peer is a safe no-op.)
 	if (!trader)
+	{
+		// MP fork (§19 co-op): but do NOT leave the card at NO_COMMUNITY_INDEX (-1).
+		// CHARACTER_COMMUNITY::id() runs it through IndexToId -> GetByIndex, which is a hard
+		// Debug.fatal on an out-of-range index ("item by index not found in section
+		// game_relations"), and HUDRecon reads exactly that for whatever you are looking at —
+		// so an uninitialised peer killed the client about half a second after you aimed at
+		// it, which is what "crash when you talk to someone" actually was. Index 0 is always
+		// in range; for an object with no character data at all, its faction is cosmetic.
+		if (Community().index() == NO_COMMUNITY_INDEX)
+			SetCommunity(0);
 		return;
+	}
 
 	SetCommunity(trader->m_community_index);
 	SetRank(trader->m_rank);
