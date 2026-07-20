@@ -506,8 +506,13 @@ IC void ref_sound::play_no_feedback(CObject* O, u32 flags, float d, Fvector* pos
 IC void ref_sound::set_position(const Fvector& pos)
 {
 	VERIFY(!::Sound->i_locked());
-	VERIFY(_feedback());
-	_feedback()->set_position(pos);
+	// MP fork: this was the ONLY setter guarding _feedback() with VERIFY (compiled out here)
+	// instead of an if — set_frequency/set_range/set_volume below all use `if (_feedback())`.
+	// With -nosound (our dedicated server and co-op client harness) play() produces no feedback
+	// object, so the first rainfall crashed the client via CEffect_Rain::OnFrame (Rain.cpp:223).
+	// Match the sibling setters; this fixes every caller, not just rain.
+	if (_feedback())
+		_feedback()->set_position(pos);
 }
 
 IC void ref_sound::set_frequency(float freq)
