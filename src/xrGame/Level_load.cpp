@@ -116,12 +116,40 @@ bool CLevel::Load_GameSpecific_Before()
 	}
 	if (want_ai_space && !ai().get_alife() && has_level_ai)
 	{
-		Msg("- XRNET(gg): step6 ai().load('%s') — builds level_graph/cross_table", net_SessionName());
-		FlushLog();
-		ai().load(net_SessionName());
-		if (coop_thin)
-			Msg("- XRNET(dbg): co-op client AI space loaded for '%s' (creatures can now spawn)",
-				net_SessionName());
+		// net_SessionName() is `*(net_Hosts.front().dpSessionName)` — calling it with an empty
+		// net_Hosts is undefined behaviour, and that is exactly why the original condition ended
+		// with `&& !net_Hosts.empty()`: that check exists to protect this call, not to gate the
+		// AI space. A co-op client can reach here with no host entry, which crashed it
+		// (0xC0000005 accessing 0x68) and made the whole AI-space attempt look unworkable.
+		// Fall back to the level's own name, which is valid here — $level$ already resolved
+		// (level.ai was found through it).
+		const shared_str lvl = name();
+		LPCSTR ai_level_name = !net_Hosts.empty() ? net_SessionName() : lvl.c_str();
+		if (!ai_level_name || !*ai_level_name)
+		{
+			if (coop_thin)
+			{
+				Msg("! XRNET(gg): no usable level name (net_Hosts=%u) — skipping ai().load()",
+					(u32)net_Hosts.size());
+				FlushLog();
+			}
+		}
+		else
+		{
+			if (coop_thin)
+			{
+				Msg("- XRNET(gg): step6 ai().load('%s') — builds level_graph/cross_table",
+					ai_level_name);
+				FlushLog();
+			}
+			ai().load(ai_level_name);
+			if (coop_thin)
+			{
+				Msg("- XRNET(dbg): co-op client AI space loaded for '%s' (creatures can now spawn)",
+					ai_level_name);
+				FlushLog();
+			}
+		}
 	}
 
 	// MP fork (§19): patrol_path_storage_raw -> load_raw(get_level_graph(), get_cross_table(), ...)
