@@ -1348,6 +1348,25 @@ void CWeapon::UpdateCL()
 			if (active != !!getVisible())
 				setVisible(active ? TRUE : FALSE);
 		}
+
+		// MP fork (§17 diag): peer weapons are NEVER visible under GAMMA (Caden, 2026-07-19)
+		// though the objects DO exist client-side. Pin which precondition fails: parent is a
+		// CActor? Remote()? does the peer's synced ActiveSlot actually resolve to THIS item?
+		// Rate-limited to one line per weapon per ~5s so it can't firehose the log. Temp.
+		if (Device.dwTimeGlobal - m_coop_dbg_last_ms > 5000)
+		{
+			m_coop_dbg_last_ms = Device.dwTimeGlobal;
+			CInventoryItem* ai_item = peer ? peer->inventory().ActiveItem() : nullptr;
+			Msg("- XRNET(diag): peerwpn '%s' id=%u parent=%s remote=%d baseslot=%u currslot=%u "
+				"peer_activeslot=%u active_id=%d vis=%d",
+				cNameSect().c_str(), ID(),
+				peer ? "actor" : "NOT-actor",
+				peer ? (peer->Remote() ? 1 : 0) : -1,
+				(u32)BaseSlot(), (u32)CurrSlot(),
+				peer ? (u32)peer->inventory().GetActiveSlot() : 0xffffu,
+				ai_item ? (int)ai_item->object().ID() : -1,
+				getVisible() ? 1 : 0);
+		}
 	}
 
 	UpdateHUDAddonsVisibility();
