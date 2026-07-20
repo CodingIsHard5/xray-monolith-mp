@@ -56,19 +56,29 @@ bool CLevel::Load_GameSpecific_Before()
 	// inherited=0) and every NPC is dropped. Build the graph ourselves from the same spawn
 	// file chunk the server uses, then let the AI space load.
 	const bool coop_thin = xr_enet::enabled() && !ai().get_alife();
+	// NOTE: every step below FlushLog()s. Msg() is buffered, so on the previous attempt a hang
+	// mid-sequence discarded all markers and made it look like this code never ran at all.
+	Msg("- XRNET(gg): Load_GameSpecific_Before entered (coop_thin=%d, have_gg=%d)",
+		coop_thin ? 1 : 0, ai().get_game_graph() ? 1 : 0);
+	FlushLog();
 	if (coop_thin && !ai().get_game_graph())
 	{
 		coop_release_game_graph();
 		string_path spawn_fn;
+		Msg("- XRNET(gg): step1 locating $game_spawn$ all.spawn"); FlushLog();
 		if (FS.exist(spawn_fn, "$game_spawn$", "all", ".spawn"))
 		{
+			Msg("- XRNET(gg): step2 opening '%s'", spawn_fn); FlushLog();
 			s_coop_spawn_file = FS.r_open(spawn_fn);
 			if (s_coop_spawn_file)
 			{
+				Msg("- XRNET(gg): step3 opening spawn chunk 4"); FlushLog();
 				s_coop_gg_chunk = s_coop_spawn_file->open_chunk(4); // chunk 4 == game graph
 				if (s_coop_gg_chunk)
 				{
+					Msg("- XRNET(gg): step4 constructing CGameGraph"); FlushLog();
 					s_coop_game_graph = xr_new<CGameGraph>(*s_coop_gg_chunk);
+					Msg("- XRNET(gg): step5 installing graph into ai_space (builds CGraphEngine)"); FlushLog();
 					ai().game_graph(s_coop_game_graph);
 					Msg("- XRNET(dbg): co-op client loaded standalone game graph (%u vertices, %u levels)",
 						(u32)s_coop_game_graph->header().vertex_count(),
@@ -88,8 +98,12 @@ bool CLevel::Load_GameSpecific_Before()
 		(GamePersistent().GameType() == eGameIDSingle && !net_Hosts.empty()) ||
 		(coop_thin && ai().get_game_graph());
 
+	Msg("- XRNET(gg): want_ai_space=%d have_gg=%d", want_ai_space ? 1 : 0, ai().get_game_graph() ? 1 : 0);
+	FlushLog();
 	if (want_ai_space && !ai().get_alife() && FS.exist(fn_game, "$level$", "level.ai"))
 	{
+		Msg("- XRNET(gg): step6 ai().load('%s') — builds level_graph/cross_table", net_SessionName());
+		FlushLog();
 		ai().load(net_SessionName());
 		if (coop_thin)
 			Msg("- XRNET(dbg): co-op client AI space loaded for '%s' (creatures can now spawn)",
