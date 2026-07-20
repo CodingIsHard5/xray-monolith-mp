@@ -18,6 +18,7 @@
 #include "script_engine.h"
 #include "patrol_path_storage.h"
 #include "alife_simulator.h"
+#include "../xrNetServer/xr_enet_transport.h"      // MP fork (§19): xr_enet::enabled()
 #include "moving_objects.h"
 #include "doors_manager.h"
 #include "../xrEngine/dedicated_server_only.h"
@@ -226,7 +227,11 @@ void CAI_Space::set_alife(CALifeSimulator* alife_simulator)
 
 void CAI_Space::game_graph(CGameGraph* game_graph)
 {
-	VERIFY(m_alife_simulator);
+	// MP fork (§19 co-op): normally only A-Life's spawn registry installs the game graph, so
+	// this asserted a simulator exists. A co-op thin client owns no simulator but still needs
+	// the graph, otherwise ai().load() cannot build level_graph/cross_table and every
+	// replicated creature fails net_Spawn. Allow the co-op client to install one.
+	VERIFY(m_alife_simulator || xr_enet::enabled());
 	VERIFY(game_graph);
 	VERIFY(!m_game_graph);
 	m_game_graph = game_graph;
