@@ -8,6 +8,7 @@
 #include "../../xrServerEntities/character_info.h"
 #include "../string_table.h"
 #include "../relation_registry.h"
+#include "../InventoryOwner.h"                   // MP fork (§19 co-op): client-side char info
 
 #include "xrUIXmlParser.h"
 #include "UIXmlInit.h"
@@ -170,10 +171,38 @@ void CUICharacterInfo::InitCharacter(u16 id)
 
 	CSE_ALifeTraderAbstract* T = ch_info_get_from_id(m_ownerID);
 
-	CCharacterInfo chInfo;
-	chInfo.Init(T);
+	CCharacterInfo local_info;
+	local_info.Init(T); // null-tolerant; leaves a valid, empty card
 
-	if (m_icons[eName]) { m_icons[eName]->TextItemControl()->SetTextST(T->m_character_name.c_str()); }
+	// MP fork (§19 co-op): a thin client keeps no server entities — a spawn packet is read,
+	// used to build the level object, then freed — so an NPC never resolves through
+	// ch_info_get_from_id and T is null here. Stock dereferences it on the very next line
+	// (T->m_character_name), which would take the client down the moment a talk window
+	// opened. The data is not lost, though: the level object carries a fully populated
+	// CCharacterInfo built from its own spawn, so read it there and the panel shows the real
+	// name, faction, rank and reputation instead of blank fields.
+	const CCharacterInfo* info = &local_info;
+	shared_str display_name = T ? T->m_character_name : shared_str();
+
+	if (!T)
+	{
+		CObject* const object = Level().Objects.net_Find(m_ownerID);
+		CInventoryOwner* const owner = object ? smart_cast<CInventoryOwner*>(object) : NULL;
+		if (owner)
+		{
+			info = &owner->CharacterInfo();
+			display_name = owner->Name();
+		}
+	}
+
+	const CCharacterInfo& chInfo = *info;
+
+	// True only when we actually have character data. With neither a server entity nor a
+	// level object (a peer player, say) chInfo is a blank card, and IconName()/Bio() assert
+	// on an empty specific-character id — so the icon and biography are skipped below.
+	const bool resolved = (T != NULL) || (info != &local_info);
+
+	if (m_icons[eName]) { m_icons[eName]->TextItemControl()->SetTextST(display_name.c_str()); }
 	if (m_icons[eRank]) { m_icons[eRank]->TextItemControl()->SetTextST(GetRankAsText(chInfo.Rank().value())); }
 	if (m_icons[eCommunity]) { m_icons[eCommunity]->TextItemControl()->SetTextST(chInfo.Community().id().c_str()); }
 	if (m_icons[eReputation])
@@ -182,7 +211,7 @@ void CUICharacterInfo::InitCharacter(u16 id)
 	}
 
 	// Bio
-	if (pUIBio && pUIBio->IsEnabled())
+	if (resolved && pUIBio && pUIBio->IsEnabled())
 	{
 		pUIBio->Clear();
 		if (chInfo.Bio().size())
@@ -214,8 +243,11 @@ void CUICharacterInfo::InitCharacter(u16 id)
 		}
 	}
 
-	m_texture_name = chInfo.IconName();
-	if (m_icons[eIcon]) { m_icons[eIcon]->InitTexture(m_texture_name.c_str()); }
+	if (resolved)
+	{
+		m_texture_name = chInfo.IconName();
+		if (m_icons[eIcon]) { m_icons[eIcon]->InitTexture(m_texture_name.c_str()); }
+	}
 	//	if ( m_icons[eRankIcon        ] ) { m_icons[eRankIcon        ]->InitTexture( chInfo.Rank().id().c_str() ); }
 
 	/*
