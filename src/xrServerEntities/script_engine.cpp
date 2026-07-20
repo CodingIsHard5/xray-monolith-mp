@@ -16,6 +16,10 @@
 #include <unordered_map>
 #include <set>
 
+// MP fork (§14 co-op): keeps Lua errors non-fatal on the dedicated (co-op) server — see
+// lua_error / lua_pcall_failed / lua_cast_failed below.
+extern ENGINE_API bool g_dedicated_server;
+
 #ifdef USE_DEBUGGER
 #	ifndef USE_LUA_STUDIO
 #		include "script_debugger.h"
@@ -228,6 +232,15 @@ void CScriptEngine::lua_error(lua_State* L)
 	LPCSTR error_msg = error_str.c_str();
 
 #if !XRAY_EXCEPTIONS
+	// MP fork (§14 co-op): see lua_pcall_failed — client-only GAMMA scripts raise Lua errors
+	// on the headless server (no HUD/fonts/UI); those must not be fatal for the server that
+	// owns the world. Log and return so the offending script is skipped, not the session.
+	if (g_dedicated_server)
+	{
+		Msg("! XRNET: LUA error on co-op server — CONTINUING (not fatal):%s", error_msg);
+		FlushLog();
+		return;
+	}
 	Debug.fatal(DEBUG_INFO, error_msg);
 #else
     throw					lua_tostring(L,-1);
@@ -283,7 +296,21 @@ int CScriptEngine::lua_pcall_failed(lua_State* L)
 	LPCSTR error_msg = error_str.c_str();
 
 #if !XRAY_EXCEPTIONS
-	Debug.fatal(DEBUG_INFO, error_msg);
+	// MP fork (§14 co-op): the co-op server runs GAMMA's FULL single-player + client script
+	// environment through game_sv_single. Client-only scripts routinely touch things a
+	// headless server does not have (get_hud(), fonts, UI statics) and raise a Lua error —
+	// which here is FATAL, so a single cosmetic client script kills the authoritative world
+	// mid-session (seen: actor_effects.HUD_mask, factionid_hud_mcm.activate_hud, ...).
+	// Stubbing each offending script in the gamedata overlay is endless whack-a-mole, so on
+	// the dedicated server log it loudly and CONTINUE instead. A broken client-side visual
+	// script must not take down the server. Clients and plain SP/MP keep fatal behaviour.
+	if (g_dedicated_server)
+	{
+		Msg("! XRNET: LUA error on co-op server — CONTINUING (not fatal):%s", error_msg);
+		FlushLog();
+	}
+	else
+		Debug.fatal(DEBUG_INFO, error_msg);
 #endif
 	if (lua_isstring(L, -1))
 		lua_pop(L, 1);
@@ -293,6 +320,16 @@ int CScriptEngine::lua_pcall_failed(lua_State* L)
 void lua_cast_failed(lua_State* L, LUABIND_TYPE_INFO info)
 {
 	CScriptEngine::print_output(L, "", LUA_ERRRUN);
+
+	// MP fork (§14 co-op): same reasoning as lua_pcall_failed — a bad cast inside a
+	// client-only GAMMA script must not kill the authoritative co-op server.
+	if (g_dedicated_server)
+	{
+		Msg("! XRNET: LUA cast error on co-op server — CONTINUING (not fatal): cannot cast lua value to %s",
+			info->name());
+		FlushLog();
+		return;
+	}
 
 	Debug.fatal(DEBUG_INFO, "LUA error: cannot cast lua value to %s", info->name());
 }
