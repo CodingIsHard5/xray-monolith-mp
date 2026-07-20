@@ -919,6 +919,7 @@ void CAI_Stalker::coop_apply_animation_state(u8 packed)
 void CAI_Stalker::net_Export(NET_Packet& P)
 {
 	R_ASSERT(Local());
+	coop_refresh_export_sample(); // MP fork (§19 co-op): see CCustomMonster::coop_refresh_export_sample
 
 	// export last known packet
 	if (NET.empty()) {
@@ -1025,12 +1026,16 @@ void CAI_Stalker::net_Import(NET_Packet& P)
 	// already here (it spawns parented to us and slots itself from its m_ItemCurrPlace), so
 	// this is the one missing fact that makes inventory().ActiveItem() resolve — and
 	// CWeapon::UpdateCL keys the third-person weapon off exactly that.
+	// Set the slot outright rather than going through Activate(): that drives the holster/
+	// draw STATE MACHINE (CInventory::Update -> CHudItem show/hide animations), which on a
+	// puppet never settles — it re-triggered from the network faster than it completed and
+	// the NPC visibly pulled its weapon out over and over. A puppet needs the server's STATE,
+	// not a local re-enactment of the transition into it; the weapon's visibility is driven
+	// directly from CWeapon::UpdateCL.
 	{
 		const u8 active_slot = P.r_u8();
-		if (active_slot == NO_ACTIVE_SLOT)
-			inventory().SetActiveSlot(NO_ACTIVE_SLOT);
-		else if (inventory().GetActiveSlot() != u16(active_slot))
-			inventory().Activate(active_slot);
+		if (inventory().GetActiveSlot() != u16(active_slot))
+			inventory().SetActiveSlot(u16(active_slot));
 	}
 
 	setVisible(TRUE);

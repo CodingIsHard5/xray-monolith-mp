@@ -47,14 +47,12 @@ static inline bool coop_local_authority(CObject* owner)
 {
 	if (!xr_enet::enabled() || ai().get_alife() || !g_pGameLevel || !owner)
 		return false;
-	// MP fork (§19 co-op): actors only, originally — they were the only creatures whose
-	// inventory state a thin client ever received. NPCs are replicated now and their active
-	// slot arrives in CAI_Stalker::net_Import, but Activate() bails out at the call site
-	// above unless the owner passes here, so every NPC stayed empty-handed. Widen to
-	// creatures: this gate is about being allowed to ACT on replicated inventory state, and
-	// creatures are exactly the owners that receive it. Non-creature containers (stashes,
-	// car trunks) still defer to the server.
-	return !!smart_cast<CEntityAlive*>(owner);
+	// MP fork (§19 co-op): actors only, deliberately. NPCs also receive a replicated active
+	// slot, but they apply it with SetActiveSlot (CAI_Stalker::net_Import) precisely so they
+	// do NOT run the activation state machine below — letting them in here made every NPC
+	// re-play its weapon-draw animation continuously, because the network re-drove the
+	// transition faster than it could finish.
+	return !!smart_cast<CActor*>(owner);
 }
 
 // what to block

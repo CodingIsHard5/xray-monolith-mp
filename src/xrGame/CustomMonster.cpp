@@ -269,9 +269,43 @@ void CCustomMonster::mk_orientation(Fvector& dir, Fmatrix& mR)
 	}
 }
 
+// MP fork (§19 co-op): the exported sample is NET.back(), and NET only gains an entry when
+// shedule_Update runs — i.e. when the SCHEDULER ticks this creature, every 100-250ms and
+// worse for distant or idle ones. Clients therefore receive the same position repeated for
+// several packets and then a jump, which is why replicated NPCs move in visible steps no
+// matter how well the client interpolates: there is nothing between the steps to interpolate.
+// net_Export runs from CLevel::ClientSend every server frame, so take a fresh sample here.
+// That turns a coarse, irregular ~5Hz stream into a dense, evenly spaced one, and costs
+// nothing on the wire — the same one sample per packet is sent either way.
+//
+// Server-only: it needs the authoritative Position() and body orientation, and a thin client
+// has neither (its creatures are Remote and never call net_Export at all).
+void CCustomMonster::coop_refresh_export_sample()
+{
+	if (!xr_enet::enabled() || !ai().get_alife() || NET.empty())
+		return;
+
+	const u32 now = Level().timeServer();
+	if (NET.back().dwTimeStamp >= now)
+		return; // already sampled this millisecond — keep timestamps strictly increasing
+
+	net_update current;
+	current.dwTimeStamp = now;
+	current.o_model = movement().m_body.current.yaw;
+	current.o_torso = movement().m_body.current;
+	current.p_pos = Position();
+	current.fHealth = GetfHealth();
+	NET.push_back(current);
+	// Bounded here as well as in shedule_Update: this runs far more often than the scheduler
+	// trim, and the exporter only ever looks at the newest entry.
+	while (NET.size() > 4)
+		NET.pop_front();
+}
+
 void CCustomMonster::net_Export(NET_Packet& P) // export to server
 {
 	R_ASSERT(Local());
+	coop_refresh_export_sample();
 
 	// export last known packet
 	R_ASSERT(!NET.empty());
@@ -333,7 +367,7 @@ void CCustomMonster::shedule_Update(u32 DT)
 	// sample-spacing-derived latency (see there), so trimming down to the stock two entries
 	// against the 50ms window would discard samples it still needs. Keep a deeper history —
 	// still bounded, so this cannot grow without limit.
-	const u32 keep = (Remote() && xr_enet::enabled() && !ai().get_alife()) ? 4u : 2u;
+	const u32 keep = (Remote() && xr_enet::enabled() && !ai().get_alife()) ? 8u : 2u;
 	while ((NET.size() > keep) && (NET[1].dwTimeStamp < dwTimeCL)) NET.pop_front();
 
 	float dt = float(DT) / 1000.f;
@@ -509,14 +543,23 @@ void CCustomMonster::UpdateCL()
 			// creatures this client does not own, and is invisible next to the stutter it removes.
 			const bool coop_puppet = Remote() && xr_enet::enabled() && !ai().get_alife();
 			u32 latency = NET_Latency;
-			if (coop_puppet && (NET.size() >= 2))
+			if (coop_puppet)
 			{
-				const u32 spacing = NET.back().dwTimeStamp - NET[NET.size() - 2].dwTimeStamp;
-				// 1.5x the last gap, so an average-sized jitter still lands inside the buffer.
-				// Capped so a creature that was asleep for seconds cannot park us far in the past.
-				const u32 wanted = (spacing + (spacing / 2) < 600) ? (spacing + (spacing / 2)) : 600;
-				if (wanted > latency)
-					latency = wanted;
+				// Floor of 100ms: with the server now sampling every frame the gaps are ~33ms,
+				// and 50ms leaves barely one sample of slack — one late packet and we are back
+				// to extrapolating. 100ms is three samples of headroom and is not perceptible on
+				// a creature the client does not control.
+				latency = 100;
+				if (NET.size() >= 2)
+				{
+					// Twice the observed gap, so a creature the server is still sampling coarsely
+					// (asleep, far away) also stays inside the buffer. Capped so one that was
+					// idle for seconds cannot park us far in the past.
+					const u32 spacing = NET.back().dwTimeStamp - NET[NET.size() - 2].dwTimeStamp;
+					const u32 wanted = (spacing * 2 < 600) ? (spacing * 2) : 600;
+					if (wanted > latency)
+						latency = wanted;
+				}
 			}
 
 			// distinguish interpolation/extrapolation
@@ -531,8 +574,23 @@ void CCustomMonster::UpdateCL()
 				// code only advances it on the interpolation path, which is fine when that is
 				// the normal case; for a puppet whose samples are momentarily late it means
 				// freezing mid-stride and then snapping — half of the "tripping" look.
-				if (coop_puppet && !bfScriptAnimation())
-					SelectAnimation(XFORM().k, movement().detail().direction(), movement().speed());
+				if (coop_puppet)
+				{
+					// MP fork (§19 co-op): the animation manager decides which leg animation to play
+					// by comparing the sight direction against movement().body_orientation().current
+					// — and on a puppet nothing ever drives that, so it keeps whatever value it was
+					// constructed with. In the alerted mental state (which is where a whole camp ends
+					// up as soon as one NPC spots something) CStalkerAnimationManager takes exactly
+					// that branch, so the forward/back/left/right choice was garbage and flipped from
+					// frame to frame: NPCs walking sideways or backwards, and the leg animation
+					// restarting every time the choice changed — the "shakey" look. We replicate the
+					// body yaw already; put it where the animation manager reads it.
+					movement().m_body.current.yaw = NET_Last.o_model;
+					movement().m_body.target.yaw = NET_Last.o_model;
+
+					if (!bfScriptAnimation())
+						SelectAnimation(XFORM().k, movement().detail().direction(), movement().speed());
+				}
 			}
 			else
 			{
@@ -561,6 +619,21 @@ void CCustomMonster::UpdateCL()
 					}
 					else
 					{
+						if (coop_puppet)
+						{
+						// MP fork (§19 co-op): the animation manager decides which leg animation to play
+						// by comparing the sight direction against movement().body_orientation().current
+						// — and on a puppet nothing ever drives that, so it keeps whatever value it was
+						// constructed with. In the alerted mental state (which is where a whole camp ends
+						// up as soon as one NPC spots something) CStalkerAnimationManager takes exactly
+						// that branch, so the forward/back/left/right choice was garbage and flipped from
+						// frame to frame: NPCs walking sideways or backwards, and the leg animation
+						// restarting every time the choice changed — the "shakey" look. We replicate the
+						// body yaw already; put it where the animation manager reads it.
+						movement().m_body.current.yaw = NET_Last.o_model;
+						movement().m_body.target.yaw = NET_Last.o_model;
+
+						}
 						if (!bfScriptAnimation())
 							SelectAnimation(XFORM().k, movement().detail().direction(), movement().speed());
 					}

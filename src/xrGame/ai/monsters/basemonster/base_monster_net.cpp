@@ -60,6 +60,7 @@ BOOL CBaseMonster::net_SaveRelevant()
 void CBaseMonster::net_Export(NET_Packet& P)
 {
 	R_ASSERT(Local());
+	coop_refresh_export_sample(); // MP fork (§19 co-op): see CCustomMonster::coop_refresh_export_sample
 
 	// export last known packet
 	R_ASSERT(!NET.empty());

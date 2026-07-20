@@ -115,6 +115,10 @@ public:
 
 	xr_deque<net_update> NET;
 	net_update NET_Last;
+
+	// MP fork (§19 co-op): refresh the outgoing sample from the creature's CURRENT state.
+	// Called from net_Export on the co-op server — see CustomMonster.cpp.
+	void coop_refresh_export_sample();
 	BOOL NET_WasInterpolating; // previous update was by interpolation or by extrapolation
 	u32 NET_Time; // server time of last update
 	//------------------------------
