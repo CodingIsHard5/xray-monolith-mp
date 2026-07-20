@@ -104,6 +104,9 @@ private:
 	update_iterator_t m_update_end;
 	server_updates_compressor m_updator;
 
+	// MP fork (§19 co-op): run a dialogue action a thin client asked us to perform.
+	void coop_run_dialog_action(NET_Packet& P);
+
 	void MakeUpdatePackets();
 	void SendUpdatePacketsToAll();
 	u32 m_last_updates_size;

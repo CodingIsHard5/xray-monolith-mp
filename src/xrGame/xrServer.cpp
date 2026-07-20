@@ -21,6 +21,9 @@
 #include "file_transfer.h"
 #include "screenshot_server.h"
 #include "xrServer_info.h"
+#include "PhraseDialog.h"                         // MP fork (§19 co-op): server-run dialog actions
+#include "Phrase.h"
+#include "PhraseScript.h"
 #include <functional>
 
 #pragma warning(push)
@@ -486,6 +489,58 @@ u32 xrServer::OnMessageSync(NET_Packet& P, ClientID sender)
 
 extern float g_fCatchObjectTime;
 
+// MP fork (§19 co-op): execute a dialogue action a client asked us to run. Everything the
+// script needs is addressable from the wire: the two speakers by object id, and the phrase by
+// (dialog id, phrase id). CPhraseDialog::Load shares the already-parsed dialog data, so this
+// is a lookup rather than a parse.
+void xrServer::coop_run_dialog_action(NET_Packet& P)
+{
+	const u16 speaker_id = P.r_u16();
+	const u16 partner_id = P.r_u16();
+	string512 dialog_id = {0};
+	string512 phrase_id = {0};
+	P.r_stringZ_s(dialog_id); // bounds-checked: this is attacker-reachable input
+	P.r_stringZ_s(phrase_id);
+
+	if (!g_pGameLevel || !dialog_id[0] || !phrase_id[0])
+		return;
+
+	CGameObject* const speaker = smart_cast<CGameObject*>(Level().Objects.net_Find(speaker_id));
+	CGameObject* const partner = smart_cast<CGameObject*>(Level().Objects.net_Find(partner_id));
+	if (!speaker || !partner)
+	{
+		Msg("! XRNET: dialog action '%s/%s' dropped - speaker %u or partner %u not on the server",
+			dialog_id, phrase_id, speaker_id, partner_id);
+		FlushLog();
+		return;
+	}
+
+	// Validate before touching the loaders. Both ids came off the wire, and the stock lookups
+	// are assert-on-miss (CPhraseDialog::Load asserts an unknown dialog id, GetPhrase THROWs
+	// an unknown phrase id) — which on a server means one malformed or merely out-of-date
+	// packet takes the whole session down for everyone. Ask with no_assert and drop quietly.
+	if (!CPhraseDialog::GetById(dialog_id, true))
+	{
+		Msg("! XRNET: dialog action dropped - unknown dialog id '%s'", dialog_id);
+		FlushLog();
+		return;
+	}
+
+	DIALOG_SHARED_PTR dialog(xr_new<CPhraseDialog>());
+	dialog->Load(dialog_id);
+
+	CPhraseGraph::CVertex* const vertex = dialog->data()->m_PhraseGraph.vertex(phrase_id);
+	if (!vertex || !vertex->data())
+	{
+		Msg("! XRNET: dialog action dropped - phrase '%s' not in dialog '%s'", phrase_id, dialog_id);
+		FlushLog();
+		return;
+	}
+
+	// Same call the single-player path makes, just with the server's own objects.
+	vertex->data()->GetScriptHelper()->Action(speaker, partner, dialog_id, phrase_id);
+}
+
 u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadcasting with "flags" as returned
 {
 	u16 type;
@@ -503,6 +558,15 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 #ifdef DEBUG
 			VERIFY(verify_entities());
 #endif
+		}
+		break;
+	case M_XRNET_DIALOG_ACTION:
+		{
+			// MP fork (§19 co-op): a client told us which dialogue action its player
+			// triggered. The client cannot run it itself — it would change only its own copy
+			// of a world it does not own — so it arrives here as (speaker, partner, dialog,
+			// phrase) and we run the very same script function against the real objects.
+			coop_run_dialog_action(P);
 		}
 		break;
 	case M_SPAWN:

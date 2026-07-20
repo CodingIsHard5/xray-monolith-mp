@@ -92,6 +92,10 @@ enum
 	M_CREATE_PLAYER_STATE,
 	M_COMPRESSED_UPDATE_OBJECTS,
 
+	// MP fork (§19 co-op): client -> server. A dialogue ACTION the player triggered, to be
+	// executed by the server against the real world. See CDialogScriptHelper::Action.
+	M_XRNET_DIALOG_ACTION,
+
 	MSG_FORCEDWORD = u32(-1)
 };
 

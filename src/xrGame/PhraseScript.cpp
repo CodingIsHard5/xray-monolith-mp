@@ -9,6 +9,9 @@
 #include "ai_debug.h"
 #include "ui/xrUIXmlParser.h"
 #include "actor.h"
+#include "level.h"                                 // MP fork (§19 co-op): Level().Send
+#include "../xrNetServer/xr_enet_transport.h"      // MP fork (§19 co-op): xr_enet::enabled
+#include "../xrServerEntities/xrMessages.h"        // MP fork (§19 co-op): M_XRNET_DIALOG_ACTION
 
 
 //загрузка из XML файла
@@ -234,6 +237,25 @@ bool CDialogScriptHelper::Precondition(const CGameObject* pSpeakerGO1,
 void CDialogScriptHelper::Action(const CGameObject* pSpeakerGO1, const CGameObject* pSpeakerGO2, LPCSTR dialog_id,
                                  LPCSTR phrase_id) const
 {
+	// MP fork (§19 co-op): a dialogue ACTION is a change to the world — money and items
+	// changing hands, info portions, task state. Run it on a thin client and only that
+	// client's copy changes; the server, which owns the world, never learns, so the effect
+	// evaporates on the next update or the next session. Hand it to the server instead: it
+	// has both speakers and the same scripts, so it can run exactly this function for real.
+	// PRECONDITIONS deliberately stay local — they only read state and the phrase list has to
+	// be built synchronously to draw the menu.
+	if (xr_enet::enabled() && !ai().get_alife() && pSpeakerGO1 && pSpeakerGO2)
+	{
+		NET_Packet packet;
+		packet.w_begin(M_XRNET_DIALOG_ACTION);
+		packet.w_u16(pSpeakerGO1->ID());
+		packet.w_u16(pSpeakerGO2->ID());
+		packet.w_stringZ(dialog_id ? dialog_id : "");
+		packet.w_stringZ(phrase_id ? phrase_id : "");
+		Level().Send(packet, net_flags(TRUE, TRUE));
+		return;
+	}
+
 	TransferInfo(smart_cast<const CInventoryOwner*>(pSpeakerGO1));
 
 	for (u32 i = 0; i < Actions().size(); ++i)
