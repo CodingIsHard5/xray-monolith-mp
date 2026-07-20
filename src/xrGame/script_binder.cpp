@@ -153,7 +153,26 @@ BOOL CScriptBinder::net_Spawn(CSE_Abstract* DC)
 		// client is the proper fix — deferred (a focused effort).
 		try
 		{
-			return ((BOOL)m_object->net_Spawn(object));
+			const BOOL bound = (BOOL)m_object->net_Spawn(object);
+
+			// MP fork (§19 co-op): the Lua binder drives SERVER-side AI logic (schemes, smart
+			// terrains, A-Life state) that a thin client neither owns nor needs — the server
+			// simulates these creatures and replicates them. Its failure used to abort the whole
+			// spawn (CGameObject::net_Spawn returns this value), so every replicated creature was
+			// dropped and no NPC ever rendered.
+			//
+			// The note that used to live here said skipping the binder "isn't enough" because
+			// CBaseMonster::net_Spawn R_ASSERT2s the level graph. That is no longer true: the
+			// co-op client now loads the game graph and the AI space (see Level_load.cpp), so the
+			// level graph and cross table exist. Let the creature spawn as a render-only puppet.
+			// co-op thin client only: ENet transport and no simulator of our own. The dedicated
+			// server owns an A-Life simulator, so it is excluded by !get_alife() regardless.
+			if (!bound && xr_enet::enabled() && !ai().get_alife())
+			{
+				clear(); // drop the half-bound script object; keep the engine object alive
+				return (TRUE);
+			}
+			return (bound);
 		}
 		catch (...)
 		{
