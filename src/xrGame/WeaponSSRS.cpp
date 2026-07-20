@@ -125,6 +125,14 @@ void CWeaponSSRS::UnloadRocket()
 
 void CWeaponSSRS::ReloadMagazine()
 {
+	// MP fork (§17 co-op): a PEER's weapon is owned by a remote actor and sits in no
+	// inventory on this client, so m_pInventory is NULL. Its state machine still runs
+	// (it shows 0 local ammo and tries to auto-reload), and every reload path below
+	// dereferences m_pInventory->GetAny(), crashing in CInventory::Get. Reloading is
+	// meaningless without an inventory — and the server owns this weapon's real state.
+	if (!m_pInventory)
+		return;
+
 	m_needReload = false;
 	m_BriefInfo_CalcFrame = 0;
 

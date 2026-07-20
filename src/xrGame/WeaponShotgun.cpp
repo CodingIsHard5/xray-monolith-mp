@@ -241,6 +241,14 @@ bool CWeaponShotgun::HaveCartridgeInInventory(u8 cnt)
 
 u8 CWeaponShotgun::AddCartridge(u8 cnt)
 {
+	// MP fork (§17 co-op): a PEER's weapon is owned by a remote actor and sits in no
+	// inventory on this client, so m_pInventory is NULL. Its state machine still runs
+	// (it shows 0 local ammo and tries to auto-reload), and every reload path below
+	// dereferences m_pInventory->GetAny(), crashing in CInventory::Get. Reloading is
+	// meaningless without an inventory — and the server owns this weapon's real state.
+	if (!m_pInventory)
+		return cnt;
+
 	if (IsMisfire()) bMisfire = false;
 
 	if (m_set_next_ammoType_on_reload != undefined_ammo_type)
