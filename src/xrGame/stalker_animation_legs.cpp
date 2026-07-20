@@ -167,10 +167,21 @@ MotionID CStalkerAnimationManager::legs_move_animation()
 		);
 	}
 
-	float yaw, pitch;
-	object().sight().GetDirectionAngles(yaw, pitch);
+	// MP fork (§19 co-op): GetDirectionAngles returns false and leaves BOTH outputs untouched
+	// when there is no path and no usable movement history — and stock ignores the return
+	// value and uses them anyway, i.e. reads uninitialised stack. In single player that is
+	// rare and self-correcting; for a replicated NPC it is the normal state (a puppet never
+	// builds a path), so the direction was different garbage every frame, the
+	// forward/back/left/right choice flipped constantly, and the leg animation was reselected
+	// and restarted every single frame. That is the "animations looping from the start".
+	// Fall back to the creature's own heading, which means "moving the way I am facing" — the
+	// sane default, and stable frame to frame.
+	float yaw = 0.f, pitch = 0.f;
+	if (object().sight().GetDirectionAngles(yaw, pitch))
+		yaw = angle_normalize_signed(-yaw);
+	else
+		yaw = movement.body_orientation().current.yaw;
 
-	yaw = angle_normalize_signed(-yaw);;
 	legs_process_direction(yaw);
 
 	float body_current = movement.body_orientation().current.yaw;

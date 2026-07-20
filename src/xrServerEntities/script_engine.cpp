@@ -52,6 +52,7 @@ static bool coop_lua_log_this_one()
 // crash is almost always explained by the first failure, not the ten-thousandth repeat).
 static bool coop_lua_flush() { return s_coop_lua_errors <= 20; }
 
+
 #ifdef USE_DEBUGGER
 #	ifndef USE_LUA_STUDIO
 #		include "script_debugger.h"
@@ -74,6 +75,19 @@ extern Flags32 psAI_Flags;
 #	endif //-DEBUG
 #endif //!XRSE_FACTORY_EXPORTS
 #include "lua.hpp"
+
+// luabind invokes the error callback (CScriptEngine::lua_error) expecting it NEVER TO RETURN —
+// stock ends in Debug.fatal. Look at luabind/functor.hpp: after `if (e) e(L);` there is only an
+// assert(0), compiled out in release, and then execution simply carries on with the error
+// object pcall pushed still sitting on the Lua stack. Nothing downstream pops it. So every
+// error we survive leaks one Lua stack slot, and a few hundred otherwise harmless script errors
+// end as a crash inside the VM itself (symbolicated: lj_vm_return). Returning is the whole point
+// of the non-fatal path, so balance the stack ourselves on the way out.
+static void coop_lua_balance_stack(lua_State* L)
+{
+	if (L && lua_gettop(L) > 0 && lua_isstring(L, -1))
+		lua_pop(L, 1);
+}
 
 #ifdef USE_LUAJIT_ONE
 void jit_command(lua_State*, LPCSTR);
@@ -259,7 +273,10 @@ void CScriptEngine::lua_error(lua_State* L)
 	ai().script_engine().on_error(L);
 
 	if (!log_this)
-		return; // non-fatal co-op path, throttled: skip the report and carry on
+	{
+		coop_lua_balance_stack(L); // luabind expects us never to return — see the helper above
+		return;                    // non-fatal co-op path, throttled: skip the report
+	}
 
 	// demonized: print first line with lua error
 	auto stack = get_lua_stack(L);
@@ -284,6 +301,7 @@ void CScriptEngine::lua_error(lua_State* L)
 			s_coop_lua_errors, coop_lua_side(), error_msg);
 		if (coop_lua_flush())
 			FlushLog();
+		coop_lua_balance_stack(L);
 		return;
 	}
 	Debug.fatal(DEBUG_INFO, error_msg);
