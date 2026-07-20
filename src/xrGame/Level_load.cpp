@@ -18,25 +18,8 @@
 #include "character_reputation.h"
 #include "monster_community.h"
 #include "HudManager.h"
-#include "game_graph.h"                            // MP fork (§19): standalone game graph
-#include "../xrNetServer/xr_enet_transport.h"      // MP fork (§19): xr_enet::enabled()
 
 extern ENGINE_API bool g_dedicated_server;
-
-// MP fork (§19 co-op): the standalone game graph a thin client builds for itself.
-// CGameGraph does NOT copy the stream — it stores raw pointers into the chunk's buffer
-// (game_graph_inline.h: m_nodes = stream.pointer()), which is why the server keeps its
-// spawn file and chunk alive as members. Mirror that: these must outlive the graph.
-static IReader* s_coop_spawn_file = nullptr;
-static IReader* s_coop_gg_chunk = nullptr;
-static CGameGraph* s_coop_game_graph = nullptr;
-
-static void coop_release_game_graph()
-{
-	if (s_coop_gg_chunk) { s_coop_gg_chunk->close(); s_coop_gg_chunk = nullptr; }
-	if (s_coop_spawn_file) { FS.r_close(s_coop_spawn_file); s_coop_spawn_file = nullptr; }
-	xr_delete(s_coop_game_graph);
-}
 
 bool CLevel::Load_GameSpecific_Before()
 {
@@ -45,56 +28,9 @@ bool CLevel::Load_GameSpecific_Before()
 	g_pGamePersistent->LoadTitle();
 	string_path fn_game;
 
-	// MP fork (§19 co-op thin client): replicated creatures never rendered because the AI
-	// space was never loaded here, for two reasons:
-	//  1) the gate below required GameType()==eGameIDSingle, but a co-op client only learns
-	//     its game type from M_SV_CONFIG_NEW_CLIENT (Export_game_type), which the server
-	//     sends from OnCL_Connected — i.e. AFTER this runs. It is not Single yet.
-	//  2) ai().load() VERIFYs a game graph, but the graph is built inside A-Life's spawn
-	//     registry, which a thin client (no simulator) never runs.
-	// Without level_graph/cross_table, CCustomMonster::net_Spawn fails (movement=1,
-	// inherited=0) and every NPC is dropped. Build the graph ourselves from the same spawn
-	// file chunk the server uses, then let the AI space load.
-	const bool coop_thin = xr_enet::enabled() && !ai().get_alife();
-	if (coop_thin && !ai().get_game_graph())
-	{
-		coop_release_game_graph();
-		string_path spawn_fn;
-		if (FS.exist(spawn_fn, "$game_spawn$", "all", ".spawn"))
-		{
-			s_coop_spawn_file = FS.r_open(spawn_fn);
-			if (s_coop_spawn_file)
-			{
-				s_coop_gg_chunk = s_coop_spawn_file->open_chunk(4); // chunk 4 == game graph
-				if (s_coop_gg_chunk)
-				{
-					s_coop_game_graph = xr_new<CGameGraph>(*s_coop_gg_chunk);
-					ai().game_graph(s_coop_game_graph);
-					Msg("- XRNET(dbg): co-op client loaded standalone game graph (%u vertices, %u levels)",
-						(u32)s_coop_game_graph->header().vertex_count(),
-						(u32)s_coop_game_graph->header().level_count());
-				}
-				else
-					Msg("! XRNET(dbg): co-op game graph: spawn chunk 4 missing in '%s'", spawn_fn);
-			}
-			else
-				Msg("! XRNET(dbg): co-op game graph: cannot open spawn file '%s'", spawn_fn);
-		}
-		else
-			Msg("! XRNET(dbg): co-op game graph: no $game_spawn$ all.spawn found");
-	}
-
-	const bool want_ai_space =
-		(GamePersistent().GameType() == eGameIDSingle && !net_Hosts.empty()) ||
-		(coop_thin && ai().get_game_graph());
-
-	if (want_ai_space && !ai().get_alife() && FS.exist(fn_game, "$level$", "level.ai"))
-	{
+	if (GamePersistent().GameType() == eGameIDSingle && !ai().get_alife() && FS.exist(fn_game, "$level$", "level.ai") &&
+		!net_Hosts.empty())
 		ai().load(net_SessionName());
-		if (coop_thin)
-			Msg("- XRNET(dbg): co-op client AI space loaded for '%s' (creatures can now spawn)",
-				net_SessionName());
-	}
 
 	if (!g_dedicated_server && !ai().get_alife() && ai().get_game_graph() && FS.exist(fn_game, "$level$", "level.game"))
 	{
