@@ -58,9 +58,12 @@ bool CLevel::Load_GameSpecific_Before()
 	const bool coop_thin = xr_enet::enabled() && !ai().get_alife();
 	// NOTE: every step below FlushLog()s. Msg() is buffered, so on the previous attempt a hang
 	// mid-sequence discarded all markers and made it look like this code never ran at all.
-	Msg("- XRNET(gg): Load_GameSpecific_Before entered (coop_thin=%d, have_gg=%d)",
-		coop_thin ? 1 : 0, ai().get_game_graph() ? 1 : 0);
-	FlushLog();
+	if (coop_thin)
+	{
+		Msg("- XRNET(gg): Load_GameSpecific_Before entered (have_gg=%d)",
+			ai().get_game_graph() ? 1 : 0);
+		FlushLog();
+	}
 	if (coop_thin && !ai().get_game_graph())
 	{
 		coop_release_game_graph();
@@ -98,11 +101,19 @@ bool CLevel::Load_GameSpecific_Before()
 		(GamePersistent().GameType() == eGameIDSingle && !net_Hosts.empty()) ||
 		(coop_thin && ai().get_game_graph());
 
-	const bool has_level_ai = !!FS.exist(fn_game, "$level$", "level.ai");
-	Msg("- XRNET(gg): want_ai_space=%d have_gg=%d level.ai=%d session='%s'",
-		want_ai_space ? 1 : 0, ai().get_game_graph() ? 1 : 0, has_level_ai ? 1 : 0,
-		net_SessionName());
-	FlushLog();
+	// NOTE: keep every probe below CO-OP-ONLY and side-effect free. An earlier revision
+	// evaluated these unconditionally and called net_SessionName() on the dedicated server,
+	// where it is not valid this early — that crashed the server (0xC0000005 accessing 0x68).
+	// The original code only ever touched net_SessionName() inside the guarded branch.
+	const bool has_level_ai = (want_ai_space && !ai().get_alife())
+		? !!FS.exist(fn_game, "$level$", "level.ai")
+		: false;
+	if (coop_thin)
+	{
+		Msg("- XRNET(gg): want_ai_space=%d have_gg=%d level.ai=%d",
+			want_ai_space ? 1 : 0, ai().get_game_graph() ? 1 : 0, has_level_ai ? 1 : 0);
+		FlushLog();
+	}
 	if (want_ai_space && !ai().get_alife() && has_level_ai)
 	{
 		Msg("- XRNET(gg): step6 ai().load('%s') — builds level_graph/cross_table", net_SessionName());
