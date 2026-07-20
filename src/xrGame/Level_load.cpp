@@ -98,9 +98,12 @@ bool CLevel::Load_GameSpecific_Before()
 		(GamePersistent().GameType() == eGameIDSingle && !net_Hosts.empty()) ||
 		(coop_thin && ai().get_game_graph());
 
-	Msg("- XRNET(gg): want_ai_space=%d have_gg=%d", want_ai_space ? 1 : 0, ai().get_game_graph() ? 1 : 0);
+	const bool has_level_ai = !!FS.exist(fn_game, "$level$", "level.ai");
+	Msg("- XRNET(gg): want_ai_space=%d have_gg=%d level.ai=%d session='%s'",
+		want_ai_space ? 1 : 0, ai().get_game_graph() ? 1 : 0, has_level_ai ? 1 : 0,
+		net_SessionName());
 	FlushLog();
-	if (want_ai_space && !ai().get_alife() && FS.exist(fn_game, "$level$", "level.ai"))
+	if (want_ai_space && !ai().get_alife() && has_level_ai)
 	{
 		Msg("- XRNET(gg): step6 ai().load('%s') — builds level_graph/cross_table", net_SessionName());
 		FlushLog();
@@ -110,8 +113,15 @@ bool CLevel::Load_GameSpecific_Before()
 				net_SessionName());
 	}
 
-	if (!g_dedicated_server && !ai().get_alife() && ai().get_game_graph() && FS.exist(fn_game, "$level$", "level.game"))
+	// MP fork (§19): patrol_path_storage_raw -> load_raw(get_level_graph(), get_cross_table(), ...)
+	// requires the LEVEL graph, not just the game graph. On a co-op thin client this block used to
+	// be dead (no game graph at all); installing one above enabled it while ai().load() may still
+	// have been skipped, so it fed a NULL level graph into load_raw and crashed (0xC0000005
+	// accessing 0x68). Require the level graph explicitly.
+	if (!g_dedicated_server && !ai().get_alife() && ai().get_game_graph() && ai().get_level_graph()
+		&& FS.exist(fn_game, "$level$", "level.game"))
 	{
+		Msg("- XRNET(gg): step7 patrol_path_storage_raw"); FlushLog();
 		IReader* stream = FS.r_open(fn_game);
 		ai().patrol_path_storage_raw(*stream);
 		FS.r_close(stream);
