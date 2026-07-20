@@ -1349,24 +1349,15 @@ void CWeapon::UpdateCL()
 				setVisible(active ? TRUE : FALSE);
 		}
 
-		// MP fork (§17 diag): peer weapons are NEVER visible under GAMMA (Caden, 2026-07-19)
-		// though the objects DO exist client-side. Pin which precondition fails: parent is a
-		// CActor? Remote()? does the peer's synced ActiveSlot actually resolve to THIS item?
-		// Rate-limited to one line per weapon per ~5s so it can't firehose the log. Temp.
-		if (Device.dwTimeGlobal - m_coop_dbg_last_ms > 5000)
-		{
-			m_coop_dbg_last_ms = Device.dwTimeGlobal;
-			CInventoryItem* ai_item = peer ? peer->inventory().ActiveItem() : nullptr;
-			Msg("- XRNET(diag): peerwpn '%s' id=%u parent=%s remote=%d baseslot=%u currslot=%u "
-				"peer_activeslot=%u active_id=%d vis=%d",
-				cNameSect().c_str(), ID(),
-				peer ? "actor" : "NOT-actor",
-				peer ? (peer->Remote() ? 1 : 0) : -1,
-				(u32)BaseSlot(), (u32)CurrSlot(),
-				peer ? (u32)peer->inventory().GetActiveSlot() : 0xffffu,
-				ai_item ? (int)ai_item->object().ID() : -1,
-				getVisible() ? 1 : 0);
-		}
+		// MP fork (§17): diagnostic removed — it answered the question and then crashed both
+		// clients (null deref, 0xC0000005 @ +0x6FCB9, after ~17 samples). What it established,
+		// under GAMMA with a peer holding a rifle:
+		//   parent=actor remote=1 baseslot=3 currslot=3 peer_activeslot=3 active_id=<self> vis=1
+		// i.e. parenting, Remote(), the synced ActiveSlot and ActiveItem resolution ALL work,
+		// and setVisible(TRUE) IS applied to the peer's active weapon. So "you can't see the
+		// other player's gun" is NOT a visibility/ownership/slot-sync problem — the remaining
+		// gap is that the visible weapon never gets positioned on the peer's hand bone
+		// (renderable_Render -> UpdateXForm, which early-returns when parent->attached(this)).
 	}
 
 	UpdateHUDAddonsVisibility();

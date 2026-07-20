@@ -51,8 +51,6 @@ class CWeapon : public CHudItemObject,
 {
 private:
 	typedef CHudItemObject inherited;
-	// MP fork (§17 diag): rate-limit for the peer-weapon visibility diagnostic in UpdateCL. Temp.
-	u32 m_coop_dbg_last_ms = 0;
 
 public:
 	CWeapon();
