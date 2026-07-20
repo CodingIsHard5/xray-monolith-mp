@@ -182,7 +182,10 @@ void CUICharacterInfo::InitCharacter(u16 id)
 	// CCharacterInfo built from its own spawn, so read it there and the panel shows the real
 	// name, faction, rank and reputation instead of blank fields.
 	const CCharacterInfo* info = &local_info;
-	shared_str display_name = T ? T->m_character_name : shared_str();
+	// m_character_name is an xr_string, Name() is an LPCSTR — keep both as a plain LPCSTR so
+	// there is no conversion to trip over, and no lifetime question either: both outlive this
+	// call (the server entity and the level object respectively).
+	LPCSTR display_name = T ? T->m_character_name.c_str() : "";
 
 	if (!T)
 	{
@@ -192,6 +195,7 @@ void CUICharacterInfo::InitCharacter(u16 id)
 		{
 			info = &owner->CharacterInfo();
 			display_name = owner->Name();
+
 		}
 	}
 
@@ -202,7 +206,7 @@ void CUICharacterInfo::InitCharacter(u16 id)
 	// on an empty specific-character id — so the icon and biography are skipped below.
 	const bool resolved = (T != NULL) || (info != &local_info);
 
-	if (m_icons[eName]) { m_icons[eName]->TextItemControl()->SetTextST(display_name.c_str()); }
+	if (m_icons[eName]) { m_icons[eName]->TextItemControl()->SetTextST(display_name); }
 	if (m_icons[eRank]) { m_icons[eRank]->TextItemControl()->SetTextST(GetRankAsText(chInfo.Rank().value())); }
 	if (m_icons[eCommunity]) { m_icons[eCommunity]->TextItemControl()->SetTextST(chInfo.Community().id().c_str()); }
 	if (m_icons[eReputation])
