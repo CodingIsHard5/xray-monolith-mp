@@ -16,7 +16,6 @@
 #include "script_binder_object.h"
 #include "script_game_object.h"
 #include "gameobject.h"
-#include "CustomMonster.h"                     // MP fork (§19): creature test in reload()
 #include "level.h"
 
 // comment next string when commiting
@@ -93,20 +92,21 @@ void CScriptBinder::reload(LPCSTR section)
 	if (!pSettings->line_exist(section, "script_binding"))
 		return;
 
-	// MP fork (§19 co-op): the dedicated server owns every NPC and mutant — their schemes,
-	// smart-terrain jobs and A-Life state all live there and are replicated to us as pure
-	// render puppets. Attaching GAMMA's creature binders (bind_monster / xr_motivator) on
-	// the thin client as well makes them drive a creature that has no simulator behind it:
-	// db.storage entries are half-built and the binder dereferences them
-	// (bind_monster.script:185 "attempt to index field 'object'" -> client CTD). Stubbing
-	// each script in the gamedata overlay is whack-a-mole and would mean editing GAMMA's
-	// mods, so the thin client simply never binds creature logic. The actor is excluded:
-	// the local player's HUD/PDA/inventory logic lives in its binder. Creature binders are
-	// server-side AI, so nothing visual is lost.
+	// MP fork (§19 co-op): MUTANTS only. Their binder (bind_monster) drives AI the server
+	// owns, and on a thin client it dereferences db.storage state that was never built —
+	// bind_monster.script:185 "attempt to index field 'object'" took the client down.
+	// Mutants have no dialogue or trade, so dropping their binder costs nothing.
+	//
+	// HUMAN NPCs keep theirs. It was tempting to skip every creature for the same stability
+	// reason, and that is what this did at first — but xr_motivator is what registers a
+	// stalker in db.storage, and GAMMA's dialogue reads db.storage[npc:id()] in two dozen
+	// places, so skipping it makes talking to anyone impossible. Their binder never once
+	// errored across hours of play, unlike bind_monster. Any Lua error it does raise is
+	// contained now anyway (non-fatal + throttled, see script_engine.cpp).
 	if (xr_enet::enabled() && !ai().get_alife())
 	{
 		CGameObject* const game_object = smart_cast<CGameObject*>(this);
-		if (game_object && smart_cast<CCustomMonster*>(game_object))
+		if (game_object && game_object->cast_base_monster())
 			return;
 	}
 
