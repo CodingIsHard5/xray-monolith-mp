@@ -8,7 +8,6 @@
 #include "../../../PHDestroyable.h"
 #include "../../../CharacterPhysicsSupport.h"
 #include "../control_animation_base.h"   // MP fork (§19 co-op): replicated animation
-#include "../control_manager.h"
 
 // MP fork (§19 co-op): mutants replicate the CHOSEN ANIMATION rather than the state behind
 // it. Stalkers can send three small enums and let the client's animation manager re-derive
@@ -22,10 +21,13 @@ static const u8 coop_anim_none = 0xFF;
 
 u8 CBaseMonster::coop_pack_animation()
 {
-	const EMotionAnim anim = control().animation().GetCurAnim();
-	if ((anim == eAnimUndefined) || (u32(anim) >= u32(eAnimCount)))
+	// NOTE: reach CControlAnimationBase through CBaseMonster::anim(), not
+	// control().animation() — the latter is typed as the abstract CControlAnimation, which
+	// exposes only update_frame() and knows nothing about EMotionAnim.
+	const EMotionAnim current = anim().GetCurAnim();
+	if ((current == eAnimUndefined) || (u32(current) >= u32(eAnimCount)))
 		return coop_anim_none;
-	return u8(anim);
+	return u8(current);
 }
 
 void CBaseMonster::coop_apply_animation(u8 packed)
@@ -34,14 +36,14 @@ void CBaseMonster::coop_apply_animation(u8 packed)
 	{
 		// The server has no opinion this frame. Drop any previous override rather than
 		// leaving the puppet latched onto a stale animation forever.
-		control().animation().clear_override_animation();
+		anim().clear_override_animation();
 		return; // also: never index m_anim_storage out of range
 	}
 
 	// index -1 leaves variant selection to select_animation()'s normal path; only the
 	// animation itself is worth a wire byte. set_override_animation ignores animations this
 	// monster does not have, so a mismatched creature simply keeps animating on its own.
-	control().animation().set_override_animation(EMotionAnim(packed), u32(-1));
+	anim().set_override_animation(EMotionAnim(packed), u32(-1));
 }
 
 void CBaseMonster::net_Save(NET_Packet& P)
