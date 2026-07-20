@@ -332,8 +332,16 @@ void CCustomMonster::shedule_Update(u32 DT)
 	while ((NET.size() > 2) && (NET[1].dwTimeStamp < dwTimeCL)) NET.pop_front();
 
 	float dt = float(DT) / 1000.f;
+
+	// MP fork (§19 co-op): a replicated creature decides nothing on the thin client — the
+	// server ran its senses and AI and sent us the result, and the Remote() branch below
+	// already skips Think()/Exec_Action for exactly that reason. Running the visibility
+	// raycasts and the memory managers for every puppet is pure cost, and a crash surface
+	// besides: they reach into A-Life state this client does not have.
+	const bool coop_puppet = Remote() && xr_enet::enabled() && !ai().get_alife();
+
 	// *** general stuff
-	if (g_Alive())
+	if (g_Alive() && !coop_puppet)
 	{
 		if (false && g_mt_config.test(mtAiVision))
 #ifndef DEBUG

@@ -81,6 +81,7 @@ stalker_movement_manager_base::stalker_movement_manager_base(CAI_Stalker* object
 	VERIFY(object);
 	m_object = object;
 	m_velocities = 0;
+	m_replicated_state = false;
 }
 
 stalker_movement_manager_base::~stalker_movement_manager_base()
@@ -166,6 +167,7 @@ void stalker_movement_manager_base::reinit()
 	VERIFY(m_current.equal_to_target(m_target));
 
 	m_last_turn_index = u32(-1);
+	m_replicated_state = false;
 }
 
 IC void stalker_movement_manager_base::setup_head_speed(stalker_movement_params& movement_params)
@@ -620,8 +622,36 @@ void stalker_movement_manager_base::set_nearest_accessible_position(Fvector desi
 	set_desired_position(&desired_position);
 }
 
+// MP fork (§19 co-op): see the header. Called from CAI_Stalker::net_Import on the thin
+// client, which is the only place that knows the server's answer for this creature.
+void stalker_movement_manager_base::set_replicated_state(EBodyState body_state, EMovementType movement_type,
+                                                         EMentalState mental_state)
+{
+	// A crouching stalker is never in the free mental state (set_body_state / update()
+	// both assert on it), and the pair arrives over the wire, so clamp rather than trust.
+	if ((body_state == eBodyStateCrouch) && (mental_state == eMentalStateFree))
+		mental_state = eMentalStateDanger;
+
+	m_current.m_body_state = body_state;
+	m_current.m_movement_type = movement_type;
+	m_current.m_mental_state = mental_state;
+
+	m_target.m_body_state = body_state;
+	m_target.m_movement_type = movement_type;
+	m_target.m_mental_state = mental_state;
+
+	m_replicated_state = true;
+}
+
 void stalker_movement_manager_base::update(u32 time_delta)
 {
+	// MP fork (§19 co-op): a puppet's params are the server's, already applied by
+	// set_replicated_state. Re-deriving them here would overwrite them with defaults and,
+	// worse, run setup_velocities/update_path — client-side pathfinding for a creature the
+	// client does not own. The animation manager reads m_current directly, so just stop.
+	if (m_replicated_state)
+		return;
+
 	VERIFY((m_target.m_mental_state != eMentalStateFree) || (m_target.m_body_state != eBodyStateCrouch));
 
 	if (!enabled())

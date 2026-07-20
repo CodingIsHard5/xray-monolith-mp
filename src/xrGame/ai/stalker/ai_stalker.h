@@ -199,6 +199,10 @@ public:
 	virtual BOOL net_Spawn(CSE_Abstract* DC);
 	virtual void net_Export(NET_Packet& P);
 	virtual void net_Import(NET_Packet& P);
+	// MP fork (§19 co-op): body/movement/mental state packed into the network "flags" byte
+	// so a replicated stalker animates instead of sliding in an idle loop — see net_Export.
+	u8 coop_pack_animation_state() const;
+	void coop_apply_animation_state(u8 packed);
 	virtual void net_Destroy();
 	virtual void net_Save(NET_Packet& P);
 	virtual BOOL net_SaveRelevant();

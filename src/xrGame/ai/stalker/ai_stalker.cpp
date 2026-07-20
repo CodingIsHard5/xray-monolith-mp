@@ -866,6 +866,56 @@ BOOL CAI_Stalker::net_SaveRelevant()
 	return (inherited::net_SaveRelevant() || BOOL(PPhysicsShell() != NULL));
 }
 
+// MP fork (§19 co-op): position and orientation alone leave a replicated stalker sliding
+// across the ground in an idle loop — CStalkerAnimationManager chooses from body state,
+// movement type and mental state, none of which a puppet's (never-run) AI can supply. They
+// are three small enums, and CCustomMonster's wire format already carries a "flags" byte
+// that net_Export has always written as a literal 0 and net_Import throws away. Reuse it:
+// the animation state costs nothing extra on the wire, needs no CSE field, and round-trips
+// through CSE_ALifeCreatureAbstract::UPDATE_Read/Write untouched.
+//
+//   bits 0-1  mental state  (danger / free / panic)
+//   bits 2-3  body state    (crouch / stand)
+//   bits 4-5  movement type (walk / run / stand)
+enum
+{
+	coop_anim_mental_shift = 0,
+	coop_anim_body_shift = 2,
+	coop_anim_movement_shift = 4,
+	coop_anim_field_mask = 0x03
+};
+
+u8 CAI_Stalker::coop_pack_animation_state() const
+{
+	stalker_movement_manager_smart_cover& m = movement();
+	return u8(
+		((u8(m.mental_state()) & coop_anim_field_mask) << coop_anim_mental_shift) |
+		((u8(m.body_state()) & coop_anim_field_mask) << coop_anim_body_shift) |
+		((u8(m.movement_type()) & coop_anim_field_mask) << coop_anim_movement_shift)
+	);
+}
+
+void CAI_Stalker::coop_apply_animation_state(u8 packed)
+{
+	using namespace MonsterSpace;
+
+	// Every 2-bit field has one unused encoding (3); fall back to the resting value rather
+	// than indexing the animation tables out of range with it.
+	const u8 mental = (packed >> coop_anim_mental_shift) & coop_anim_field_mask;
+	const u8 body = (packed >> coop_anim_body_shift) & coop_anim_field_mask;
+	const u8 move = (packed >> coop_anim_movement_shift) & coop_anim_field_mask;
+
+	movement().set_replicated_state(
+		(body == u8(eBodyStateCrouch)) ? eBodyStateCrouch : eBodyStateStand,
+		(move == u8(eMovementTypeWalk))
+			? eMovementTypeWalk
+			: ((move == u8(eMovementTypeRun)) ? eMovementTypeRun : eMovementTypeStand),
+		(mental == u8(eMentalStateDanger))
+			? eMentalStateDanger
+			: ((mental == u8(eMentalStatePanic)) ? eMentalStatePanic : eMentalStateFree)
+	);
+}
+
 void CAI_Stalker::net_Export(NET_Packet& P)
 {
 	R_ASSERT(Local());
@@ -882,7 +932,7 @@ void CAI_Stalker::net_Export(NET_Packet& P)
 	P.w_float(GetfHealth());
 
 	P.w_u32(N.dwTimeStamp);
-	P.w_u8(0);
+	P.w_u8(coop_pack_animation_state());
 	P.w_vec3(N.p_pos);
 	P.w_float /*w_angle8*/(N.o_model);
 	P.w_float /*w_angle8*/(N.o_torso.yaw);
@@ -939,6 +989,7 @@ void CAI_Stalker::net_Import(NET_Packet& P)
 
 	P.r_u32(N.dwTimeStamp);
 	P.r_u8(flags);
+	coop_apply_animation_state(flags); // MP fork (§19 co-op): see net_Export
 	P.r_vec3(N.p_pos);
 	P.r_float /*r_angle8*/(N.o_model);
 	P.r_float /*r_angle8*/(N.o_torso.yaw);

@@ -134,6 +134,13 @@ bool CStalkerAnimationManager::standing() const
 	CAI_Stalker& obj = object();
 	stalker_movement_manager_smart_cover& movement = obj.movement();
 
+	// MP fork (§19 co-op): a replicated stalker's movement manager never runs, so its
+	// desirable speed (CMovementManager::m_speed, the first thing speed() below tests) stays
+	// zero and every puppet is judged to be standing — an idle loop while the network drags
+	// it across the ground. The server already told us what it is doing; believe that.
+	if (movement.replicated_state())
+		return (eMovementTypeStand == movement.movement_type());
+
 	if (movement.speed(obj.character_physics_support()->movement()) < EPS_L)
 		return (true);
 

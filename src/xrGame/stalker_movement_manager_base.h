@@ -81,6 +81,14 @@ public:
 	float speed(const EMovementDirection& movement_direction);
 	void setup_speed_from_animation(const float& speed);
 
+	// MP fork (§19 co-op): a replicated stalker on the thin client is a render puppet — the
+	// server ran its AI and we are told the resulting state. Apply it straight to both the
+	// current and target params so CStalkerAnimationManager picks the same animation the
+	// server's copy is playing, and latch m_replicated_state so update() stops re-deriving
+	// them (which would also start client-side pathfinding for a creature we do not own).
+	void set_replicated_state(EBodyState body_state, EMovementType movement_type, EMentalState mental_state);
+	IC bool replicated_state() const { return m_replicated_state; }
+
 public:
 	IC SBoneRotation const& head_orientation() const;
 	IC Fvector const* desired_position() const;
@@ -128,6 +136,7 @@ private:
 	velocities_type const* m_velocities;
 	float m_danger_head_speed;
 	u32 m_last_turn_index;
+	bool m_replicated_state; // MP fork (§19 co-op): params come from the network, not from AI
 
 protected:
 	CAI_Stalker* m_object;
