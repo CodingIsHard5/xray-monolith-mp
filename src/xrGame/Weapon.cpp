@@ -201,11 +201,18 @@ void CWeapon::UpdateXForm()
 	if (parent && parent->use_simplified_visual())
 		return;
 
-	if (parent->attached(this))
+	// MP fork: latent null-deref — the line above null-checks `parent`, this one did not,
+	// so a parent that is not a CInventoryOwner crashed here (0xC0000005 accessing 0x40).
+	// It never fired while UpdateXForm was only reached from renderable_Render, but the
+	// co-op peer-weapon fix calls it every frame from UpdateCL, including mid-spawn.
+	if (parent && parent->attached(this))
 		return;
 
 	IKinematics* V = smart_cast<IKinematics*>(E->Visual());
-	VERIFY(V);
+	// MP fork: VERIFY is compiled out here, and the calls below dereference V. Same reason
+	// as above: safe from the render path, not safe every frame.
+	if (!V)
+		return;
 
 	// Get matrices
 	int boneL = -1, boneR = -1, boneR2 = -1;
