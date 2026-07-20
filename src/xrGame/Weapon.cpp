@@ -3066,6 +3066,12 @@ void CWeapon::modify_holder_params(float& range, float& fov) const
 
 bool CWeapon::render_item_ui_query()
 {
+	// MP fork (§17 co-op): a PEER's weapon has no inventory on this client (m_pInventory is
+	// NULL) but is now visible, so this render-time query can run for it. Same latent
+	// null-deref class as CWeaponMagazined::IsAmmoAvailable.
+	if (!m_pInventory)
+		return false;
+
 	bool b_is_active_item = (m_pInventory->ActiveItem() == this);
 	bool res = b_is_active_item && IsZoomed() && ZoomHideCrosshair() && ZoomTexture() && !IsRotatingToZoom();
 	return res;

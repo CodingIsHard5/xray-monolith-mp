@@ -351,6 +351,14 @@ bool CWeaponMagazined::TryReload()
 
 bool CWeaponMagazined::IsAmmoAvailable()
 {
+	// MP fork (§17 co-op): m_pInventory is NULL for a PEER's weapon — the item belongs to a
+	// remote actor and is not in any inventory on this client. TryReload() above guards this
+	// exact pointer; this one did not, so the call below ran GetAny() on a null CInventory and
+	// crashed iterating m_ruck/m_belt (0xC0000005 accessing 0x40). Latent until peer weapons
+	// became active/visible and started exercising this path.
+	if (!m_pInventory)
+		return (false);
+
 	if (smart_cast<CWeaponAmmo*>(m_pInventory->GetAny(m_ammoTypes[m_ammoType].c_str())))
 		return (true);
 	else
