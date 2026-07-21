@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§19 co-op): xr_enet::enabled()
 #include "LevelGameDef.h"
 #include "script_process.h"
 #include "xrServer_Objects_ALife_Monsters.h"
@@ -788,6 +789,22 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 				game_PlayerState* ps = get_eid(id_src);
 				if (!ps) break;
 				id_src = ps->GameID;
+			}
+
+			// MP fork (§19 co-op): confirm client-fired hits actually arrive. Whether a joining
+			// player's bullets do anything is otherwise unobservable from outside the process —
+			// there is no existing log on this path, and aiming a test client at a target
+			// through a synthetic input layer has proved unreliable. Throttled hard, because a
+			// firefight raises a great many of these: first 50 verbatim, then one in 200.
+			if (xr_enet::enabled())
+			{
+				static u32 s_coop_hits = 0;
+				++s_coop_hits;
+				if ((s_coop_hits <= 50) || ((s_coop_hits % 200) == 0))
+				{
+					Msg("- XRNET(hit): #%u  hitter %u -> hitted %u", s_coop_hits, id_src, id_dest);
+					FlushLog();
+				}
 			}
 
 			OnHit(id_src, id_dest, tNetPacket);
