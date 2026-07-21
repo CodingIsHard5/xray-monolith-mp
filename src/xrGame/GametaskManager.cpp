@@ -259,17 +259,22 @@ void CGameTaskManager::coop_apply_tasks(NET_Packet& packet)
 		shared_str id;
 		packet.r_stringZ(id);
 
+		// Mirror of the writer: pull the blob out and hand load_task a reader over it. Reading
+		// a fixed number of bytes also means a task whose format ever drifts cannot
+		// desynchronise every task after it.
 		const u16 size = packet.r_u16();
-		const u32 next = packet.r_tell() + size;
+		xr_vector<u8> blob;
+		blob.resize(size);
+		if (size)
+			packet.r(&blob[0], size);
 
 		CGameTask* const task = xr_new<CGameTask>();
 		task->m_ID = id;
-		task->load_task(packet);
-
-		// Trust the length, not load_task's appetite: if a task's format ever drifts, skipping
-		// to the recorded end keeps the rest of the list readable instead of desynchronising
-		// every task after it.
-		packet.r_seek(next);
+		if (size)
+		{
+			IReader reader(&blob[0], int(size));
+			task->load_task(reader);
+		}
 
 		SGameTaskKey key;
 		key.task_id = id;
@@ -300,14 +305,16 @@ void CGameTaskManager::coop_broadcast_tasks()
 		if (!task)
 			continue;
 
-		packet.w_stringZ(task->m_ID);
+		// save_task writes to an IWriter (the savegame path), not to a packet, so serialise
+		// into memory and carry the bytes. Length-prefixed, so a client that cannot make sense
+		// of one task can skip it rather than losing the rest of the list.
+		CMemoryWriter blob;
+		task->save_task(blob);
 
-		// Length-prefixed, so a client that cannot make sense of one task can still skip it
-		// rather than losing the rest of the list.
-		u32 size_pos;
-		packet.w_chunk_open16(size_pos);
-		task->save_task(packet);
-		packet.w_chunk_close16(size_pos);
+		packet.w_stringZ(task->m_ID);
+		packet.w_u16(u16(blob.size()));
+		if (blob.size())
+			packet.w(blob.pointer(), blob.size());
 	}
 
 	Level().Server->SendBroadcast(BroadcastCID, packet, net_flags(TRUE, TRUE));
