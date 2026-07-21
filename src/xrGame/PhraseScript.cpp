@@ -156,6 +156,38 @@ bool CDialogScriptHelper::Precondition(const CGameObject* pSpeakerGO, LPCSTR dia
 	return predicate_result;
 }
 
+// MP fork (§19 co-op): not every dialogue action changes the world. Logging what phrases
+// actually carry settled two bugs at once:
+//   "Goodbye" -> dialogs.break_dialog      (closes the conversation window)
+//   "[Trade]" -> dialogs.npc_is_trader     (turns the trade UI on)
+// Both are things that happen to the PLAYER, and both were being shipped to a server that has
+// no conversation window and no trade UI, so they silently did nothing. Meanwhile money,
+// items, info portions and tasks genuinely must run on the server or they evaporate.
+//
+// So route per action rather than per phrase: UI actions run on the client that asked, world
+// actions run on the server, and each runs in exactly one place. Matched on the function name
+// so a module prefix does not matter, and kept as a list because more will surface.
+static bool coop_is_client_side_action(LPCSTR action)
+{
+	if (!action)
+		return false;
+
+	static LPCSTR const client_actions[] =
+	{
+		"break_dialog",   // ends the conversation - Goodbye
+		"npc_is_trader",  // switches the talk window into trade mode
+		"start_trade",    // opens the trade menu directly
+		"disable_ui",
+		"enable_ui",
+	};
+
+	for (u32 i = 0; i < (sizeof(client_actions) / sizeof(client_actions[0])); ++i)
+		if (strstr(action, client_actions[i]))
+			return true;
+
+	return false;
+}
+
 void CDialogScriptHelper::Action(const CGameObject* pSpeakerGO, LPCSTR dialog_id, LPCSTR phrase_id) const
 {
 	for (u32 i = 0; i < Actions().size(); ++i)
@@ -234,6 +266,7 @@ bool CDialogScriptHelper::Precondition(const CGameObject* pSpeakerGO1,
 	return predicate_result;
 }
 
+
 void CDialogScriptHelper::Action(const CGameObject* pSpeakerGO1, const CGameObject* pSpeakerGO2, LPCSTR dialog_id,
                                  LPCSTR phrase_id) const
 {
@@ -244,16 +277,13 @@ void CDialogScriptHelper::Action(const CGameObject* pSpeakerGO1, const CGameObje
 	// has both speakers and the same scripts, so it can run exactly this function for real.
 	// PRECONDITIONS deliberately stay local — they only read state and the phrase list has to
 	// be built synchronously to draw the menu.
-	if (xr_enet::enabled() && !ai().get_alife() && pSpeakerGO1 && pSpeakerGO2)
-	{
-		// Diagnostic: which actions a phrase actually carries is the missing fact behind both
-		// "the trade menu does not pop up" and "goodbye does not exit" — those may be script
-		// actions with CLIENT-side effects, which this routing sends away to the server.
-		for (u32 i = 0; i < Actions().size(); ++i)
-			Msg("- XRNET(dlg): forwarding action '%s' (dialog '%s' phrase '%s')",
-				Actions()[i].c_str(), dialog_id ? dialog_id : "?", phrase_id ? phrase_id : "?");
-		FlushLog();
+	const bool coop_client = xr_enet::enabled() && !ai().get_alife();
+	const bool coop_server = xr_enet::enabled() && !!ai().get_alife();
 
+	if (coop_client && pSpeakerGO1 && pSpeakerGO2)
+	{
+		// Hand the phrase to the server so its world-changing actions are real. It skips the
+		// client-side ones below, and we run those here — each action happens exactly once.
 		NET_Packet packet;
 		packet.w_begin(M_XRNET_DIALOG_ACTION);
 		packet.w_u16(pSpeakerGO1->ID());
@@ -261,13 +291,19 @@ void CDialogScriptHelper::Action(const CGameObject* pSpeakerGO1, const CGameObje
 		packet.w_stringZ(dialog_id ? dialog_id : "");
 		packet.w_stringZ(phrase_id ? phrase_id : "");
 		Level().Send(packet, net_flags(TRUE, TRUE));
-		return;
 	}
 
-	TransferInfo(smart_cast<const CInventoryOwner*>(pSpeakerGO1));
+	// Info portions are world state: the server owns them.
+	if (!coop_client)
+		TransferInfo(smart_cast<const CInventoryOwner*>(pSpeakerGO1));
 
 	for (u32 i = 0; i < Actions().size(); ++i)
 	{
+		// Each action belongs to exactly one side — see coop_is_client_side_action.
+		const bool client_side = coop_is_client_side_action(*Actions()[i]);
+		if ((coop_client && !client_side) || (coop_server && client_side))
+			continue;
+
 		::luabind::functor<void> lua_function;
 		THROW(*Actions()[i]);
 

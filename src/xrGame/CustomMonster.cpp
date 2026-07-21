@@ -310,17 +310,18 @@ void CCustomMonster::coop_refresh_export_sample()
 	if (!_valid(Position()) || !_valid(XFORM()))
 		return;
 
-	// NOTE THE SIGN. Fmatrix::rotateY(a) sets k = (sin a, 0, cos a), but Fvector::getHP
-	// returns h = -atan(x/z), i.e. it gives back -a for that same vector. Feeding h straight
-	// through therefore mirrored every replicated NPC's facing, and because the leg-animation
-	// code picks forward/back/left/right by comparing heading against body yaw, everything
-	// downstream of it was wrong too. Negate to get the angle rotateY actually wants.
-	float model_yaw, model_pitch;
-	XFORM().k.getHP(model_yaw, model_pitch);
-	current.o_model = angle_normalize(-model_yaw);
-
+	// DO NOT sample the heading from XFORM. I tried that, and it silently FROZE every NPC's
+	// facing, because the loop closes: UpdateCL does XFORM().rotateY(NET_Last.o_model), and
+	// that block is NOT gated on Remote(), so it runs on the server for its own local
+	// creatures too. Sampling XFORM to fill NET, which then drives XFORM, is self-referential
+	// and the angle sticks at whatever it happened to be — reported as "always facing roughly
+	// the same direction". The sign correction I then added on top was chasing a symptom of
+	// the loop rather than a real convention mismatch.
+	//
+	// m_body is the movement manager's own orientation, driven independently of XFORM, which
+	// is exactly why stock samples it here. Same convention rotateY expects, no negation.
+	current.o_model = movement().m_body.current.yaw;
 	current.o_torso = movement().m_body.current;
-	current.o_torso.yaw = current.o_model;
 	current.p_pos = Position();
 	current.fHealth = GetfHealth();
 	NET.push_back(current);
