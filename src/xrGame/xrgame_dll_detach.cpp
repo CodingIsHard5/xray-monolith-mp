@@ -43,6 +43,7 @@ extern void DestroyUIGeom();
 extern void InitHudSoundSettings();
 
 #include "../xrEngine/IGame_Persistent.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§19 co-op): xr_enet::enabled()
 
 void init_game_globals()
 {
@@ -54,6 +55,17 @@ void init_game_globals()
 		//.		CEncyclopediaArticle::InitInternal			();
 		CPhraseDialog::InitInternal();
 		InventoryUtilities::CreateShaders();
+	}
+	else if (xr_enet::enabled())
+	{
+		// MP fork (§19 co-op): a stock dedicated server never runs dialogue, so it skips this
+		// table with everything else in the client-only block. Ours EXECUTES dialogue actions
+		// on behalf of its players (xrServer::coop_run_dialog_action), and that resolves a
+		// phrase through exactly this table — with it unbuilt, the lookup dereferenced a null
+		// vector and the server died the instant anyone picked a line, which the players see
+		// as "the conversation crashed". Build the table; the shaders stay client-only,
+		// they are genuinely about rendering.
+		CPhraseDialog::InitInternal();
 	};
 	CCharacterInfo::InitInternal();
 	CSpecificCharacter::InitInternal();
