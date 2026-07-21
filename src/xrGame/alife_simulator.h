@@ -15,6 +15,16 @@
 #pragma warning(push)
 #pragma warning(disable:4005)
 
+namespace inventory { namespace upgrade { class Manager; } }
+
+// MP fork (§19 co-op): the inventory upgrade manager is owned by the A-Life simulator, and a
+// thin client never registers one in ai() — so every upgrade lookup went through
+// ai().alife() and dereferenced null, meaning a visit to any technician crashed the client.
+// The manager is built from configs rather than from world state, so the client's inert
+// simulator has a perfectly good one. Prefer the real simulator; fall back to the inert
+// instance. Returns null only if neither exists, which callers must handle.
+inventory::upgrade::Manager* coop_upgrade_manager();
+
 class CALifeSimulator :
 	public CALifeUpdateManager,
 	public CALifeInteractionManager

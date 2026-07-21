@@ -183,6 +183,18 @@ CALifeSimulator* CALifeSimulator::client_inert_instance()
 	return g_client_inert_alife;
 }
 
+// MP fork (§19 co-op): see the header.
+inventory::upgrade::Manager* coop_upgrade_manager()
+{
+	if (ai().get_alife())
+		return &ai().alife().inventory_upgrade_manager();
+
+	if (g_client_inert_alife)
+		return &g_client_inert_alife->inventory_upgrade_manager();
+
+	return NULL;
+}
+
 CALifeSimulator::~CALifeSimulator()
 {
 	VERIFY(!ai().get_alife());

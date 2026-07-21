@@ -60,11 +60,12 @@ bool UIProperty::init_property(shared_str const& property_id)
 
 UIProperty::Property_type* UIProperty::get_property()
 {
-	if (!ai().get_alife())
-	{
+	// MP fork (§19 co-op): was "no A-Life -> no properties", which blanked the upgrade panel
+	// on a thin client. The manager comes from configs, so the inert client sim can answer.
+	inventory::upgrade::Manager* const manager = coop_upgrade_manager();
+	if (!manager)
 		return NULL;
-	}
-	Property_type* proper = ai().alife().inventory_upgrade_manager().get_property(m_property_id);
+	Property_type* proper = manager->get_property(m_property_id);
 	VERIFY(proper);
 	return proper;
 }
@@ -99,8 +100,10 @@ bool UIProperty::compute_value(ItemUpgrades_type const& item_upgrades)
 	ItemUpgrades_type::const_iterator ie_upg = item_upgrades.end();
 	for (; ib_upg != ie_upg; ++ib_upg)
 	{
-		Upgrade_type* upgr = ai().alife().inventory_upgrade_manager().get_upgrade(*ib_upg);
-		VERIFY(upgr);
+		inventory::upgrade::Manager* const upgrade_manager = coop_upgrade_manager();
+		Upgrade_type* upgr = upgrade_manager ? upgrade_manager->get_upgrade(*ib_upg) : NULL;
+		if (!upgr)
+			continue;
 		for (u8 i = 0; i < inventory::upgrade::max_properties_count; i++)
 		{
 			if (upgr->get_property_name(i)._get() == m_property_id._get())

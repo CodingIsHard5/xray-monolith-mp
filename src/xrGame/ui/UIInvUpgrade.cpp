@@ -55,7 +55,12 @@ void UIUpgrade::init_upgrade(LPCSTR upgrade_id, CInventoryItem& item)
 
 UIUpgrade::Upgrade_type* UIUpgrade::get_upgrade()
 {
-	Upgrade_type* res = ai().alife().inventory_upgrade_manager().get_upgrade(m_upgrade_id);
+	// MP fork (§19 co-op): via coop_upgrade_manager — a thin client has no A-Life simulator
+	// registered in ai(), so this used to deref null and crash on any visit to a technician.
+	inventory::upgrade::Manager* const manager = coop_upgrade_manager();
+	if (!manager)
+		return NULL;
+	Upgrade_type* res = manager->get_upgrade(m_upgrade_id);
 	VERIFY(res);
 	return res;
 }

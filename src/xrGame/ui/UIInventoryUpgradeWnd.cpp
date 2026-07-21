@@ -406,5 +406,10 @@ void CUIInventoryUpgradeWnd::set_info_cur_upgrade(Upgrade_type* upgrade)
 
 CUIInventoryUpgradeWnd::Manager_type& CUIInventoryUpgradeWnd::get_manager()
 {
-	return ai().alife().inventory_upgrade_manager();
+	// MP fork (§19 co-op): see coop_upgrade_manager. This one returns a reference, so a
+	// missing manager is unrecoverable — but it cannot happen: the client's inert simulator
+	// always constructs one (CALifeSimulatorBase::reload).
+	Manager_type* const manager = coop_upgrade_manager();
+	R_ASSERT2(manager, "no inventory upgrade manager (neither A-Life nor inert client sim)");
+	return *manager;
 }
