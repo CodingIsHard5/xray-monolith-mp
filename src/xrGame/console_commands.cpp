@@ -16,6 +16,8 @@
 #include "hit.h"
 #include "PHDestroyable.h"
 #include "actor.h"
+#include "InventoryOwner.h"                  // MP fork (§19 co-op): coop_talk_nearest
+#include "ai/stalker/ai_stalker.h"           // MP fork (§19 co-op): coop_talk_nearest
 #include "Actor_Flags.h"
 #include "customzone.h"
 #include "script_engine.h"
@@ -1426,6 +1428,58 @@ public:
 	};
 };
 #endif // #if defined(USE_DEBUGGER) && defined(USE_LUA_STUDIO)
+
+// MP fork (§19 co-op): reproduce a dialogue without fighting the input layer. Talking needs
+// the player aimed at an NPC and a keypress, and driving that into a wine window from a script
+// has proved unreliable — which left the co-op chat crash being fixed by inference rather than
+// observation, twice, wrongly. This picks the nearest living stalker and starts the same
+// conversation the use key would, so the path is reproducible on demand and stays testable
+// after it works. Debug/diagnostic only; it does nothing an ordinary keypress could not.
+class CCC_CoopTalkNearest : public IConsole_Command
+{
+public:
+	CCC_CoopTalkNearest(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+
+	virtual void Execute(LPCSTR args)
+	{
+		CActor* const actor = smart_cast<CActor*>(Level().CurrentControlEntity());
+		if (!actor)
+		{
+			Msg("! coop_talk_nearest: no controlled actor");
+			return;
+		}
+
+		float best_distance = flt_max;
+		CAI_Stalker* best = NULL;
+
+		for (u32 i = 0, n = Level().Objects.o_count(); i < n; ++i)
+		{
+			CAI_Stalker* const stalker = smart_cast<CAI_Stalker*>(Level().Objects.o_get_by_iterator(i));
+			if (!stalker || !stalker->g_Alive() || (stalker == actor))
+				continue;
+
+			const float distance = stalker->Position().distance_to(actor->Position());
+			if (distance < best_distance)
+			{
+				best_distance = distance;
+				best = stalker;
+			}
+		}
+
+		if (!best)
+		{
+			Msg("! coop_talk_nearest: no living stalker on the level");
+			return;
+		}
+
+		Msg("- coop_talk_nearest: talking to '%s' (id %u) at %.1fm", best->cName().c_str(), best->ID(),
+			best_distance);
+		FlushLog();
+		actor->RunTalkDialog(smart_cast<CInventoryOwner*>(best), false);
+	}
+
+	virtual void Info(TInfo& I) { xr_strcpy(I, "co-op diag: start a dialogue with the nearest living stalker"); }
+};
 
 class CCC_DumpInfos : public IConsole_Command
 {
@@ -3000,6 +3054,7 @@ void CCC_RegisterCommands()
 
 #ifdef DEBUG
 	CMD1(CCC_DumpInfos, "dump_infos");
+	CMD1(CCC_CoopTalkNearest, "coop_talk_nearest"); // MP fork (§19 co-op): see the class
 	CMD1(CCC_DumpTasks, "dump_tasks");
 	CMD1(CCC_DumpMap, "dump_map");
 	CMD1(CCC_DumpCreatures, "dump_creatures");
