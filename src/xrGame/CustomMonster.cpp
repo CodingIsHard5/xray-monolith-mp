@@ -310,9 +310,14 @@ void CCustomMonster::coop_refresh_export_sample()
 	if (!_valid(Position()) || !_valid(XFORM()))
 		return;
 
+	// NOTE THE SIGN. Fmatrix::rotateY(a) sets k = (sin a, 0, cos a), but Fvector::getHP
+	// returns h = -atan(x/z), i.e. it gives back -a for that same vector. Feeding h straight
+	// through therefore mirrored every replicated NPC's facing, and because the leg-animation
+	// code picks forward/back/left/right by comparing heading against body yaw, everything
+	// downstream of it was wrong too. Negate to get the angle rotateY actually wants.
 	float model_yaw, model_pitch;
 	XFORM().k.getHP(model_yaw, model_pitch);
-	current.o_model = angle_normalize(model_yaw);
+	current.o_model = angle_normalize(-model_yaw);
 
 	current.o_torso = movement().m_body.current;
 	current.o_torso.yaw = current.o_model;
@@ -630,6 +635,19 @@ void CCustomMonster::UpdateCL()
 			if (coop_puppet && (dwTime < NET.front().dwTimeStamp))
 				dwTime = NET.front().dwTimeStamp;
 
+			// MP fork (§19 co-op): the puppet's real ground speed, from the two newest samples.
+			// This is the number CStalkerAnimationManager::standing() actually needs. Computed
+			// here rather than inside the interpolation branch: that branch is skipped whenever
+			// a packet is late, and a stale speed left an NPC that had stopped still playing a
+			// walk cycle.
+			if (coop_puppet && (NET.size() >= 2))
+			{
+				const net_update& prev = NET[NET.size() - 2];
+				const net_update& last = NET.back();
+				const u32 gap = last.dwTimeStamp - prev.dwTimeStamp;
+				m_coop_net_speed = gap ? (prev.p_pos.distance_to(last.p_pos) / (float(gap) / 1000.f)) : 0.f;
+			}
+
 			net_update& N = NET.back();
 			if ((dwTime > N.dwTimeStamp) || (NET.size() < 2))
 			{
@@ -677,15 +695,6 @@ void CCustomMonster::UpdateCL()
 					u32 d2 = B.dwTimeStamp - A.dwTimeStamp;
 					//			VERIFY					(d2);
 					float factor = d2 ? (float(d1) / float(d2)) : 1.f;
-
-					// MP fork (§19 co-op): the puppet's real ground speed, straight from the two
-					// samples we are interpolating between. This is the number the animation
-					// manager actually needs — see CStalkerAnimationManager::standing().
-					if (coop_puppet)
-					{
-						const float seconds = float(d2) / 1000.f;
-						m_coop_net_speed = (seconds > EPS) ? (A.p_pos.distance_to(B.p_pos) / seconds) : 0.f;
-					}
 
 					Fvector l_tOldPosition = Position();
 					NET_Last.lerp(A, B, factor);

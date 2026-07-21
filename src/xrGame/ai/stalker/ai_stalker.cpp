@@ -1096,6 +1096,19 @@ void CAI_Stalker::update_object_handler()
 
 void CAI_Stalker::create_anim_mov_ctrl(CBlend* b, Fmatrix* start_pose, bool local_animation)
 {
+	// MP fork (§19 co-op): a replicated stalker must never have its movement driven by its
+	// animation. Once an animation-movement controller exists,
+	// CCustomMonster::UpdateCL stops applying the network transform at all — both the
+	// rotateY and the translate_over are guarded on !animation_movement_controlled() — so the
+	// puppet wanders off wherever its local animation takes it and then snaps back when that
+	// animation ends. GAMMA's NPCs use movement-controlling animations constantly (sitting
+	// down at fires, standing up, transitions), so this is not a corner case.
+	//
+	// The animation still PLAYS; only the movement extraction is suppressed. Position comes
+	// from the wire, which is the whole point of a puppet.
+	if (Remote() && xr_enet::enabled() && !ai().get_alife())
+		return;
+
 	inherited::create_anim_mov_ctrl(b, start_pose, local_animation);
 }
 
