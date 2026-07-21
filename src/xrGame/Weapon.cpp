@@ -1542,7 +1542,16 @@ bool CWeapon::Action(u16 cmd, u32 flags)
 	{
 	case kWPN_FIRE:
 		if (IsPending())
+		{
+			// Diagnostic: this is the drop that the player experiences as an unresponsive gun.
+			if (coop_own_weapon(H_Parent()))
+			{
+				Msg("- XRNET(wpn): FIRE dropped, pending in state %u [%s]", GetState(),
+					cNameSect().c_str());
+				FlushLog();
+			}
 			return false;
+		}
 
 		if (flags & CMD_START)
 		{
@@ -2240,8 +2249,18 @@ void CWeapon::SwitchState(u32 S)
 {
 	if (coop_own_weapon(H_Parent()))
 	{
+		// Diagnostic: "guns usually unresponsive" is what a stuck pending flag looks like -
+		// CWeapon::Action drops every command while IsPending(). Log the transitions and the
+		// flag so the exact state it stalls in is visible instead of inferred.
+		Msg("- XRNET(wpn): switch %u -> %u (pending=%d) [%s]", GetState(), S, IsPending() ? 1 : 0,
+			cNameSect().c_str());
+
 		SetNextState(S);
 		OnStateSwitch(S, GetState());
+
+		Msg("- XRNET(wpn):   after: state=%u next=%u pending=%d", GetState(), GetNextState(),
+			IsPending() ? 1 : 0);
+		FlushLog();
 		return;
 	}
 

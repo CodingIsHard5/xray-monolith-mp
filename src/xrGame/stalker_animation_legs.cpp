@@ -263,6 +263,18 @@ MotionID CStalkerAnimationManager::legs_no_move_animation()
 	const xr_vector<MotionID>& animation = m_data_storage->m_part_animations.A[body_state].m_in_place->A;
 
 	stalker_movement_manager_smart_cover& movement = object().movement();
+
+	// MP fork (§19 co-op): a standing replicated NPC has nothing to turn towards. This
+	// function plays a TURN-IN-PLACE animation whenever target yaw differs from current, and
+	// on a puppet the target is written from head orientation (just below, and from
+	// legs_process_direction) which nothing drives — so it never matched, and every stationary
+	// NPC shuffled its feet forever with its legs pointing somewhere other than its body.
+	// A puppet expresses turning by its replicated heading changing over time, which rotates
+	// the model directly; there is no separate turn to animate. Make target agree with
+	// current so the idle animation is chosen.
+	if (movement.replicated_state())
+		movement.m_body.target.yaw = movement.m_body.current.yaw;
+
 	const SBoneRotation& body_orientation = movement.body_orientation();
 	float current = body_orientation.current.yaw;
 	float target = body_orientation.target.yaw;
