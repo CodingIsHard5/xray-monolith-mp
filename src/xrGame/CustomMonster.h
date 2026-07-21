@@ -119,6 +119,13 @@ public:
 	// MP fork (§19 co-op): refresh the outgoing sample from the creature's CURRENT state.
 	// Called from net_Export on the co-op server — see CustomMonster.cpp.
 	void coop_refresh_export_sample();
+
+	// MP fork (§19 co-op): how fast this puppet is ACTUALLY moving, measured from the
+	// interpolated network samples (m/s). A replicated creature's movement manager never
+	// runs, so its own speed() is structurally zero and cannot be used to tell whether it is
+	// walking or standing — see CStalkerAnimationManager::standing().
+	float m_coop_net_speed;
+	IC float coop_net_speed() const { return m_coop_net_speed; }
 	BOOL NET_WasInterpolating; // previous update was by interpolation or by extrapolation
 	u32 NET_Time; // server time of last update
 	//------------------------------

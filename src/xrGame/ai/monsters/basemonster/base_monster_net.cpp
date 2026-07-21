@@ -8,6 +8,7 @@
 #include "../../../PHDestroyable.h"
 #include "../../../CharacterPhysicsSupport.h"
 #include "../control_animation_base.h"   // MP fork (§19 co-op): replicated animation
+#include "../../../../xrNetServer/xr_enet_transport.h"   // MP fork (§19 co-op): xr_enet::enabled()
 
 // MP fork (§19 co-op): mutants replicate the CHOSEN ANIMATION rather than the state behind
 // it. Stalkers can send three small enums and let the client's animation manager re-derive
@@ -116,9 +117,24 @@ void CBaseMonster::net_Import(NET_Packet& P)
 	P.r_float /*r_angle8*/(N.o_torso.yaw);
 	P.r_float /*r_angle8*/(N.o_torso.pitch);
 	P.r_float /*r_angle8*/(N.o_torso.roll);
-	id_Team = P.r_u8();
-	id_Squad = P.r_u8();
-	id_Group = P.r_u8();
+	// MP fork (§19 co-op): DISCARD these on a puppet — see CCustomMonster::net_Import for the
+	// full reasoning. Short version: agent_manager() resolves through
+	// seniority_holder().team(g_Team()).squad(g_Squad()).group(g_Group()), and a group's
+	// CAgentManager only exists once a member REGISTERS in it (CEntity::ChangeTeam is the only
+	// path that does that). Assigning raw leaves the creature registered in one group while
+	// reporting another, so net_Relcase later dereferences a null component — a real crash
+	// from live play, symbolicated to CAgentManager::remove_links.
+	{
+		const u8 net_team = P.r_u8();
+		const u8 net_squad = P.r_u8();
+		const u8 net_group = P.r_u8();
+		if (!(xr_enet::enabled() && !ai().get_alife()))
+		{
+			id_Team = net_team;
+			id_Squad = net_squad;
+			id_Group = net_group;
+		}
+	}
 
 	GameGraph::_GRAPH_ID l_game_vertex_id = ai_location().game_vertex_id();
 	P.r(&l_game_vertex_id, sizeof(l_game_vertex_id));

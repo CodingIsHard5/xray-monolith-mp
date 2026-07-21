@@ -104,6 +104,7 @@ CCustomMonster::CCustomMonster() :
 	m_already_dead = false;
 	m_invulnerable = false;
 	m_moving_object = 0;
+	m_coop_net_speed = 0.f;
 }
 
 CCustomMonster::~CCustomMonster()
@@ -291,8 +292,21 @@ void CCustomMonster::coop_refresh_export_sample()
 
 	net_update current;
 	current.dwTimeStamp = now;
-	current.o_model = movement().m_body.current.yaw;
+
+	// Take the facing from the OBJECT TRANSFORM, not from movement().m_body.current.yaw.
+	// The client applies this with XFORM().rotateY(o_model), which replaces the rotation
+	// outright, so o_model has to be the creature's real world heading. m_body is the
+	// movement manager's own idea of where the body should be pointing; for a stalker whose
+	// rotation is animation-driven it is not the same thing, and using it left every
+	// replicated NPC facing whatever value it happened to hold — reported from play as
+	// "npcs are all facing one direction". A pure Y-rotation has k = (sin a, 0, cos a), so
+	// the heading getHP() returns is exactly the angle rotateY() wants back.
+	float model_yaw, model_pitch;
+	XFORM().k.getHP(model_yaw, model_pitch);
+	current.o_model = angle_normalize(model_yaw);
+
 	current.o_torso = movement().m_body.current;
+	current.o_torso.yaw = current.o_model;
 	current.p_pos = Position();
 	current.fHealth = GetfHealth();
 	NET.push_back(current);
@@ -342,9 +356,32 @@ void CCustomMonster::net_Import(NET_Packet& P)
 	P.r_float /*r_angle8*/(N.o_torso.pitch);
 	P.r_float /*r_angle8*/(N.o_torso.roll);
 
-	id_Team = P.r_u8();
-	id_Squad = P.r_u8();
-	id_Group = P.r_u8();
+	// MP fork (§19 co-op): DISCARD the replicated team/squad/group on a puppet. Stock assigns
+	// these three ids raw, which is fine when nothing replicates them — but CAI_Stalker::
+	// agent_manager() resolves through
+	//   Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(g_Group())
+	// and a group's CAgentManager is only created when a member REGISTERS in it
+	// (CEntity::ChangeTeam is the only path that unregisters from the old group and registers
+	// in the new one). Assigning raw leaves the creature registered in the group it spawned
+	// into while REPORTING a different one, so agent_manager() hands back a group that was
+	// never populated and net_Relcase dereferences its null components — a real crash from
+	// live play, symbolicated to CAgentManager::remove_links.
+	// Keeping the spawn-time ids leaves the hierarchy self-consistent, which is what actually
+	// matters here: a puppet runs no AI, so team/squad/group have no other consumer on this
+	// client. (Routing through ChangeTeam would be the "correct" fix, but it churns
+	// registration and fires on_before/on_after_change_team AI hooks on every difference —
+	// not a trade worth making for a value nothing here reads.)
+	{
+		const u8 net_team = P.r_u8();
+		const u8 net_squad = P.r_u8();
+		const u8 net_group = P.r_u8();
+		if (!(xr_enet::enabled() && !ai().get_alife()))
+		{
+			id_Team = net_team;
+			id_Squad = net_squad;
+			id_Group = net_group;
+		}
+	}
 
 	if (NET.empty() || (NET.back().dwTimeStamp < N.dwTimeStamp))
 	{
@@ -629,6 +666,16 @@ void CCustomMonster::UpdateCL()
 					u32 d2 = B.dwTimeStamp - A.dwTimeStamp;
 					//			VERIFY					(d2);
 					float factor = d2 ? (float(d1) / float(d2)) : 1.f;
+
+					// MP fork (§19 co-op): the puppet's real ground speed, straight from the two
+					// samples we are interpolating between. This is the number the animation
+					// manager actually needs — see CStalkerAnimationManager::standing().
+					if (coop_puppet)
+					{
+						const float seconds = float(d2) / 1000.f;
+						m_coop_net_speed = (seconds > EPS) ? (A.p_pos.distance_to(B.p_pos) / seconds) : 0.f;
+					}
+
 					Fvector l_tOldPosition = Position();
 					NET_Last.lerp(A, B, factor);
 					if (Local())

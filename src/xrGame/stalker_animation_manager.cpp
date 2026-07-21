@@ -134,12 +134,21 @@ bool CStalkerAnimationManager::standing() const
 	CAI_Stalker& obj = object();
 	stalker_movement_manager_smart_cover& movement = obj.movement();
 
-	// MP fork (§19 co-op): a replicated stalker's movement manager never runs, so its
-	// desirable speed (CMovementManager::m_speed, the first thing speed() below tests) stays
-	// zero and every puppet is judged to be standing — an idle loop while the network drags
-	// it across the ground. The server already told us what it is doing; believe that.
+	// MP fork (§19 co-op): a replicated stalker's movement manager never runs, so its own
+	// speed() is structurally zero and cannot answer this. Measure the puppet's real ground
+	// speed from the network samples instead.
+	//
+	// This deliberately keeps the SPEED test as the primary one, exactly as the stock code
+	// below does. An earlier version asked movement_type() alone, and that is a different
+	// question: movement type describes HOW a creature would move, not whether it is moving.
+	// Idle NPCs routinely sit at "walk" with zero speed, so every one of them played a walk
+	// cycle on the spot — reported from play as "all playing a walking animation".
 	if (movement.replicated_state())
+	{
+		if (object().coop_net_speed() < EPS_L)
+			return (true);
 		return (eMovementTypeStand == movement.movement_type());
+	}
 
 	if (movement.speed(obj.character_physics_support()->movement()) < EPS_L)
 		return (true);

@@ -85,7 +85,16 @@ extern Flags32 psAI_Flags;
 // of the non-fatal path, so balance the stack ourselves on the way out.
 static void coop_lua_balance_stack(lua_State* L)
 {
-	if (L && lua_gettop(L) > 0 && lua_isstring(L, -1))
+	if (!L)
+		return;
+
+	// Pop EXACTLY ONE value, whatever its type. pcall's contract is that a failure leaves
+	// precisely one error object on the stack, and that is what we are cleaning up.
+	// A first attempt only popped when the top was a string — but luabind raises plenty of
+	// non-string errors (its own error objects, tables from script-side error(), ...), so the
+	// leak survived for exactly the errors dialogue produces most, and chatting still ended
+	// in the VM. Type is not the question here; balance is.
+	if (lua_gettop(L) > 0)
 		lua_pop(L, 1);
 }
 
@@ -354,8 +363,7 @@ int CScriptEngine::lua_pcall_failed(lua_State* L)
 
 	if (!log_this)
 	{
-		if (lua_isstring(L, -1))
-			lua_pop(L, 1);
+		coop_lua_balance_stack(L);
 		return (LUA_ERRRUN);
 	}
 
@@ -391,7 +399,10 @@ int CScriptEngine::lua_pcall_failed(lua_State* L)
 	else
 		Debug.fatal(DEBUG_INFO, error_msg);
 #endif
-	if (lua_isstring(L, -1))
+	// Same reasoning as coop_lua_balance_stack: pop the error object regardless of type.
+	// Stock only ever reached here via the exceptions build, because Debug.fatal above does
+	// not return — so the string-only test was effectively dead code and never exercised.
+	if (lua_gettop(L) > 0)
 		lua_pop(L, 1);
 	return (LUA_ERRRUN);
 }
