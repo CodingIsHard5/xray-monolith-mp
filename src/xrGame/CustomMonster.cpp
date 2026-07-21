@@ -310,18 +310,29 @@ void CCustomMonster::coop_refresh_export_sample()
 	if (!_valid(Position()) || !_valid(XFORM()))
 		return;
 
-	// DO NOT sample the heading from XFORM. I tried that, and it silently FROZE every NPC's
-	// facing, because the loop closes: UpdateCL does XFORM().rotateY(NET_Last.o_model), and
-	// that block is NOT gated on Remote(), so it runs on the server for its own local
-	// creatures too. Sampling XFORM to fill NET, which then drives XFORM, is self-referential
-	// and the angle sticks at whatever it happened to be — reported as "always facing roughly
-	// the same direction". The sign correction I then added on top was chasing a symptom of
-	// the loop rather than a real convention mismatch.
+	// Sample whichever source is actually AUTHORITATIVE for this creature's facing, because
+	// which one that is varies — and getting it wrong produced both facing bugs so far.
 	//
-	// m_body is the movement manager's own orientation, driven independently of XFORM, which
-	// is exactly why stock samples it here. Same convention rotateY expects, no negation.
-	current.o_model = movement().m_body.current.yaw;
+	//  * When an animation owns the transform (animation_movement_controlled), the transform
+	//    IS the truth and m_body is only the movement manager's intent. For a stalker standing
+	//    around, that intent is often stale, which is why every idle NPC pointed the same way.
+	//  * Otherwise XFORM is driven FROM o_model by the rotateY below — which is not gated on
+	//    Remote(), so it runs on the server for its own creatures too. Sampling XFORM there
+	//    closes a feedback loop and freezes the angle, which is the other bug I shipped.
+	//
+	// So: read XFORM only when something else is driving it, and m_body otherwise. Note the
+	// negation - rotateY(a) sets k = (sin a, 0, cos a) while getHP returns -a for that vector.
+	if (animation_movement_controlled())
+	{
+		float model_yaw, model_pitch;
+		XFORM().k.getHP(model_yaw, model_pitch);
+		current.o_model = angle_normalize(-model_yaw);
+	}
+	else
+		current.o_model = movement().m_body.current.yaw;
+
 	current.o_torso = movement().m_body.current;
+	current.o_torso.yaw = current.o_model;
 	current.p_pos = Position();
 	current.fHealth = GetfHealth();
 	NET.push_back(current);

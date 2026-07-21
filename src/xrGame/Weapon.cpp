@@ -1316,6 +1316,30 @@ void CWeapon::SendHiddenItem()
 {
 	if (!CHudItem::object().getDestroy() && m_pInventory)
 	{
+		// MP fork (§19 co-op): THE weapon deadlock. Stock ASKS the server to hide the weapon
+		// and sets pending while it waits for GE_WPN_STATE_CHANGE to come back. We now
+		// deliberately ignore that event for the weapon in our own hands, because we drive its
+		// state locally - so the request was never answered and pending stuck forever. Every
+		// later command is dropped while IsPending(), which is exactly "I can fire and reload
+		// once, then I cannot put it away or switch to the other gun".
+		//
+		// Hide it here instead, and still tell the server so its copy of us - and therefore
+		// what other players see in our hands - follows. No pending: nothing is being waited on.
+		if (coop_own_weapon(H_Parent()))
+		{
+			NET_Packet P;
+			CHudItem::object().u_EventGen(P, GE_WPN_STATE_CHANGE, CHudItem::object().ID());
+			P.w_u8(u8(eHiding));
+			P.w_u8(u8(m_sub_state));
+			P.w_u8(m_ammoType);
+			P.w_u8(u8(iAmmoElapsed & 0xff));
+			P.w_u8(m_set_next_ammoType_on_reload);
+			CHudItem::object().u_EventSend(P, net_flags(TRUE, TRUE, FALSE, TRUE));
+
+			OnHiddenItem();
+			return;
+		}
+
 		// !!! Just single entry for given state !!!
 		NET_Packet P;
 		CHudItem::object().u_EventGen(P, GE_WPN_STATE_CHANGE, CHudItem::object().ID());

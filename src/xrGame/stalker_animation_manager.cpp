@@ -145,7 +145,10 @@ bool CStalkerAnimationManager::standing() const
 	// cycle on the spot — reported from play as "all playing a walking animation".
 	if (movement.replicated_state())
 	{
-		if (object().coop_net_speed() < EPS_L)
+		// A real threshold, not EPS_L (0.001 m/s). Replicated positions carry a little noise,
+		// and at a millimetre per second every standing NPC read as "moving" and played a walk
+		// cycle on the spot. 0.15 m/s is well below any actual gait and well above the jitter.
+		if (object().coop_net_speed() < 0.15f)
 			return (true);
 		return (eMovementTypeStand == movement.movement_type());
 	}
