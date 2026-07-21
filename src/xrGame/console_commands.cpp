@@ -2526,6 +2526,12 @@ void CCC_RegisterCommands()
 	//g_OptConCom.Init();
 
 	CMD1(CCC_MemStats, "stat_memory");
+
+	// MP fork (§19 co-op): deliberately OUTSIDE #ifdef DEBUG. It first went in next to
+	// dump_infos, which is DEBUG-only, so the release build reported "Unknown command" and
+	// the whole point of adding it was lost. This is a diagnostic, but the builds that need
+	// diagnosing are release builds.
+	CMD1(CCC_CoopTalkNearest, "coop_talk_nearest");
 #ifdef DEBUG
 	CMD1(CCC_MemCheckpoint, "stat_memory_checkpoint");
 #endif //#ifdef DEBUG
@@ -3054,7 +3060,6 @@ void CCC_RegisterCommands()
 
 #ifdef DEBUG
 	CMD1(CCC_DumpInfos, "dump_infos");
-	CMD1(CCC_CoopTalkNearest, "coop_talk_nearest"); // MP fork (§19 co-op): see the class
 	CMD1(CCC_DumpTasks, "dump_tasks");
 	CMD1(CCC_DumpMap, "dump_map");
 	CMD1(CCC_DumpCreatures, "dump_creatures");
