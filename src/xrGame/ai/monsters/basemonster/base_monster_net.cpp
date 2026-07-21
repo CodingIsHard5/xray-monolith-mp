@@ -140,7 +140,9 @@ void CBaseMonster::net_Import(NET_Packet& P)
 	P.r(&l_game_vertex_id, sizeof(l_game_vertex_id));
 	P.r(&l_game_vertex_id, sizeof(l_game_vertex_id));
 
-	if (NET.empty() || (NET.back().dwTimeStamp < N.dwTimeStamp))
+	// MP fork (§19 co-op): see CCustomMonster::net_Import — never let an invalid position into
+	// the interpolation buffer; a NaN reaching the physics shape is fatal.
+	if (_valid(N.p_pos) && (NET.empty() || (NET.back().dwTimeStamp < N.dwTimeStamp)))
 	{
 		NET.push_back(N);
 		NET_WasInterpolating = TRUE;

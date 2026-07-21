@@ -301,6 +301,15 @@ void CCustomMonster::coop_refresh_export_sample()
 	// replicated NPC facing whatever value it happened to hold — reported from play as
 	// "npcs are all facing one direction". A pure Y-rotation has k = (sin a, 0, cos a), so
 	// the heading getHP() returns is exactly the angle rotateY() wants back.
+	// Never sample an invalid transform. Stock exported whatever the scheduler last recorded,
+	// which was at least a position the creature really occupied; sampling live means a
+	// creature caught mid-teleport or before its physics settles can hand us a NaN, and that
+	// NaN then travels to every client and ends in
+	// CPHActivationShape::Create "assertion failed _valid(start_pos)". Skip the sample and
+	// keep the previous one - one stale frame is invisible, a NaN is fatal.
+	if (!_valid(Position()) || !_valid(XFORM()))
+		return;
+
 	float model_yaw, model_pitch;
 	XFORM().k.getHP(model_yaw, model_pitch);
 	current.o_model = angle_normalize(model_yaw);
@@ -383,7 +392,9 @@ void CCustomMonster::net_Import(NET_Packet& P)
 		}
 	}
 
-	if (NET.empty() || (NET.back().dwTimeStamp < N.dwTimeStamp))
+	// Belt and braces against the same NaN: refuse to let an invalid position into the
+	// interpolation buffer at all, so it can never reach the physics shape.
+	if (_valid(N.p_pos) && (NET.empty() || (NET.back().dwTimeStamp < N.dwTimeStamp)))
 	{
 		NET.push_back(N);
 		NET_WasInterpolating = TRUE;
