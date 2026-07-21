@@ -7,6 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+// MP fork (§19 co-op): coop_request_client_menu
+#include "xrServer.h"
+#include "../xrNetServer/xr_enet_transport.h"
+#include "../xrServerEntities/xrMessages.h"
 #include "script_game_object.h"
 #include "script_game_object_impl.h"
 #include "script_entity_action.h"
@@ -1260,6 +1264,26 @@ bool CScriptGameObject::Use(CScriptGameObject* obj)
 	return false;
 }
 
+// MP fork (§19 co-op): a menu is the one kind of dialogue "action" that belongs to the player
+// rather than to the world, and the server that now executes those actions has no UI to open
+// one with. Ask the owning client instead. Broadcast rather than unicast: every client checks
+// whether the actor named is the one it controls, which avoids having to resolve a client id
+// from an object id and is correct with any number of players.
+enum { coop_menu_trade = 0, coop_menu_upgrade = 1 };
+
+static bool coop_request_client_menu(CActor* actor, u8 menu)
+{
+	if (!actor || !g_dedicated_server || !xr_enet::enabled() || !Level().Server)
+		return false;
+
+	NET_Packet packet;
+	packet.w_begin(M_XRNET_OPEN_MENU);
+	packet.w_u8(menu);
+	packet.w_u16(actor->ID());
+	Level().Server->SendBroadcast(BroadcastCID, packet, net_flags(TRUE, TRUE));
+	return true;
+}
+
 void CScriptGameObject::StartTrade(CScriptGameObject* obj)
 {
 	CActor* actor = smart_cast<CActor*>(&obj->object());
@@ -1272,6 +1296,14 @@ void CScriptGameObject::StartTrade(CScriptGameObject* obj)
 
 	CInventoryOwner* pOtherOwner = smart_cast<CInventoryOwner*>(&object());
 	if (!pOtherOwner)
+		return;
+
+	// MP fork (§19 co-op): dialogue ACTIONS execute on the server now, so a [Trade] line runs
+	// this there — and a dedicated server has no UI, so the player got the NPC's reply and no
+	// trade window. Menus are the one kind of "action" that belongs to the client rather than
+	// the world. Tell the owning client to open it. Doing it here rather than special-casing
+	// dialogue means every path that opens trade is covered, including plain script calls.
+	if (coop_request_client_menu(actor, coop_menu_trade))
 		return;
 
 	CUIGameSP* pGameSP = smart_cast<CUIGameSP*>(CurrentGameUI());
@@ -1293,6 +1325,9 @@ void CScriptGameObject::StartUpgrade(CScriptGameObject* obj)
 	if (!pOtherOwner)
 		return;
 	
+	if (coop_request_client_menu(actor, coop_menu_upgrade)) // MP fork (§19 co-op): see StartTrade
+		return;
+
 	CUIGameSP* pGameSP = smart_cast<CUIGameSP*>(CurrentGameUI());
 	if (pGameSP)
 		pGameSP->StartUpgrade(pActorInv, pOtherOwner);

@@ -1,4 +1,7 @@
 #include "stdafx.h"
+// MP fork (§19 co-op): M_XRNET_OPEN_MENU
+#include "UIGameSP.h"
+#include "InventoryOwner.h"
 #include "entity.h"
 #include "xrserver_objects.h"
 #include "level.h"
@@ -136,6 +139,30 @@ void CLevel::ClientReceive()
 		case M_UPDATE:
 			{
 				game->net_import_update(*P);
+			}
+			break;
+		case M_XRNET_OPEN_MENU:
+			{
+				// MP fork (§19 co-op): the server ran a dialogue action that wanted to open a
+				// menu for a player. It has no UI, so it asked us. Broadcast, so check the
+				// actor named is the one WE control before opening anything.
+				const u8 menu = P->r_u8();
+				const u16 actor_id = P->r_u16();
+
+				CObject* const controlled = CurrentControlEntity();
+				CUIGameSP* const ui = smart_cast<CUIGameSP*>(CurrentGameUI());
+				if (!ui || !controlled || (controlled->ID() != actor_id))
+					break;
+
+				CInventoryOwner* const us = smart_cast<CInventoryOwner*>(controlled);
+				CInventoryOwner* const partner = us ? us->GetTalkPartner() : NULL;
+				if (!us || !partner)
+					break;
+
+				if (menu == 0)
+					ui->StartTrade(us, partner);
+				else
+					ui->StartUpgrade(us, partner);
 			}
 			break;
 		case M_UPDATE_OBJECTS:

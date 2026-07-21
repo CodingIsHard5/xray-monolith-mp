@@ -96,6 +96,10 @@ enum
 	// executed by the server against the real world. See CDialogScriptHelper::Action.
 	M_XRNET_DIALOG_ACTION,
 
+	// MP fork (§19 co-op): server -> clients. A script asked to open a menu (trade, upgrade)
+	// on behalf of a player. The server has no UI, so it tells the owning client to open it.
+	M_XRNET_OPEN_MENU,
+
 	MSG_FORCEDWORD = u32(-1)
 };
 
