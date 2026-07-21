@@ -1,5 +1,7 @@
 #include "stdafx.h"
 #include "../xrNetServer/xr_enet_transport.h"   // MP fork (§19 co-op): xr_enet::enabled()
+#include "hit.h"                                     // MP fork (§19 co-op): apply hits server-side
+#include "GameObject.h"
 #include "LevelGameDef.h"
 #include "script_process.h"
 #include "xrServer_Objects_ALife_Monsters.h"
@@ -808,6 +810,35 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 			}
 
 			OnHit(id_src, id_dest, tNetPacket);
+
+			// MP fork (§19 co-op): apply the hit to OUR OWN copy of the target here.
+			//
+			// In single player this broadcast is how the damage lands: client and server are
+			// one process, so the packet loops back through the local client and reaches the
+			// object. On a dedicated ENet server there is no such loopback - SendTo_LL routes
+			// remote clients over the socket and the in-process host-client falls through to
+			// DirectPlay, which this fork does not have. So the broadcast reached every PLAYER
+			// (hence the pain sounds and blood) and never reached the server's own creature,
+			// whose health therefore never dropped and who consequently never died.
+			//
+			// Read a copy, so the broadcast below still sees the packet unconsumed.
+			if (xr_enet::enabled() && Level().Objects.net_Find(id_dest))
+			{
+				NET_Packet local = tNetPacket;
+				SHit hit;
+				hit.PACKET_TYPE = GE_HIT;
+				hit.Read_Packet_Cont(local);
+				hit.who = Level().Objects.net_Find(hit.whoID);
+
+				CGameObject* const target = smart_cast<CGameObject*>(Level().Objects.net_Find(id_dest));
+				if (target)
+				{
+					target->SetHitInfo(hit.who, Level().Objects.net_Find(hit.weaponID), hit.bone(),
+					                   hit.p_in_bone_space, hit.dir);
+					target->Hit(&hit);
+				}
+			}
+
 			m_server->SendBroadcast(BroadcastCID, tNetPacket, net_flags(TRUE,TRUE));
 		}
 		break;
