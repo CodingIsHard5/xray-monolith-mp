@@ -1171,6 +1171,19 @@ void CWeapon::load(IReader& input_packet)
 	load_data(m_bRememberActorNVisnStatus, input_packet);
 }
 
+// MP fork (§19 co-op): the local player owns their own hands. CHudItem::SwitchState already
+// says exactly this and applies the state locally instead of waiting for a server round-trip —
+// but CWeapon OVERRIDES SwitchState and never got the same treatment, so for an actual WEAPON
+// the state machine bailed out on OnClient() and was driven only by events arriving from the
+// server's copy of us. That is what "reloading and switching feels weird" is: two authorities
+// for one gun. Give the weapon the same rule as every other held item.
+static inline bool coop_own_weapon(CObject* parent)
+{
+	if (!xr_enet::enabled() || ai().get_alife() || !g_pGameLevel || !parent)
+		return false;
+	return (Level().CurrentViewEntity() == parent) || (Level().CurrentEntity() == parent);
+}
+
 void CWeapon::OnEvent(NET_Packet& P, u16 type)
 {
 	switch (type)
@@ -1196,6 +1209,15 @@ void CWeapon::OnEvent(NET_Packet& P, u16 type)
 				m_set_next_ammoType_on_reload = undefined_ammo_type;
 			else
 				m_set_next_ammoType_on_reload = NextAmmo;
+
+			// MP fork (§19 co-op): ignore this for the weapon in OUR OWN hands. We drive that
+			// state machine locally (see SwitchState above), and the server also sends state
+			// for its copy of us — applying both meant the gun was fought over by two
+			// authorities, and SetAmmoElapsed below would stamp the server's round count over
+			// the one the player is actually watching mid-reload. Peers and NPCs still need
+			// this: their weapons ARE server-driven.
+			if (coop_own_weapon(H_Parent()))
+				break;
 
 			if (OnClient()) SetAmmoElapsed(int(AmmoElapsed));
 			OnStateSwitch(u32(state), GetState());
@@ -2216,6 +2238,13 @@ CUIWindow* CWeapon::ZoomTexture()
 
 void CWeapon::SwitchState(u32 S)
 {
+	if (coop_own_weapon(H_Parent()))
+	{
+		SetNextState(S);
+		OnStateSwitch(S, GetState());
+		return;
+	}
+
 	if (OnClient()) return;
 
 #ifndef MASTER_GOLD

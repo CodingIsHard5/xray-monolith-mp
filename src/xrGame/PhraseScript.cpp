@@ -246,6 +246,14 @@ void CDialogScriptHelper::Action(const CGameObject* pSpeakerGO1, const CGameObje
 	// be built synchronously to draw the menu.
 	if (xr_enet::enabled() && !ai().get_alife() && pSpeakerGO1 && pSpeakerGO2)
 	{
+		// Diagnostic: which actions a phrase actually carries is the missing fact behind both
+		// "the trade menu does not pop up" and "goodbye does not exit" — those may be script
+		// actions with CLIENT-side effects, which this routing sends away to the server.
+		for (u32 i = 0; i < Actions().size(); ++i)
+			Msg("- XRNET(dlg): forwarding action '%s' (dialog '%s' phrase '%s')",
+				Actions()[i].c_str(), dialog_id ? dialog_id : "?", phrase_id ? phrase_id : "?");
+		FlushLog();
+
 		NET_Packet packet;
 		packet.w_begin(M_XRNET_DIALOG_ACTION);
 		packet.w_u16(pSpeakerGO1->ID());
