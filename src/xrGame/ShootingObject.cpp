@@ -16,6 +16,8 @@
 #include "level.h"
 #include "level_bullet_manager.h"
 #include "game_cl_single.h"
+#include "ai_space.h"                              // MP fork (§19 co-op): ai().get_alife()
+#include "../xrNetServer/xr_enet_transport.h"      // MP fork (§19 co-op): xr_enet::enabled()
 
 #define HIT_POWER_EPSILON 0.05f
 #define WALLMARK_SIZE 0.04f
@@ -438,6 +440,21 @@ void CShootingObject::RenderLight()
 
 bool CShootingObject::SendHitAllowed(CObject* pUser)
 {
+	// MP fork (§19 co-op): THE combat blocker. game_cl_single::IsServerControlHits() returns
+	// true, and in real single player that is trivially satisfied — client and server are the
+	// same process, so OnServer() is true and the hit is raised locally. On a co-op thin
+	// client OnServer() is false, so this returned false for every shot the player fired and
+	// no hit event was ever sent. You could empty a magazine into an NPC and nothing would
+	// happen: damage can only be applied where the world lives, and nothing was telling the
+	// world about it.
+	//
+	// Send hits for the actor we actually control, and nothing else — exactly the rule the
+	// non-server branch below already applies in multiplayer. Everything else on this client
+	// is a puppet whose shots the server is already simulating for itself; sending those too
+	// would double every NPC's damage.
+	if (xr_enet::enabled() && !ai().get_alife())
+		return (smart_cast<CActor*>(pUser) && (Level().CurrentControlEntity() == pUser));
+
 	if (Game().IsServerControlHits())
 		return OnServer();
 
