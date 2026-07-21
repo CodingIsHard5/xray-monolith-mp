@@ -85,17 +85,24 @@ extern Flags32 psAI_Flags;
 // of the non-fatal path, so balance the stack ourselves on the way out.
 static void coop_lua_balance_stack(lua_State* L)
 {
-	if (!L)
+	if (!L || (lua_gettop(L) <= 0))
 		return;
 
-	// Pop EXACTLY ONE value, whatever its type. pcall's contract is that a failure leaves
-	// precisely one error object on the stack, and that is what we are cleaning up.
-	// A first attempt only popped when the top was a string — but luabind raises plenty of
-	// non-string errors (its own error objects, tables from script-side error(), ...), so the
-	// leak survived for exactly the errors dialogue produces most, and chatting still ended
-	// in the VM. Type is not the question here; balance is.
-	if (lua_gettop(L) > 0)
-		lua_pop(L, 1);
+	// Replace the error object with `false`. Do NOT simply pop it.
+	//
+	// luabind has two shapes here. The void form does pcall(L, n, 0) and leaves the error on
+	// the stack with nothing to remove it — that one leaks a slot. The NON-VOID form (which
+	// is what dialogue preconditions use: functor<bool>) guards the call with a
+	// detail::stack_pop that removes exactly one slot on scope exit, and then reads a return
+	// value at -1. Popping here as well left that form one slot short, and the VM crashed
+	// later reading a slot that was no longer there — reproduced from a single failing
+	// precondition, so this was never about error volume.
+	//
+	// Pop-and-push keeps the depth identical for both forms, and leaves a value the
+	// converter can actually read: a failed precondition then behaves as "this phrase is not
+	// available", which is exactly the sane answer when its script could not run.
+	lua_pop(L, 1);
+	lua_pushboolean(L, 0);
 }
 
 #ifdef USE_LUAJIT_ONE
@@ -399,11 +406,8 @@ int CScriptEngine::lua_pcall_failed(lua_State* L)
 	else
 		Debug.fatal(DEBUG_INFO, error_msg);
 #endif
-	// Same reasoning as coop_lua_balance_stack: pop the error object regardless of type.
-	// Stock only ever reached here via the exceptions build, because Debug.fatal above does
-	// not return — so the string-only test was effectively dead code and never exercised.
-	if (lua_gettop(L) > 0)
-		lua_pop(L, 1);
+	// Same reasoning as coop_lua_balance_stack — keep the depth, leave something readable.
+	coop_lua_balance_stack(L);
 	return (LUA_ERRRUN);
 }
 
