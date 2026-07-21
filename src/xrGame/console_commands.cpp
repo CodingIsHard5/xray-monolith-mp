@@ -2494,7 +2494,9 @@ public:
 		for (u32 i = 0, n = Level().Objects.o_count(); i < n; ++i)
 		{
 			CAI_Stalker* const stalker = smart_cast<CAI_Stalker*>(Level().Objects.o_get_by_iterator(i));
-			if (!stalker || !stalker->g_Alive() || (stalker == actor))
+			// No actor check needed: an actor is never a CAI_Stalker, so the smart_cast above
+			// has already excluded ourselves and every other player.
+			if (!stalker || !stalker->g_Alive())
 				continue;
 
 			const float distance = stalker->Position().distance_to(actor->Position());
