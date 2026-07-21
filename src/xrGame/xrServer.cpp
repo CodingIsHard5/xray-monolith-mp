@@ -529,8 +529,8 @@ void xrServer::coop_run_dialog_action(NET_Packet& P)
 	DIALOG_SHARED_PTR dialog(xr_new<CPhraseDialog>());
 	dialog->Load(dialog_id);
 
-	CPhraseGraph::CVertex* const vertex = dialog->data()->m_PhraseGraph.vertex(phrase_id);
-	if (!vertex || !vertex->data())
+	CPhrase* const phrase = dialog->coop_find_phrase(phrase_id);
+	if (!phrase)
 	{
 		Msg("! XRNET: dialog action dropped - phrase '%s' not in dialog '%s'", phrase_id, dialog_id);
 		FlushLog();
@@ -538,7 +538,7 @@ void xrServer::coop_run_dialog_action(NET_Packet& P)
 	}
 
 	// Same call the single-player path makes, just with the server's own objects.
-	vertex->data()->GetScriptHelper()->Action(speaker, partner, dialog_id, phrase_id);
+	phrase->GetScriptHelper()->Action(speaker, partner, dialog_id, phrase_id);
 }
 
 u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadcasting with "flags" as returned

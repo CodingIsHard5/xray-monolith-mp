@@ -157,6 +157,13 @@ bool CPhraseDialog::SayPhrase(DIALOG_SHARED_PTR& phrase_dialog, const shared_str
 	return phrase_dialog ? !phrase_dialog->m_bFinished : true;
 }
 
+// MP fork (§19 co-op): see the header.
+CPhrase* CPhraseDialog::coop_find_phrase(const shared_str& phrase_id)
+{
+	CPhraseGraph::CVertex* const phrase_vertex = data()->m_PhraseGraph.vertex(phrase_id);
+	return phrase_vertex ? phrase_vertex->data() : NULL;
+}
+
 CPhrase* CPhraseDialog::GetPhrase(const shared_str& phrase_id)
 {
 	CPhraseGraph::CVertex* phrase_vertex = data()->m_PhraseGraph.vertex(phrase_id);

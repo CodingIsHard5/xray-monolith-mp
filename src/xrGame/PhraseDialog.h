@@ -60,6 +60,11 @@ public:
 
 	virtual void Load(shared_str dialog_id);
 
+	// MP fork (§19 co-op): GetPhrase THROWs on an unknown id, which is fine for ids that came
+	// from our own config but not for one that arrived over the network — on a server that
+	// would end the session for everyone. Same lookup, null on miss.
+	CPhrase* coop_find_phrase(const shared_str& phrase_id);
+
 	//связь диалога между двумя DialogManager
 	virtual void Init(CPhraseDialogManager* speaker_first, CPhraseDialogManager* speaker_second);
 
