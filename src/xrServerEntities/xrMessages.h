@@ -100,6 +100,9 @@ enum
 	// on behalf of a player. The server has no UI, so it tells the owning client to open it.
 	M_XRNET_OPEN_MENU,
 
+	// MP fork (§19 co-op): server -> clients. The shared quest list, whenever it changes.
+	M_XRNET_TASKS,
+
 	MSG_FORCEDWORD = u32(-1)
 };
 

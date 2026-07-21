@@ -44,6 +44,10 @@ public:
 	u32 GetTaskCount(ETaskState state);
 	void MapLocationRelcase(CMapLocation* ml);
 
+	// MP fork (§19 co-op): push the shared quest list to clients (server) / adopt it (client).
+	void coop_broadcast_tasks();
+	void coop_apply_tasks(NET_Packet& packet);
+
 	void ResetStorage() { m_gametasks = NULL; };
 	void DumpTasks();
 };

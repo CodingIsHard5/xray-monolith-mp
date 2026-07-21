@@ -1,4 +1,8 @@
 #include "pch_script.h"
+// MP fork (§19 co-op): shared quest replication
+#include "../xrNetServer/xr_enet_transport.h"
+#include "xrServer.h"
+#include "xrMessages.h"
 #include "GameTaskManager.h"
 #include "alife_registry_wrappers.h"
 #include "ui/xrUIXmlParser.h"
@@ -223,8 +227,90 @@ void CGameTaskManager::UpdateActiveTask()
 	if (psDeviceFlags2.test(rsDiscord))
 		RPC_UpdateTaskName();
 
+	// MP fork (§19 co-op): tasks are given by dialogue actions, and those run on the SERVER so
+	// their effects are real - which means the quest lands in the SERVER's list. A joining
+	// player reads its OWN list, which is a private in-memory one (CALifeRegistryWrapper falls
+	// back to a local registry when there is no A-Life simulator), so accepting a quest looked
+	// like it did nothing at all. Push the list out whenever it changes.
+	//
+	// The host has ONE list, not one per player, so this makes quests SHARED: both players see
+	// the same objectives and see them complete together. For co-op that is the wanted
+	// behaviour, and it is also the only behaviour the existing storage can express.
+	coop_broadcast_tasks();
+
 	m_flags.set(eChanged, FALSE);
 	m_actual_frame = Device.dwFrame;
+}
+
+// MP fork (§19 co-op): adopt the server's quest list. Clears ours and rebuilds from the wire,
+// so a task the server dropped disappears here too rather than lingering.
+void CGameTaskManager::coop_apply_tasks(NET_Packet& packet)
+{
+	if (ai().get_alife()) // servers own the list; only a thin client adopts one
+		return;
+
+	vGameTasks& tasks = GetGameTasks();
+	delete_data(tasks);
+	tasks.clear();
+
+	const u16 count = packet.r_u16();
+	for (u16 i = 0; i < count; ++i)
+	{
+		shared_str id;
+		packet.r_stringZ(id);
+
+		const u16 size = packet.r_u16();
+		const u32 next = packet.r_tell() + size;
+
+		CGameTask* const task = xr_new<CGameTask>();
+		task->m_ID = id;
+		task->load_task(packet);
+
+		// Trust the length, not load_task's appetite: if a task's format ever drifts, skipping
+		// to the recorded end keeps the rest of the list readable instead of desynchronising
+		// every task after it.
+		packet.r_seek(next);
+
+		SGameTaskKey key;
+		key.task_id = id;
+		key.game_task = task;
+		tasks.push_back(key);
+	}
+
+	m_flags.set(eChanged, TRUE); // makes the PDA redraw
+}
+
+// MP fork (§19 co-op): serialise the task list to every client. Reuses each task's own
+// save/load - the same pair savegames use - so objectives, timers, titles and map hints all
+// come along without inventing a wire format for them.
+void CGameTaskManager::coop_broadcast_tasks()
+{
+	if (!xr_enet::enabled() || !ai().get_alife() || !Level().Server)
+		return;
+
+	vGameTasks& tasks = GetGameTasks();
+
+	NET_Packet packet;
+	packet.w_begin(M_XRNET_TASKS);
+	packet.w_u16(u16(tasks.size()));
+
+	for (u32 i = 0; i < tasks.size(); ++i)
+	{
+		CGameTask* const task = tasks[i].game_task;
+		if (!task)
+			continue;
+
+		packet.w_stringZ(task->m_ID);
+
+		// Length-prefixed, so a client that cannot make sense of one task can still skip it
+		// rather than losing the rest of the list.
+		u32 size_pos;
+		packet.w_chunk_open16(size_pos);
+		task->save_task(packet);
+		packet.w_chunk_close16(size_pos);
+	}
+
+	Level().Server->SendBroadcast(BroadcastCID, packet, net_flags(TRUE, TRUE));
 }
 
 void CGameTaskManager::RPC_UpdateTaskName()

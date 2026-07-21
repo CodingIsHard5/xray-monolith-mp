@@ -2,6 +2,7 @@
 // MP fork (§19 co-op): M_XRNET_OPEN_MENU
 #include "UIGameSP.h"
 #include "InventoryOwner.h"
+#include "GametaskManager.h"                  // MP fork (§19 co-op): M_XRNET_TASKS
 #include "entity.h"
 #include "xrserver_objects.h"
 #include "level.h"
@@ -139,6 +140,13 @@ void CLevel::ClientReceive()
 		case M_UPDATE:
 			{
 				game->net_import_update(*P);
+			}
+			break;
+		case M_XRNET_TASKS:
+			{
+				// MP fork (§19 co-op): the server's shared quest list. See
+				// CGameTaskManager::coop_broadcast_tasks.
+				GameTaskManager().coop_apply_tasks(*P);
 			}
 			break;
 		case M_XRNET_OPEN_MENU:

@@ -826,7 +826,13 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 			// Read a copy, so the broadcast below still sees the packet unconsumed.
 			if (xr_enet::enabled() && Level().Objects.net_Find(id_dest))
 			{
+				// Rewind two bytes first. The caller above read id_dest and id_src, and id_src IS
+				// SHit's whoID - Read_Packet_Cont starts by reading whoID and weaponID. Without
+				// the rewind every field lands one slot early, hit_type comes out as garbage,
+				// and CEntityCondition::ConditionHit kills the server with "unknown hit type 0".
 				NET_Packet local = tNetPacket;
+				local.r_seek(local.r_tell() - sizeof(u16));
+
 				SHit hit;
 				hit.PACKET_TYPE = GE_HIT;
 				hit.Read_Packet_Cont(local);

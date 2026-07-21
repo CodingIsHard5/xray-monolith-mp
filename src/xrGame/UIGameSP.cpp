@@ -171,12 +171,35 @@ void CUIGameSP::StartTrade(CInventoryOwner* pActorInv, CInventoryOwner* pOtherOw
 	//.	if( MainInputReceiver() )	return;
 
 	//---- before trade mode ---------------------------
+	// MP fork (§19 co-op) diagnostic: reported as "the trade option plays the menu sound but
+	// no window opens". Everything from here on is client-side, so the interesting question is
+	// which step declines - the script hook below can VETO the menu outright, and both
+	// participants must have trading enabled. Log the decision rather than guess again.
+	const bool coop_diag = xr_enet::enabled() && !ai().get_alife();
+	if (coop_diag)
+	{
+		Msg("- XRNET(trade): StartTrade actor_trade_enabled=%d partner_trade_enabled=%d",
+			pActorInv ? (pActorInv->IsTradeEnabled() ? 1 : 0) : -1,
+			pOtherOwner ? (pOtherOwner->IsTradeEnabled() ? 1 : 0) : -1);
+	}
+
 	::luabind::functor<bool> funct1;
 	if (ai().script_engine().functor("actor_menu_inventory.CUIActorMenu_OnMode_Trade", funct1))
 	{
 		CGameObject* GO = smart_cast<CGameObject*>(pOtherOwner);
-		if (funct1(GO->lua_game_object()))
+		const bool vetoed = !!funct1(GO->lua_game_object());
+		if (coop_diag)
+		{
+			Msg("- XRNET(trade): script hook present, vetoed=%d", vetoed ? 1 : 0);
+			FlushLog();
+		}
+		if (vetoed)
 			return;
+	}
+	else if (coop_diag)
+	{
+		Msg("- XRNET(trade): no script hook, opening the stock menu");
+		FlushLog();
 	}
 	//---------------------------------------------------------
 	
@@ -185,6 +208,12 @@ void CUIGameSP::StartTrade(CInventoryOwner* pActorInv, CInventoryOwner* pOtherOw
 
 	ActorMenu->SetMenuMode(mmTrade);
 	ActorMenu->ShowDialog(true);
+
+	if (coop_diag)
+	{
+		Msg("- XRNET(trade): after ShowDialog, menu shown=%d", ActorMenu->IsShown() ? 1 : 0);
+		FlushLog();
+	}
 }
 
 void CUIGameSP::StartUpgrade(CInventoryOwner* pActorInv, CInventoryOwner* pMech)
