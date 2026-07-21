@@ -288,11 +288,7 @@ void CScriptEngine::lua_error(lua_State* L)
 	}
 	ai().script_engine().on_error(L);
 
-	if (!log_this)
-	{
-		coop_lua_balance_stack(L); // luabind expects us never to return — see the helper above
-		return;                    // non-fatal co-op path, throttled: skip the report
-	}
+	// No early return here any more: this handler is fatal, so it always reports.
 
 	// demonized: print first line with lua error
 	auto stack = get_lua_stack(L);
@@ -311,14 +307,26 @@ void CScriptEngine::lua_error(lua_State* L)
 	// MP fork (§14 co-op): see lua_pcall_failed — client-only GAMMA scripts raise Lua errors
 	// on the headless server (no HUD/fonts/UI); those must not be fatal for the server that
 	// owns the world. Log and return so the offending script is skipped, not the session.
+	// MP fork (§19 co-op): THIS handler is fatal again, deliberately. It is luabind's
+	// set_error_callback, invoked from an UNPROTECTED functor call, and luabind's own code
+	// says what it expects: after `if (e) e(L);` there is only assert(0). Returning from it
+	// leaves LuaJIT mid-error on a stack it believes it has unwound, and the next VM
+	// operation faults — reproduced repeatedly as an access violation inside lj_vm_return
+	// from a SINGLE failing dialogue precondition, and neither popping the error object nor
+	// replacing it with a readable value made that sound. It cannot be made sound from here.
+	//
+	// lua_pcall_failed below stays non-fatal, and that is not inconsistent: it is the errfunc
+	// of a protected call, where returning is exactly what the caller expects. That is why
+	// the server has survived hundreds of script errors without ever crashing this way. Same
+	// intent, opposite correctness — the difference is whether the call was protected.
+	//
+	// Callers that must survive a broken script should wrap it in pcall on the Lua side; the
+	// co-op overlay does exactly that for the dialogue preconditions known to fail here.
 	if (nonfatal)
 	{
-		Msg("! XRNET: LUA error #%u on co-op %s — CONTINUING (not fatal):%s",
+		Msg("! XRNET: LUA error #%u on co-op %s — FATAL (unprotected luabind call):%s",
 			s_coop_lua_errors, coop_lua_side(), error_msg);
-		if (coop_lua_flush())
-			FlushLog();
-		coop_lua_balance_stack(L);
-		return;
+		FlushLog();
 	}
 	Debug.fatal(DEBUG_INFO, error_msg);
 #else
