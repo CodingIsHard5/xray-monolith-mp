@@ -1,7 +1,5 @@
 #include "stdafx.h"
 #include "../xrNetServer/xr_enet_transport.h"   // MP fork (§19 co-op): xr_enet::enabled()
-#include "hit.h"                                     // MP fork (§19 co-op): apply hits server-side
-#include "GameObject.h"
 #include "LevelGameDef.h"
 #include "script_process.h"
 #include "xrServer_Objects_ALife_Monsters.h"
@@ -17,6 +15,10 @@
 
 #include "debug_renderer.h"
 #include "xrGameSpyServer.h"
+// MP fork (§19 co-op): apply hits to the server's own objects. Must come AFTER the block
+// above — hit.h needs the ALife namespace, which those headers bring in.
+#include "hit.h"
+#include "GameObject.h"
 
 extern ENGINE_API bool g_dedicated_server;
 
