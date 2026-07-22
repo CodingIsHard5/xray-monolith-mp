@@ -1,4 +1,6 @@
 #include "stdafx.h"
+#include "../../xrNetServer/xr_enet_transport.h"
+#include "../UIGameCustom.h"
 #include "UITalkWnd.h"
 
 #include "UITalkDialogWnd.h"
@@ -202,6 +204,19 @@ void UpdateCameraDirection(CGameObject* pTo)
 
 void CUITalkWnd::Update()
 {
+	// MP fork (§19 co-op): if the trade or upgrade menu is open, this conversation window is
+	// sitting ON TOP of it and hiding it - the reported "trade plays a sound but no window".
+	// In single player base-game Lua (hide_hud_inventory) ends the talk when trade opens; that
+	// Lua is not in the GAMMA overlay and does not fire on this path. Closing the window from
+	// INSIDE the phrase action crashed (use-after-free on the phrase vectors mid-iteration), so
+	// do it HERE instead - Update runs between frames, outside the dialogue evaluation, which
+	// is safe. Guarded on xr_enet so plain SP/MP are untouched.
+	if (xr_enet::enabled() && CurrentGameUI() && CurrentGameUI()->GetActorMenu().IsShown())
+	{
+		HideDialog();
+		return;
+	}
+
 	//остановить разговор, если нужно
 	if (g_actor && m_pActor && !m_pActor->IsTalking())
 	{

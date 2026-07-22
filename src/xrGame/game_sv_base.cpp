@@ -847,21 +847,43 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 						ea ? ea->GetfHealth() : -1.f, hit.power, int(hit.hit_type));
 				}
 
+				CEntityAlive* const target_ea = target ? smart_cast<CEntityAlive*>(target) : NULL;
 				if (target)
 				{
+					const float hp_pre = target_ea ? target_ea->GetfHealth() : 1.f;
+
 					target->SetHitInfo(hit.who, Level().Objects.net_Find(hit.weaponID), hit.bone(),
 					                   hit.p_in_bone_space, hit.dir);
 					target->Hit(&hit);
 
+					// MP fork (§19 co-op): guarantee the damage and the death. On the headless
+					// server the stock chain is unreliable: Hit() feeds a delta that
+					// UpdateCondition applies on a scheduler tick, and even at zero health the
+					// self-kill in CEntityAlive::shedule_Update is gated on Local(), which a
+					// server-owned NPC is not. Result: NPCs took no lasting damage and never
+					// died. So: if Hit() did not lower health, apply a scaled reduction
+					// directly; and whenever health reaches zero, force the kill the Local()
+					// gate skipped. Hit() still runs first, so wounds, aggro and effects are
+					// intact when it does work.
+					if (target_ea && target_ea->g_Alive())
+					{
+						const float hp_mid = target_ea->GetfHealth();
+						if (hp_mid >= hp_pre - EPS_L)
+						{
+							const float dmg = _min(hit.power, 2.0f) * 0.5f;
+							target_ea->SetfHealth(hp_pre - dmg);
+						}
+						if (target_ea->GetfHealth() <= 0.f && !target_ea->AlreadyDie())
+							target_ea->KillEntity(hit.who ? hit.who->ID() : target_ea->ID());
+					}
+
 					if (log)
 					{
-						CEntityAlive* const ea = smart_cast<CEntityAlive*>(target);
-						Msg("- XRNET(hit-apply):   hp_after=%.3f alive=%d canharm=%d delta=%.4f tglobal=%.1f invuln=%.1f",
+						CEntityAlive* const ea = target_ea;
+						Msg("- XRNET(hit-apply):   hp_after=%.3f alive=%d local=%d canharm=%d",
 							ea ? ea->GetfHealth() : -1.f, ea ? (ea->g_Alive() ? 1 : 0) : -1,
-							ea ? (ea->conditions().CanBeHarmed() ? 1 : 0) : -1,
-							ea ? ea->conditions().coop_dbg_delta() : 0.f,
-							Device.fTimeGlobal,
-							ea ? ea->conditions().coop_dbg_invuln() : 0.f);
+							ea ? (ea->Local() ? 1 : 0) : -1,
+							ea ? (ea->conditions().CanBeHarmed() ? 1 : 0) : -1);
 						FlushLog();
 					}
 				}

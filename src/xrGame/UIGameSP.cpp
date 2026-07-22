@@ -216,20 +216,12 @@ void CUIGameSP::StartTrade(CInventoryOwner* pActorInv, CInventoryOwner* pOtherOw
 	// dialogs.npc_is_trader) is what stops it. That Lua does not end the talk here, so end it
 	// ourselves: drop the actor's talk state and hide the window. The trade menu is a separate
 	// window and is unaffected.
-	// MP fork (§19 co-op): end the conversation so the talk window closes and the trade menu
-	// behind it is visible - but do it SAFELY. StartTrade runs from inside the dialogue phrase
-	// action (SayPhrase -> npc_is_trader -> start_trade), so tearing the talk window down
-	// synchronously here clears the phrase vectors the caller is still iterating - a
-	// use-after-free crash (xr_vector<CPhrase*>::clear_and_free). Just drop the actor's talk
-	// state; CUITalkWnd::Update sees !IsTalking() next frame and closes the window itself,
-	// which is the same deferred path a normal Goodbye uses and is re-entrancy-safe.
-	if (coop_diag && pActorInv)
-		pActorInv->StopTalk();
-
+	// The talk window itself closes once the trade menu is up - see CUITalkWnd::Update. Doing
+	// it there (between frames) rather than here (inside the phrase action) avoids the
+	// use-after-free that tearing the dialogue down mid-iteration caused.
 	if (coop_diag)
 	{
-		Msg("- XRNET(trade): after ShowDialog, menu shown=%d talk_hidden=%d",
-			ActorMenu->IsShown() ? 1 : 0, (TalkMenu && TalkMenu->IsShown()) ? 0 : 1);
+		Msg("- XRNET(trade): after ShowDialog, menu shown=%d", ActorMenu->IsShown() ? 1 : 0);
 		FlushLog();
 	}
 }
@@ -254,11 +246,7 @@ void CUIGameSP::StartUpgrade(CInventoryOwner* pActorInv, CInventoryOwner* pMech)
 	ActorMenu->SetMenuMode(mmUpgrade);
 	ActorMenu->ShowDialog(true);
 
-	// MP fork (§19 co-op): same as StartTrade - close the conversation window so the upgrade
-	// menu behind it is visible.
-	// MP fork (§19 co-op): defer-close, same as StartTrade - see there.
-	if (xr_enet::enabled() && !ai().get_alife() && pActorInv)
-		pActorInv->StopTalk();
+	// The talk window closes itself once this menu is up - see CUITalkWnd::Update.
 }
 
 void CUIGameSP::StartTalk(bool disable_break)
