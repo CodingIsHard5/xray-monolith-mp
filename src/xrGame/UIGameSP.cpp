@@ -209,9 +209,24 @@ void CUIGameSP::StartTrade(CInventoryOwner* pActorInv, CInventoryOwner* pOtherOw
 	ActorMenu->SetMenuMode(mmTrade);
 	ActorMenu->ShowDialog(true);
 
+	// MP fork (§19 co-op): close the conversation window. The diagnostic proved the trade menu
+	// opens (menu shown=1), but it opens BEHIND the talk window, which stays up - so the player
+	// sees the dialogue, not the trade grid. In single player CUITalkWnd::Update closes itself
+	// once the actor stops talking, and hide_hud_inventory() (base-game Lua, called from
+	// dialogs.npc_is_trader) is what stops it. That Lua does not end the talk here, so end it
+	// ourselves: drop the actor's talk state and hide the window. The trade menu is a separate
+	// window and is unaffected.
+	if (coop_diag && pActorInv)
+	{
+		pActorInv->StopTalk();
+		if (TalkMenu && TalkMenu->IsShown())
+			TalkMenu->HideDialog();
+	}
+
 	if (coop_diag)
 	{
-		Msg("- XRNET(trade): after ShowDialog, menu shown=%d", ActorMenu->IsShown() ? 1 : 0);
+		Msg("- XRNET(trade): after ShowDialog, menu shown=%d talk_hidden=%d",
+			ActorMenu->IsShown() ? 1 : 0, (TalkMenu && TalkMenu->IsShown()) ? 0 : 1);
 		FlushLog();
 	}
 }
@@ -235,6 +250,15 @@ void CUIGameSP::StartUpgrade(CInventoryOwner* pActorInv, CInventoryOwner* pMech)
 
 	ActorMenu->SetMenuMode(mmUpgrade);
 	ActorMenu->ShowDialog(true);
+
+	// MP fork (§19 co-op): same as StartTrade - close the conversation window so the upgrade
+	// menu behind it is visible.
+	if (xr_enet::enabled() && !ai().get_alife() && pActorInv)
+	{
+		pActorInv->StopTalk();
+		if (TalkMenu && TalkMenu->IsShown())
+			TalkMenu->HideDialog();
+	}
 }
 
 void CUIGameSP::StartTalk(bool disable_break)
