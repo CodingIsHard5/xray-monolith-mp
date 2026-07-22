@@ -2946,6 +2946,13 @@ void CActor::OnDifficultyChanged()
 
 CVisualMemoryManager* CActor::visual_memory() const
 {
+	// MP fork (§19 co-op): a PEER actor on the dedicated server has no memory manager built
+	// (m_memory is null - memory init is for the local player). Server-side NPC combat AI
+	// queries an enemy actor's visual_memory when re-evaluating targets - notably when a
+	// squad-mate DIES - and dereferenced null+0xC0, crashing the server the instant an NPC
+	// was killed. Return null here and let those call sites handle it.
+	if (!m_memory)
+		return NULL;
 	return (&memory().visual());
 }
 

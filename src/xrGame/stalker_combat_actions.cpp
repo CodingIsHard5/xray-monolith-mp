@@ -1380,8 +1380,9 @@ void CStalkerActionSuddenAttack::execute()
 	}
 
 	CVisualMemoryManager* visual_memory_manager = enemy->visual_memory();
-	VERIFY(visual_memory_manager);
-	if (enemy->g_Alive() && !visual_memory_manager->visible_now(&object()))
+	// MP fork (§19 co-op): null for a peer actor on the server (no memory manager). Treat as
+	// "cannot confirm the enemy sees us" and carry on rather than deref null.
+	if (visual_memory_manager && enemy->g_Alive() && !visual_memory_manager->visible_now(&object()))
 		return;
 
 	m_storage->set_property(eWorldPropertyUseSuddenness, false);

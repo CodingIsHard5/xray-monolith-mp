@@ -171,9 +171,10 @@ void CStalkerCombatPlanner::initialize()
 	if (!m_loaded && object().memory().enemy().selected())
 	{
 		CVisualMemoryManager* visual_memory_manager = object().memory().enemy().selected()->visual_memory();
-		VERIFY(visual_memory_manager);
-		CScriptActionPlanner::m_storage.set_property(eWorldPropertyUseSuddenness,
-		                                             !visual_memory_manager->visible_now(&object()));
+		// MP fork (§19 co-op): null for a peer actor on the server - see CActor::visual_memory.
+		if (visual_memory_manager)
+			CScriptActionPlanner::m_storage.set_property(eWorldPropertyUseSuddenness,
+			                                             !visual_memory_manager->visible_now(&object()));
 	}
 
 	m_loaded = false;
