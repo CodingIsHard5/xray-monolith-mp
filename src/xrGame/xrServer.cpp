@@ -537,8 +537,16 @@ void xrServer::coop_run_dialog_action(NET_Packet& P)
 		return;
 	}
 
+	// MP fork (§19 co-op): mark which player is talking, so any task GIVEN by this action is
+	// tagged to them (CGameTaskManager::GiveGameTaskToActor reads it). Cleared right after -
+	// tasks given outside a dialogue must stay owner 0 (global).
+	extern u16 g_coop_dialog_actor;
+	g_coop_dialog_actor = speaker_id;
+
 	// Same call the single-player path makes, just with the server's own objects.
 	phrase->GetScriptHelper()->Action(speaker, partner, dialog_id, phrase_id);
+
+	g_coop_dialog_actor = 0;
 }
 
 u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadcasting with "flags" as returned

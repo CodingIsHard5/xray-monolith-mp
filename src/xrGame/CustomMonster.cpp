@@ -336,6 +336,24 @@ void CCustomMonster::coop_refresh_export_sample()
 	current.p_pos = Position();
 	current.fHealth = GetfHealth();
 	NET.push_back(current);
+
+	// MP fork (§19 co-op) facing diagnostic: what the SERVER is exporting, and where it came
+	// from. Throttled per creature. Compare with XRNET(face-cl) on the client to see the
+	// mismatch instead of guessing. Enable with -xrnet_facelog to avoid log spam otherwise.
+	if (strstr(Core.Params, "-xrnet_facelog"))
+	{
+		float xf_yaw, xf_pitch;
+		XFORM().k.getHP(xf_yaw, xf_pitch);
+		static u32 s_face_sv = 0;
+		if ((++s_face_sv % 30) == 0)
+		{
+			Msg("- XRNET(face-sv): id=%u src=%s o_model=%.3f m_body=%.3f xform=%.3f animctl=%d",
+				ID(), animation_movement_controlled() ? "xform" : "m_body",
+				current.o_model, movement().m_body.current.yaw, angle_normalize(-xf_yaw),
+				animation_movement_controlled() ? 1 : 0);
+			FlushLog();
+		}
+	}
 	// Bounded here as well as in shedule_Update: this runs far more often than the scheduler
 	// trim, and the exporter only ever looks at the newest entry.
 	while (NET.size() > 4)
@@ -771,6 +789,19 @@ void CCustomMonster::UpdateCL()
 		{
 			if (!animation_movement_controlled() && m_update_rotation_on_frame)
 				XFORM().rotateY(NET_Last.o_model);
+				if (strstr(Core.Params, "-xrnet_facelog"))
+				{
+					float applied_yaw, applied_pitch;
+					XFORM().k.getHP(applied_yaw, applied_pitch);
+					static u32 s_face_cl = 0;
+					if ((++s_face_cl % 30) == 0)
+					{
+						Msg("- XRNET(face-cl): id=%u recv_o_model=%.3f applied=%.3f animctl=%d",
+							ID(), NET_Last.o_model, angle_normalize(-applied_yaw),
+							animation_movement_controlled() ? 1 : 0);
+						FlushLog();
+					}
+				}
 			if (!animation_movement_controlled())
 				XFORM().translate_over(NET_Last.p_pos);
 

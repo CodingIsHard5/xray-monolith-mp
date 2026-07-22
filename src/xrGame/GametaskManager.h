@@ -44,10 +44,20 @@ public:
 	u32 GetTaskCount(ETaskState state);
 	void MapLocationRelcase(CMapLocation* ml);
 
-	// MP fork (§19 co-op): push the shared quest list to clients (server) / adopt it (client).
+	// MP fork (§19 co-op): push each player its own quest list (server) / adopt it (client).
 	void coop_broadcast_tasks();
 	void coop_apply_tasks(NET_Packet& packet);
 
 	void ResetStorage() { m_gametasks = NULL; };
 	void DumpTasks();
 };
+
+
+// MP fork (§19 co-op): quest ownership / faction / squad management (server-side). See
+// GametaskManager.cpp. Console commands and dialogue drive these.
+void coop_squad_create(u32 squad_id);
+void coop_squad_add_player(u32 squad_id, u16 player_id);
+void coop_squad_add_npc(u32 squad_id, u16 npc_id);
+void coop_squad_set_sharing(u32 squad_id, bool on);
+void coop_mark_faction_task(const shared_str& task_id, bool on);
+void coop_dump_squads();

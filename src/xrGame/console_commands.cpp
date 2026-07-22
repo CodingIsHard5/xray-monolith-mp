@@ -2636,6 +2636,54 @@ public:
 	virtual void Info(TInfo& I) { xr_strcpy(I, "co-op diag: print the local quest list"); }
 };
 
+// MP fork (§19 co-op): squad + quest-sharing management (server-side; run on the host, or on a
+// client whose command reaches the host in a hosted setup). First-pass tooling for the
+// per-player/faction/squad quest system - see GametaskManager.cpp.
+//   coop_squad <squad_id> add_player <player_id>
+//   coop_squad <squad_id> add_npc <npc_id>
+//   coop_squad <squad_id> share <0|1>
+//   coop_squad list
+class CCC_CoopSquad : public IConsole_Command
+{
+public:
+	CCC_CoopSquad(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+
+	virtual void Execute(LPCSTR args)
+	{
+		if (!ai().get_alife())
+		{
+			Msg("! coop_squad: run this on the host (it owns squads and quests)");
+			return;
+		}
+
+		string64 first = {0}, verb = {0};
+		u32 arg = 0;
+		const int n = sscanf(args ? args : "", "%63s %63s %u", first, verb, &arg);
+
+		if (n >= 1 && 0 == xr_strcmp(first, "list"))
+		{
+			coop_dump_squads();
+			return;
+		}
+
+		const u32 squad_id = u32(atoi(first));
+		if (n < 2)
+		{
+			coop_squad_create(squad_id);
+			Msg("- coop_squad: created/selected squad %u", squad_id);
+			return;
+		}
+
+		if (0 == xr_strcmp(verb, "add_player")) { coop_squad_add_player(squad_id, u16(arg)); Msg("- coop_squad: player %u -> squad %u", arg, squad_id); }
+		else if (0 == xr_strcmp(verb, "add_npc")) { coop_squad_add_npc(squad_id, u16(arg)); Msg("- coop_squad: npc %u -> squad %u", arg, squad_id); }
+		else if (0 == xr_strcmp(verb, "share")) { coop_squad_set_sharing(squad_id, arg != 0); Msg("- coop_squad: squad %u sharing=%u", squad_id, arg); }
+		else Msg("! coop_squad: unknown '%s' (add_player|add_npc|share|list)", verb);
+		FlushLog();
+	}
+
+	virtual void Info(TInfo& I) { xr_strcpy(I, "co-op: squad mgmt - <id> add_player|add_npc|share <n> | list"); }
+};
+
 void CCC_RegisterCommands()
 {
 	//Not needed for a singleplayer-only mod
@@ -2650,6 +2698,7 @@ void CCC_RegisterCommands()
 	CMD1(CCC_CoopTalkNearest, "coop_talk_nearest");
 	CMD1(CCC_CoopHitNearest, "coop_hit_nearest");
 	CMD1(CCC_CoopDumpTasks, "coop_dump_tasks");
+	CMD1(CCC_CoopSquad, "coop_squad");
 #ifdef DEBUG
 	CMD1(CCC_MemCheckpoint, "stat_memory_checkpoint");
 #endif //#ifdef DEBUG

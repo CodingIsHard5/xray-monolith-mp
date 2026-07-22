@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "../../xrNetServer/xr_enet_transport.h"
 #include "../UIGameCustom.h"
+#include "UIActorMenu.h"   // MP fork (§19 co-op): GetActorMenu().IsShown()
 #include "UITalkWnd.h"
 
 #include "UITalkDialogWnd.h"
