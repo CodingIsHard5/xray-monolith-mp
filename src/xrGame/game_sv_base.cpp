@@ -856,8 +856,12 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 					if (log)
 					{
 						CEntityAlive* const ea = smart_cast<CEntityAlive*>(target);
-						Msg("- XRNET(hit-apply):   hp_after=%.3f alive=%d",
-							ea ? ea->GetfHealth() : -1.f, ea ? (ea->g_Alive() ? 1 : 0) : -1);
+						Msg("- XRNET(hit-apply):   hp_after=%.3f alive=%d canharm=%d delta=%.4f tglobal=%.1f invuln=%.1f",
+							ea ? ea->GetfHealth() : -1.f, ea ? (ea->g_Alive() ? 1 : 0) : -1,
+							ea ? (ea->conditions().CanBeHarmed() ? 1 : 0) : -1,
+							ea ? ea->conditions().coop_dbg_delta() : 0.f,
+							Device.fTimeGlobal,
+							ea ? ea->conditions().coop_dbg_invuln() : 0.f);
 						FlushLog();
 					}
 				}

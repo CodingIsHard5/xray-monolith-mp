@@ -129,6 +129,10 @@ public:
 	IC void SetEntityMorale(float morale) { m_fEntityMorale = morale; }
 
 	IC float GetHealthLost() const { return m_fHealthLost; }
+	// MP fork (§19 co-op) diagnostic: expose the delta and invuln timer so the server can log
+	// exactly why a hit is or is not reducing an NPC's health.
+	IC float coop_dbg_delta() const { return m_fDeltaHealth; }
+	IC float coop_dbg_invuln() const { return m_fInvulnerableTime; }
 
 	virtual bool IsLimping() const;
 
