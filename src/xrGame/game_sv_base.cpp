@@ -19,6 +19,7 @@
 // above — hit.h needs the ALife namespace, which those headers bring in.
 #include "hit.h"
 #include "GameObject.h"
+#include "entity_alive.h"                          // MP fork (§19 co-op): GetfHealth/g_Alive
 
 extern ENGINE_API bool g_dedicated_server;
 
@@ -811,25 +812,21 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 				}
 			}
 
-			OnHit(id_src, id_dest, tNetPacket);
-
-			// MP fork (§19 co-op): apply the hit to OUR OWN copy of the target here.
+			// MP fork (§19 co-op): apply the hit to OUR OWN copy of the target.
 			//
-			// In single player this broadcast is how the damage lands: client and server are
+			// In single player the broadcast below is how damage lands: client and server are
 			// one process, so the packet loops back through the local client and reaches the
-			// object. On a dedicated ENet server there is no such loopback - SendTo_LL routes
-			// remote clients over the socket and the in-process host-client falls through to
-			// DirectPlay, which this fork does not have. So the broadcast reached every PLAYER
-			// (hence the pain sounds and blood) and never reached the server's own creature,
-			// whose health therefore never dropped and who consequently never died.
+			// object. A dedicated ENet server has no such loopback - SendTo_LL routes remote
+			// clients to the socket and the in-process host-client falls through to DirectPlay,
+			// which the fork lacks. So the broadcast reached every PLAYER (pain sounds, blood)
+			// and never the server's own creature, whose health never dropped, so it never died.
 			//
-			// Read a copy, so the broadcast below still sees the packet unconsumed.
-			if (xr_enet::enabled() && Level().Objects.net_Find(id_dest))
+			// Snapshot the SHit HERE, before OnHit - OnHit reads from the packet, so capturing
+			// after it starts from the wrong position. At this point the packet is positioned
+			// just after id_src, and id_src IS SHit's whoID (Read_Packet_Cont starts there), so
+			// rewind two bytes to line up whoID.
+			if (xr_enet::enabled())
 			{
-				// Rewind two bytes first. The caller above read id_dest and id_src, and id_src IS
-				// SHit's whoID - Read_Packet_Cont starts by reading whoID and weaponID. Without
-				// the rewind every field lands one slot early, hit_type comes out as garbage,
-				// and CEntityCondition::ConditionHit kills the server with "unknown hit type 0".
 				NET_Packet local = tNetPacket;
 				local.r_seek(local.r_tell() - sizeof(u16));
 
@@ -839,13 +836,36 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 				hit.who = Level().Objects.net_Find(hit.whoID);
 
 				CGameObject* const target = smart_cast<CGameObject*>(Level().Objects.net_Find(id_dest));
+
+				static u32 s_coop_apply = 0;
+				const bool log = (++s_coop_apply <= 30);
+				if (log)
+				{
+					CEntityAlive* const ea = target ? smart_cast<CEntityAlive*>(target) : NULL;
+					Msg("- XRNET(hit-apply): target %u found=%d alive=%d hp_before=%.3f power=%.1f htype=%d",
+						id_dest, target ? 1 : 0, ea ? (ea->g_Alive() ? 1 : 0) : -1,
+						ea ? ea->GetfHealth() : -1.f, hit.power, int(hit.hit_type));
+				}
+
 				if (target)
 				{
 					target->SetHitInfo(hit.who, Level().Objects.net_Find(hit.weaponID), hit.bone(),
 					                   hit.p_in_bone_space, hit.dir);
 					target->Hit(&hit);
+
+					if (log)
+					{
+						CEntityAlive* const ea = smart_cast<CEntityAlive*>(target);
+						Msg("- XRNET(hit-apply):   hp_after=%.3f alive=%d",
+							ea ? ea->GetfHealth() : -1.f, ea ? (ea->g_Alive() ? 1 : 0) : -1);
+						FlushLog();
+					}
 				}
+				else if (log)
+					FlushLog();
 			}
+
+			OnHit(id_src, id_dest, tNetPacket);
 
 			m_server->SendBroadcast(BroadcastCID, tNetPacket, net_flags(TRUE,TRUE));
 		}
