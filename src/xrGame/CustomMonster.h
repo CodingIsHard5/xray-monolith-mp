@@ -126,6 +126,13 @@ public:
 	// walking or standing — see CStalkerAnimationManager::standing().
 	float m_coop_net_speed;
 	IC float coop_net_speed() const { return m_coop_net_speed; }
+	// MP fork (§19 co-op): world heading of the puppet's actual movement (radians), from the
+	// two newest network samples. The leg-animation direction picker uses this instead of the
+	// undriven sight so the legs match the body - see stalker_animation_legs.cpp.
+	float m_coop_net_heading;
+	bool  m_coop_net_moving;
+	IC float coop_net_heading() const { return m_coop_net_heading; }
+	IC bool  coop_net_moving()  const { return m_coop_net_moving; }
 	BOOL NET_WasInterpolating; // previous update was by interpolation or by extrapolation
 	u32 NET_Time; // server time of last update
 	//------------------------------

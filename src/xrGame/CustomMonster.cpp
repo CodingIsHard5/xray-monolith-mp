@@ -105,6 +105,8 @@ CCustomMonster::CCustomMonster() :
 	m_invulnerable = false;
 	m_moving_object = 0;
 	m_coop_net_speed = 0.f;
+	m_coop_net_heading = 0.f;
+	m_coop_net_moving = false;
 }
 
 CCustomMonster::~CCustomMonster()
@@ -675,7 +677,17 @@ void CCustomMonster::UpdateCL()
 				const net_update& prev = NET[NET.size() - 2];
 				const net_update& last = NET.back();
 				const u32 gap = last.dwTimeStamp - prev.dwTimeStamp;
-				m_coop_net_speed = gap ? (prev.p_pos.distance_to(last.p_pos) / (float(gap) / 1000.f)) : 0.f;
+				Fvector d; d.sub(last.p_pos, prev.p_pos); d.y = 0.f;
+				const float dist = d.magnitude();
+				m_coop_net_speed = gap ? (dist / (float(gap) / 1000.f)) : 0.f;
+				// Heading of travel. Keep the last real heading when nearly stationary so a
+				// momentarily-still NPC does not snap its legs to a random direction.
+				m_coop_net_moving = (dist > 0.03f);
+				if (m_coop_net_moving)
+				{
+					float h, pch; d.getHP(h, pch);
+					m_coop_net_heading = angle_normalize(-h); // getHP returns -a for rotateY(a)
+				}
 			}
 
 			net_update& N = NET.back();

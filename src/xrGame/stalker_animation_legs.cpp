@@ -177,7 +177,18 @@ MotionID CStalkerAnimationManager::legs_move_animation()
 	// Fall back to the creature's own heading, which means "moving the way I am facing" — the
 	// sane default, and stable frame to frame.
 	float yaw = 0.f, pitch = 0.f;
-	if (object().sight().GetDirectionAngles(yaw, pitch))
+	if (movement.replicated_state())
+	{
+		// MP fork (§19 co-op): the facing diagnostic proved the body ROOT rotation replicates
+		// correctly; what was arbitrary was THIS - the leg-direction pick keyed off the NPC's
+		// SIGHT direction, which is undriven on a puppet, so the legs pointed independently of
+		// the body. Use the puppet's real direction of TRAVEL instead (from the network
+		// position deltas). Standing still -> face forward (legs aligned with the body). This
+		// makes "walking left" actually strafe left relative to the body, etc.
+		yaw = object().coop_net_moving() ? object().coop_net_heading()
+		                                 : movement.body_orientation().current.yaw;
+	}
+	else if (object().sight().GetDirectionAngles(yaw, pitch))
 		yaw = angle_normalize_signed(-yaw);
 	else
 		yaw = movement.body_orientation().current.yaw;
