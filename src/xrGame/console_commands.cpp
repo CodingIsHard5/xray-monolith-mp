@@ -18,6 +18,8 @@
 #include "actor.h"
 #include "InventoryOwner.h"                  // MP fork (§19 co-op): coop_talk_nearest
 #include "ai/stalker/ai_stalker.h"           // MP fork (§19 co-op): coop_talk_nearest
+#include "GametaskManager.h"                                   // MP fork (§19 co-op): coop console commands
+#include "Hit.h"                                   // MP fork (§19 co-op): coop console commands
 #include "Actor_Flags.h"
 #include "customzone.h"
 #include "script_engine.h"
@@ -2522,6 +2524,118 @@ public:
 	virtual void Info(TInfo& I) { xr_strcpy(I, "co-op diag: start a dialogue with the nearest living stalker"); }
 };
 
+// MP fork (§19 co-op): find the nearest living stalker whose section name contains the given
+// substring (empty = any). Shared by the talk and hit commands so both can target a specific
+// KIND of NPC - a trader, a barman, a technician - without me being able to walk up to one.
+static CAI_Stalker* coop_find_nearest_stalker(LPCSTR name_filter, float& out_distance)
+{
+	CActor* const actor = smart_cast<CActor*>(Level().CurrentControlEntity());
+	if (!actor)
+		return NULL;
+
+	float best = flt_max;
+	CAI_Stalker* result = NULL;
+
+	for (u32 i = 0, n = Level().Objects.o_count(); i < n; ++i)
+	{
+		CAI_Stalker* const stalker = smart_cast<CAI_Stalker*>(Level().Objects.o_get_by_iterator(i));
+		if (!stalker || !stalker->g_Alive())
+			continue;
+		if (name_filter && name_filter[0] && !strstr(stalker->cNameSect().c_str(), name_filter))
+			continue;
+
+		const float distance = stalker->Position().distance_to(actor->Position());
+		if (distance < best)
+		{
+			best = distance;
+			result = stalker;
+		}
+	}
+
+	out_distance = best;
+	return result;
+}
+
+// MP fork (§19 co-op): apply a hit to the nearest NPC, as if the player had shot it. This is
+// the ONLY way I can test the NPC-death path from an automated session - synthetic mouse
+// input cannot aim, so I cannot land a real bullet on a target. It builds the same SHit and
+// sends the same GE_HIT event a bullet does, so it exercises the whole pipeline including the
+// server-side application that makes creatures actually die. Diagnostic/dev only.
+//   coop_hit_nearest [power] [name_substr]
+class CCC_CoopHitNearest : public IConsole_Command
+{
+public:
+	CCC_CoopHitNearest(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+
+	virtual void Execute(LPCSTR args)
+	{
+		CActor* const actor = smart_cast<CActor*>(Level().CurrentControlEntity());
+		if (!actor)
+		{
+			Msg("! coop_hit_nearest: no controlled actor");
+			return;
+		}
+
+		float power = 100.f;
+		string256 name_filter = {0};
+		sscanf(args ? args : "", "%f %255s", &power, name_filter);
+
+		float distance = flt_max;
+		CAI_Stalker* const target = coop_find_nearest_stalker(name_filter, distance);
+		if (!target)
+		{
+			Msg("! coop_hit_nearest: no matching living stalker");
+			return;
+		}
+
+		Fvector dir;
+		dir.sub(target->Position(), actor->Position());
+		dir.normalize_safe();
+
+		SHit hit(power, dir, actor, u16(0), Fvector().set(0, 0, 0), 1.f, ALife::eHitTypeFireWound, 0.f, false);
+		hit.whoID = actor->ID();
+		hit.weaponID = actor->ID();
+		hit.GenHeader(GE_HIT, target->ID());
+
+		NET_Packet packet;
+		hit.Write_Packet(packet);
+		actor->u_EventSend(packet);
+
+		Msg("- coop_hit_nearest: %.0f dmg -> '%s' (id %u) at %.1fm, health now %.2f",
+			power, target->cName().c_str(), target->ID(), distance, target->GetfHealth());
+		FlushLog();
+	}
+
+	virtual void Info(TInfo& I)
+	{
+		xr_strcpy(I, "co-op diag: hit the nearest NPC. args: [power] [name_substr]");
+	}
+};
+
+// MP fork (§19 co-op): print the local task list. Verifies quest replication - give a task via
+// dialogue on the server, run this on the client, and the task should appear.
+class CCC_CoopDumpTasks : public IConsole_Command
+{
+public:
+	CCC_CoopDumpTasks(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+
+	virtual void Execute(LPCSTR /*args*/)
+	{
+		vGameTasks& tasks = Level().GameTaskManager().GetGameTasks();
+		Msg("- coop_dump_tasks: %u task(s) in the local list", tasks.size());
+		for (u32 i = 0; i < tasks.size(); ++i)
+		{
+			CGameTask* const t = tasks[i].game_task;
+			if (t)
+				Msg("    [%u] id='%s' state=%d title='%s'", i, t->m_ID.c_str(), int(t->GetTaskState()),
+					t->m_Title.c_str());
+		}
+		FlushLog();
+	}
+
+	virtual void Info(TInfo& I) { xr_strcpy(I, "co-op diag: print the local quest list"); }
+};
+
 void CCC_RegisterCommands()
 {
 	//Not needed for a singleplayer-only mod
@@ -2534,6 +2648,8 @@ void CCC_RegisterCommands()
 	// the whole point of adding it was lost. This is a diagnostic, but the builds that need
 	// diagnosing are release builds.
 	CMD1(CCC_CoopTalkNearest, "coop_talk_nearest");
+	CMD1(CCC_CoopHitNearest, "coop_hit_nearest");
+	CMD1(CCC_CoopDumpTasks, "coop_dump_tasks");
 #ifdef DEBUG
 	CMD1(CCC_MemCheckpoint, "stat_memory_checkpoint");
 #endif //#ifdef DEBUG
