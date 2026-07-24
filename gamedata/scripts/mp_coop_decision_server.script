@@ -115,7 +115,7 @@ local function do_spawn(actor)
 	local apos = actor:position()
 	local adir = actor:direction()
 	local d = vector():set(adir.x, 0, adir.z)
-	d:normalize()
+	if d:magnitude() < 0.01 then d:set(1, 0, 0) else d:normalize() end   -- actor facing straight up/down
 	local perp = vector():set(-d.z, 0, d.x)
 	local section = pick_section()
 	if not section then
@@ -229,8 +229,33 @@ local function tick_impl(now_ms, real_count, actor_id)
 	end
 end
 
--- _G.mp_coop_server_tick target (registered in mp_client.on_server_game_start)
+-- _G.mp_coop_server_tick target (registered in mp_client.on_server_game_start). Dispatches to a
+-- scenario chosen ONCE from the engine command line: -coop_combat -> the KIND_COMBAT originator
+-- (mp_coop_scenario_combat), otherwise the default KIND_MOVE originator (this file). Lets one
+-- engine hook drive different decision sites without a rebuild (command_line() = Core.Params).
+local scenario = nil   -- nil until resolved; then "move" or a delegate function
 function tick(now_ms, real_count, actor_id)
+	if scenario == nil then
+		local cl = ""
+		pcall(function() cl = command_line() or "" end)
+		if string.find(cl, "-coop_combat", 1, true) then
+			scenario = mp_coop_scenario_combat.tick
+			logf("~ MP_COOP_SV: scenario = COMBAT (mp_coop_scenario_combat)")
+		else
+			scenario = "move"
+			logf("~ MP_COOP_SV: scenario = MOVE (default)")
+		end
+	end
+	if scenario ~= "move" then
+		-- the delegate guards itself, but wrap anyway so a nil/broken scenario can't propagate a
+		-- Lua error up through the engine functor call; latch it off after the first failure.
+		local ok, err = pcall(scenario, now_ms, real_count, actor_id)
+		if not ok then
+			logf("! MP_COOP_SV scenario error: %s", tostring(err))
+			scenario = function() end   -- stop retrying a broken scenario
+		end
+		return
+	end
 	local ok, err = pcall(tick_impl, now_ms, real_count, actor_id)
 	if not ok then
 		logf("! MP_COOP_SV tick error: %s", tostring(err))

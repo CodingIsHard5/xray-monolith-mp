@@ -16,8 +16,9 @@
 	The SAME codec + KIND enum is used by the server originator (mp_coop_decision_server.script).
 --]]
 
--- Decision kinds — must match mp_coop_decision_server.script.
-KIND_MOVE = 1   -- move an online NPC to a target point (args = encoded point)
+-- Decision kinds — must match the server originators.
+KIND_MOVE   = 1   -- move an online NPC to a target point (args = encoded point)
+KIND_COMBAT = 2   -- set an online NPC's combat enemy (args = enemy object id, u16)
 
 -- ---- point codec (shared convention with the server) --------------------------------------
 -- X-Ray's Lua is 5.1 (no string.pack), so encode each coordinate as a cm-scaled signed int32
@@ -52,6 +53,16 @@ end
 
 function decode_point(hex)
 	return vector():set(hex_to_i32(hex, 0) / 100, hex_to_i32(hex, 4) / 100, hex_to_i32(hex, 8) / 100)
+end
+
+-- u16 codec (KIND_COMBAT args = a single object id): 2 bytes big-endian = 4 hex chars.
+function encode_u16(v)
+	v = v % 65536
+	return string.format("%02x%02x", math.floor(v / 256) % 256, v % 256)
+end
+
+function decode_u16(hex)
+	return tonumber(string.sub(hex, 1, 4), 16) or 0
 end
 
 local function dist_xz(a, b)
@@ -118,6 +129,33 @@ function on_decision(subject_id, kind, hex_args)
 			logf("MP_COOP_MOVE: [CLIENT] subject=%s local drive order failed (puppet not controllable?): %s",
 				tostring(subject_id), tostring(err))
 		end
+		return
+	end
+
+	if kind == KIND_COMBAT then
+		-- The server decided this online NPC's combat enemy. Replicate it so the client's copy
+		-- fights the SAME target. set_enemy is direct for a bloodsucker (CAI_Bloodsucker::SetEnemy);
+		-- set_relation is the stalker (InventoryOwner) path. Apply whichever the subject supports.
+		local enemy_id = decode_u16(hex_args)
+		local npc = level.object_by_id(subject_id)
+		local enemy = level.object_by_id(enemy_id)
+		if not npc or not enemy then
+			logf("MP_COOP_CB: [CLIENT] subject=%s enemy=%s NOT both online (npc=%s enemy=%s)",
+				tostring(subject_id), tostring(enemy_id), tostring(npc ~= nil), tostring(enemy ~= nil))
+			return
+		end
+		-- Apply the stalker relation path (the verifiable one: relation() reads back = enemy) and,
+		-- harmlessly, the bloodsucker path. best_enemy is the native-engagement signal (see the
+		-- scenario's KNOWN GAP note: it stays nil for logic-less headless-spawned NPCs).
+		pcall(function() npc:set_enemy(enemy) end)                         -- monster (bloodsucker)
+		pcall(function()                                                   -- stalker (InventoryOwner)
+			npc:set_relation(game_object.enemy, enemy)
+			npc:force_set_goodwill(-3000, enemy)
+		end)
+		local rel = select(2, pcall(function() return npc:relation(enemy) end))
+		local be = npc:best_enemy()
+		logf("MP_COOP_CB: [CLIENT] subject=%s enemy=%s relation=%s best_enemy=%s",
+			tostring(subject_id), tostring(enemy_id), tostring(rel), be and tostring(be:id()) or "nil")
 		return
 	end
 
