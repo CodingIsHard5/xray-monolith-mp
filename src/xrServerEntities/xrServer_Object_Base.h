@@ -76,6 +76,7 @@ public:
 	u16 ID_Parent; // internal ParentID, 0xffff means no parent
 	u16 ID_Phantom; // internal PhantomID, 0xffff means no phantom
 	xrClientData* owner;
+	bool m_coop_orphaned;  // MP fork (§9.3/9.4): actor preserved for reconnection, skip ownership
 
 	// spawn data
 	shared_str s_name;

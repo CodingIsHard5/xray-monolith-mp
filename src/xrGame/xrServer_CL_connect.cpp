@@ -31,7 +31,16 @@ void xrServer::Perform_connect_spawn(CSE_Abstract* E, xrClientData* CL, NET_Pack
 	Flags16 save = E->s_flags;
 	//-------------------------------------------------
 	E->s_flags.set(M_SPAWN_UPDATE,TRUE);
-	if (0 == E->owner)
+
+	// MP fork (§9.3/9.4 co-op reconnection): orphaned entities (actor preserved for
+	// reconnection) must NOT be claimed by a connecting client. Send as stripped/remote
+	// so other players can see the body standing at its last position.
+	if (E->m_coop_orphaned)
+	{
+		E->Spawn_Write(P, FALSE);
+		E->UPDATE_Write(P);
+	}
+	else if (0 == E->owner)
 	{
 		// PROCESS NAME; Name this entity
 		if (E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER))

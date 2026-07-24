@@ -9,6 +9,7 @@
 #include "object_broker.h"
 #include "gamepersistent.h"
 #include "xrServer.h"
+#include "xrMessages.h"                            // MP fork (§9.3): M_SPAWN_OBJECT_* flags
 #include "ai_space.h"                              // MP fork: ai().alife()
 #include "script_engine.h"                         // MP fork: server-side Lua init hook
 #include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
@@ -255,7 +256,7 @@ void game_sv_Single::coop_clone_inventory_for(CSE_ALifeCreatureActor* base, CSE_
 		cloned, owner->ID, CL->ID.value());
 }
 
-void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
+void game_sv_Single::coop_spawn_actor_for(xrClientData* CL, Fvector* pos_override, Fvector* angle_override)
 {
 	CSE_ALifeCreatureActor* base = ai().alife().graph().actor();
 	if (!base)
@@ -287,12 +288,20 @@ void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
 	E->s_RP = 0xFE;
 	E->RespawnTime = 0;
 
-	// position slightly offset from the base actor so co-op players don't overlap
-	static int s_coop_actor_seq = 0;
-	++s_coop_actor_seq;
-	E->o_Position = base->o_Position;
-	E->o_Position.x += 1.5f * float(s_coop_actor_seq);
-	E->o_Angle = base->o_Angle;
+	// Position: use override (reconnection at saved position) or offset from base actor
+	if (pos_override)
+	{
+		E->o_Position = *pos_override;
+		E->o_Angle = angle_override ? *angle_override : base->o_Angle;
+	}
+	else
+	{
+		static int s_coop_actor_seq = 0;
+		++s_coop_actor_seq;
+		E->o_Position = base->o_Position;
+		E->o_Position.x += 1.5f * float(s_coop_actor_seq);
+		E->o_Angle = base->o_Angle;
+	}
 
 	CSE_ALifeCreatureActor* na = smart_cast<CSE_ALifeCreatureActor*>(E);
 	if (na)
@@ -354,10 +363,114 @@ void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
 // any client that is net_Ready (in the world, sending updates) but does not yet own an
 // entity (CL->owner == NULL) gets a fresh actor. spawn_end/Process_spawn replicates it
 // with per-recipient ownership (owner LOCAL+ASPLAYER, peers stripped -> remote render).
+// MP fork (§9.3/9.4 co-op reconnection): orphan the actor when a co-op client disconnects.
+// The entity stays in the world (alive, at its last position) but has no owning client.
+// If the same player name reconnects within the timeout, the actor is re-associated.
+void game_sv_Single::coop_orphan_actor(xrClientData* CL)
+{
+	if (!CL || !CL->owner)
+		return;
+
+	CSE_Abstract* actor = CL->owner;
+	coop_orphan orphan;
+	orphan.entity_id = actor->ID;
+	orphan.player_name = CL->ps ? CL->ps->getName() : CL->name;
+	orphan.disconnect_time = Device.dwTimeGlobal;
+
+	// Mark the entity as orphaned so Perform_connect_spawn won't claim it for other
+	// connecting clients. Detach ownership so the update loop skips it (frozen body).
+	actor->m_coop_orphaned = true;
+	actor->owner = NULL;
+	CL->owner = NULL;
+
+	// Also orphan child entities (inventory items) — they share the actor's fate
+	for (u16 child_id : actor->children)
+	{
+		CSE_Abstract* child = m_server->ID_to_entity(child_id);
+		if (child)
+		{
+			child->m_coop_orphaned = true;
+			child->owner = NULL;
+		}
+	}
+
+	m_coop_orphans.push_back(orphan);
+	Msg("- XRNET(dbg): co-op actor id %u orphaned for player '%s' (reconnect window %ds)",
+		orphan.entity_id, orphan.player_name.c_str(), RECONNECT_TIMEOUT_MS / 1000);
+}
+
+void game_sv_Single::OnCoopClientDisconnected(xrClientData* CL)
+{
+	if (!xr_enet::enabled())
+		return;
+	coop_orphan_actor(CL);
+	// Clean up the grace-period entry so a reconnecting client gets a fresh grace window
+	m_coop_seen.erase(CL->ID.value());
+}
+
+CSE_Abstract* game_sv_Single::coop_find_orphan(LPCSTR name)
+{
+	for (auto it = m_coop_orphans.begin(); it != m_coop_orphans.end(); ++it)
+	{
+		if (!xr_strcmp(it->player_name.c_str(), name))
+		{
+			u16 eid = it->entity_id;
+			m_coop_orphans.erase(it);
+			CSE_Abstract* entity = m_server->ID_to_entity(eid);
+			if (entity)
+			{
+				Msg("- XRNET(dbg): co-op orphan matched for player '%s' -> entity id %u", name, eid);
+				return entity;
+			}
+			Msg("! XRNET(dbg): co-op orphan entity id %u no longer exists for player '%s'", eid, name);
+			return NULL;
+		}
+	}
+	return NULL;
+}
+
+void game_sv_Single::coop_cleanup_orphans()
+{
+	if (m_coop_orphans.empty())
+		return;
+
+	const u32 now = Device.dwTimeGlobal;
+	for (auto it = m_coop_orphans.begin(); it != m_coop_orphans.end(); )
+	{
+		if (now - it->disconnect_time > RECONNECT_TIMEOUT_MS)
+		{
+			u16 eid = it->entity_id;
+			Msg("- XRNET(dbg): co-op orphan expired for player '%s' (entity id %u) — destroying",
+				it->player_name.c_str(), eid);
+
+			CSE_Abstract* entity = m_server->ID_to_entity(eid);
+			if (entity)
+			{
+				// Clear orphan flags before destroying
+				entity->m_coop_orphaned = false;
+				for (u16 child_id : entity->children)
+				{
+					CSE_Abstract* child = m_server->ID_to_entity(child_id);
+					if (child) child->m_coop_orphaned = false;
+				}
+
+				// Perform_destroy handles children, entity removal, and broadcast
+				m_server->Perform_destroy(entity, net_flags(TRUE, TRUE));
+			}
+			it = m_coop_orphans.erase(it);
+		}
+		else
+			++it;
+	}
+}
+
 void game_sv_Single::coop_poll_spawns()
 {
 	if (!xr_enet::enabled() || !ai().get_alife())
 		return; // co-op (ENet) only; stock single-player untouched
+
+	// Expire orphaned actors past the reconnect timeout
+	coop_cleanup_orphans();
 
 	// A co-op client never reliably sends M_CLIENTREADY, and it can't be net_Ready
 	// before it has a Local actor to export (chicken-and-egg). So use a grace period:
@@ -384,7 +497,40 @@ void game_sv_Single::coop_poll_spawns()
 	collector c; c.self = this; c.now = now;
 	m_server->ForEachClientDo(c);
 	for (xrClientData* CL : c.pending)
-		coop_spawn_actor_for(CL);
+	{
+		// MP fork (§9.3/9.4 co-op reconnection): check if this client matches an orphaned
+		// actor from a previous disconnect. If so, spawn a fresh actor at the orphan's
+		// last position (preserving location), then destroy the orphan entity.
+		LPCSTR client_name = CL->ps ? CL->ps->getName() : CL->name.c_str();
+		CSE_Abstract* orphan = coop_find_orphan(client_name);
+		if (orphan)
+		{
+			Fvector saved_pos = orphan->o_Position;
+			Fvector saved_angle = orphan->o_Angle;
+
+			// Clear orphan flags before destroying so cleanup proceeds normally
+			orphan->m_coop_orphaned = false;
+			for (u16 child_id : orphan->children)
+			{
+				CSE_Abstract* child = m_server->ID_to_entity(child_id);
+				if (child) child->m_coop_orphaned = false;
+			}
+
+			// Perform_destroy handles children (reject+destroy), entity removal,
+			// and broadcasts GE_DESTROY to all clients
+			m_server->Perform_destroy(orphan, net_flags(TRUE, TRUE));
+
+			// Spawn a fresh actor at the orphan's saved position
+			coop_spawn_actor_for(CL, &saved_pos, &saved_angle);
+
+			Msg("- XRNET(dbg): co-op player '%s' RECONNECTED at saved position (%.1f, %.1f, %.1f)",
+				client_name, saved_pos.x, saved_pos.y, saved_pos.z);
+		}
+		else
+		{
+			coop_spawn_actor_for(CL);
+		}
+	}
 }
 
 BOOL game_sv_Single::OnTouch(u16 eid_who, u16 eid_what, BOOL bForced)
@@ -502,7 +648,7 @@ void game_sv_Single::coop_update_anchors()
 void game_sv_Single::Update()
 {
 	inherited::Update();
-	coop_poll_spawns();    // MP fork (§14 co-op): give ready clients their own actor
+	coop_poll_spawns();    // MP fork (§14 co-op): give ready clients their own actor + reconnection
 	coop_update_anchors(); // MP fork (§15 co-op): re-centre A-Life on the players
 	/*	switch(phase) 	{
 			case GAME_PHASE_PENDING : {

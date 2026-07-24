@@ -33,11 +33,30 @@ public:
 	virtual void OnPlayerConnectFinished(ClientID id_who);
 private:
 	void coop_poll_spawns();                 // spawn actors for ready, actorless clients
-	void coop_spawn_actor_for(xrClientData* CL);
+	void coop_spawn_actor_for(xrClientData* CL, Fvector* pos_override = NULL, Fvector* angle_override = NULL);
 	void coop_clone_inventory_for(CSE_ALifeCreatureActor* base, CSE_Abstract* owner, xrClientData* CL);
 	void coop_give_starting_kit(CSE_Abstract* owner, xrClientData* CL);
 	void coop_update_anchors();              // feed player positions to A-Life anchors
 	xr_map<u32, u32> m_coop_seen;            // client id -> first-seen time (grace for load)
+
+	// MP fork (§9.3/9.4 co-op reconnection): when a co-op client disconnects, its actor
+	// entity stays alive in the world (orphaned) for up to RECONNECT_TIMEOUT_MS. If the
+	// same player name reconnects within that window, the orphaned actor is re-associated
+	// instead of spawning a fresh one — preserving position, health, inventory.
+	struct coop_orphan
+	{
+		u16         entity_id;   // server entity ID of the orphaned actor
+		shared_str  player_name; // name used to match the reconnecting client
+		u32         disconnect_time; // Device.dwTimeGlobal when disconnected
+	};
+	xr_vector<coop_orphan> m_coop_orphans;
+	static const u32 RECONNECT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+	void coop_orphan_actor(xrClientData* CL);    // called on co-op client disconnect
+	void coop_cleanup_orphans();                  // expire stale orphans
+	CSE_Abstract* coop_find_orphan(LPCSTR name);  // find orphan by player name
+public:
+	void OnCoopClientDisconnected(xrClientData* CL); // game-layer co-op disconnect handler
 public:
 	virtual BOOL OnTouch(u16 eid_who, u16 eid_what, BOOL bForced = FALSE);
 	virtual void OnDetach(u16 eid_who, u16 eid_what);

@@ -4,6 +4,7 @@
 #include "alife_simulator.h"
 #include "xrserver_objects.h"
 #include "level.h"
+#include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
 
 void xrServer::OnCL_Disconnected(IClient* CL)
 {
@@ -27,6 +28,23 @@ void xrServer::OnCL_Disconnected(IClient* CL)
 	clientID.set(0);
 
 	game->AddDelayedEvent(P, GAME_EVENT_PLAYER_DISCONNECTED, 0, clientID);
+
+	// MP fork (§9.3/9.4 co-op reconnection): in co-op mode, DON'T migrate or destroy
+	// the disconnecting player's actor entity. Instead, orphan it — the entity stays in
+	// the world at its last position with no owner. If the player reconnects within the
+	// timeout window, it gets re-associated. game_sv_Single handles the orphan lifecycle.
+	if (xr_enet::enabled() && !CL->flags.bLocal)
+	{
+		game_sv_Single* sv_single = smart_cast<game_sv_Single*>(game);
+		if (sv_single)
+		{
+			sv_single->OnCoopClientDisconnected(xrCData);
+			// coop_orphan_actor already nulled ownership on actor + children and
+			// set m_coop_orphaned. No migration needed — orphans stay in the entity map.
+			Server_Client_Check(CL);
+			return;
+		}
+	}
 
 	//
 	xrS_entities::iterator I = entities.begin(), E = entities.end();
