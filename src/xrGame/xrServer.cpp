@@ -354,6 +354,12 @@ void xrServer::MakeUpdatePackets()
 		// keep dense streaming (no regression). (The step-3 cadence PROBE threw the throttle at all
 		// creatures; that measurement is done — see DECISION_REPLICATION_PLAN.md — so it is now
 		// membership-gated per the inversion plan.)
+		// throttle bookkeeping deferred to AFTER the write below (CodeRabbit): the timestamp must be
+		// stamped only once a NON-EMPTY update is actually queued, else an ObjectSize==0 pass (packet
+		// dropped) would still consume a throttle window and suppress the next real correction.
+		static xr_map<u16, u32> s_c2_last_sent; // per driven creature: last throttled send time
+		bool c2_driven_send = false;
+		u32  c2_gap = 0;
 		if (s_throttle_ms > 0 && xr_enet::enabled() && Test.cast_creature_abstract())
 		{
 			const u32 now = Device.dwTimeGlobal;
@@ -362,15 +368,11 @@ void xrServer::MakeUpdatePackets()
 				&& ((now - dd->second) < COOP_DECISION_DRIVEN_TTL_MS);
 			if (driven)
 			{
-				static xr_map<u16, u32> s_last_sent;
-				auto it = s_last_sent.find(Test.ID);
-				if (it != s_last_sent.end() && (now - it->second) < u32(s_throttle_ms))
+				auto it = s_c2_last_sent.find(Test.ID);
+				if (it != s_c2_last_sent.end() && (now - it->second) < u32(s_throttle_ms))
 					continue; // within the throttle window — skip this driven creature's update
-				const u32 gap = (it != s_last_sent.end()) ? (now - it->second) : 0;
-				s_last_sent[Test.ID] = now;
-				if (strstr(Core.Params, "-dbg"))
-					Msg("* COOP_C2_THROTTLE: id=%u SENT gap=%ums (throttle=%dms, driven)",
-					    Test.ID, gap, s_throttle_ms);
+				c2_driven_send = true;
+				c2_gap = (it != s_c2_last_sent.end()) ? (now - it->second) : 0;
 			}
 		}
 
@@ -387,6 +389,14 @@ void xrServer::MakeUpdatePackets()
 #ifdef DEBUG
 			if (g_Dump_Update_Write) Msg("* %s : %d", Test.name(), ObjectSize);
 #endif
+			// §4 step 3 (C2): a real update is going out — NOW stamp the throttle time (see above).
+			if (c2_driven_send)
+			{
+				s_c2_last_sent[Test.ID] = Device.dwTimeGlobal;
+				if (strstr(Core.Params, "-dbg"))
+					Msg("* COOP_C2_THROTTLE: id=%u SENT gap=%ums (throttle=%dms, driven)",
+					    Test.ID, c2_gap, s_throttle_ms);
+			}
 			m_updator.write_update_for(Test.ID, tmpPacket);
 		}
 	} //all entities

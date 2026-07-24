@@ -91,12 +91,23 @@ local function logf(...) printf("%s", string.format(...)) end
 -- m_fDistToEnd > 0 lets the monster's path builder arrest the walk near the destination
 -- (base_monster_script bfAssignMovement: is_path_end); default -1 makes it over-walk the point.
 local DIST_TO_END = 1.5
+-- §14 step 3 (increment C1c): arrival hysteresis, mirroring mp_coop_decision_server. Re-issuing
+-- move(walk_fwd) re-arms ACT_WALK_FWD each time and its root motion carries the NPC PAST the target
+-- (the overshoot). So the walk is issued ONCE per target and its single arrested path runs; we
+-- re-issue only on a new target, drift past REARM_M after arriving, or loss of script control.
+local STOP_M  = 2.5    -- within this of target -> arrived: stop re-issuing so it settles
+local REARM_M = 4.0    -- if it drifts past this after arriving -> re-path once
+-- per-subject drive state: subject_id -> { tx,ty,tz, arrived, issued }
+local drive_state = {}
+
+local function valid_lvid(vid)
+	return vid ~= nil and vid ~= 4294967295 and vid ~= 65535
+end
 
 -- ---- executor ------------------------------------------------------------------------------
 
 -- Drive an online puppet to a target with the proven monster-movement order (Spike 2: monsters
--- obey raw scripted movement; bipeds freeze — biped control is a separate sub-problem). Returns
--- true if the order was issued.
+-- obey raw scripted movement; bipeds freeze — biped control is a separate sub-problem).
 local function drive_move(obj, tgt)
 	-- clamp to the puppet's nav mesh so the order isn't silently dropped for an off-mesh target
 	local dest = tgt
@@ -105,6 +116,11 @@ local function drive_move(obj, tgt)
 		if type(r2) == "userdata" then dest = r2
 		elseif type(r1) == "userdata" then dest = r1 end
 	end
+	-- Resolve the destination to a nav VERTEX so the node-based move ctor gives the path builder an
+	-- exact path-end node (mirrors the server; a blind world point ends at the nearest vertex ~m off
+	-- and the NPC completes short, then wanders). Fall back to the point ctor if resolution fails.
+	local vid = nil
+	pcall(function() vid = level.vertex_id(vector():set(dest.x, dest.y, dest.z)) end)
 	-- Take script control ONCE. Calling obj:script(true) while already scripted raises
 	-- "Invalid sequence of taking an entity under script control" (mirror the Spike-2 driver:
 	-- only (re)take control when the engine reports the object is not currently scripted).
@@ -113,11 +129,14 @@ local function drive_move(obj, tgt)
 		obj:enable_vision(false)           -- no enemies -> combat won't override the move (Spike 2)
 	end
 	local a = entity_action()
-	a:set_action(move(move.walk_fwd, vector():set(dest.x, dest.y, dest.z), DIST_TO_END))
+	if valid_lvid(vid) then
+		a:set_action(move(move.walk_fwd, vid, vector():set(dest.x, dest.y, dest.z), DIST_TO_END))
+	else
+		a:set_action(move(move.walk_fwd, vector():set(dest.x, dest.y, dest.z), DIST_TO_END))
+	end
 	a:set_action(cond(cond.move_end))
 	obj:reset_action_queue()               -- command() APPENDS; reset so re-issues don't pile up
 	obj:command(a, false)
-	return true
 end
 
 function on_decision(subject_id, kind, hex_args)
@@ -149,16 +168,37 @@ function on_decision(subject_id, kind, hex_args)
 			end
 		end
 		-- Always sample the puppet's CURRENT position vs the target FIRST, so verification has a
-		-- distance track regardless of whether local scripted control or server replication is what
-		-- actually moves the puppet (this fork still streams M_UPDATE for server objects; isolating
-		-- pure local execution is step-3 work). Then best-effort issue the local drive order.
+		-- distance track on every decision (the harness reads this line).
 		local p0 = obj:position()
+		local d  = dist_xz(p0, tgt)
 		logf("MP_COOP_MOVE: [CLIENT] subject=%s tgt=%.2f,%.2f,%.2f pos=%.2f,%.2f,%.2f dist=%.2f",
-			tostring(subject_id), tgt.x, tgt.y, tgt.z, p0.x, p0.y, p0.z, dist_xz(p0, tgt))
-		local ok, err = pcall(drive_move, obj, tgt)
-		if not ok then
-			logf("MP_COOP_MOVE: [CLIENT] subject=%s local drive order failed (puppet not controllable?): %s",
-				tostring(subject_id), tostring(err))
+			tostring(subject_id), tgt.x, tgt.y, tgt.z, p0.x, p0.y, p0.z, d)
+
+		-- §14 step 3 (increment C1c): issue-once + arrival hysteresis (mirrors mp_coop_decision_server).
+		-- The server re-broadcasts the same target every ~3s; re-issuing the walk each time re-arms
+		-- ACT_WALK_FWD and overshoots. So track per-subject state and re-issue the walk ONLY when the
+		-- target changes, the NPC drifts past REARM_M after arriving, or it loses script control.
+		local s = drive_state[subject_id]
+		if not s or dist_xz(vector():set(s.tx, s.ty, s.tz), tgt) > 0.5 then
+			s = { tx = tgt.x, ty = tgt.y, tz = tgt.z, arrived = false, issued = false }
+			drive_state[subject_id] = s
+		end
+		if s.arrived and d > REARM_M then s.arrived = false; s.issued = false end
+		if (not s.arrived) and d <= STOP_M then
+			s.arrived = true
+			logf("MP_COOP_MOVE: [CLIENT] subject=%s ARRIVED (dist %.2f <= %.1f) — settling",
+				tostring(subject_id), d, STOP_M)
+		end
+		-- a Cordon scheme/binder can pull script control back, after which the NPC wanders: re-path.
+		if obj:get_script() == false then s.issued = false; s.arrived = false end
+
+		if (not s.arrived) and (not s.issued) then
+			local ok, err = pcall(drive_move, obj, tgt)
+			if ok then s.issued = true
+			else
+				logf("MP_COOP_MOVE: [CLIENT] subject=%s local drive order failed (puppet not controllable?): %s",
+					tostring(subject_id), tostring(err))
+			end
 		end
 		return
 	end
