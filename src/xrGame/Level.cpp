@@ -1005,14 +1005,24 @@ namespace
 			xrClientData* const cl = static_cast<xrClientData*>(client);
 			if (!cl || !cl->owner)
 				return;
+			const u16 owner_id = cl->owner->ID;
+			// Skip the dedicated server's own loopback self-client (the fake host actor,
+			// owner id 0). The server is authoritative and applies decisions at the decide
+			// site directly; routing its own decision back through a network broadcast would
+			// double-apply. Only real remote players receive M_XRNET_DECISION.
+			if (owner_id == 0)
+			{
+				if (strstr(Core.Params, "-dbg"))
+					Msg("* COOP_DECISION_SV: SKIP self/fake-host client 0x%08x (owner id 0)",
+					    cl->ID.value());
+				return;
+			}
 			server->SendTo(cl->ID, *packet, net_flags(TRUE, TRUE));
 			++sent;
-			const u16 owner_id = cl->owner->ID;
-			if (owner_id != 0)
-				++sent_real;
+			++sent_real;
 			if (strstr(Core.Params, "-dbg"))
-				Msg("* COOP_DECISION_SV: SENT to client 0x%08x (owner id %u%s)",
-				    cl->ID.value(), owner_id, owner_id ? "" : " = self/fake-host");
+				Msg("* COOP_DECISION_SV: SENT to client 0x%08x (owner id %u)",
+				    cl->ID.value(), u32(owner_id));
 		}
 	};
 }
@@ -1087,7 +1097,29 @@ void CLevel::coop_dispatch_due_decisions()
 				Msg("* COOP_DECISION_EXEC: [%s] subject=%u kind=%u exec_tick=%u local_ts=%u delta=%dms (#%u)",
 				    Server ? "SV-SELF" : "CLIENT", d.subject_id, u32(d.kind), d.exec_tick, now,
 				    s32(now) - s32(d.exec_tick), m_coop_decisions_executed);
-			// (increment B: route {subject_id, kind, args} to the Lua executor / native AI here)
+
+			// mp_api seam (increment B): hand the fired decision to gamedata. The client's
+			// native X-Ray AI executes it; real NPC control (set movement target / combat
+			// enemy) plugs into _G.mp_coop_on_decision. Args are hex-encoded so the binary
+			// payload survives Lua string marshaling (no embedded nulls).
+			{
+				static const char HEX[] = "0123456789abcdef";
+				xr_string hex;
+				hex.reserve(d.args.size() * 2);
+				for (u32 b = 0; b < d.args.size(); ++b)
+				{
+					hex.push_back(HEX[(d.args[b] >> 4) & 0xF]);
+					hex.push_back(HEX[d.args[b] & 0xF]);
+				}
+				luabind::functor<void> f;
+				const bool have = ai().script_engine().functor("_G.mp_coop_on_decision", f);
+				if (strstr(Core.Params, "-dbg"))
+					Msg("* COOP_DECISION_LUA: mp_coop_on_decision %s",
+					    have ? "FOUND -> calling" : "not registered (log-only)");
+				if (have)
+					f(u32(d.subject_id), u32(d.kind), hex.c_str());
+			}
+
 			m_coop_decisions[i] = m_coop_decisions.back();
 			m_coop_decisions.pop_back();
 		}

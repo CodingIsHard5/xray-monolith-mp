@@ -1,0 +1,31 @@
+--[[
+	MP fork (§4 decision replication, increment B): client-side executor seam.
+
+	When a scheduled server decision fires on this client's shared clock, the engine
+	(CLevel::coop_dispatch_due_decisions) calls _G.mp_coop_on_decision(subject_id, kind,
+	hex_args). For now this just logs receipt, proving the engine -> gamedata seam end to
+	end. Real NPC control (set an online NPC's movement target / combat enemy from the
+	decision, then let native X-Ray AI execute it) plugs into this function.
+
+	subject_id : u16  - the object the decision concerns (an online NPC's id)
+	kind       : u8   - decision kind enum (maps 1:1 to a gamedata executor)
+	hex_args   : str  - kind-specific args, hex-encoded (binary-safe over Lua strings)
+
+	Registered at chunk load (below) so it exists as soon as this file loads; the
+	presence of on_game_start makes axr_main auto-load the file on the client.
+--]]
+
+local function mp_coop_on_decision(subject_id, kind, hex_args)
+	printf("MP_COOP_DECISION_LUA: fired subject=%s kind=%s args=%s",
+		tostring(subject_id), tostring(kind), tostring(hex_args))
+	-- (real executor: resolve subject_id to a level object and drive its state_mgr)
+end
+
+-- Publish to the global table so the engine functor lookup ("_G.mp_coop_on_decision")
+-- resolves it. Runs when the chunk is loaded.
+_G.mp_coop_on_decision = mp_coop_on_decision
+
+function on_game_start()
+	_G.mp_coop_on_decision = mp_coop_on_decision
+	printf("MP_COOP_DECISION_LUA: registered mp_coop_on_decision (on_game_start)")
+end
