@@ -754,9 +754,10 @@ void game_sv_Single::Update()
 	// MP fork (test harness): -coop_test_decision broadcasts a synthetic scheduled decision
 	// once a client is actually connected, proving the M_XRNET_DECISION wire + shared-clock
 	// scheduling end to end. The client should log COOP_DECISION_CL (queued) then
-	// COOP_DECISION_EXEC with a small delta. Because a co-op client connects only after the
-	// server has stabilised, we RETRY every 5s (a one-shot fire would broadcast to zero
-	// clients) and stop once the decision was actually delivered to >= 1 client.
+	// COOP_DECISION_EXEC with a small delta. We RETRY every 5s and stop only once the decision
+	// reached a REAL remote player (coop_broadcast_decision returns clients whose owner->ID != 0):
+	// a one-shot fire would hit the dedicated server's own loopback self-client (the fake host
+	// actor, id 0) before the real client connects, and never reach it.
 	// For automated E2E testing (dev/harness/test_coop_decision.sh).
 	if (xr_enet::enabled() && strstr(Core.Params, "-coop_test_decision"))
 	{

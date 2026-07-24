@@ -997,7 +997,9 @@ namespace
 	{
 		xrServer*  server;
 		NET_Packet* packet;
-		u32        sent;
+		u32        sent;       // all clients with an owner (includes the dedicated server's
+		                       // own loopback self-client, whose owner is the fake host actor id 0)
+		u32        sent_real;  // clients backed by a REAL player actor (owner->ID != 0)
 		void operator()(IClient* client)
 		{
 			xrClientData* const cl = static_cast<xrClientData*>(client);
@@ -1005,6 +1007,12 @@ namespace
 				return;
 			server->SendTo(cl->ID, *packet, net_flags(TRUE, TRUE));
 			++sent;
+			const u16 owner_id = cl->owner->ID;
+			if (owner_id != 0)
+				++sent_real;
+			if (strstr(Core.Params, "-dbg"))
+				Msg("* COOP_DECISION_SV: SENT to client 0x%08x (owner id %u%s)",
+				    cl->ID.value(), owner_id, owner_id ? "" : " = self/fake-host");
 		}
 	};
 }
@@ -1029,16 +1037,19 @@ u32 CLevel::coop_broadcast_decision(u16 subject_id, u8 kind, const void* args, u
 		packet.w(args, args_size);
 
 	coop_decision_sender sender;
-	sender.server = Server;
-	sender.packet = &packet;
-	sender.sent   = 0;
+	sender.server    = Server;
+	sender.packet    = &packet;
+	sender.sent      = 0;
+	sender.sent_real = 0;
 	Server->ForEachClientDoSender(sender);
 
 	if (strstr(Core.Params, "-dbg"))
-		Msg("* COOP_DECISION_SV: broadcast subject=%u kind=%u args=%uB exec_tick=%u (now=%u lead=%ums) -> %u client(s)",
-		    subject_id, u32(kind), u32(args_size), exec_tick, timeServer(), lead_ms, sender.sent);
+		Msg("* COOP_DECISION_SV: broadcast subject=%u kind=%u args=%uB exec_tick=%u (now=%u lead=%ums) -> %u client(s), %u real",
+		    subject_id, u32(kind), u32(args_size), exec_tick, timeServer(), lead_ms, sender.sent, sender.sent_real);
 
-	return sender.sent;
+	// Return only clients backed by a real player actor: the caller uses this to know the
+	// decision reached an actual remote player, not just the server's own loopback self-client.
+	return sender.sent_real;
 }
 
 void CLevel::coop_recv_decision(NET_Packet& P)
@@ -1054,8 +1065,9 @@ void CLevel::coop_recv_decision(NET_Packet& P)
 	m_coop_decisions.push_back(d);
 
 	if (strstr(Core.Params, "-dbg"))
-		Msg("* COOP_DECISION_CL: queued subject=%u kind=%u args=%uB exec_tick=%u (now=%u, fires in %dms)",
-		    d.subject_id, u32(d.kind), u32(n), d.exec_tick, timeServer(), s32(d.exec_tick) - s32(timeServer()));
+		Msg("* COOP_DECISION_CL: [%s] queued subject=%u kind=%u args=%uB exec_tick=%u (now=%u, fires in %dms)",
+		    Server ? "SV-SELF" : "CLIENT", d.subject_id, u32(d.kind), u32(n), d.exec_tick, timeServer(),
+		    s32(d.exec_tick) - s32(timeServer()));
 }
 
 void CLevel::coop_dispatch_due_decisions()
@@ -1072,9 +1084,9 @@ void CLevel::coop_dispatch_due_decisions()
 		{
 			++m_coop_decisions_executed;
 			if (strstr(Core.Params, "-dbg"))
-				Msg("* COOP_DECISION_EXEC: subject=%u kind=%u exec_tick=%u local_ts=%u delta=%dms (#%u)",
-				    d.subject_id, u32(d.kind), d.exec_tick, now, s32(now) - s32(d.exec_tick),
-				    m_coop_decisions_executed);
+				Msg("* COOP_DECISION_EXEC: [%s] subject=%u kind=%u exec_tick=%u local_ts=%u delta=%dms (#%u)",
+				    Server ? "SV-SELF" : "CLIENT", d.subject_id, u32(d.kind), d.exec_tick, now,
+				    s32(now) - s32(d.exec_tick), m_coop_decisions_executed);
 			// (increment B: route {subject_id, kind, args} to the Lua executor / native AI here)
 			m_coop_decisions[i] = m_coop_decisions.back();
 			m_coop_decisions.pop_back();
