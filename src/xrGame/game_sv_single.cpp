@@ -11,6 +11,7 @@
 #include "xrServer.h"
 #include "xrMessages.h"                            // MP fork (§9.3): M_SPAWN_OBJECT_*, GE_DESTROY
 #include "Level.h"                                 // MP fork (§9.3): Level().timeServer()
+#include "GameTaskManager.h"                        // MP fork (§19): coop_broadcast_tasks on connect
 #include "ai_space.h"                              // MP fork: ai().alife()
 #include "script_engine.h"                         // MP fork: server-side Lua init hook
 #include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
@@ -593,7 +594,14 @@ void game_sv_Single::coop_poll_spawns()
 		{
 			coop_spawn_actor_for(CL);
 		}
+
 	}
+
+	// MP fork (§19 co-op): push the server's quest list to any newly connected clients.
+	// coop_broadcast_tasks normally fires only on task-list changes, but a connecting
+	// client needs the existing list immediately.
+	if (!c.pending.empty())
+		Level().GameTaskManager().coop_broadcast_tasks();
 }
 
 BOOL game_sv_Single::OnTouch(u16 eid_who, u16 eid_what, BOOL bForced)
