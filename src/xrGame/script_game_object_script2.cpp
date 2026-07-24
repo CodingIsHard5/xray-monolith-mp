@@ -459,5 +459,8 @@ class_<CScriptGameObject> script_register_game_object1(class_<CScriptGameObject>
 
 		.def("g_fireParams", SAFE_WRAP(&CScriptGameObject::g_fireParams))
 
-		.def("reload_weapon", &CScriptGameObject::reload_weapon);
+		.def("reload_weapon", &CScriptGameObject::reload_weapon)
+
+		.def("coop_is_dead", &CScriptGameObject::coop_is_dead)
+		.def("coop_respawn_timer", &CScriptGameObject::coop_respawn_timer);
 }

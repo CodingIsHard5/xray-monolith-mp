@@ -814,3 +814,17 @@ void CScriptGameObject::set_scope_ui(LPCSTR scope_texture) {
 
 	weapon->SetUIScope(scope_texture);
 }
+
+bool CScriptGameObject::coop_is_dead() const
+{
+	CActor* actor = smart_cast<CActor*>(&object());
+	if (!actor) return false;
+	return actor->coop_is_dead();
+}
+
+float CScriptGameObject::coop_respawn_timer() const
+{
+	CActor* actor = smart_cast<CActor*>(&object());
+	if (!actor) return 0.f;
+	return actor->coop_respawn_timer();
+}

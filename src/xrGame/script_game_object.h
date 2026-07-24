@@ -272,6 +272,8 @@ public:
 	void set_fov(float new_fov);
 	void set_range(float new_range);
 	bool Alive() const;
+	bool coop_is_dead() const;
+	float coop_respawn_timer() const;
 	ALife::ERelationType GetRelationType(CScriptGameObject* who);
 
 	// CScriptEntity

@@ -324,6 +324,8 @@ protected:
 	void      coop_respawn();        // revive the actor after the timer
 
 public:
+	bool      coop_is_dead() const       { return m_coop_dead; }
+	float     coop_respawn_timer() const { return m_coop_respawn_timer; }
 	SActorMotions* m_anims;
 #ifdef ENABLE_CAR
 	SActorVehicleAnims* m_vehicle_anims;
