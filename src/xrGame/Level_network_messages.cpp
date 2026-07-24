@@ -149,6 +149,13 @@ void CLevel::ClientReceive()
 				GameTaskManager().coop_apply_tasks(*P);
 			}
 			break;
+		case M_XRNET_DECISION:
+			{
+				// MP fork (§3/§4 decision replication): a scheduled server decision. Queue it;
+				// CLevel::coop_dispatch_due_decisions fires it when our clock reaches exec_tick.
+				coop_recv_decision(*P);
+			}
+			break;
 		case M_XRNET_OPEN_MENU:
 			{
 				// MP fork (§19 co-op): the server ran a dialogue action that wanted to open a

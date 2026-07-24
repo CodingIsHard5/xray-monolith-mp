@@ -750,6 +750,30 @@ void game_sv_Single::Update()
 			Msg("- COOP_TEST_QUEST: synthetic task 'coop_test_quest_e2e' created, broadcast forced");
 		}
 	}
+
+	// MP fork (test harness): -coop_test_decision broadcasts a synthetic scheduled decision
+	// once a client is actually connected, proving the M_XRNET_DECISION wire + shared-clock
+	// scheduling end to end. The client should log COOP_DECISION_CL (queued) then
+	// COOP_DECISION_EXEC with a small delta. Because a co-op client connects only after the
+	// server has stabilised, we RETRY every 5s (a one-shot fire would broadcast to zero
+	// clients) and stop once the decision was actually delivered to >= 1 client.
+	// For automated E2E testing (dev/harness/test_coop_decision.sh).
+	if (xr_enet::enabled() && strstr(Core.Params, "-coop_test_decision"))
+	{
+		static bool s_dec_done     = false;
+		static u32  s_dec_last_try = 0;
+		if (!s_dec_done && Device.dwTimeGlobal - s_dec_last_try > 5000)
+		{
+			s_dec_last_try = Device.dwTimeGlobal;
+			const u32 magic = 0xDEC15100;                    // payload the client can integrity-check
+			const u32 lead  = 1000;                          // 1s LEAD so scheduling is observable on loopback
+			const u32 n = Level().coop_broadcast_decision(/*subject*/ 0xC0DE, /*kind*/ 200,
+			                                               &magic, u16(sizeof(magic)), lead);
+			Msg("- COOP_TEST_DECISION: broadcast attempt (subject=0xC0DE kind=200 lead=%ums) -> %u client(s)", lead, n);
+			if (n > 0)
+				s_dec_done = true;
+		}
+	}
 	/*	switch(phase) 	{
 			case GAME_PHASE_PENDING : {
 				OnRoundStart();

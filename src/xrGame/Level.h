@@ -169,6 +169,30 @@ public:
 	NET_Queue_Event* game_events = nullptr;
 	xr_deque<CSE_Abstract*> game_spawn_queue;
 	xrServer* Server = nullptr;
+
+	// MP fork (§3/§4 decision replication): scheduled AI decisions from the server.
+	// The server stamps each decision with exec_tick = timeServer()+LEAD and broadcasts
+	// it; every client queues it and executes when its own clock reaches exec_tick, so
+	// identical decisions step off on the same tick regardless of ping (C2 proved the
+	// shared clock holds to <5ms). Between decisions there is zero traffic — the client
+	// runs native X-Ray AI locally. See dev/DECISION_REPLICATION_PLAN.md.
+	struct CoopDecision
+	{
+		u32           exec_tick  = 0;
+		u16           subject_id = 0;
+		u8            kind       = 0;
+		xr_vector<u8> args;
+	};
+	xr_vector<CoopDecision> m_coop_decisions;          // client-side pending queue
+	u32                     m_coop_decisions_executed = 0;
+	// server side: stamp exec_tick = timeServer()+lead_ms and broadcast to every in-game
+	// client; returns the number of clients the decision was sent to.
+	u32 coop_broadcast_decision(u16 subject_id, u8 kind, const void* args, u16 args_size, u32 lead_ms);
+	// client side: decode an inbound M_XRNET_DECISION and enqueue it
+	void coop_recv_decision(NET_Packet& P);
+	// client side: fire every queued decision whose exec_tick has arrived (called each frame)
+	void coop_dispatch_due_decisions();
+
 	GlobalFeelTouch m_feel_deny;
 	CZoneList* hud_zones_list = nullptr;
 	CZoneList* create_hud_zones_list();

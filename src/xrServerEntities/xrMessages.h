@@ -103,6 +103,15 @@ enum
 	// MP fork (§19 co-op): server -> clients. The shared quest list, whenever it changes.
 	M_XRNET_TASKS,
 
+	// MP fork (§3/§4 decision replication): server -> clients. A scheduled AI decision.
+	// Payload: u32 exec_tick (server timeServer()+LEAD), u16 subject_id, u8 kind,
+	// u16 args_size, args[]. Each client queues it and fires it when its OWN
+	// timeServer() reaches exec_tick, so identical decisions step off on the same
+	// tick regardless of ping (C2 proved the shared clock holds to <5ms). Between
+	// decisions there is zero traffic — the client runs native X-Ray AI locally.
+	// See dev/DECISION_REPLICATION_PLAN.md.
+	M_XRNET_DECISION,
+
 	MSG_FORCEDWORD = u32(-1)
 };
 

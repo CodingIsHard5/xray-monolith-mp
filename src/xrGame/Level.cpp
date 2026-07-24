@@ -987,6 +987,103 @@ void CLevel::MakeReconnect()
 	}
 }
 
+// MP fork (§3/§4 decision replication): send one already-built decision packet to every
+// in-game client. Uses cl->owner (not net_Ready) as the "client is playing" gate, matching
+// the quest-broadcast fix — co-op clients get their actor from the grace timer and may never
+// send M_CLIENTREADY. See dev/DECISION_REPLICATION_PLAN.md.
+namespace
+{
+	struct coop_decision_sender
+	{
+		xrServer*  server;
+		NET_Packet* packet;
+		u32        sent;
+		void operator()(IClient* client)
+		{
+			xrClientData* const cl = static_cast<xrClientData*>(client);
+			if (!cl || !cl->owner)
+				return;
+			server->SendTo(cl->ID, *packet, net_flags(TRUE, TRUE));
+			++sent;
+		}
+	};
+}
+
+u32 CLevel::coop_broadcast_decision(u16 subject_id, u8 kind, const void* args, u16 args_size, u32 lead_ms)
+{
+	if (!xr_enet::enabled() || !Server)
+		return 0;
+	// A non-zero size with a null pointer would advertise a length we never write,
+	// leaving coop_recv_decision to read past the payload. Reject it up front.
+	R_ASSERT2(!args_size || args, "coop_broadcast_decision: args_size > 0 but args is null");
+
+	const u32 exec_tick = timeServer() + lead_ms;
+
+	NET_Packet packet;
+	packet.w_begin(M_XRNET_DECISION);
+	packet.w_u32(exec_tick);
+	packet.w_u16(subject_id);
+	packet.w_u8(kind);
+	packet.w_u16(args_size);
+	if (args_size && args)
+		packet.w(args, args_size);
+
+	coop_decision_sender sender;
+	sender.server = Server;
+	sender.packet = &packet;
+	sender.sent   = 0;
+	Server->ForEachClientDoSender(sender);
+
+	if (strstr(Core.Params, "-dbg"))
+		Msg("* COOP_DECISION_SV: broadcast subject=%u kind=%u args=%uB exec_tick=%u (now=%u lead=%ums) -> %u client(s)",
+		    subject_id, u32(kind), u32(args_size), exec_tick, timeServer(), lead_ms, sender.sent);
+
+	return sender.sent;
+}
+
+void CLevel::coop_recv_decision(NET_Packet& P)
+{
+	CoopDecision d;
+	d.exec_tick  = P.r_u32();
+	d.subject_id = P.r_u16();
+	d.kind       = P.r_u8();
+	const u16 n  = P.r_u16();
+	d.args.resize(n);
+	if (n)
+		P.r(d.args.data(), n);
+	m_coop_decisions.push_back(d);
+
+	if (strstr(Core.Params, "-dbg"))
+		Msg("* COOP_DECISION_CL: queued subject=%u kind=%u args=%uB exec_tick=%u (now=%u, fires in %dms)",
+		    d.subject_id, u32(d.kind), u32(n), d.exec_tick, timeServer(), s32(d.exec_tick) - s32(timeServer()));
+}
+
+void CLevel::coop_dispatch_due_decisions()
+{
+	if (m_coop_decisions.empty())
+		return;
+
+	const u32 now = timeServer();
+	for (u32 i = 0; i < m_coop_decisions.size(); /* advance inside */)
+	{
+		CoopDecision& d = m_coop_decisions[i];
+		// wrap-safe "now has reached exec_tick": the diff stays small (lead is ~ms).
+		if (s32(now - d.exec_tick) >= 0)
+		{
+			++m_coop_decisions_executed;
+			if (strstr(Core.Params, "-dbg"))
+				Msg("* COOP_DECISION_EXEC: subject=%u kind=%u exec_tick=%u local_ts=%u delta=%dms (#%u)",
+				    d.subject_id, u32(d.kind), d.exec_tick, now, s32(now) - s32(d.exec_tick),
+				    m_coop_decisions_executed);
+			// (increment B: route {subject_id, kind, args} to the Lua executor / native AI here)
+			m_coop_decisions[i] = m_coop_decisions.back();
+			m_coop_decisions.pop_back();
+		}
+		else
+			++i;
+	}
+}
+
 void CLevel::OnFrame()
 {
 	PROF_EVENT("CLevel::OnFrame()");
@@ -1026,7 +1123,11 @@ void CLevel::OnFrame()
 		ClientReceive();
 		Device.Statistic->netClient1.End();
 	}
-	
+
+	// MP fork (§3/§4 decision replication): fire any scheduled server decisions whose
+	// exec_tick has now arrived on our shared clock. No-op (empty queue) on the server.
+	coop_dispatch_due_decisions();
+
 	ProcessGameEvents();
 #ifdef SPAWN_ANTIFREEZE
 	{
