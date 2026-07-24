@@ -620,9 +620,17 @@ void CCustomMonster::UpdateCL()
 			(Device.dwTimeGlobal - m_coop_locally_driven_ts) > u32(COOP_LOCALLY_DRIVEN_TTL_MS))
 		{
 			m_coop_locally_driven = false;
+			// §14 step 3 (D polish): the decision system is done with this NPC — RELEASE the script
+			// control its decision executor took (obj:script(true) in mp_coop_decision_client), so it
+			// reverts to a genuine dense-streamed puppet instead of a script-controlled object idling
+			// on a completed order (which the coop_puppet stream path can't cleanly drive). Release
+			// with the CURRENT control name so SetScriptControl's name-match guard passes.
+			const bool released = GetScriptControl();
+			if (released)
+				SetScriptControl(false, GetScriptControlName());
 			if (strstr(Core.Params, "-coop_local_ai"))
-				Msg("- MP_COOP_LOCALAI: id=%u decision stream ended (>%ums) — reverting to dense-streamed puppet",
-				    ID(), u32(COOP_LOCALLY_DRIVEN_TTL_MS));
+				Msg("- MP_COOP_LOCALAI: id=%u decision stream ended (>%ums) — reverting to dense-streamed puppet (script_ctrl_released=%d)",
+				    ID(), u32(COOP_LOCALLY_DRIVEN_TTL_MS), released ? 1 : 0);
 		}
 
 #ifdef DEBUG
