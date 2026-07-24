@@ -164,8 +164,19 @@ private:
 protected:
 	void Server_Client_Check(IClient* CL);
 	void PerformCheckClientsForMaxPing();
+	// MP fork (§4 step 3, increment C2): ids of creatures the decision system currently OWNS
+	// (a client runs their AI locally). Only these are M_UPDATE-throttled to the soft-correct
+	// cadence (-coop_update_throttle); normal puppets keep dense streaming. Value = the last time
+	// coop_broadcast_decision refreshed the entry; an id whose decisions stop is aged out after
+	// COOP_DECISION_DRIVEN_TTL_MS so it returns to dense streaming. See DECISION_REPLICATION_PLAN.md.
+	xr_map<u16, u32> m_coop_decision_driven;
+	enum { COOP_DECISION_DRIVEN_TTL_MS = 5000 };
+
 public:
 	game_sv_GameState* game;
+
+	// MP fork (§4 step 3, C2): mark a creature as decision-driven (called at the broadcast site).
+	void coop_mark_decision_driven(u16 id);
 
 	void Export_game_type(IClient* CL);
 	void Perform_game_export();

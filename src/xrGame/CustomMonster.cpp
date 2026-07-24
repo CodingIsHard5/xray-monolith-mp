@@ -821,8 +821,14 @@ void CCustomMonster::UpdateCL()
 
 			// §14 step 3 (increment C1b): confirm the local movement pipeline is live and the body is
 			// advancing. Logs the pipeline state + the object's current XZ (which reflects the PRIOR
-			// frame's translate_over apply, so it advances frame-to-frame once the apply is enabled).
-			if (Remote() && m_coop_locally_driven)
+			// frame's translate_over apply, so it advances frame-to-frame). GATED behind -coop_local_ai
+			// (the C-workstream opt-in, parsed once) so it is silent in normal play, and throttled with
+			// no per-sample FlushLog (relies on the normal log cadence) — CodeRabbit: avoid per-frame
+			// synchronous I/O and unconditional hot-path logging.
+			static int s_c1b_enabled = -1; // -1 unparsed, 0 off, 1 on
+			if (s_c1b_enabled == -1)
+				s_c1b_enabled = strstr(Core.Params, "-coop_local_ai") ? 1 : 0;
+			if (s_c1b_enabled && Remote() && m_coop_locally_driven)
 			{
 				static u32 s_c1b_log = 0;
 				if ((s_c1b_log++ % 30) == 0)
@@ -839,7 +845,6 @@ void CCustomMonster::UpdateCL()
 						mc ? (mc->CharacterExist() ? 1 : 0) : -1,
 						(mc && mc->CharacterExist()) ? (mc->IsCharacterEnabled() ? 1 : 0) : -1,
 						p.x, p.z);
-					FlushLog();
 				}
 			}
 			UpdatePositionAnimation();

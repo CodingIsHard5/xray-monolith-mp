@@ -291,6 +291,15 @@ void _stdcall xrServer::SendGameUpdateTo(IClient* client)
 	SendTo(xr_client->ID, Packet, net_flags(FALSE,TRUE));
 }
 
+// §4 step 3 (increment C2): record that a creature is decision-driven. Called from
+// CLevel::coop_broadcast_decision each time a decision is broadcast for the subject, so a subject
+// under active decisions keeps a fresh timestamp; MakeUpdatePackets ages the entry out after
+// COOP_DECISION_DRIVEN_TTL_MS and only throttles ids that are still live.
+void xrServer::coop_mark_decision_driven(u16 id)
+{
+	m_coop_decision_driven[id] = Device.dwTimeGlobal;
+}
+
 void xrServer::MakeUpdatePackets()
 {
 	NET_Packet tmpPacket;
@@ -339,14 +348,30 @@ void xrServer::MakeUpdatePackets()
 			if (const char* p = strstr(Core.Params, "-coop_update_throttle "))
 				s_throttle_ms = atoi(p + xr_strlen("-coop_update_throttle "));
 		}
+		// §4 step 3 (increment C2): the throttle now applies ONLY to creatures the decision system
+		// currently owns (a live, non-expired m_coop_decision_driven entry) — these run their AI on
+		// the client and need only a sparse soft-correction. Normal puppets are NOT in the set and
+		// keep dense streaming (no regression). (The step-3 cadence PROBE threw the throttle at all
+		// creatures; that measurement is done — see DECISION_REPLICATION_PLAN.md — so it is now
+		// membership-gated per the inversion plan.)
 		if (s_throttle_ms > 0 && xr_enet::enabled() && Test.cast_creature_abstract())
 		{
-			static xr_map<u16, u32> s_last_sent;
 			const u32 now = Device.dwTimeGlobal;
-			auto it = s_last_sent.find(Test.ID);
-			if (it != s_last_sent.end() && (now - it->second) < u32(s_throttle_ms))
-				continue; // within the throttle window — skip this creature's update this pass
-			s_last_sent[Test.ID] = now;
+			auto dd = m_coop_decision_driven.find(Test.ID);
+			const bool driven = (dd != m_coop_decision_driven.end())
+				&& ((now - dd->second) < COOP_DECISION_DRIVEN_TTL_MS);
+			if (driven)
+			{
+				static xr_map<u16, u32> s_last_sent;
+				auto it = s_last_sent.find(Test.ID);
+				if (it != s_last_sent.end() && (now - it->second) < u32(s_throttle_ms))
+					continue; // within the throttle window — skip this driven creature's update
+				const u32 gap = (it != s_last_sent.end()) ? (now - it->second) : 0;
+				s_last_sent[Test.ID] = now;
+				if (strstr(Core.Params, "-dbg"))
+					Msg("* COOP_C2_THROTTLE: id=%u SENT gap=%ums (throttle=%dms, driven)",
+					    Test.ID, gap, s_throttle_ms);
+			}
 		}
 
 		tmpPacket.B.count = 0;

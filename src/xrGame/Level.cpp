@@ -1053,6 +1053,12 @@ u32 CLevel::coop_broadcast_decision(u16 subject_id, u8 kind, const void* args, u
 	sender.sent_real = 0;
 	Server->ForEachClientDoSender(sender);
 
+	// §4 step 3 (increment C2): the subject is decision-driven — its clients run its AI locally, so
+	// the server may throttle its M_UPDATE to the sparse soft-correct cadence (MakeUpdatePackets
+	// gates -coop_update_throttle on this set). Refresh the entry each broadcast; it ages out if
+	// decisions stop, returning the creature to dense streaming.
+	Server->coop_mark_decision_driven(subject_id);
+
 	if (strstr(Core.Params, "-dbg"))
 		Msg("* COOP_DECISION_SV: broadcast subject=%u kind=%u args=%uB exec_tick=%u (now=%u lead=%ums) -> %u client(s), %u real",
 		    subject_id, u32(kind), u32(args_size), exec_tick, timeServer(), lead_ms, sender.sent, sender.sent_real);
