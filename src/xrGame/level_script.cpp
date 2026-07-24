@@ -1899,6 +1899,61 @@ void mp_anchor_clear(u32 idx) { mp_anchors::clear(idx); }
 void mp_anchor_clear_all() { mp_anchors::clear_all(); }
 u32 mp_anchor_count() { return mp_anchors::count(); }
 
+// MP fork (§3/§4 decision replication): let SERVER gamedata originate a scheduled decision.
+// The engine stamps exec_tick = timeServer()+lead and broadcasts M_XRNET_DECISION to every
+// real remote client; each client's on_decision fires it when its shared clock reaches
+// exec_tick. args are hex-encoded (binary-safe over Lua strings; the client hands the same
+// hex back to _G.mp_coop_on_decision). Returns the number of real remote clients it reached.
+// See dev/DECISION_REPLICATION_PLAN.md.
+u32 mp_broadcast_decision(u32 subject_id, u32 kind, LPCSTR hex_args, u32 lead_ms)
+{
+	// Public Lua API: validate against the wire field widths BEFORE narrowing, and reject
+	// malformed payloads outright (never broadcast a silently-truncated decision).
+	if (subject_id > 0xFFFF || kind > 0xFF)
+	{
+		Msg("! mp_broadcast_decision: subject_id/kind out of range (subject=%u kind=%u)",
+		    subject_id, kind);
+		return 0;
+	}
+
+	xr_vector<u8> bytes;
+	if (hex_args && *hex_args)
+	{
+		auto nib = [](char c) -> int {
+			if (c >= '0' && c <= '9') return c - '0';
+			if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+			if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+			return -1;
+		};
+		const size_t len = xr_strlen(hex_args);
+		if (len & 1) // odd length = malformed hex
+		{
+			Msg("! mp_broadcast_decision: hex_args has odd length %u", u32(len));
+			return 0;
+		}
+		bytes.reserve(len / 2);
+		for (size_t i = 0; i < len; i += 2)
+		{
+			const int hi = nib(hex_args[i]);
+			const int lo = nib(hex_args[i + 1]);
+			if (hi < 0 || lo < 0)
+			{
+				Msg("! mp_broadcast_decision: non-hex character in args");
+				return 0;
+			}
+			bytes.push_back(u8((hi << 4) | lo));
+		}
+	}
+	if (bytes.size() > 0xFFFF) // payload length must fit the u16 wire field
+	{
+		Msg("! mp_broadcast_decision: payload too large (%u bytes)", u32(bytes.size()));
+		return 0;
+	}
+	return Level().coop_broadcast_decision(u16(subject_id), u8(kind),
+	                                       bytes.empty() ? nullptr : bytes.data(),
+	                                       u16(bytes.size()), lead_ms);
+}
+
 //ability to update level netpacket
 void g_send(NET_Packet& P, bool bReliable = 0, bool bSequential = 1, bool bHighPriority = 0, bool bSendImmediately = 0)
 {
@@ -2825,6 +2880,9 @@ void CLevel::script_register(lua_State* L)
         def("mp_anchor_set", &mp_anchor_set),
         def("mp_anchor_clear", &mp_anchor_clear),
         def("mp_anchor_clear_all", &mp_anchor_clear_all),
-        def("mp_anchor_count", &mp_anchor_count)
+        def("mp_anchor_count", &mp_anchor_count),
+
+        // MP fork (§3/§4): server gamedata originates a scheduled decision
+        def("mp_broadcast_decision", &mp_broadcast_decision)
 	];
 }

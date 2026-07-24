@@ -110,6 +110,20 @@ end
 -- Release-safe: this is our overlay only; no GAMMA mod is edited. Once the engine hook
 -- exists, further server-side fixes are pure Lua here — no rebuild needed.
 function on_server_game_start()
+	-- DECISION REPLICATION (§4): self-check the server-side broadcast export. It reaches 0
+	-- clients here (server init, pre-connect), but a clean COOP_DECISION_SV log with no Lua
+	-- error proves the level.mp_broadcast_decision binding + hex decode work end to end. Real
+	-- decision sites call it later with live online-NPC ids. Harmless on a normal run.
+	local okb, errb = pcall(function()
+		if level and level.mp_broadcast_decision then
+			local n = level.mp_broadcast_decision(0xBEEF, 201, "cafe", 500)
+			printf("~ MP co-op: decision export self-check -> %s real client(s)", tostring(n))
+		else
+			printf("! MP co-op: level.mp_broadcast_decision MISSING (old exe?)")
+		end
+	end)
+	if not okb then printf("! MP co-op: decision export self-check errored: %s", tostring(errb)) end
+
 	-- nextTick: canonically from Spatial Audio's kute_common.script (mod 469), which does
 	-- not load on the -nosound server, so mods that call the bare global (e.g. mod 410's
 	-- ubgl_no_3db.on_game_load) crash. Provide a fallback: defer via AddUniqueCall when
