@@ -140,8 +140,12 @@ public:
 	// INCREMENT A: the flag + accessors exist and are Lua-settable, but NOTHING reads it yet —
 	// the shedule_Update/UpdateCL/AI-call gates land in increment B. So this is a pure no-op.
 	bool  m_coop_locally_driven;
+	u32   m_coop_locally_driven_ts;   // §14 step 3 (D): time of the last decision that (re)set the flag
+	enum { COOP_LOCALLY_DRIVEN_TTL_MS = 5000 }; // auto-clear if no decision refresh within this (see .cpp)
 	IC bool coop_locally_driven() const { return m_coop_locally_driven; }
-	IC void coop_set_locally_driven(bool v) { m_coop_locally_driven = v; }
+	// §14 step 3 (increment D): stamp the refresh time on set-true so UpdateCL can auto-clear the flag
+	// when the decision stream stops (defined in CustomMonster.cpp — needs Device.dwTimeGlobal).
+	void coop_set_locally_driven(bool v);
 	BOOL NET_WasInterpolating; // previous update was by interpolation or by extrapolation
 	u32 NET_Time; // server time of last update
 	//------------------------------

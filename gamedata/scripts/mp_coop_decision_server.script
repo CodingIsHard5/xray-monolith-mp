@@ -43,6 +43,9 @@ local ONLINE_TIMEOUT  = 20000  -- ms after spawn to give up waiting for the mons
 -- reaches the target it MUST have moved under its own client-local AI — because with C1 the engine
 -- no longer positions a locally-driven puppet from the NET stream. Resolved once in tick().
 local no_server_drive = false
+-- §14 step 3 (increment D): -coop_decision_burst N stops broadcasting after N decisions so the
+-- client's locally-driven flag ages out (TTL) and the NPC reverts to a dense-streamed puppet. nil = off.
+local burst_limit = nil
 
 local st = {
 	phase       = "wait",   -- wait -> spawning -> wait_online -> active -> failed
@@ -210,6 +213,16 @@ local function tick_impl(now_ms, real_count, actor_id)
 			end
 		end
 
+		-- §14 step 3 (increment D): once the decision BURST is complete, stop broadcasting so the
+		-- client's locally-driven flag ages out (TTL) and the NPC reverts to a dense-streamed puppet.
+		if burst_limit and st.broadcasts >= burst_limit then
+			if not st.burst_logged then
+				st.burst_logged = true
+				logf("~ MP_COOP_SV: decision burst complete (%d broadcasts) — stopping (increment D: client flag will age out)", burst_limit)
+			end
+			return
+		end
+
 		-- Re-broadcast the "go to target" decision on the 3s cadence regardless of arrival. In
 		-- production decisions are rare (fire once); here we keep re-sending so the client keeps
 		-- emitting position samples AFTER the server monster settles — that's how the harness
@@ -247,6 +260,11 @@ function tick(now_ms, real_count, actor_id)
 		no_server_drive = string.find(cl, "-coop_no_server_drive", 1, true) ~= nil
 		if no_server_drive then
 			logf("~ MP_COOP_SV: -coop_no_server_drive — server DECIDES but leaves its monster idle (C1 local-exec proof)")
+		end
+		local bm = string.match(cl, "-coop_decision_burst%s+(%d+)")
+		if bm then
+			burst_limit = tonumber(bm)
+			logf("~ MP_COOP_SV: -coop_decision_burst %d — will stop broadcasting after %d decisions (increment D)", burst_limit, burst_limit)
 		end
 		if string.find(cl, "-coop_combat", 1, true) then
 			scenario = mp_coop_scenario_combat.tick

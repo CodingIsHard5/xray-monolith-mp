@@ -108,6 +108,19 @@ CCustomMonster::CCustomMonster() :
 	m_coop_net_heading = 0.f;
 	m_coop_net_moving = false;
 	m_coop_locally_driven = false; // §14 step 3: default = dense streaming (coop_puppet)
+	m_coop_locally_driven_ts = 0;
+}
+
+// §14 step 3 (increment D): setter stamps the refresh time on set-true so UpdateCL can auto-clear the
+// flag once decisions stop arriving. The client's decision executor calls this every decision (~3s),
+// keeping the flag alive; when the stream ends the flag ages out (TTL) and the NPC reverts to a
+// dense-streamed puppet — symmetric with the server's m_coop_decision_driven TTL (which resumes dense
+// M_UPDATE for the same NPC). Not inline: needs Device.dwTimeGlobal.
+void CCustomMonster::coop_set_locally_driven(bool v)
+{
+	m_coop_locally_driven = v;
+	if (v)
+		m_coop_locally_driven_ts = Device.dwTimeGlobal;
 }
 
 CCustomMonster::~CCustomMonster()
@@ -598,6 +611,19 @@ void CCustomMonster::UpdateCL()
 	START_PROFILE("CustomMonster/client_update")
 		m_client_update_delta = (u32)std::min(Device.dwTimeGlobal - m_last_client_update_time, u32(100));
 		m_last_client_update_time = Device.dwTimeGlobal;
+
+		// §14 step 3 (increment D): age out the locally-driven flag when its decision stream stops.
+		// The executor refreshes it (~every 3s) while decisions flow; once they cease, after the TTL
+		// the NPC reverts to a normal coop_puppet (dense-streamed). TTL(5s) > broadcast period(3s), so
+		// this never fires during a live decision stream — the continuous move demo is unaffected.
+		if (m_coop_locally_driven &&
+			(Device.dwTimeGlobal - m_coop_locally_driven_ts) > u32(COOP_LOCALLY_DRIVEN_TTL_MS))
+		{
+			m_coop_locally_driven = false;
+			if (strstr(Core.Params, "-coop_local_ai"))
+				Msg("- MP_COOP_LOCALAI: id=%u decision stream ended (>%ums) — reverting to dense-streamed puppet",
+				    ID(), u32(COOP_LOCALLY_DRIVEN_TTL_MS));
+		}
 
 #ifdef DEBUG
 	if( animation_movement() )
