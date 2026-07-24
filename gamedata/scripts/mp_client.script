@@ -114,12 +114,14 @@ function on_server_game_start()
 	-- clients here (server init, pre-connect), but a clean COOP_DECISION_SV log with no Lua
 	-- error proves the level.mp_broadcast_decision binding + hex decode work end to end. Real
 	-- decision sites call it later with live online-NPC ids. Harmless on a normal run.
+	-- NOTE: the export lives in the `game` luabind module (registered alongside mp_anchor_*),
+	-- so the Lua path is game.mp_broadcast_decision, not level.*.
 	local okb, errb = pcall(function()
-		if level and level.mp_broadcast_decision then
-			local n = level.mp_broadcast_decision(0xBEEF, 201, "cafe", 500)
+		if game and game.mp_broadcast_decision then
+			local n = game.mp_broadcast_decision(0xBEEF, 201, "cafe", 500)
 			printf("~ MP co-op: decision export self-check -> %s real client(s)", tostring(n))
 		else
-			printf("! MP co-op: level.mp_broadcast_decision MISSING (old exe?)")
+			printf("! MP co-op: game.mp_broadcast_decision MISSING (old exe?)")
 		end
 	end)
 	if not okb then printf("! MP co-op: decision export self-check errored: %s", tostring(errb)) end
