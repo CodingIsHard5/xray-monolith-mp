@@ -9,7 +9,8 @@
 #include "object_broker.h"
 #include "gamepersistent.h"
 #include "xrServer.h"
-#include "xrMessages.h"                            // MP fork (§9.3): M_SPAWN_OBJECT_* flags
+#include "xrMessages.h"                            // MP fork (§9.3): M_SPAWN_OBJECT_*, GE_DESTROY
+#include "Level.h"                                 // MP fork (§9.3): Level().timeServer()
 #include "ai_space.h"                              // MP fork: ai().alife()
 #include "script_engine.h"                         // MP fork: server-side Lua init hook
 #include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
@@ -256,7 +257,7 @@ void game_sv_Single::coop_clone_inventory_for(CSE_ALifeCreatureActor* base, CSE_
 		cloned, owner->ID, CL->ID.value());
 }
 
-void game_sv_Single::coop_spawn_actor_for(xrClientData* CL, Fvector* pos_override, Fvector* angle_override)
+void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
 {
 	CSE_ALifeCreatureActor* base = ai().alife().graph().actor();
 	if (!base)
@@ -288,20 +289,12 @@ void game_sv_Single::coop_spawn_actor_for(xrClientData* CL, Fvector* pos_overrid
 	E->s_RP = 0xFE;
 	E->RespawnTime = 0;
 
-	// Position: use override (reconnection at saved position) or offset from base actor
-	if (pos_override)
-	{
-		E->o_Position = *pos_override;
-		E->o_Angle = angle_override ? *angle_override : base->o_Angle;
-	}
-	else
-	{
-		static int s_coop_actor_seq = 0;
-		++s_coop_actor_seq;
-		E->o_Position = base->o_Position;
-		E->o_Position.x += 1.5f * float(s_coop_actor_seq);
-		E->o_Angle = base->o_Angle;
-	}
+	// position slightly offset from the base actor so co-op players don't overlap
+	static int s_coop_actor_seq = 0;
+	++s_coop_actor_seq;
+	E->o_Position = base->o_Position;
+	E->o_Position.x += 1.5f * float(s_coop_actor_seq);
+	E->o_Angle = base->o_Angle;
 
 	CSE_ALifeCreatureActor* na = smart_cast<CSE_ALifeCreatureActor*>(E);
 	if (na)
@@ -499,32 +492,102 @@ void game_sv_Single::coop_poll_spawns()
 	for (xrClientData* CL : c.pending)
 	{
 		// MP fork (§9.3/9.4 co-op reconnection): check if this client matches an orphaned
-		// actor from a previous disconnect. If so, spawn a fresh actor at the orphan's
-		// last position (preserving location), then destroy the orphan entity.
+		// actor from a previous disconnect. If so, re-associate the existing entity
+		// (preserving position, health, and inventory) instead of spawning fresh.
 		LPCSTR client_name = CL->ps ? CL->ps->getName() : CL->name.c_str();
 		CSE_Abstract* orphan = coop_find_orphan(client_name);
 		if (orphan)
 		{
-			Fvector saved_pos = orphan->o_Position;
-			Fvector saved_angle = orphan->o_Angle;
-
-			// Clear orphan flags before destroying so cleanup proceeds normally
+			// Clear orphan state and restore ownership
 			orphan->m_coop_orphaned = false;
+			orphan->owner = CL;
+			CL->owner = orphan;
+			orphan->set_name_replace(client_name);
+
+			// Restore children ownership
 			for (u16 child_id : orphan->children)
 			{
 				CSE_Abstract* child = m_server->ID_to_entity(child_id);
-				if (child) child->m_coop_orphaned = false;
+				if (child)
+				{
+					child->m_coop_orphaned = false;
+					child->owner = CL;
+				}
 			}
 
-			// Perform_destroy handles children (reject+destroy), entity removal,
-			// and broadcasts GE_DESTROY to all clients
-			m_server->Perform_destroy(orphan, net_flags(TRUE, TRUE));
+			// The reconnecting client already received this entity as stripped/remote
+			// during SendConnectionData. Destroy that client-side representation and
+			// re-send as LOCAL+ASPLAYER so the client takes control of it.
+			// (SendTo bypasses server event processing — only the client acts on it.)
+			{
+				// Destroy the stripped entity on the reconnecting client
+				NET_Packet P;
+				P.w_begin(M_EVENT);
+				P.w_u32(Level().timeServer());
+				P.w_u16(GE_DESTROY);
+				P.w_u16(orphan->ID);
+				m_server->SendTo(CL->ID, P, net_flags(TRUE, TRUE));
 
-			// Spawn a fresh actor at the orphan's saved position
-			coop_spawn_actor_for(CL, &saved_pos, &saved_angle);
+				// Re-send the actor as LOCAL+ASPLAYER
+				NET_Packet P2;
+				Flags16 save = orphan->s_flags;
+				orphan->s_flags.set(M_SPAWN_UPDATE, TRUE);
+				orphan->s_flags.set(M_SPAWN_OBJECT_ASPLAYER, TRUE);
+				orphan->Spawn_Write(P2, TRUE); // TRUE = LOCAL
+				orphan->UPDATE_Write(P2);
+				orphan->s_flags = save;
+				m_server->SendTo(CL->ID, P2, net_flags(TRUE, TRUE));
 
-			Msg("- XRNET(dbg): co-op player '%s' RECONNECTED at saved position (%.1f, %.1f, %.1f)",
-				client_name, saved_pos.x, saved_pos.y, saved_pos.z);
+				// Re-send children (inventory items) as LOCAL
+				for (u16 child_id : orphan->children)
+				{
+					CSE_Abstract* child = m_server->ID_to_entity(child_id);
+					if (!child) continue;
+
+					// Destroy stripped child on client
+					NET_Packet Pd;
+					Pd.w_begin(M_EVENT);
+					Pd.w_u32(Level().timeServer());
+					Pd.w_u16(GE_DESTROY);
+					Pd.w_u16(child->ID);
+					m_server->SendTo(CL->ID, Pd, net_flags(TRUE, TRUE));
+
+					// Re-send as LOCAL
+					NET_Packet Ps;
+					Flags16 csave = child->s_flags;
+					child->s_flags.set(M_SPAWN_UPDATE, TRUE);
+					child->Spawn_Write(Ps, TRUE);
+					child->UPDATE_Write(Ps);
+					child->s_flags = csave;
+					m_server->SendTo(CL->ID, Ps, net_flags(TRUE, TRUE));
+				}
+			}
+
+			// Replay other players' actors to this client (late-join snapshot)
+			struct peer_replay
+			{
+				game_sv_Single* self;
+				xrClientData* target;
+				void operator()(IClient* client)
+				{
+					xrClientData* other = static_cast<xrClientData*>(client);
+					if (other == target) return;
+					if (other == self->m_server->GetServerClient()) return;
+					if (!other->owner) return;
+					CSE_Abstract* peer = other->owner;
+					NET_Packet Packet;
+					peer->Spawn_Write(Packet, FALSE); // stripped => remote
+					self->m_server->SendTo(target->ID, Packet, net_flags(TRUE, TRUE));
+				}
+			};
+			peer_replay pr; pr.self = this; pr.target = CL;
+			m_server->ForEachClientDo(pr);
+
+			Msg("- XRNET(dbg): co-op player '%s' RECONNECTED -> actor id %u restored "
+				"(pos %.1f,%.1f,%.1f, %d inventory items)",
+				client_name, orphan->ID,
+				orphan->o_Position.x, orphan->o_Position.y, orphan->o_Position.z,
+				(int)orphan->children.size());
 		}
 		else
 		{
