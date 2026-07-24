@@ -59,6 +59,10 @@ local function dist_xz(a, b)
 	return math.sqrt(dx * dx + dz * dz)
 end
 
+-- X-Ray's printf only interpolates %s (not %d/%f); string.format (Lua 5.1) does all of them
+-- correctly (proven by the Spike-2 CSV writer). Build the line, then hand printf a single %s.
+local function logf(...) printf("%s", string.format(...)) end
+
 -- ---- executor ------------------------------------------------------------------------------
 
 -- Drive an online puppet to a target with the proven monster-movement order (Spike 2: monsters
@@ -72,8 +76,13 @@ local function drive_move(obj, tgt)
 		if type(r2) == "userdata" then dest = r2
 		elseif type(r1) == "userdata" then dest = r1 end
 	end
-	obj:script(true, "mp_coop_decision_client")
-	obj:enable_vision(false)               -- no enemies -> combat won't override the move (Spike 2)
+	-- Take script control ONCE. Calling obj:script(true) while already scripted raises
+	-- "Invalid sequence of taking an entity under script control" (mirror the Spike-2 driver:
+	-- only (re)take control when the engine reports the object is not currently scripted).
+	if obj:get_script() == false then
+		obj:script(true, "mp_coop_decision_client")
+		obj:enable_vision(false)           -- no enemies -> combat won't override the move (Spike 2)
+	end
 	local a = entity_action()
 	a:set_action(move(move.walk_fwd, vector():set(dest.x, dest.y, dest.z)))
 	a:set_action(cond(cond.move_end))
@@ -89,7 +98,7 @@ function on_decision(subject_id, kind, hex_args)
 		if not obj then
 			-- subject isn't online on this client (outside the actor's online radius): degrade
 			-- gracefully — the puppet will pick the target up if/when it net_Spawns.
-			printf("MP_COOP_MOVE: [CLIENT] subject=%s NOT online here; tgt=%.2f,%.2f,%.2f",
+			logf("MP_COOP_MOVE: [CLIENT] subject=%s NOT online here; tgt=%.2f,%.2f,%.2f",
 				tostring(subject_id), tgt.x, tgt.y, tgt.z)
 			return
 		end
@@ -98,11 +107,11 @@ function on_decision(subject_id, kind, hex_args)
 		-- actually moves the puppet (this fork still streams M_UPDATE for server objects; isolating
 		-- pure local execution is step-3 work). Then best-effort issue the local drive order.
 		local p0 = obj:position()
-		printf("MP_COOP_MOVE: [CLIENT] subject=%s tgt=%.2f,%.2f,%.2f pos=%.2f,%.2f,%.2f dist=%.2f",
+		logf("MP_COOP_MOVE: [CLIENT] subject=%s tgt=%.2f,%.2f,%.2f pos=%.2f,%.2f,%.2f dist=%.2f",
 			tostring(subject_id), tgt.x, tgt.y, tgt.z, p0.x, p0.y, p0.z, dist_xz(p0, tgt))
 		local ok, err = pcall(drive_move, obj, tgt)
 		if not ok then
-			printf("MP_COOP_MOVE: [CLIENT] subject=%s local drive order failed (puppet not controllable?): %s",
+			logf("MP_COOP_MOVE: [CLIENT] subject=%s local drive order failed (puppet not controllable?): %s",
 				tostring(subject_id), tostring(err))
 		end
 		return
