@@ -192,6 +192,10 @@ public:
 	void coop_recv_decision(NET_Packet& P);
 	// client side: fire every queued decision whose exec_tick has arrived (called each frame)
 	void coop_dispatch_due_decisions();
+	// server side: per-frame gamedata decision-origination tick. On the host/server with enet
+	// co-op enabled (and -coop_server_tick), calls _G.mp_coop_server_tick(now_ms, real_count,
+	// actor_id) so ALL decision origination lives in gamedata (the mp_api seam). No-op otherwise.
+	void coop_server_decision_tick();
 
 	GlobalFeelTouch m_feel_deny;
 	CZoneList* hud_zones_list = nullptr;

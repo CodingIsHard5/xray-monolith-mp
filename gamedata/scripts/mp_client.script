@@ -126,6 +126,16 @@ function on_server_game_start()
 	end)
 	if not okb then printf("! MP co-op: decision export self-check errored: %s", tostring(errb)) end
 
+	-- DECISION ORIGINATION (§4, first real online-NPC decision site): register the server-side
+	-- per-frame originator. The engine (CLevel::coop_server_decision_tick, under -coop_server_tick)
+	-- calls _G.mp_coop_server_tick(now_ms, real_count, actor_id) each frame; mp_coop_decision_server
+	-- spawns a monster near a connected player and broadcasts KIND_MOVE decisions for it.
+	local okt, errt = pcall(function()
+		_G.mp_coop_server_tick = mp_coop_decision_server.tick
+		printf("~ MP co-op: registered mp_coop_server_tick (decision origination)")
+	end)
+	if not okt then printf("! MP co-op: mp_coop_server_tick register failed: %s", tostring(errt)) end
+
 	-- nextTick: canonically from Spatial Audio's kute_common.script (mod 469), which does
 	-- not load on the -nosound server, so mods that call the bare global (e.g. mod 410's
 	-- ubgl_no_3db.on_game_load) crash. Provide a fallback: defer via AddUniqueCall when

@@ -1,5 +1,5 @@
 --[[
-	MP fork (§4 decision replication, increment B): client-side executor.
+	MP fork (§4 decision replication): client-side executor.
 
 	When a scheduled server decision fires on this client's shared clock, the engine
 	(CLevel::coop_dispatch_due_decisions) calls _G.mp_coop_on_decision, which is wired to
@@ -7,18 +7,103 @@
 	init hook — on_game_start never runs on a thin client, so this is registered there).
 
 	subject_id : u16  - the object the decision concerns (an online NPC's id)
-	kind       : u8   - decision kind enum (maps 1:1 to a gamedata executor)
+	kind       : u8   - decision kind enum (see KIND_* below)
 	hex_args   : str  - kind-specific args, hex-encoded (binary-safe over Lua strings)
 
-	For now this just logs receipt, proving the engine -> gamedata seam end to end. Real
-	NPC control (resolve subject_id to a level object and drive its state_mgr movement
-	target / combat enemy) plugs into on_decision.
+	KIND_MOVE (the first real online-NPC decision site): args are a movement target point,
+	encoded by the point codec below. We resolve subject_id -> the online puppet and drive it
+	with the Spike-2 monster-movement order (walk_fwd + move_end); native local AI executes it.
+	The SAME codec + KIND enum is used by the server originator (mp_coop_decision_server.script).
 --]]
 
--- Module-level (non-local) so mp_client can reference mp_coop_decision_client.on_decision,
--- which also triggers X-Ray to load this file on the client.
+-- Decision kinds — must match mp_coop_decision_server.script.
+KIND_MOVE = 1   -- move an online NPC to a target point (args = encoded point)
+
+-- ---- point codec (shared convention with the server) --------------------------------------
+-- X-Ray's Lua is 5.1 (no string.pack), so encode each coordinate as a cm-scaled signed int32
+-- (round(coord*100)) in big-endian bytes -> hex. cm precision is ample for a movement target
+-- and stays well inside int32 for any level coordinate (~±1000 m). 3 coords = 12 bytes = 24 hex.
+
+local function i32_to_hex(v)
+	v = v % 4294967296                       -- two's-complement wrap into unsigned 32
+	local b0 = math.floor(v / 16777216) % 256
+	local b1 = math.floor(v / 65536) % 256
+	local b2 = math.floor(v / 256) % 256
+	local b3 = v % 256
+	return string.format("%02x%02x%02x%02x", b0, b1, b2, b3)
+end
+
+local function hex_to_i32(hex, byte_off)     -- byte_off: 0-based
+	local u = tonumber(string.sub(hex, byte_off * 2 + 1, byte_off * 2 + 8), 16)
+	if u == nil then return 0 end
+	if u >= 2147483648 then u = u - 4294967296 end
+	return u
+end
+
+local function round_scaled(f)
+	if f >= 0 then return math.floor(f * 100 + 0.5) end
+	return math.ceil(f * 100 - 0.5)
+end
+
+-- module-level so the server script (which duplicates the same math) and tests can reference it
+function encode_point(v)
+	return i32_to_hex(round_scaled(v.x)) .. i32_to_hex(round_scaled(v.y)) .. i32_to_hex(round_scaled(v.z))
+end
+
+function decode_point(hex)
+	return vector():set(hex_to_i32(hex, 0) / 100, hex_to_i32(hex, 4) / 100, hex_to_i32(hex, 8) / 100)
+end
+
+local function dist_xz(a, b)
+	local dx, dz = a.x - b.x, a.z - b.z
+	return math.sqrt(dx * dx + dz * dz)
+end
+
+-- ---- executor ------------------------------------------------------------------------------
+
+-- Drive an online puppet to a target with the proven monster-movement order (Spike 2: monsters
+-- obey raw scripted movement; bipeds freeze — biped control is a separate sub-problem). Returns
+-- true if the order was issued.
+local function drive_move(obj, tgt)
+	-- clamp to the puppet's nav mesh so the order isn't silently dropped for an off-mesh target
+	local dest = tgt
+	if not obj:accessible(tgt) then
+		local r1, r2 = obj:accessible_nearest(tgt, vector())
+		if type(r2) == "userdata" then dest = r2
+		elseif type(r1) == "userdata" then dest = r1 end
+	end
+	obj:script(true, "mp_coop_decision_client")
+	obj:enable_vision(false)               -- no enemies -> combat won't override the move (Spike 2)
+	local a = entity_action()
+	a:set_action(move(move.walk_fwd, vector():set(dest.x, dest.y, dest.z)))
+	a:set_action(cond(cond.move_end))
+	obj:reset_action_queue()               -- command() APPENDS; reset so re-issues don't pile up
+	obj:command(a, false)
+	return true
+end
+
 function on_decision(subject_id, kind, hex_args)
+	if kind == KIND_MOVE then
+		local tgt = decode_point(hex_args)
+		local obj = level.object_by_id(subject_id)
+		if not obj then
+			-- subject isn't online on this client (outside the actor's online radius): degrade
+			-- gracefully — the puppet will pick the target up if/when it net_Spawns.
+			printf("MP_COOP_MOVE: [CLIENT] subject=%s NOT online here; tgt=%.2f,%.2f,%.2f",
+				tostring(subject_id), tgt.x, tgt.y, tgt.z)
+			return
+		end
+		local p0 = obj:position()
+		local ok, err = pcall(drive_move, obj, tgt)
+		if not ok then
+			printf("MP_COOP_MOVE: [CLIENT] subject=%s drive FAILED: %s", tostring(subject_id), tostring(err))
+			return
+		end
+		printf("MP_COOP_MOVE: [CLIENT] subject=%s tgt=%.2f,%.2f,%.2f pos=%.2f,%.2f,%.2f dist=%.2f",
+			tostring(subject_id), tgt.x, tgt.y, tgt.z, p0.x, p0.y, p0.z, dist_xz(p0, tgt))
+		return
+	end
+
 	printf("MP_COOP_DECISION_LUA: fired subject=%s kind=%s args=%s",
 		tostring(subject_id), tostring(kind), tostring(hex_args))
-	-- (real executor: local obj = level.object_by_id(subject_id); drive its state_mgr)
 end

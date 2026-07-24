@@ -1128,6 +1128,48 @@ void CLevel::coop_dispatch_due_decisions()
 	}
 }
 
+// MP fork (§4): server-side gamedata decision-origination tick. Runs only on the host/server
+// (Server != nullptr) with enet co-op enabled, and only under -coop_server_tick so stock MP is
+// untouched. Hands gamedata the shared-clock time and the first real remote client's actor id
+// (a reference near a live player, or 0 if none connected). All real decision-site logic — pick
+// a subject NPC, choose a target, call game.mp_broadcast_decision — then lives in Lua
+// (mp_coop_decision_server.script). See dev/DECISION_REPLICATION_PLAN.md.
+void CLevel::coop_server_decision_tick()
+{
+	if (!xr_enet::enabled() || !Server)
+		return;
+	if (!strstr(Core.Params, "-coop_server_tick"))
+		return;
+
+	// Probe the connected clients for the first REAL remote player (owner->ID != 0). The
+	// dedicated server's own loopback self-client is the fake host actor (owner id 0) — skip it,
+	// same rule the decision broadcaster uses.
+	struct client_probe
+	{
+		u32 real_count;
+		u16 actor_id;
+		void operator()(IClient* c)
+		{
+			xrClientData* const cl = static_cast<xrClientData*>(c);
+			if (!cl || !cl->owner)
+				return;
+			const u16 id = cl->owner->ID;
+			if (id == 0)
+				return;
+			++real_count;
+			if (actor_id == 0)
+				actor_id = id;
+		}
+	} probe;
+	probe.real_count = 0;
+	probe.actor_id   = 0;
+	Server->ForEachClientDoSender(probe);
+
+	luabind::functor<void> fn;
+	if (ai().script_engine().functor("_G.mp_coop_server_tick", fn))
+		fn(timeServer(), probe.real_count, u32(probe.actor_id));
+}
+
 void CLevel::OnFrame()
 {
 	PROF_EVENT("CLevel::OnFrame()");
@@ -1171,6 +1213,10 @@ void CLevel::OnFrame()
 	// MP fork (§3/§4 decision replication): fire any scheduled server decisions whose
 	// exec_tick has now arrived on our shared clock. No-op (empty queue) on the server.
 	coop_dispatch_due_decisions();
+
+	// MP fork (§4): server-side gamedata decision-origination tick (no-op off the host/server
+	// or without -coop_server_tick). Lets gamedata drive real decision sites through the mp_api.
+	coop_server_decision_tick();
 
 	ProcessGameEvents();
 #ifdef SPAWN_ANTIFREEZE

@@ -1,0 +1,155 @@
+--[[
+	MP fork (§4 decision replication): SERVER-side decision originator — the first REAL
+	online-NPC decision site, driven entirely from gamedata through the mp_api seam.
+
+	The engine calls _G.mp_coop_server_tick(now_ms, real_count, actor_id) each frame on the
+	co-op host/server (CLevel::coop_server_decision_tick, gated behind -coop_server_tick).
+	_G.mp_coop_server_tick is wired to tick() below by mp_client.on_server_game_start.
+
+	What this does (first hook, deliberately a monster — Spike 2: monsters obey scripted
+	movement, bipeds freeze):
+	  1. Once a real remote player is connected, spawn one controllable monster next to that
+	     player's actor (so it net_Spawns to the client, i.e. is online on BOTH ends).
+	  2. Choose a movement target near the actor and, every BCAST_PERIOD, originate the decision:
+	     game.mp_broadcast_decision(monster_id, KIND_MOVE, encode_point(target), LEAD).
+	  3. Apply the SAME move to the server's authoritative monster so server and client run the
+	     identical order and converge on the target (Spike-2 drift budget bounds the difference).
+
+	The client's mp_coop_decision_client.on_decision resolves monster_id -> puppet and drives it.
+	This is the payoff of §4: server decides an online NPC's movement, the client executes it.
+--]]
+
+local KIND_MOVE = mp_coop_decision_client.KIND_MOVE   -- = 1 (shared enum)
+
+local MONSTER_SECTIONS = {
+	"dog_normal", "dog_strong", "dog_red_dog", "pseudodog_normal",
+	"flesh_normal", "flesh_03a_normal", "boar_normal",
+}
+
+local SPAWN_SIDE      = 6      -- m: spawn the monster this far to the actor's side
+local TARGET_AHEAD    = 15     -- m: target this far along the actor's facing
+local LEAD_MS         = 500    -- scheduled-execution lead (well over LAN ping)
+local BCAST_PERIOD_MS = 3000   -- re-originate the decision this often (pins the settle window)
+local ONLINE_TIMEOUT  = 20000  -- ms after spawn to give up waiting for the monster to go online
+
+local st = {
+	phase       = "wait",   -- wait -> spawning -> wait_online -> active -> failed
+	monster_id  = nil,
+	spawn_ms    = nil,
+	target      = nil,
+	last_bcast  = 0,
+	broadcasts  = 0,
+}
+
+local function pick_section()
+	for _, s in ipairs(MONSTER_SECTIONS) do
+		if system_ini():section_exist(s) then return s end
+	end
+	return nil
+end
+
+local function clamp_to_mesh(obj, v)
+	if obj:accessible(v) then return v end
+	local r1, r2 = obj:accessible_nearest(v, vector())
+	if type(r2) == "userdata" then return r2 end
+	if type(r1) == "userdata" then return r1 end
+	return v
+end
+
+-- same monster-movement order the client executor uses (Spike 2)
+local function drive_move(obj, tgt)
+	obj:script(true, "mp_coop_decision_server")
+	obj:enable_vision(false)
+	local a = entity_action()
+	a:set_action(move(move.walk_fwd, vector():set(tgt.x, tgt.y, tgt.z)))
+	a:set_action(cond(cond.move_end))
+	obj:reset_action_queue()
+	obj:command(a, false)
+end
+
+local function do_spawn(actor)
+	local apos = actor:position()
+	local adir = actor:direction()
+	local d = vector():set(adir.x, 0, adir.z)
+	d:normalize()
+	local perp = vector():set(-d.z, 0, d.x)
+	local section = pick_section()
+	if not section then
+		printf("! MP_COOP_SV: no monster section available; cannot originate move decision")
+		st.phase = "failed"
+		return
+	end
+	local spos = vector():set(apos.x + perp.x * SPAWN_SIDE, apos.y, apos.z + perp.z * SPAWN_SIDE)
+	local ok, se = pcall(function()
+		return alife():create(section, spos, actor:level_vertex_id(), actor:game_vertex_id())
+	end)
+	if not ok or not se then
+		printf("! MP_COOP_SV: alife():create(%s) failed: %s", tostring(section), tostring(se))
+		st.phase = "failed"
+		return
+	end
+	st.monster_id = se.id
+	st.spawn_ms   = time_global()
+	st.phase      = "wait_online"
+	-- target: ahead of the actor along its facing, on the far side of the monster
+	st.target = vector():set(apos.x + d.x * TARGET_AHEAD, apos.y, apos.z + d.z * TARGET_AHEAD)
+	printf("~ MP_COOP_SV: spawned %s id=%d at %.2f,%.2f,%.2f (target %.2f,%.2f,%.2f)",
+		section, st.monster_id, spos.x, spos.y, spos.z, st.target.x, st.target.y, st.target.z)
+end
+
+local function tick_impl(now_ms, real_count, actor_id)
+	if st.phase == "failed" then return end
+
+	if st.phase == "wait" then
+		if real_count < 1 or not actor_id or actor_id == 0 then return end
+		local actor = level.object_by_id(actor_id)
+		if not actor then return end
+		st.phase = "spawning"
+		do_spawn(actor)
+		return
+	end
+
+	if st.phase == "wait_online" then
+		local obj = level.object_by_id(st.monster_id)
+		if obj then
+			st.target = clamp_to_mesh(obj, st.target)
+			st.phase  = "active"
+			printf("~ MP_COOP_SV: monster id=%d online on server; target clamped to %.2f,%.2f,%.2f",
+				st.monster_id, st.target.x, st.target.y, st.target.z)
+		elseif time_global() - (st.spawn_ms or 0) > ONLINE_TIMEOUT then
+			printf("! MP_COOP_SV: monster id=%d never came online within %dms; giving up",
+				tostring(st.monster_id), ONLINE_TIMEOUT)
+			st.phase = "failed"
+		end
+		return
+	end
+
+	if st.phase == "active" then
+		if now_ms - st.last_bcast < BCAST_PERIOD_MS then return end
+		st.last_bcast = now_ms
+		local obj = level.object_by_id(st.monster_id)
+		if not obj then return end   -- transient; wait for it to come back
+		-- 1) originate the decision over the mp_api seam
+		local hex = mp_coop_decision_client.encode_point(st.target)
+		local n = 0
+		local ok = pcall(function()
+			n = game.mp_broadcast_decision(st.monster_id, KIND_MOVE, hex, LEAD_MS) or 0
+		end)
+		-- 2) apply the same order to the authoritative server monster
+		pcall(drive_move, obj, st.target)
+		st.broadcasts = st.broadcasts + 1
+		local p = obj:position()
+		local dx, dz = p.x - st.target.x, p.z - st.target.z
+		printf("~ MP_COOP_SV: broadcast #%d KIND_MOVE subject=%d -> %d client(s); server monster at %.2f,%.2f,%.2f dist=%.2f",
+			st.broadcasts, st.monster_id, n, p.x, p.y, p.z, math.sqrt(dx * dx + dz * dz))
+	end
+end
+
+-- _G.mp_coop_server_tick target (registered in mp_client.on_server_game_start)
+function tick(now_ms, real_count, actor_id)
+	local ok, err = pcall(tick_impl, now_ms, real_count, actor_id)
+	if not ok then
+		printf("! MP_COOP_SV tick error: %s", tostring(err))
+		st.phase = "failed"
+	end
+end
