@@ -398,6 +398,18 @@ void CGameTaskManager::coop_apply_tasks(NET_Packet& packet)
 		tasks.push_back(key);
 	}
 
+	// MP fork (C2/quest E2E): log task adoption for test harness
+	if (strstr(Core.Params, "-dbg"))
+	{
+		Msg("* COOP_TASKS: adopted %u task(s) from server", tasks.size());
+		for (u32 j = 0; j < tasks.size(); ++j)
+		{
+			CGameTask* const tj = tasks[j].game_task;
+			if (tj)
+				Msg("*   COOP_TASKS[%u]: id='%s' state=%d", j, tj->m_ID.c_str(), int(tj->GetTaskState()));
+		}
+	}
+
 	m_flags.set(eChanged, TRUE); // makes the PDA redraw
 }
 
@@ -472,6 +484,10 @@ void CGameTaskManager::coop_broadcast_tasks()
 		if (tasks[i].game_task)
 			tasks[i].game_task->save_task(*blobs[i]);
 	}
+
+	// MP fork (quest E2E): log broadcast for test harness
+	if (strstr(Core.Params, "-dbg"))
+		Msg("* COOP_TASKS_SV: broadcasting %u task(s) to clients", tasks.size());
 
 	coop_task_sender sender;
 	sender.server = Level().Server;
