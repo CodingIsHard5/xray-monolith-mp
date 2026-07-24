@@ -1244,7 +1244,16 @@ void CActor::UpdateCL()
 			{
 				s_kill_delay = -1.f;  // one-shot
 				Msg("- COOP(test): firing self-kill NOW");
-				KillEntity(ID());
+				// Can't use KillEntity(ID()) — it only sends GE_DIE
+				// when OnServer(), which is false on a thin client.
+				// Send the die event directly to the server.
+				{
+					NET_Packet P;
+					u_EventGen(P, GE_DIE, ID());
+					P.w_u16(u16(ID()));
+					P.w_u32(0);
+					u_EventSend(P, net_flags(TRUE, TRUE, FALSE, TRUE));
+				}
 			}
 		}
 	}
