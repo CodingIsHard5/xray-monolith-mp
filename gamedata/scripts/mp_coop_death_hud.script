@@ -1,0 +1,50 @@
+--[[
+	Co-op death/respawn spectate HUD
+	Shows "You died. Respawning in X seconds..." during the spectate period.
+	Client-side only — queries db.actor:coop_is_dead() / coop_respawn_timer()
+	which are set by the engine's co-op death system.
+--]]
+
+local hud_wnd = nil     -- CUIStatic shown during death
+local was_dead = false   -- edge tracker for show/hide
+
+local function update_hud()
+	if not db.actor then return end
+
+	local dead = db.actor:coop_is_dead()
+
+	if dead and not was_dead then
+		-- just died — create HUD
+		hud_wnd = CUIStatic()
+		hud_wnd:SetWndPos(vector2():set(212, 300))
+		hud_wnd:SetWndSize(vector2():set(600, 68))
+		local tc = hud_wnd:TextControl()
+		tc:SetFont(GetFontGraffiti32Russian())
+		tc:SetTextColor(GetARGB(255, 255, 60, 60))
+		tc:SetText("You died. Respawning...")
+		get_hud():AddDialogToRender(hud_wnd)
+	end
+
+	if dead and hud_wnd then
+		-- update countdown text
+		local secs = db.actor:coop_respawn_timer()
+		local t = math.ceil(secs)
+		if t < 0 then t = 0 end
+		local tc = hud_wnd:TextControl()
+		tc:SetText(string.format("You died. Respawning in %d...", t))
+	end
+
+	if not dead and was_dead then
+		-- respawned — remove HUD
+		if hud_wnd then
+			get_hud():RemoveDialogToRender(hud_wnd)
+			hud_wnd = nil
+		end
+	end
+
+	was_dead = dead
+end
+
+function on_game_start()
+	RegisterScriptCallback("actor_on_update", update_hud)
+end

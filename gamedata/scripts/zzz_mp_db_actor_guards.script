@@ -1,0 +1,188 @@
+--[[
+	MP db.actor nil-guards
+	Monkey-patches functions in stock/GAMMA scripts that crash when db.actor
+	is nil (dedicated server with no player actor). Each patch early-returns
+	a safe default when db.actor is absent; the original function runs
+	unchanged when a player IS present.
+
+	Naming: zzz_ ensures this runs AFTER the scripts it patches have
+	registered their on_game_start callbacks.
+--]]
+
+function on_game_start()
+
+	-- ===================================================================
+	-- schemes_ai_gamma: scheme_camper / scheme_cover
+	-- These check if the enemy is the actor for AI behavior selection.
+	-- Without an actor, the enemy is never the actor -> return nil (skip).
+	-- ===================================================================
+	if schemes_ai_gamma then
+		local org_scheme_camper = schemes_ai_gamma.scheme_camper
+		if org_scheme_camper then
+			schemes_ai_gamma.scheme_camper = function(enemy, npc, actor)
+				if not db.actor then return end
+				return org_scheme_camper(enemy, npc, actor)
+			end
+		end
+
+		local org_scheme_cover = schemes_ai_gamma.scheme_cover
+		if org_scheme_cover then
+			schemes_ai_gamma.scheme_cover = function(enemy, npc, actor)
+				if not db.actor then return end
+				return org_scheme_cover(enemy, npc, actor)
+			end
+		end
+	end
+
+	-- ===================================================================
+	-- xr_companion: companion activity methods + select_position
+	-- Companions follow the actor; without one, skip entirely.
+	-- ===================================================================
+	if xr_companion then
+		if xr_companion.action_companion_activity then
+			local cls = xr_companion.action_companion_activity
+
+			local org_beh_walk = cls.beh_walk_simple
+			if org_beh_walk then
+				cls.beh_walk_simple = function(self)
+					if not db.actor then return end
+					return org_beh_walk(self)
+				end
+			end
+
+			local org_beh_wait = cls.beh_wait_simple
+			if org_beh_wait then
+				cls.beh_wait_simple = function(self)
+					if not db.actor then return end
+					return org_beh_wait(self)
+				end
+			end
+		end
+
+		local org_select_position = xr_companion.select_position
+		if org_select_position then
+			xr_companion.select_position = function(npc, st)
+				if not db.actor then return end
+				return org_select_position(npc, st)
+			end
+		end
+	end
+
+	-- ===================================================================
+	-- xr_wounded: action_wounded:execute
+	-- L96: monolith suicide references db.actor unconditionally
+	-- L169: wound hit uses db.actor as draftsman
+	-- Guard: skip the entire execute body; base class still runs.
+	-- ===================================================================
+	if xr_wounded and xr_wounded.action_wounded then
+		local org_execute = xr_wounded.action_wounded.execute
+		if org_execute then
+			xr_wounded.action_wounded.execute = function(self)
+				if not db.actor then
+					action_base.execute(self)
+					return
+				end
+				return org_execute(self)
+			end
+		end
+	end
+
+	-- ===================================================================
+	-- axr_beh: action_beh:set_desired_target (cover_near_actor branch)
+	-- The whole execute method uses db.actor heavily for condlist eval.
+	-- Guard the execute entry point.
+	-- ===================================================================
+	if axr_beh and axr_beh.action_beh then
+		local org_execute = axr_beh.action_beh.execute
+		if org_execute then
+			axr_beh.action_beh.execute = function(self)
+				if not db.actor then
+					action_base.execute(self)
+					return
+				end
+				return org_execute(self)
+			end
+		end
+	end
+
+	-- ===================================================================
+	-- xr_meet: action_meet_wait:execute
+	-- L126: db.actor:position() unconditional
+	-- L185: look_object = db.actor
+	-- Guard: skip meet behavior without actor.
+	-- ===================================================================
+	if xr_meet and xr_meet.action_meet_wait then
+		local org_execute = xr_meet.action_meet_wait.execute
+		if org_execute then
+			xr_meet.action_meet_wait.execute = function(self)
+				if not db.actor then
+					action_base.execute(self)
+					return
+				end
+				return org_execute(self)
+			end
+		end
+	end
+
+	-- ===================================================================
+	-- xr_conditions: condlist evaluator functions
+	-- These are called by xr_logic.pick_section_from_condlist across
+	-- many schemes. Return false (condition not met) when no actor.
+	-- ===================================================================
+	if xr_conditions then
+		local org_is_actor_enemy = xr_conditions.is_actor_enemy_to_faction
+		if org_is_actor_enemy then
+			xr_conditions.is_actor_enemy_to_faction = function(actor, npc, p)
+				if not db.actor then return false end
+				return org_is_actor_enemy(actor, npc, p)
+			end
+		end
+
+		local org_actor_out_zone = xr_conditions.actor_out_zone
+		if org_actor_out_zone then
+			xr_conditions.actor_out_zone = function(actor, npc, p)
+				if not db.actor then return false end
+				return org_actor_out_zone(actor, npc, p)
+			end
+		end
+
+		local org_actor_has_item = xr_conditions.actor_has_item
+		if org_actor_has_item then
+			xr_conditions.actor_has_item = function(actor, npc, p)
+				if not db.actor then return false end
+				return org_actor_has_item(actor, npc, p)
+			end
+		end
+
+		local org_actor_has_item_amount = xr_conditions.actor_has_item_amount
+		if org_actor_has_item_amount then
+			xr_conditions.actor_has_item_amount = function(actor, npc, p)
+				if not db.actor then return false end
+				return org_actor_has_item_amount(actor, npc, p)
+			end
+		end
+
+		local org_actor_has_item_count = xr_conditions.actor_has_item_count
+		if org_actor_has_item_count then
+			xr_conditions.actor_has_item_count = function(actor, npc, p)
+				if not db.actor then return false end
+				return org_actor_has_item_count(actor, npc, p)
+			end
+		end
+	end
+
+	-- ===================================================================
+	-- axr_companions: setup_companion_logic uses db.actor for section
+	-- selection. Without actor, use loaded_active_section only.
+	-- ===================================================================
+	if axr_companions then
+		local org_setup = axr_companions.setup_companion_logic
+		if org_setup then
+			axr_companions.setup_companion_logic = function(npc, st, loaded, cannot_dismiss)
+				if not db.actor then return end
+				return org_setup(npc, st, loaded, cannot_dismiss)
+			end
+		end
+	end
+
+end
