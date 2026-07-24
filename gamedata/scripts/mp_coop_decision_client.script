@@ -1,31 +1,24 @@
 --[[
-	MP fork (§4 decision replication, increment B): client-side executor seam.
+	MP fork (§4 decision replication, increment B): client-side executor.
 
 	When a scheduled server decision fires on this client's shared clock, the engine
-	(CLevel::coop_dispatch_due_decisions) calls _G.mp_coop_on_decision(subject_id, kind,
-	hex_args). For now this just logs receipt, proving the engine -> gamedata seam end to
-	end. Real NPC control (set an online NPC's movement target / combat enemy from the
-	decision, then let native X-Ray AI execute it) plugs into this function.
+	(CLevel::coop_dispatch_due_decisions) calls _G.mp_coop_on_decision, which is wired to
+	on_decision() below by mp_client.on_client_level_start (the co-op thin client's Lua
+	init hook — on_game_start never runs on a thin client, so this is registered there).
 
 	subject_id : u16  - the object the decision concerns (an online NPC's id)
 	kind       : u8   - decision kind enum (maps 1:1 to a gamedata executor)
 	hex_args   : str  - kind-specific args, hex-encoded (binary-safe over Lua strings)
 
-	Registered at chunk load (below) so it exists as soon as this file loads; the
-	presence of on_game_start makes axr_main auto-load the file on the client.
+	For now this just logs receipt, proving the engine -> gamedata seam end to end. Real
+	NPC control (resolve subject_id to a level object and drive its state_mgr movement
+	target / combat enemy) plugs into on_decision.
 --]]
 
-local function mp_coop_on_decision(subject_id, kind, hex_args)
+-- Module-level (non-local) so mp_client can reference mp_coop_decision_client.on_decision,
+-- which also triggers X-Ray to load this file on the client.
+function on_decision(subject_id, kind, hex_args)
 	printf("MP_COOP_DECISION_LUA: fired subject=%s kind=%s args=%s",
 		tostring(subject_id), tostring(kind), tostring(hex_args))
-	-- (real executor: resolve subject_id to a level object and drive its state_mgr)
-end
-
--- Publish to the global table so the engine functor lookup ("_G.mp_coop_on_decision")
--- resolves it. Runs when the chunk is loaded.
-_G.mp_coop_on_decision = mp_coop_on_decision
-
-function on_game_start()
-	_G.mp_coop_on_decision = mp_coop_on_decision
-	printf("MP_COOP_DECISION_LUA: registered mp_coop_on_decision (on_game_start)")
+	-- (real executor: local obj = level.object_by_id(subject_id); drive its state_mgr)
 end

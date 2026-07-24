@@ -1,0 +1,191 @@
+-- MP fork (§14 co-op thin client): client-side gamedata init.
+-- Called ONCE per level by the engine (CLevel::InitializeClientGame) on a
+-- co-op client, at config time BEFORE any object binder or spawn runs. This is
+-- where we initialise the server-side gamedata globals that single-player code
+-- references raw but that a thin client's normal init paths never create.
+--
+-- Keep every init here CLIENT-SAFE (no alife()/server writes): the authoritative
+-- world lives on the server; the client only needs these globals to EXIST so
+-- stock references resolve to empty/no-op instead of indexing nil.
+
+function on_client_level_start()
+	-- SIMBOARD: bind_campfire.script:273 (and others) index the global
+	-- SIMBOARD raw. get_sim_board() lazily builds an EMPTY simulation_board
+	-- (sim_board.script: __init only sets empty tables — client-safe), so the
+	-- campfire/smart lookups resolve to nil and skip, which is correct on a
+	-- client that owns no A-Life.
+	sim_board.get_sim_board()
+
+	-- PDA (§18): on the co-op thin client the engine's on_game_start callback never
+	-- fires (it is driven by the A-Life simulator, which a thin client has none of),
+	-- so stock pda.pda_use() returns false and opening the PDA does nothing (the
+	-- engine path is otherwise correct: CurrentEntity is the owned actor, alive,
+	-- AF_3D_PDA off). Patch pda.pda_use to allow the PDA to open on the co-op client.
+	-- on_client_level_start runs on the client (unlike on_game_start), so this sticks.
+	local ok, err = pcall(function()
+		if pda and pda.pda_use then
+			pda.pda_use = function(...) return true end -- allow PDA to open on the co-op client
+			printf("~ MP co-op: patched pda.pda_use")
+		end
+	end)
+	if not ok then printf("! MP co-op: pda.pda_use patch failed: %s", tostring(err)) end
+
+	-- DECISION REPLICATION (§4): register the client-side executor for scheduled server
+	-- decisions. The engine (CLevel::coop_dispatch_due_decisions) calls _G.mp_coop_on_decision
+	-- when a decision fires on the shared clock. on_game_start never runs on the thin client,
+	-- so it MUST be registered here. Referencing mp_coop_decision_client also loads that file.
+	local okd, errd = pcall(function()
+		_G.mp_coop_on_decision = mp_coop_decision_client.on_decision
+		printf("~ MP co-op: registered mp_coop_on_decision (decision replication)")
+	end)
+	if not okd then printf("! MP co-op: mp_coop_on_decision register failed: %s", tostring(errd)) end
+
+	-- THIN-CLIENT BINDERS: single-player object binders that look the object up in the
+	-- A-Life simulator crash on a co-op client, which owns no A-Life (alife():object()
+	-- returns nil), e.g. bind_heli.script:118 "attempt to index local 'se_obj' (a nil
+	-- value)" on k00_marsh, which killed the client right after it entered the world.
+	-- These world objects are server-owned in co-op and reach the client as replicated
+	-- puppets, so the client-side binder logic is not needed — prevent it from binding.
+	-- Each entry is {module, function}; missing ones are skipped. Add more as they surface.
+	local binder_stubs = {
+		{ "bind_heli", "bind" }, -- helicopters (Great Swamp etc.)
+	}
+	for _, s in ipairs(binder_stubs) do
+		local mod_name, fn_name = s[1], s[2]
+		local ok2 = pcall(function()
+			local m = _G[mod_name]
+			if m and m[fn_name] then
+				m[fn_name] = function(...) return end
+				printf("~ MP co-op: stubbed client-side %s.%s (thin client owns no A-Life)", mod_name, fn_name)
+			end
+		end)
+		if not ok2 then printf("! MP co-op: binder stub failed for %s.%s", mod_name, fn_name) end
+	end
+
+	-- DIALOGUE PRECONDITIONS: these run on the CLIENT (the phrase list has to be built
+	-- synchronously to draw the menu), and they read world state a thin client does not
+	-- fully have, so some of them legitimately fail. That failure is NOT survivable in the
+	-- engine: luabind calls its error callback from an UNPROTECTED call and expects it never
+	-- to return, so continuing corrupts the VM (seen as an access violation in lj_vm_return
+	-- from one single failing precondition). The only sound place to absorb it is here, on
+	-- the Lua side, before the error ever reaches luabind.
+	--
+	-- Wrap each known-fragile precondition in pcall: a script that cannot answer now reads as
+	-- "this phrase is not available", which is the sane result — the line is hidden instead of
+	-- the session ending. Add entries as they surface; this is our overlay, no rebuild needed.
+	local precondition_guards = {
+		-- dialogs_axr_companion.script:363 — concatenates a nil giver_id when the hostage
+		-- task cannot be resolved, which is the normal case on a client that owns no A-Life.
+		{ "dialogs_axr_companion", "is_hostage_task_giver" },
+	}
+	for _, g in ipairs(precondition_guards) do
+		local mod_name, fn_name = g[1], g[2]
+		local ok3 = pcall(function()
+			local m = _G[mod_name]
+			if m and type(m[fn_name]) == "function" then
+				local original = m[fn_name]
+				m[fn_name] = function(...)
+					local ok, result = pcall(original, ...)
+					if ok then return result end
+					return false
+				end
+				printf("~ MP co-op: guarded dialogue precondition %s.%s", mod_name, fn_name)
+			end
+		end)
+		if not ok3 then printf("! MP co-op: precondition guard failed for %s.%s", mod_name, fn_name) end
+	end
+
+	-- (future thin-client globals get initialised here — one place, no engine
+	--  rebuild needed to add more.)
+end
+
+-- MP fork (§14 co-op SERVER init): called ONCE by the engine (game_sv_Single::Create)
+-- on the co-op dedicated server, after the A-Life simulator exists (script engine ready)
+-- and BEFORE any on_game_load callback fires. The co-op server runs GAMMA's full
+-- single-player + client script env, so scripts here reference globals that another mod's
+-- client-only script is supposed to define. When that defining script never loads on a
+-- headless -nosound server, the reference is nil and the game FATALs
+-- ("attempt to call global (nil)"). Define server-safe fallbacks for those globals here.
+--
+-- Release-safe: this is our overlay only; no GAMMA mod is edited. Once the engine hook
+-- exists, further server-side fixes are pure Lua here — no rebuild needed.
+function on_server_game_start()
+	-- nextTick: canonically from Spatial Audio's kute_common.script (mod 469), which does
+	-- not load on the -nosound server, so mods that call the bare global (e.g. mod 410's
+	-- ubgl_no_3db.on_game_load) crash. Provide a fallback: defer via AddUniqueCall when
+	-- available, else no-op — the deferred payloads are client visual effects (weapon anim
+	-- show/hide) that are irrelevant on a renderless server. If kute_common ever does load,
+	-- its `function nextTick` overrides this (we only fill a nil).
+	if not nextTick then
+		_G.nextTick = function(f, ...)
+			if AddUniqueCall then
+				local args = { ... }
+				AddUniqueCall(function()
+					f(unpack(args))
+					return true
+				end)
+			end
+		end
+		printf("~ MP co-op: defined server-side nextTick fallback")
+	end
+
+	-- Math global aliases: many GAMMA client scripts (and their own nextTick fallbacks,
+	-- e.g. G.A.M.M.A. Weapon Pack close_combat_weapons_launchers.script:39) call bare
+	-- globals max/min/floor/ceil/abs that a core client script normally aliases to math.*.
+	-- Those aren't defined on the headless server, so the calls hit nil. These are pure
+	-- functions; aliasing them server-side is always safe. Only fill nils so anything that
+	-- already defined them (client, or if a core script does load) wins.
+	local math_aliases = { max = math.max, min = math.min, floor = math.floor,
+	                       ceil = math.ceil, abs = math.abs }
+	for name, fn in pairs(math_aliases) do
+		if not _G[name] then _G[name] = fn end
+	end
+
+	-- AddUniqueCall: core deferred-call queue (normally from utils_obj/bind). If it is
+	-- missing on the server, client scripts that queue visual effects through it crash.
+	-- Provide a no-op fallback: the deferred payloads are client-side visuals, irrelevant
+	-- on a renderless server. Only fill if nil (never override a real one).
+	if not AddUniqueCall then
+		_G.AddUniqueCall = function(f) return end
+		printf("~ MP co-op: defined server-side AddUniqueCall no-op fallback")
+	end
+
+	-- SERVER PERF: GAMMA's per-NPC sound-scheme init (sound_theme.init_npc_sound, called
+	-- from z_npc_footsteps for every A-Life NPC) tries to load voice/character sounds that
+	-- don't exist on the -nosound headless server. Each miss raises a soft abort that logs a
+	-- full Lua stack traceback, so loading the world took 10+ minutes and pegged a core.
+	-- Sound is purely client-side (clients run their own sound), so stub it to a no-op on the
+	-- server: NPC audio schemes aren't needed for authoritative A-Life/AI. Only override if
+	-- present; leaves the client untouched (this hook is server-only).
+	local ok_snd = pcall(function()
+		if sound_theme and sound_theme.init_npc_sound then
+			sound_theme.init_npc_sound = function(npc) return end
+			printf("~ MP co-op: stubbed server-side sound_theme.init_npc_sound (-nosound perf)")
+		end
+	end)
+	if not ok_snd then printf("! MP co-op: sound_theme stub failed") end
+
+	-- CLIENT-HUD SCRIPTS ON THE SERVER: GAMMA ships HUD/UI mods whose callbacks run through
+	-- game_sv_single on the headless server, where there is no HUD (CurrentGameUI() is NULL),
+	-- so they index nil and FATAL. They are purely visual, so no-op them server-side. Each
+	-- entry is {module, function}; missing modules are skipped. Add new ones here as they
+	-- surface — this is our overlay, so no engine rebuild is needed.
+	local hud_stubs = {
+		{ "factionid_hud_mcm", "activate_hud" }, -- factionid_hud_mcm.script:131 attempt to index nil
+		-- actor_effects.HUD_mask (G.A.M.M.A. 3D PDA and Headlamp Animations) does
+		-- `local hud = get_hud()` then indexes it; get_hud() is nil on the headless
+		-- server, so it FATALs at actor_effects.script:1309 mid-session.
+		{ "actor_effects", "HUD_mask" },
+	}
+	for _, s in ipairs(hud_stubs) do
+		local mod_name, fn_name = s[1], s[2]
+		local ok = pcall(function()
+			local m = _G[mod_name]
+			if m and m[fn_name] then
+				m[fn_name] = function(...) return end
+				printf("~ MP co-op: stubbed server-side %s.%s", mod_name, fn_name)
+			end
+		end)
+		if not ok then printf("! MP co-op: stub failed for %s.%s", mod_name, fn_name) end
+	end
+end
