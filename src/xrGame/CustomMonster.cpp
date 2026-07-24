@@ -819,7 +819,35 @@ void CCustomMonster::UpdateCL()
 		{
 #pragma todo("Dima to All : this is FAKE, network is not supported here!")
 
-			UpdatePositionAnimation();
+			// §14 step 3 (increment C1b DIAGNOSTIC): a locally-driven monster froze at spawn even
+			// though UpdatePositionAnimation runs. Log the full movement pipeline state so one build
+			// pinpoints the broken precondition (path not built / speed 0 / physics character state).
+			if (Remote() && m_coop_locally_driven)
+			{
+				static u32 s_c1b_log = 0;
+				if ((s_c1b_log++ % 30) == 0)
+				{
+					CPHMovementControl* mc = character_physics_support() ? character_physics_support()->movement() : NULL;
+					const Fvector p_before = Position();
+					UpdatePositionAnimation();
+					const Fvector p_after = Position();
+					Msg("- MP_C1B: id=%u en=%d path_n=%u desspd=%.3f pcompl=%d spd=%.3f chExist=%d chEn=%d moved=%.4f",
+						ID(),
+						movement().enabled() ? 1 : 0,
+						(u32)movement().detail().path().size(),
+						movement().old_desirable_speed(),
+						movement().path_completed() ? 1 : 0,
+						movement().speed(),
+						mc ? (mc->CharacterExist() ? 1 : 0) : -1,
+						(mc && mc->CharacterExist()) ? (mc->IsCharacterEnabled() ? 1 : 0) : -1,
+						p_before.distance_to(p_after));
+					FlushLog();
+				}
+				else
+					UpdatePositionAnimation();
+			}
+			else
+				UpdatePositionAnimation();
 		}
 
 		// Use interpolated/last state
