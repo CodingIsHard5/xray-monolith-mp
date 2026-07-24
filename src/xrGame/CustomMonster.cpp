@@ -107,6 +107,7 @@ CCustomMonster::CCustomMonster() :
 	m_coop_net_speed = 0.f;
 	m_coop_net_heading = 0.f;
 	m_coop_net_moving = false;
+	m_coop_locally_driven = false; // §14 step 3: default = dense streaming (coop_puppet)
 }
 
 CCustomMonster::~CCustomMonster()

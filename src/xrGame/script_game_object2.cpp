@@ -828,3 +828,18 @@ float CScriptGameObject::coop_respawn_timer() const
 	if (!actor) return 0.f;
 	return actor->coop_respawn_timer();
 }
+
+// MP fork (§14 step 3): decision-driven flag on a replicated creature (see CCustomMonster).
+bool CScriptGameObject::coop_locally_driven() const
+{
+	CCustomMonster* monster = smart_cast<CCustomMonster*>(&object());
+	if (!monster) return false;
+	return monster->coop_locally_driven();
+}
+
+void CScriptGameObject::coop_set_locally_driven(bool value)
+{
+	CCustomMonster* monster = smart_cast<CCustomMonster*>(&object());
+	if (!monster) return;
+	monster->coop_set_locally_driven(value);
+}

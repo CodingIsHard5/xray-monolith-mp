@@ -274,6 +274,8 @@ public:
 	bool Alive() const;
 	bool coop_is_dead() const;
 	float coop_respawn_timer() const;
+	bool coop_locally_driven() const;
+	void coop_set_locally_driven(bool value);
 	ALife::ERelationType GetRelationType(CScriptGameObject* who);
 
 	// CScriptEntity

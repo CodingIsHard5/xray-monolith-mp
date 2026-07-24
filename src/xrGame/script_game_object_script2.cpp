@@ -462,5 +462,7 @@ class_<CScriptGameObject> script_register_game_object1(class_<CScriptGameObject>
 		.def("reload_weapon", &CScriptGameObject::reload_weapon)
 
 		.def("coop_is_dead", &CScriptGameObject::coop_is_dead)
-		.def("coop_respawn_timer", &CScriptGameObject::coop_respawn_timer);
+		.def("coop_respawn_timer", &CScriptGameObject::coop_respawn_timer)
+		.def("coop_locally_driven", &CScriptGameObject::coop_locally_driven)
+		.def("coop_set_locally_driven", &CScriptGameObject::coop_set_locally_driven);
 }

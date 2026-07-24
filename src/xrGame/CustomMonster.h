@@ -133,6 +133,15 @@ public:
 	bool  m_coop_net_moving;
 	IC float coop_net_heading() const { return m_coop_net_heading; }
 	IC bool  coop_net_moving()  const { return m_coop_net_moving; }
+	// MP fork (§14 step 3 — client-local AI inversion): when set, this replicated creature is
+	// DECISION-DRIVEN — the client runs its native AI locally (it executes the replicated
+	// decision) and only soft-corrects from a thinned M_UPDATE stream, instead of dense-streaming
+	// its position as a coop_puppet. Default false = today's dense streaming (zero regression).
+	// INCREMENT A: the flag + accessors exist and are Lua-settable, but NOTHING reads it yet —
+	// the shedule_Update/UpdateCL/AI-call gates land in increment B. So this is a pure no-op.
+	bool  m_coop_locally_driven;
+	IC bool coop_locally_driven() const { return m_coop_locally_driven; }
+	IC void coop_set_locally_driven(bool v) { m_coop_locally_driven = v; }
 	BOOL NET_WasInterpolating; // previous update was by interpolation or by extrapolation
 	u32 NET_Time; // server time of last update
 	//------------------------------
