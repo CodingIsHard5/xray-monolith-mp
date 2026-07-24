@@ -324,6 +324,31 @@ void xrServer::MakeUpdatePackets()
 		if (!Test.Net_Relevant() && !(xr_enet::enabled() && Test.cast_creature_abstract()))
 			continue;
 
+		// MP fork (§4 step 3 recon): optional soft-correction CADENCE PROBE. Under
+		// -coop_update_throttle <ms>, cap each replicated creature's M_UPDATE to at most once per
+		// <ms> (instead of every pass) so we can measure how sparse the stream can get before the
+		// client's puppet interpolation visibly degrades — that empirically sizes the
+		// M_COOP_CORRECTION cadence the client-local-AI inversion will need (see
+		// dev/DECISION_REPLICATION_PLAN.md, Step 3). Gated + creature-only: stock/normal co-op is
+		// untouched (throttle stays off). This does NOT change the puppet AI-skip; it only thins the
+		// stream on the existing interpolation path.
+		static int s_throttle_ms = -2; // -2 = unparsed, -1 = disabled
+		if (s_throttle_ms == -2)
+		{
+			s_throttle_ms = -1;
+			if (const char* p = strstr(Core.Params, "-coop_update_throttle "))
+				s_throttle_ms = atoi(p + xr_strlen("-coop_update_throttle "));
+		}
+		if (s_throttle_ms > 0 && xr_enet::enabled() && Test.cast_creature_abstract())
+		{
+			static xr_map<u16, u32> s_last_sent;
+			const u32 now = Device.dwTimeGlobal;
+			auto it = s_last_sent.find(Test.ID);
+			if (it != s_last_sent.end() && (now - it->second) < u32(s_throttle_ms))
+				continue; // within the throttle window — skip this creature's update this pass
+			s_last_sent[Test.ID] = now;
+		}
+
 		tmpPacket.B.count = 0;
 		// write specific data
 		{
