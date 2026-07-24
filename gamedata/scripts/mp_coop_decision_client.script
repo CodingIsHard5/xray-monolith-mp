@@ -63,6 +63,10 @@ end
 -- correctly (proven by the Spike-2 CSV writer). Build the line, then hand printf a single %s.
 local function logf(...) printf("%s", string.format(...)) end
 
+-- m_fDistToEnd > 0 lets the monster's path builder arrest the walk near the destination
+-- (base_monster_script bfAssignMovement: is_path_end); default -1 makes it over-walk the point.
+local DIST_TO_END = 1.5
+
 -- ---- executor ------------------------------------------------------------------------------
 
 -- Drive an online puppet to a target with the proven monster-movement order (Spike 2: monsters
@@ -84,7 +88,7 @@ local function drive_move(obj, tgt)
 		obj:enable_vision(false)           -- no enemies -> combat won't override the move (Spike 2)
 	end
 	local a = entity_action()
-	a:set_action(move(move.walk_fwd, vector():set(dest.x, dest.y, dest.z)))
+	a:set_action(move(move.walk_fwd, vector():set(dest.x, dest.y, dest.z), DIST_TO_END))
 	a:set_action(cond(cond.move_end))
 	obj:reset_action_queue()               -- command() APPENDS; reset so re-issues don't pile up
 	obj:command(a, false)

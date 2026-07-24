@@ -31,7 +31,11 @@ local MONSTER_SECTIONS = {
 local SPAWN_SIDE      = 6      -- m: spawn the monster this far to the actor's side
 local TARGET_DIST     = 10     -- m: target this far from the monster in the first accessible dir
 local LEAD_MS         = 500    -- scheduled-execution lead (well over LAN ping)
-local BCAST_PERIOD_MS = 3000   -- re-originate the decision this often (pins the settle window)
+local BCAST_PERIOD_MS = 3000   -- re-broadcast the decision this often WHILE the NPC is still moving
+local DIST_TO_END     = 1.5    -- m: path arrests within this of the destination (m_fDistToEnd > 0
+                               -- enables the is_path_end completion; default -1 never arrests)
+local STOP_M          = 2.5    -- arrived: stop commanding so the monster settles (idle, not re-walked)
+local REARM_M         = 4.0    -- if it drifts past this after arriving, resume driving/broadcasting
 local ONLINE_TIMEOUT  = 20000  -- ms after spawn to give up waiting for the monster to go online
 
 local st = {
@@ -53,46 +57,55 @@ local function pick_section()
 	return nil
 end
 
-local function clamp_to_mesh(obj, v)
-	if obj:accessible(v) then return v end
-	local r1, r2 = obj:accessible_nearest(v, vector())
-	if type(r2) == "userdata" then return r2 end
-	if type(r1) == "userdata" then return r1 end
-	return v
-end
-
--- Pick a target the monster can actually PATH to: try 8 compass directions at TARGET_DIST from
--- the monster's current position and take the first the engine reports accessible. A blind
--- "N metres north" target can land inside a Cordon structure, so the pathfinder routes the
--- monster sideways along the obstacle and it never converges (observed with the first dog).
-local DIRS = {
-	{ 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
-	{ 0.7071, 0.7071 }, { -0.7071, 0.7071 }, { 0.7071, -0.7071 }, { -0.7071, -0.7071 },
-}
-local function choose_target(obj)
-	local p = obj:position()
-	for _, dd in ipairs(DIRS) do
-		local cand = vector():set(p.x + dd[1] * TARGET_DIST, p.y, p.z + dd[2] * TARGET_DIST)
-		if obj:accessible(cand) then return cand end
-	end
-	return clamp_to_mesh(obj, vector():set(p.x + TARGET_DIST, p.y, p.z))
-end
-
 local function dist_xz(a, b)
 	local dx, dz = a.x - b.x, a.z - b.z
 	return math.sqrt(dx * dx + dz * dz)
 end
 
+-- Pick a target that is an ACTUAL nav vertex, so the monster's path ENDS exactly there. A blind
+-- "N metres east" world point can (a) land inside a Cordon structure and (b) sit up to several
+-- metres off the nav mesh, so the path ends at the nearest vertex ~4 m away, the monster reaches
+-- THAT and completes, then wanders (the plateau-at-4m overshoot we measured). level.vertex_in_
+-- direction walks the graph from the monster's own vertex toward each compass heading and returns
+-- a reachable vertex; we take the one that gives the most travel. Returns level_vertex_id, position.
+local DIRS = {
+	{ 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
+	{ 0.7071, 0.7071 }, { -0.7071, 0.7071 }, { 0.7071, -0.7071 }, { -0.7071, -0.7071 },
+}
+local function valid_lvid(vid)
+	return vid ~= nil and vid ~= 4294967295 and vid ~= 65535
+end
+local function choose_target(obj)
+	local lvid0 = obj:level_vertex_id()
+	local p = obj:position()
+	local best_vid, best_pos, best_d = nil, nil, 0
+	for _, dd in ipairs(DIRS) do
+		local dir = vector():set(dd[1], 0, dd[2])
+		local vid = level.vertex_in_direction(lvid0, dir, TARGET_DIST)
+		if valid_lvid(vid) then
+			local pos = level.vertex_position(vid)
+			local d = dist_xz(p, pos)
+			if d > best_d then best_d, best_vid, best_pos = d, vid, pos end
+		end
+	end
+	if best_vid then return best_vid, best_pos end
+	return lvid0, p   -- degenerate: boxed in, no meaningful move
+end
+
 -- same monster-movement order the client executor uses (Spike 2). Take script control ONCE:
 -- obj:script(true) while already scripted raises "Invalid sequence of taking an entity under
 -- script control", so (re)take only when the engine reports the object is not scripted.
-local function drive_move(obj, tgt)
+-- dist_to_end > 0 lets the path builder ARREST the walk near the destination (base_monster_script
+-- bfAssignMovement: is_path_end(m_fDistToEnd)); default -1 disables it and the monster over-walks.
+local function drive_move(obj, vid, pos)
 	if obj:get_script() == false then
 		obj:script(true, "mp_coop_decision_server")
 		obj:enable_vision(false)
 	end
 	local a = entity_action()
-	a:set_action(move(move.walk_fwd, vector():set(tgt.x, tgt.y, tgt.z)))
+	-- node-based ctor move(walk_fwd, level_vertex_id, position, dist_to_end): gives the path builder
+	-- an explicit destination NODE (exact path end) plus the arrest distance.
+	a:set_action(move(move.walk_fwd, vid, vector():set(pos.x, pos.y, pos.z), DIST_TO_END))
 	a:set_action(cond(cond.move_end))
 	obj:reset_action_queue()
 	obj:command(a, false)
@@ -142,10 +155,12 @@ local function tick_impl(now_ms, real_count, actor_id)
 	if st.phase == "wait_online" then
 		local obj = level.object_by_id(st.monster_id)
 		if obj then
-			st.target = choose_target(obj)
+			st.target_vid, st.target = choose_target(obj)
+			st.need_issue = true
 			st.phase  = "active"
-			logf("~ MP_COOP_SV: monster id=%d online; chose accessible target %.2f,%.2f,%.2f (dist %.2f)",
-				st.monster_id, st.target.x, st.target.y, st.target.z, dist_xz(obj:position(), st.target))
+			logf("~ MP_COOP_SV: monster id=%d online; target vertex %d @ %.2f,%.2f,%.2f (dist %.2f)",
+				st.monster_id, st.target_vid, st.target.x, st.target.y, st.target.z,
+				dist_xz(obj:position(), st.target))
 		elseif time_global() - (st.spawn_ms or 0) > ONLINE_TIMEOUT then
 			logf("! MP_COOP_SV: monster id=%s never came online within %dms; giving up",
 				tostring(st.monster_id), ONLINE_TIMEOUT)
@@ -158,32 +173,47 @@ local function tick_impl(now_ms, real_count, actor_id)
 		local obj = level.object_by_id(st.monster_id)
 		if not obj then return end   -- transient; wait for it to come back
 
-		-- Recapture EVERY tick (not just per broadcast): a Cordon monster's own scheme/binder can
-		-- pull script control back between broadcasts, after which it wanders. Cheap re-assert.
+		-- Recapture (cheap, every tick): a Cordon monster's own scheme/binder can pull script
+		-- control back, after which it wanders. Re-assert whenever the engine reports it unscripted.
 		if obj:get_script() == false then
 			local rok = pcall(function() obj:script(true, "mp_coop_decision_server"); obj:enable_vision(false) end)
 			st.recaptures = (st.recaptures or 0) + 1
 			if not rok then st.ctrl_fail = (st.ctrl_fail or 0) + 1 end
+			st.need_issue = true   -- lost control: it will have moved; re-path
+			st.arrived    = false
 		end
 
-		-- Re-path the authoritative monster to the fixed target EVERY tick. move(walk_fwd,dst)+move_end
-		-- self-terminates on arrival, after which the monster wanders (Spike-2); a 3s re-issue lets it
-		-- drift ~5m between orders and overshoot. Continuous re-issue pins it on the target. The client
-		-- mirrors this via M_UPDATE (measured ~0.5m), so the broadcast itself stays at the 3s cadence.
-		-- Best-effort (runs every frame) but don't swallow silently — log the first failure once.
-		local dok, derr = pcall(drive_move, obj, st.target)
-		if not dok and not st.drive_logged then
-			st.drive_logged = true
-			logf("! MP_COOP_SV: per-tick drive_move failed for subject=%d: %s", st.monster_id, tostring(derr))
+		local d = dist_xz(obj:position(), st.target)
+
+		-- Arrival hysteresis. Once WITHIN STOP_M, stop re-issuing: re-issuing move(walk_fwd) re-arms
+		-- ACT_WALK_FWD each time and its root motion carries the monster PAST the target (the overshoot
+		-- we measured). If it drifts back past REARM_M, re-path once. The order is otherwise issued
+		-- ONCE and the single path (to an exact nav vertex, arrested by dist_to_end) runs to completion.
+		if st.arrived and d > REARM_M then st.arrived = false; st.need_issue = true end
+		if not st.arrived and d <= STOP_M then
+			st.arrived = true
+			logf("~ MP_COOP_SV: subject=%d ARRIVED (dist %.2f <= %.1f) — settling", st.monster_id, d, STOP_M)
 		end
 
-		-- wrap-safe elapsed (now_ms is the u32 shared clock; matches coop_dispatch's diff idiom).
+		if not st.arrived and st.need_issue then
+			st.need_issue = false
+			local dok, derr = pcall(drive_move, obj, st.target_vid, st.target)
+			if not dok and not st.drive_logged then
+				st.drive_logged = true
+				logf("! MP_COOP_SV: drive_move failed for subject=%d: %s", st.monster_id, tostring(derr))
+			end
+		end
+
+		-- Re-broadcast the "go to target" decision on the 3s cadence regardless of arrival. In
+		-- production decisions are rare (fire once); here we keep re-sending so the client keeps
+		-- emitting position samples AFTER the server monster settles — that's how the harness
+		-- confirms it stays pinned. Re-sending is idempotent (same target); the client re-arms its
+		-- own walk toward an already-reached point, which M_UPDATE holds in place. wrap-safe u32 diff.
 		local elapsed = now_ms - st.last_bcast
 		if elapsed < 0 then elapsed = elapsed + 4294967296 end
 		if elapsed < BCAST_PERIOD_MS then return end
 		st.last_bcast = now_ms
 
-		-- 1) originate the decision over the mp_api seam
 		local hex = mp_coop_decision_client.encode_point(st.target)
 		local n = 0
 		local ok, berr = pcall(function()
@@ -192,14 +222,10 @@ local function tick_impl(now_ms, real_count, actor_id)
 		if not ok then
 			logf("! MP_COOP_SV: broadcast FAILED for subject=%d: %s", st.monster_id, tostring(berr))
 		end
-		-- (the authoritative server monster is driven to st.target every tick above; the server
-		-- applies at the decide site, ~LEAD_MS ahead of the clients' exec_tick — a first-hook
-		-- simplification. Tightening the server to the shared exec_tick is step-3 work, §4.2.)
 		st.broadcasts = st.broadcasts + 1
 		local p = obj:position()
 		logf("~ MP_COOP_SV: broadcast #%d subject=%d -> %d client(s); monster %.2f,%.2f,%.2f dist=%.2f scripted=%s recap=%d",
-			st.broadcasts, st.monster_id, n, p.x, p.y, p.z, dist_xz(p, st.target),
-			tostring(obj:get_script()), st.recaptures or 0)
+			st.broadcasts, st.monster_id, n, p.x, p.y, p.z, d, tostring(obj:get_script()), st.recaptures or 0)
 	end
 end
 
