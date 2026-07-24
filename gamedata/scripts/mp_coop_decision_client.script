@@ -17,8 +17,11 @@
 --]]
 
 -- Decision kinds — must match the server originators.
-KIND_MOVE   = 1   -- move an online NPC to a target point (args = encoded point)
-KIND_COMBAT = 2   -- set an online NPC's combat enemy (args = enemy object id, u16)
+KIND_MOVE     = 1   -- move an online NPC to a target point (args = encoded point)
+KIND_COMBAT   = 2   -- set an online NPC's combat enemy (args = enemy object id, u16)
+KIND_MOVE_OBJ = 3   -- move an online NPC toward a target OBJECT (args = target object id, u16) — a
+                    -- dynamic "follow/regroup" decision: the target is re-resolved each decision, so
+                    -- the subject tracks a moving object. Reuses the move-execution machine below.
 
 -- §14 step 3 (inversion): flip a decision-driven NPC to client-local AI ONLY when the client was
 -- launched with -coop_local_ai. Default OFF keeps the NPC a NET-driven puppet (the working move
@@ -143,6 +146,70 @@ local function drive_move(obj, tgt, use_node)
 	obj:command(a, false)
 end
 
+-- §14 step 3: flip a decision-driven NPC to client-local AI (increment B). The engine gate
+-- (CustomMonster.cpp: coop_puppet && !m_coop_locally_driven, and the Remote AI branch) then makes the
+-- client run its native Think/ProcessScripts/Exec_Action LOCALLY — it executes the replicated order
+-- itself instead of mirroring the streamed position. Per-NPC; normal puppets keep dense streaming.
+local function flip_locally_driven(subject_id, obj)
+	if not local_ai_enabled() then return end
+	local sok, serr = pcall(function()
+		obj:coop_set_locally_driven(true)
+		logf("MP_COOP_LOCALAI: [CLIENT] subject=%s coop_set_locally_driven(true) OK; readback=%s",
+			tostring(subject_id), tostring(obj:coop_locally_driven()))
+	end)
+	if not sok then
+		logf("MP_COOP_LOCALAI: [CLIENT] subject=%s setter FAILED (binding missing?): %s",
+			tostring(subject_id), tostring(serr))
+	end
+end
+
+-- Shared move executor: flip to local AI, log the distance track, and drive the subject to a world
+-- point with issue-once + arrival hysteresis + stall-retry. Used by both KIND_MOVE (fixed point) and
+-- KIND_MOVE_OBJ (a target object's current position). tgt is a world vector.
+--
+-- §14 step 3 (increment C1c): the server re-broadcasts the same target every ~3s; re-issuing the walk
+-- each time re-arms ACT_WALK_FWD and overshoots, so DON'T re-issue while the NPC is making progress.
+-- But issue-once alone can FREEZE the NPC (the first order can land before the object is path-ready and
+-- silently no-op, with no retry), so also re-issue when it has STALLED (no progress since the last
+-- decision) or lost script control — while it is closing the gap we stay hands-off (no overshoot).
+local function execute_move(subject_id, obj, tgt)
+	flip_locally_driven(subject_id, obj)
+
+	-- Sample position vs target FIRST so verification has a distance track on every decision.
+	local p0 = obj:position()
+	local d  = dist_xz(p0, tgt)
+	logf("MP_COOP_MOVE: [CLIENT] subject=%s tgt=%.2f,%.2f,%.2f pos=%.2f,%.2f,%.2f dist=%.2f",
+		tostring(subject_id), tgt.x, tgt.y, tgt.z, p0.x, p0.y, p0.z, d)
+
+	local s = drive_state[subject_id]
+	if not s or dist_xz(vector():set(s.tx, s.ty, s.tz), tgt) > 0.5 then
+		s = { tx = tgt.x, ty = tgt.y, tz = tgt.z, arrived = false, issued = false, last_d = nil }
+		drive_state[subject_id] = s
+	end
+	if s.arrived and d > REARM_M then s.arrived = false; s.issued = false end
+	if (not s.arrived) and d <= STOP_M then
+		s.arrived = true
+		logf("MP_COOP_MOVE: [CLIENT] subject=%s ARRIVED (dist %.2f <= %.1f) — settling",
+			tostring(subject_id), d, STOP_M)
+	end
+	if obj:get_script() == false then s.issued = false end  -- a scheme/binder reclaimed control: re-path
+
+	local progressing = (s.last_d ~= nil) and (d < s.last_d - 0.3)
+	local stalled     = (s.last_d ~= nil) and (d >= s.last_d - 0.3)
+	if (not s.arrived) and ((not s.issued) or stalled) and (not progressing) then
+		-- first issue prefers the node ctor (clean pin); a stall retry falls back to the blind point
+		-- ctor (self-heals an unpathable resolved vertex).
+		local use_node = (not s.issued)
+		local ok, err = pcall(drive_move, obj, tgt, use_node)
+		if ok then s.issued = true
+		else
+			logf("MP_COOP_MOVE: [CLIENT] subject=%s local drive order failed (puppet not controllable?): %s",
+				tostring(subject_id), tostring(err))
+		end
+	end
+	s.last_d = d
+end
+
 function on_decision(subject_id, kind, hex_args)
 	if kind == KIND_MOVE then
 		local tgt = decode_point(hex_args)
@@ -154,67 +221,26 @@ function on_decision(subject_id, kind, hex_args)
 				tostring(subject_id), tgt.x, tgt.y, tgt.z)
 			return
 		end
-		-- §14 step 3 INVERSION (increment B): flip this decision-driven NPC to client-local AI. The
-		-- engine gate (CustomMonster.cpp: coop_puppet && !m_coop_locally_driven, and the Remote AI
-		-- branch) then makes the client run its native Think/ProcessScripts/Exec_Action LOCALLY —
-		-- it executes the replicated move order itself instead of mirroring the streamed position.
-		-- Per-NPC, only for NPCs the decision system owns; normal puppets keep dense streaming.
-		-- (This crosses the A-Life-state crash surface by design — see the engine comment.)
-		if local_ai_enabled() then
-			local sok, serr = pcall(function()
-				obj:coop_set_locally_driven(true)
-				logf("MP_COOP_LOCALAI: [CLIENT] subject=%s coop_set_locally_driven(true) OK; readback=%s",
-					tostring(subject_id), tostring(obj:coop_locally_driven()))
-			end)
-			if not sok then
-				logf("MP_COOP_LOCALAI: [CLIENT] subject=%s setter FAILED (binding missing?): %s",
-					tostring(subject_id), tostring(serr))
-			end
-		end
-		-- Always sample the puppet's CURRENT position vs the target FIRST, so verification has a
-		-- distance track on every decision (the harness reads this line).
-		local p0 = obj:position()
-		local d  = dist_xz(p0, tgt)
-		logf("MP_COOP_MOVE: [CLIENT] subject=%s tgt=%.2f,%.2f,%.2f pos=%.2f,%.2f,%.2f dist=%.2f",
-			tostring(subject_id), tgt.x, tgt.y, tgt.z, p0.x, p0.y, p0.z, d)
+		execute_move(subject_id, obj, tgt)
+		return
+	end
 
-		-- §14 step 3 (increment C1c): issue-once + arrival hysteresis (mirrors mp_coop_decision_server).
-		-- The server re-broadcasts the same target every ~3s; re-issuing the walk each time re-arms
-		-- ACT_WALK_FWD and overshoots. So track per-subject state and DON'T re-issue while the NPC is
-		-- making progress. But issue-once alone can FREEZE the NPC: the first order can land before the
-		-- object is path-ready and silently no-op, with no retry. So also re-issue when the NPC has
-		-- STALLED (a prior issue produced no progress since the last decision) or lost script control —
-		-- while it is closing the gap we stay hands-off (no overshoot).
-		local s = drive_state[subject_id]
-		if not s or dist_xz(vector():set(s.tx, s.ty, s.tz), tgt) > 0.5 then
-			s = { tx = tgt.x, ty = tgt.y, tz = tgt.z, arrived = false, issued = false, last_d = nil }
-			drive_state[subject_id] = s
+	if kind == KIND_MOVE_OBJ then
+		-- Move the subject toward a target OBJECT (by id) — a dynamic follow/regroup decision. The
+		-- target position is re-resolved each decision, so the subject tracks a moving object; the
+		-- move-execution machine treats a >0.5m target shift as a new target and re-paths.
+		local target_id = decode_u16(hex_args)
+		local obj  = level.object_by_id(subject_id)
+		local tobj = level.object_by_id(target_id)
+		if not obj or not tobj then
+			logf("MP_COOP_MOVEOBJ: [CLIENT] subject=%s target=%s NOT both online (subj=%s tgt=%s)",
+				tostring(subject_id), tostring(target_id), tostring(obj ~= nil), tostring(tobj ~= nil))
+			return
 		end
-		if s.arrived and d > REARM_M then s.arrived = false; s.issued = false end
-		if (not s.arrived) and d <= STOP_M then
-			s.arrived = true
-			logf("MP_COOP_MOVE: [CLIENT] subject=%s ARRIVED (dist %.2f <= %.1f) — settling",
-				tostring(subject_id), d, STOP_M)
-		end
-		-- a Cordon scheme/binder can pull script control back, after which the NPC wanders: re-path.
-		if obj:get_script() == false then s.issued = false end
-
-		-- progress since the last decision (>0.3m closer = genuinely walking). Stalled = issued but not
-		-- closing: retry. Progressing: leave the single path alone.
-		local progressing = (s.last_d ~= nil) and (d < s.last_d - 0.3)
-		local stalled     = (s.last_d ~= nil) and (d >= s.last_d - 0.3)
-		if (not s.arrived) and ((not s.issued) or stalled) and (not progressing) then
-			-- first issue prefers the node ctor (clean pin); a stall retry falls back to the blind
-			-- point ctor (self-heals an unpathable resolved vertex).
-			local use_node = (not s.issued)
-			local ok, err = pcall(drive_move, obj, tgt, use_node)
-			if ok then s.issued = true
-			else
-				logf("MP_COOP_MOVE: [CLIENT] subject=%s local drive order failed (puppet not controllable?): %s",
-					tostring(subject_id), tostring(err))
-			end
-		end
-		s.last_d = d
+		local tgt = tobj:position()
+		logf("MP_COOP_MOVEOBJ: [CLIENT] subject=%s target=%s target_pos=%.2f,%.2f,%.2f",
+			tostring(subject_id), tostring(target_id), tgt.x, tgt.y, tgt.z)
+		execute_move(subject_id, obj, tgt)
 		return
 	end
 

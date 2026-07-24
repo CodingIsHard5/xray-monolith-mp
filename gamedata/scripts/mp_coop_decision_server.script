@@ -19,7 +19,8 @@
 	This is the payoff of §4: server decides an online NPC's movement, the client executes it.
 --]]
 
-local KIND_MOVE = mp_coop_decision_client.KIND_MOVE   -- = 1 (shared enum)
+local KIND_MOVE     = mp_coop_decision_client.KIND_MOVE       -- = 1 (shared enum)
+local KIND_MOVE_OBJ = mp_coop_decision_client.KIND_MOVE_OBJ   -- = 3 (move toward a target object id)
 
 -- Prefer a docile flesh (the Spike-2 driver used a flesh and it followed orders cleanly). Dogs
 -- are pack hunters and reassert native behaviour more aggressively.
@@ -46,6 +47,9 @@ local no_server_drive = false
 -- §14 step 3 (increment D): -coop_decision_burst N stops broadcasting after N decisions so the
 -- client's locally-driven flag ages out (TTL) and the NPC reverts to a dense-streamed puppet. nil = off.
 local burst_limit = nil
+-- §14 step 3 (broaden KINDs): -coop_move_obj originates KIND_MOVE_OBJ toward the player actor (a
+-- dynamic object target) instead of the fixed-point KIND_MOVE.
+local move_obj_mode = false
 
 local st = {
 	phase       = "wait",   -- wait -> spawning -> wait_online -> active -> failed
@@ -233,18 +237,31 @@ local function tick_impl(now_ms, real_count, actor_id)
 		if elapsed < BCAST_PERIOD_MS then return end
 		st.last_bcast = now_ms
 
-		local hex = mp_coop_decision_client.encode_point(st.target)
+		-- §14 step 3 (broaden KINDs): -coop_move_obj originates KIND_MOVE_OBJ toward the PLAYER ACTOR
+		-- (a dynamic object target) instead of KIND_MOVE toward the fixed vertex — the client resolves
+		-- the actor and drives the monster to it (a "regroup on the player" decision). Otherwise the
+		-- default fixed-point KIND_MOVE.
+		local kind, hex, what
+		if move_obj_mode and actor_id and actor_id ~= 0 then
+			kind = KIND_MOVE_OBJ
+			hex  = mp_coop_decision_client.encode_u16(actor_id)
+			what = string.format("MOVE_OBJ->actor %d", actor_id)
+		else
+			kind = KIND_MOVE
+			hex  = mp_coop_decision_client.encode_point(st.target)
+			what = "MOVE->vertex"
+		end
 		local n = 0
 		local ok, berr = pcall(function()
-			n = game.mp_broadcast_decision(st.monster_id, KIND_MOVE, hex, LEAD_MS) or 0
+			n = game.mp_broadcast_decision(st.monster_id, kind, hex, LEAD_MS) or 0
 		end)
 		if not ok then
 			logf("! MP_COOP_SV: broadcast FAILED for subject=%d: %s", st.monster_id, tostring(berr))
 		end
 		st.broadcasts = st.broadcasts + 1
 		local p = obj:position()
-		logf("~ MP_COOP_SV: broadcast #%d subject=%d -> %d client(s); monster %.2f,%.2f,%.2f dist=%.2f scripted=%s recap=%d",
-			st.broadcasts, st.monster_id, n, p.x, p.y, p.z, d, tostring(obj:get_script()), st.recaptures or 0)
+		logf("~ MP_COOP_SV: broadcast #%d subject=%d %s -> %d client(s); monster %.2f,%.2f,%.2f dist=%.2f scripted=%s recap=%d",
+			st.broadcasts, st.monster_id, what, n, p.x, p.y, p.z, d, tostring(obj:get_script()), st.recaptures or 0)
 	end
 end
 
@@ -270,6 +287,10 @@ function tick(now_ms, real_count, actor_id)
 				burst_limit = tonumber(bm)
 				logf("~ MP_COOP_SV: -coop_decision_burst %d — will stop broadcasting after %d decisions (increment D)", burst_limit, burst_limit)
 			end
+		end
+		move_obj_mode = string.find(cl, "-coop_move_obj", 1, true) ~= nil
+		if move_obj_mode then
+			logf("~ MP_COOP_SV: -coop_move_obj — originating KIND_MOVE_OBJ toward the player actor (broaden KINDs)")
 		end
 		if string.find(cl, "-coop_combat", 1, true) then
 			scenario = mp_coop_scenario_combat.tick
