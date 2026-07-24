@@ -435,13 +435,14 @@ namespace
 		void operator()(IClient* client)
 		{
 			xrClientData* const cl = static_cast<xrClientData*>(client);
-			if (!cl || !cl->net_Ready || !cl->owner)
+			// MP fork (§19 co-op): co-op clients may never send M_CLIENTREADY (actors are
+			// spawned via grace timer in coop_poll_spawns), so net_Ready can stay false.
+			// Use cl->owner as the "client is in-game" signal instead.
+			if (!cl || !cl->owner)
 			{
-				// MP fork (quest E2E diag): log skipped clients so we can tell if the remote
-				// client is being skipped due to missing owner/net_Ready
 				if (strstr(Core.Params, "-dbg") && cl)
-					Msg("* COOP_TASKS_SV: SKIP client 0x%08x (net_Ready=%d owner=%p)",
-						cl->ID.value(), int(cl->net_Ready), cl->owner);
+					Msg("* COOP_TASKS_SV: SKIP client 0x%08x (owner=%p)",
+						cl->ID.value(), cl->owner);
 				return;
 			}
 			const u16 actor_id = cl->owner->ID;
