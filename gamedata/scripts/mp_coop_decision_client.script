@@ -108,7 +108,10 @@ end
 
 -- Drive an online puppet to a target with the proven monster-movement order (Spike 2: monsters
 -- obey raw scripted movement; bipeds freeze — biped control is a separate sub-problem).
-local function drive_move(obj, tgt)
+-- use_node: prefer the node-based ctor (exact path-end vertex, cleaner pin). On a retry after a
+-- stall we pass false to fall back to the blind point ctor (a resolved vertex can be unpathable and
+-- silently no-op the order — the blind ctor + DIST_TO_END is the C1b-proven path that always moved).
+local function drive_move(obj, tgt, use_node)
 	-- clamp to the puppet's nav mesh so the order isn't silently dropped for an off-mesh target
 	local dest = tgt
 	if not obj:accessible(tgt) then
@@ -117,10 +120,11 @@ local function drive_move(obj, tgt)
 		elseif type(r1) == "userdata" then dest = r1 end
 	end
 	-- Resolve the destination to a nav VERTEX so the node-based move ctor gives the path builder an
-	-- exact path-end node (mirrors the server; a blind world point ends at the nearest vertex ~m off
-	-- and the NPC completes short, then wanders). Fall back to the point ctor if resolution fails.
+	-- exact path-end node (mirrors the server). Skipped on a stall retry (use_node=false).
 	local vid = nil
-	pcall(function() vid = level.vertex_id(vector():set(dest.x, dest.y, dest.z)) end)
+	if use_node then
+		pcall(function() vid = level.vertex_id(vector():set(dest.x, dest.y, dest.z)) end)
+	end
 	-- Take script control ONCE. Calling obj:script(true) while already scripted raises
 	-- "Invalid sequence of taking an entity under script control" (mirror the Spike-2 driver:
 	-- only (re)take control when the engine reports the object is not currently scripted).
@@ -176,11 +180,14 @@ function on_decision(subject_id, kind, hex_args)
 
 		-- §14 step 3 (increment C1c): issue-once + arrival hysteresis (mirrors mp_coop_decision_server).
 		-- The server re-broadcasts the same target every ~3s; re-issuing the walk each time re-arms
-		-- ACT_WALK_FWD and overshoots. So track per-subject state and re-issue the walk ONLY when the
-		-- target changes, the NPC drifts past REARM_M after arriving, or it loses script control.
+		-- ACT_WALK_FWD and overshoots. So track per-subject state and DON'T re-issue while the NPC is
+		-- making progress. But issue-once alone can FREEZE the NPC: the first order can land before the
+		-- object is path-ready and silently no-op, with no retry. So also re-issue when the NPC has
+		-- STALLED (a prior issue produced no progress since the last decision) or lost script control —
+		-- while it is closing the gap we stay hands-off (no overshoot).
 		local s = drive_state[subject_id]
 		if not s or dist_xz(vector():set(s.tx, s.ty, s.tz), tgt) > 0.5 then
-			s = { tx = tgt.x, ty = tgt.y, tz = tgt.z, arrived = false, issued = false }
+			s = { tx = tgt.x, ty = tgt.y, tz = tgt.z, arrived = false, issued = false, last_d = nil }
 			drive_state[subject_id] = s
 		end
 		if s.arrived and d > REARM_M then s.arrived = false; s.issued = false end
@@ -190,16 +197,24 @@ function on_decision(subject_id, kind, hex_args)
 				tostring(subject_id), d, STOP_M)
 		end
 		-- a Cordon scheme/binder can pull script control back, after which the NPC wanders: re-path.
-		if obj:get_script() == false then s.issued = false; s.arrived = false end
+		if obj:get_script() == false then s.issued = false end
 
-		if (not s.arrived) and (not s.issued) then
-			local ok, err = pcall(drive_move, obj, tgt)
+		-- progress since the last decision (>0.3m closer = genuinely walking). Stalled = issued but not
+		-- closing: retry. Progressing: leave the single path alone.
+		local progressing = (s.last_d ~= nil) and (d < s.last_d - 0.3)
+		local stalled     = (s.last_d ~= nil) and (d >= s.last_d - 0.3)
+		if (not s.arrived) and ((not s.issued) or stalled) and (not progressing) then
+			-- first issue prefers the node ctor (clean pin); a stall retry falls back to the blind
+			-- point ctor (self-heals an unpathable resolved vertex).
+			local use_node = (not s.issued)
+			local ok, err = pcall(drive_move, obj, tgt, use_node)
 			if ok then s.issued = true
 			else
 				logf("MP_COOP_MOVE: [CLIENT] subject=%s local drive order failed (puppet not controllable?): %s",
 					tostring(subject_id), tostring(err))
 			end
 		end
+		s.last_d = d
 		return
 	end
 
