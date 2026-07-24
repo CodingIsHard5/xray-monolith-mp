@@ -38,6 +38,12 @@ local STOP_M          = 2.5    -- arrived: stop commanding so the monster settle
 local REARM_M         = 4.0    -- if it drifts past this after arriving, resume driving/broadcasting
 local ONLINE_TIMEOUT  = 20000  -- ms after spawn to give up waiting for the monster to go online
 
+-- §14 step 3 (increment C1 proof): with -coop_no_server_drive the server ORIGINATES the decision
+-- but leaves its own monster idle (script-controlled, no move order). Then if the CLIENT NPC still
+-- reaches the target it MUST have moved under its own client-local AI — because with C1 the engine
+-- no longer positions a locally-driven puppet from the NET stream. Resolved once in tick().
+local no_server_drive = false
+
 local st = {
 	phase       = "wait",   -- wait -> spawning -> wait_online -> active -> failed
 	monster_id  = nil,
@@ -195,7 +201,7 @@ local function tick_impl(now_ms, real_count, actor_id)
 			logf("~ MP_COOP_SV: subject=%d ARRIVED (dist %.2f <= %.1f) — settling", st.monster_id, d, STOP_M)
 		end
 
-		if not st.arrived and st.need_issue then
+		if not st.arrived and st.need_issue and not no_server_drive then
 			st.need_issue = false
 			local dok, derr = pcall(drive_move, obj, st.target_vid, st.target)
 			if not dok and not st.drive_logged then
@@ -238,6 +244,10 @@ function tick(now_ms, real_count, actor_id)
 	if scenario == nil then
 		local cl = ""
 		pcall(function() cl = command_line() or "" end)
+		no_server_drive = string.find(cl, "-coop_no_server_drive", 1, true) ~= nil
+		if no_server_drive then
+			logf("~ MP_COOP_SV: -coop_no_server_drive — server DECIDES but leaves its monster idle (C1 local-exec proof)")
+		end
 		if string.find(cl, "-coop_combat", 1, true) then
 			scenario = mp_coop_scenario_combat.tick
 			logf("~ MP_COOP_SV: scenario = COMBAT (mp_coop_scenario_combat)")

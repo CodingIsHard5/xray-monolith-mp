@@ -810,7 +810,12 @@ void CCustomMonster::UpdateCL()
 				animation_movement()->DBG_verify_position_not_chaged();
 #endif
 
-		if (Local() && g_Alive())
+		// §14 step 3 (inversion, increment C1): a decision-driven NPC's position is DRIVEN BY ITS
+		// OWN client-local AI, not the server stream. Run UpdatePositionAnimation (the movement
+		// manager integrates its AI path via move_along_path) exactly like a Local object, and skip
+		// the NET position/rotation override below. NET_Last.p_pos stays as move_along_path's
+		// blend/leash target — a free soft-correction toward the server's authoritative position.
+		if ((Local() || m_coop_locally_driven) && g_Alive())
 		{
 #pragma todo("Dima to All : this is FAKE, network is not supported here!")
 
@@ -818,7 +823,11 @@ void CCustomMonster::UpdateCL()
 		}
 
 		// Use interpolated/last state
-		if (g_Alive())
+		// §14 step 3 (increment C1): for a locally-driven NPC the local AI owns position + orientation,
+		// so DO NOT apply the NET overrides below (they would slam it back onto the streamed sample
+		// every frame and cancel the local movement). NET_Last is still updated for the soft-correct
+		// leash used inside UpdatePositionAnimation above.
+		if (g_Alive() && !m_coop_locally_driven)
 		{
 			if (!animation_movement_controlled() && m_update_rotation_on_frame)
 				XFORM().rotateY(NET_Last.o_model);
