@@ -37,6 +37,10 @@ private:
 	CActorDeathEffector* m_death_effector;
 	void UpdateTutorialThresholds();
 	void UpdateSatiety();
+public:
+	// MP fork (§9 co-op): clear the death effector on respawn
+	void clear_death_effector();
+private:
 	virtual void UpdateRadiation();
 public:
 	CActorCondition(CActor* object);

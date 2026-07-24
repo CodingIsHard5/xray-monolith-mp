@@ -1108,3 +1108,14 @@ void CActorDeathEffector::Stop()
 	enable_input();
 	show_indicators();
 }
+
+// MP fork (§9 co-op): clean up the death effector on respawn
+void CActorCondition::clear_death_effector()
+{
+	if (m_death_effector)
+	{
+		if (m_death_effector->IsActual())
+			m_death_effector->Stop();
+		xr_delete(m_death_effector);
+	}
+}

@@ -1899,11 +1899,7 @@ void CActor::coop_respawn()
 	cam_Set(eacFirstEye);
 
 	// --- Clear the death effector if it's still running ---
-	if (conditions().m_death_effector)
-	{
-		conditions().m_death_effector->Stop();
-		xr_delete(conditions().m_death_effector);
-	}
+	conditions().clear_death_effector();
 
 	// --- Re-enable input (death effector may have disabled it) ---
 	if (!g_dedicated_server && CurrentGameUI())
