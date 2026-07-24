@@ -117,6 +117,21 @@ function on_decision(subject_id, kind, hex_args)
 				tostring(subject_id), tgt.x, tgt.y, tgt.z)
 			return
 		end
+		-- §14 step 3 INVERSION (increment B): flip this decision-driven NPC to client-local AI. The
+		-- engine gate (CustomMonster.cpp: coop_puppet && !m_coop_locally_driven, and the Remote AI
+		-- branch) then makes the client run its native Think/ProcessScripts/Exec_Action LOCALLY —
+		-- it executes the replicated move order itself instead of mirroring the streamed position.
+		-- Per-NPC, only for NPCs the decision system owns; normal puppets keep dense streaming.
+		-- (This crosses the A-Life-state crash surface by design — see the engine comment.)
+		local sok, serr = pcall(function()
+			obj:coop_set_locally_driven(true)
+			logf("MP_COOP_LOCALAI: [CLIENT] subject=%s coop_set_locally_driven(true) OK; readback=%s",
+				tostring(subject_id), tostring(obj:coop_locally_driven()))
+		end)
+		if not sok then
+			logf("MP_COOP_LOCALAI: [CLIENT] subject=%s setter FAILED (binding missing?): %s",
+				tostring(subject_id), tostring(serr))
+		end
 		-- Always sample the puppet's CURRENT position vs the target FIRST, so verification has a
 		-- distance track regardless of whether local scripted control or server replication is what
 		-- actually moves the puppet (this fork still streams M_UPDATE for server objects; isolating

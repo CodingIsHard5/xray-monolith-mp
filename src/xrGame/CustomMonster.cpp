@@ -469,7 +469,12 @@ void CCustomMonster::shedule_Update(u32 DT)
 	// already skips Think()/Exec_Action for exactly that reason. Running the visibility
 	// raycasts and the memory managers for every puppet is pure cost, and a crash surface
 	// besides: they reach into A-Life state this client does not have.
-	const bool coop_puppet = Remote() && xr_enet::enabled() && !ai().get_alife();
+	// §14 step 3 (inversion, increment B): a DECISION-DRIVEN NPC (m_coop_locally_driven) is the
+	// exception — the client runs its native AI locally to EXECUTE the replicated decision, so it
+	// is NOT a coop_puppet here: it runs Exec_Visibility/memory().update below and the AI call
+	// further down. This is the deliberate crossing of the crash surface the comment above warns
+	// about; expect to symbolicate + guard A-Life-state derefs on the first flip.
+	const bool coop_puppet = Remote() && xr_enet::enabled() && !ai().get_alife() && !m_coop_locally_driven;
 
 	// *** general stuff
 	if (g_Alive() && !coop_puppet)
@@ -497,11 +502,26 @@ void CCustomMonster::shedule_Update(u32 DT)
 	m_dwCurrentTime = Device.dwTimeGlobal;
 
 	VERIFY(_valid(Position()));
-	if (Remote())
+	// §14 step 3 (inversion, increment B): a decision-driven NPC falls into the AI branch below so
+	// the client runs its Think/ProcessScripts/Exec_Action locally — under script control (the
+	// decision system holds it via obj:script(true)), GetScriptControl() is true so ProcessScripts()
+	// executes the replicated move order LOCALLY. Default (flag off) keeps the stock Remote no-op.
+	if (Remote() && !m_coop_locally_driven)
 	{
 	}
 	else
 	{
+		// §14 step 3: confirm (throttled) that a decision-driven NPC is running client-local AI.
+		if (Remote() && m_coop_locally_driven)
+		{
+			static u32 s_localai_log = 0;
+			if ((s_localai_log++ % 60) == 0)
+			{
+				Msg("- MP_COOP_LOCALAI: id=%u running client-local AI (script_ctrl=%d alive=%d)",
+					ID(), GetScriptControl() ? 1 : 0, g_Alive() ? 1 : 0);
+				FlushLog();
+			}
+		}
 		// here is monster AI call
 		m_fTimeUpdateDelta = dt;
 		Device.Statistic->AI_Think.Begin();
