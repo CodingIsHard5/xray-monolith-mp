@@ -1204,6 +1204,39 @@ void CActor::UpdateCL()
 			coop_respawn();
 	}
 
+	// MP fork (test harness): self-kill after N seconds for automated testing.
+	// Launch with: -coop_test_kill <seconds>
+	// Only fires on a co-op thin client's own actor, once.
+	if (g_Alive() && this == Actor() && coop_thin_client())
+	{
+		static float s_kill_delay = -1.f;
+		static bool  s_kill_init  = false;
+		static float s_kill_accum = 0.f;
+		if (!s_kill_init)
+		{
+			s_kill_init = true;
+			LPCSTR p = strstr(Core.Params, "-coop_test_kill");
+			if (p)
+			{
+				p += sizeof("-coop_test_kill") - 1;
+				while (*p == ' ') ++p;
+				s_kill_delay = (float)atof(p);
+				if (s_kill_delay <= 0.f) s_kill_delay = 15.f;
+				Msg("- COOP(test): will self-kill in %.0f seconds", s_kill_delay);
+			}
+		}
+		if (s_kill_delay > 0.f)
+		{
+			s_kill_accum += Device.fTimeDelta;
+			if (s_kill_accum >= s_kill_delay)
+			{
+				s_kill_delay = -1.f;  // one-shot
+				Msg("- COOP(test): firing self-kill NOW");
+				KillEntity(ID());
+			}
+		}
+	}
+
 	pickup_result_t pickup_result = {true, false};
 	if (g_Alive())
 		pickup_result = PickupModeUpdate();
