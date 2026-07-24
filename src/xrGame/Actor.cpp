@@ -983,7 +983,15 @@ void CActor::Die(CObject* who)
 		if (coop_thin_client() && this == Actor())
 		{
 			m_coop_dead           = true;
-			m_coop_respawn_timer  = 10.f;            // seconds until respawn (Appendix B tunable)
+			// Appendix B tunable: -coop_respawn_delay <seconds> (default 10)
+			static float s_respawn_delay = -1.f;
+			if (s_respawn_delay < 0.f)
+			{
+				s_respawn_delay = 10.f;
+				LPCSTR p = strstr(Core.Params, "-coop_respawn_delay");
+				if (p) { p += sizeof("-coop_respawn_delay") - 1; while (*p == ' ') ++p; s_respawn_delay = _max((float)atof(p), 1.f); }
+			}
+			m_coop_respawn_timer = s_respawn_delay;
 			m_coop_death_pos      = Position();
 			cam_Set(eacFreeLook);
 
