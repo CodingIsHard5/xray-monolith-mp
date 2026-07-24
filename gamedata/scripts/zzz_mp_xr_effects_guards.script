@@ -1,0 +1,46 @@
+--[[
+	MP co-op xr_effects completeness guard.
+
+	The GAMMA addon xr_effects_addon.script — which defines xr_effects.script, the generic
+	  %=script(somescript:somefunc:arg1:arg2:...)%  ->  somescript.somefunc(a, b, {arg1, arg2, ...})
+	condlist-effect dispatcher — is ABSENT from the flat co-op gamedata. Any stock object whose logic
+	uses that effect (e.g. the darkscape collapsed_tunnel physics objects' ph_idle scheme) therefore
+	raises "attempt to call a nil value" at xr_logic.script:491 (pick_section_from_condlist calls
+	xr_effects[functor] after only WARNING that it is missing). It is caught by the co-op error handler
+	(non-fatal) but spams the log whenever such an object issues its event.
+
+	Fix: define the missing xr_effects.script ourselves — a faithful, SELF-CONTAINED, db.actor-FREE
+	port of the addon dispatcher (so it is safe on a dedicated server with no actor). We deliberately do
+	NOT port the rest of the addon (release_item etc. use db.actor -> the S3 nil class). Guarded so we
+	never clobber a real xr_effects.script if the addon is ever actually present.
+
+	Registration mirrors the S3 db.actor guards: on_game_start on the SERVER; and mp_client.on_client_
+	level_start calls ensure_xr_effects_script() on the THIN CLIENT (on_game_start never runs there).
+	Naming: zzz_ so on_game_start runs after xr_effects has registered.
+--]]
+
+-- Define xr_effects.script if (and only if) it is missing. Idempotent; safe to call repeatedly.
+function ensure_xr_effects_script()
+	if not xr_effects then return end        -- xr_effects module not loaded yet (shouldn't happen at hook time)
+	if xr_effects.script then return end      -- already provided (real addon present) -> leave it alone
+
+	-- %=script(scr:fname:arg1:arg2:...)% -> _G[scr][fname](a, b, {arg1, arg2, ...}). Guards a missing
+	-- target (logs once, via %s only per X-Ray printf) instead of the stock unconditional nil-call.
+	xr_effects.script = function(a, b, c)
+		if c and #c > 1 and _G[c[1]] and _G[c[1]][c[2]] and type(_G[c[1]][c[2]]) == "function" then
+			local scr, fname = c[1], c[2]
+			local args = {}
+			for i = 3, #c do args[i - 2] = c[i] end
+			_G[scr][fname](a, b, args)
+		else
+			printf("! MP co-op: xr_effects.script target missing: %s.%s (guarded, skipped)",
+				c and tostring(c[1]) or "?", c and tostring(c[2]) or "?")
+		end
+	end
+	printf("~ MP co-op: defined missing xr_effects.script (xr_effects_addon absent from flat gamedata)")
+end
+
+function on_game_start()
+	local ok, err = pcall(ensure_xr_effects_script)
+	if not ok then printf("! MP co-op: xr_effects guard (server) failed: %s", tostring(err)) end
+end

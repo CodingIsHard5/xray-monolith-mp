@@ -40,6 +40,12 @@ function on_client_level_start()
 	end)
 	if not okd then printf("! MP co-op: mp_coop_on_decision register failed: %s", tostring(errd)) end
 
+	-- xr_effects COMPLETENESS: the flat co-op gamedata lacks xr_effects_addon.script, so stock
+	-- objects using the %=script()% effect nil-error at xr_logic:491. on_game_start never runs on the
+	-- thin client, so define the missing xr_effects.script here too (referencing the module loads it).
+	local oke, erre = pcall(function() zzz_mp_xr_effects_guards.ensure_xr_effects_script() end)
+	if not oke then printf("! MP co-op: xr_effects guard (client) failed: %s", tostring(erre)) end
+
 	-- THIN-CLIENT BINDERS: single-player object binders that look the object up in the
 	-- A-Life simulator crash on a co-op client, which owns no A-Life (alife():object()
 	-- returns nil), e.g. bind_heli.script:118 "attempt to index local 'se_obj' (a nil
