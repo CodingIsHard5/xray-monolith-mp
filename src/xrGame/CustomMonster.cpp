@@ -810,28 +810,26 @@ void CCustomMonster::UpdateCL()
 				animation_movement()->DBG_verify_position_not_chaged();
 #endif
 
-		// §14 step 3 (inversion, increment C1): a decision-driven NPC's position is DRIVEN BY ITS
+		// §14 step 3 (inversion, increment C1b): a decision-driven NPC's position is DRIVEN BY ITS
 		// OWN client-local AI, not the server stream. Run UpdatePositionAnimation (the movement
-		// manager integrates its AI path via move_along_path) exactly like a Local object, and skip
-		// the NET position/rotation override below. NET_Last.p_pos stays as move_along_path's
-		// blend/leash target — a free soft-correction toward the server's authoritative position.
+		// manager integrates its AI path via move_along_path) exactly like a Local object; it fills
+		// NET_Last.p_pos (by reference) with the locally-computed advanced position. The apply block
+		// below then writes that into the object XFORM (see the C1b note there).
 		if ((Local() || m_coop_locally_driven) && g_Alive())
 		{
 #pragma todo("Dima to All : this is FAKE, network is not supported here!")
 
-			// §14 step 3 (increment C1b DIAGNOSTIC): a locally-driven monster froze at spawn even
-			// though UpdatePositionAnimation runs. Log the full movement pipeline state so one build
-			// pinpoints the broken precondition (path not built / speed 0 / physics character state).
+			// §14 step 3 (increment C1b): confirm the local movement pipeline is live and the body is
+			// advancing. Logs the pipeline state + the object's current XZ (which reflects the PRIOR
+			// frame's translate_over apply, so it advances frame-to-frame once the apply is enabled).
 			if (Remote() && m_coop_locally_driven)
 			{
 				static u32 s_c1b_log = 0;
 				if ((s_c1b_log++ % 30) == 0)
 				{
 					CPHMovementControl* mc = character_physics_support() ? character_physics_support()->movement() : NULL;
-					const Fvector p_before = Position();
-					UpdatePositionAnimation();
-					const Fvector p_after = Position();
-					Msg("- MP_C1B: id=%u en=%d path_n=%u desspd=%.3f pcompl=%d spd=%.3f chExist=%d chEn=%d moved=%.4f",
+					const Fvector p = Position();
+					Msg("- MP_C1B: id=%u en=%d path_n=%u desspd=%.3f pcompl=%d spd=%.3f chExist=%d chEn=%d pos=%.2f,%.2f",
 						ID(),
 						movement().enabled() ? 1 : 0,
 						(u32)movement().detail().path().size(),
@@ -840,22 +838,25 @@ void CCustomMonster::UpdateCL()
 						movement().speed(),
 						mc ? (mc->CharacterExist() ? 1 : 0) : -1,
 						(mc && mc->CharacterExist()) ? (mc->IsCharacterEnabled() ? 1 : 0) : -1,
-						p_before.distance_to(p_after));
+						p.x, p.z);
 					FlushLog();
 				}
-				else
-					UpdatePositionAnimation();
 			}
-			else
-				UpdatePositionAnimation();
+			UpdatePositionAnimation();
 		}
 
 		// Use interpolated/last state
-		// §14 step 3 (increment C1): for a locally-driven NPC the local AI owns position + orientation,
-		// so DO NOT apply the NET overrides below (they would slam it back onto the streamed sample
-		// every frame and cancel the local movement). NET_Last is still updated for the soft-correct
-		// leash used inside UpdatePositionAnimation above.
-		if (g_Alive() && !m_coop_locally_driven)
+		// §14 step 3 (increment C1b): a locally-driven monster MUST reach this block. UpdatePositionAnimation
+		// above passes NET_Last.p_pos BY REFERENCE into move_along_path, which resets it to the object's
+		// current position and then advances it along the local AI path — so after that call NET_Last.p_pos
+		// holds the LOCAL-AI-COMPUTED position, not the streamed sample. translate_over(NET_Last.p_pos) below
+		// is the ONLY writer of the object's visible XFORM for a monster (CPHMovementControl::SetPosition
+		// only moves the physics box). C1 skipped this block for locally-driven NPCs on the mistaken premise
+		// that NET_Last was still the stream — which discarded the computed motion and froze the monster at
+		// spawn (diagnosed via MP_C1B: en=1 path_n=21 desspd=1.5 but the body never moved). This is exactly
+		// the Local-monster path (original: `if (Local()) UpdatePositionAnimation(); ... translate_over(...)`).
+		// The NET yaw/pitch still applied here acts as a soft heading leash toward the server's copy.
+		if (g_Alive())
 		{
 			if (!animation_movement_controlled() && m_update_rotation_on_frame)
 				XFORM().rotateY(NET_Last.o_model);
