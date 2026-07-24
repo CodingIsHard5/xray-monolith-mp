@@ -118,12 +118,16 @@ local function tick_impl(now_ms, real_count, actor_id)
 			return
 		end
 
-		-- Force each as the other's enemy ONCE. set_enemy -> CBaseMonster::SetEnemy -> EnemyMan.script_enemy
-		-- (direct, perception-bypassing). Do NOT take obj:script(true) — that would suppress Think/StateMan.
+		-- Force each as the other's enemy EACH tick. set_enemy -> CBaseMonster::SetEnemy ->
+		-- EnemyMan.script_enemy (direct, perception-bypassing). Re-applied every tick because
+		-- EnemyMan.update() CLEARS m_script_enemy if the enemy is momentarily !g_Alive() (e.g. the frame
+		-- right after spawn), so a one-shot set can be silently dropped. Do NOT take obj:script(true) —
+		-- that would suppress Think/StateMan. Log the IMMEDIATE readback to see if the set sticks.
+		local ok = pcall(function() a:set_enemy(b); b:set_enemy(a) end)
 		if not st.enemy_set then
-			local ok = pcall(function() a:set_enemy(b); b:set_enemy(a) end)
 			st.enemy_set = true
-			logf("~ MP_COOP_MC: set_enemy applied both ways (ok=%s)", tostring(ok))
+			logf("~ MP_COOP_MC: set_enemy applied (ok=%s); immediate readback A.enemy=%s B.enemy=%s",
+				tostring(ok), tostring(enemy_id(a)), tostring(enemy_id(b)))
 		end
 
 		local elapsed = now_ms - st.last_log
@@ -132,11 +136,13 @@ local function tick_impl(now_ms, real_count, actor_id)
 		st.last_log = now_ms
 		st.ticks = st.ticks + 1
 
+		-- NB: game_object.health is a PROPERTY (obj.health), not a method (obj:health() = "call a number").
 		local pa, pb = a:position(), b:position()
+		local ha, hb = a.health, b.health
 		logf("~ MP_COOP_MC: #%d dist=%.2f | A id=%d hp=%.2f enemy=%s scripted=%s | B id=%d hp=%.2f enemy=%s scripted=%s",
 			st.ticks, dist_xz(pa, pb),
-			st.a_id, a:health(), tostring(enemy_id(a)), tostring(a:get_script()),
-			st.b_id, b:health(), tostring(enemy_id(b)), tostring(b:get_script()))
+			st.a_id, ha, tostring(enemy_id(a)), tostring(a:get_script()),
+			st.b_id, hb, tostring(enemy_id(b)), tostring(b:get_script()))
 	end
 end
 
