@@ -261,10 +261,15 @@ function tick(now_ms, real_count, actor_id)
 		if no_server_drive then
 			logf("~ MP_COOP_SV: -coop_no_server_drive — server DECIDES but leaves its monster idle (C1 local-exec proof)")
 		end
-		local bm = string.match(cl, "-coop_decision_burst%s+(%d+)")
-		if bm then
-			burst_limit = tonumber(bm)
-			logf("~ MP_COOP_SV: -coop_decision_burst %d — will stop broadcasting after %d decisions (increment D)", burst_limit, burst_limit)
+		-- NB: '-' is a MAGIC char in Lua patterns, so match the flag with PLAIN find (like the flags
+		-- above) then extract the number from the tail — a bare string.match("-coop_...(%d+)") fails.
+		local bs = string.find(cl, "-coop_decision_burst", 1, true)
+		if bs then
+			local bm = string.match(string.sub(cl, bs), "(%d+)")
+			if bm then
+				burst_limit = tonumber(bm)
+				logf("~ MP_COOP_SV: -coop_decision_burst %d — will stop broadcasting after %d decisions (increment D)", burst_limit, burst_limit)
+			end
 		end
 		if string.find(cl, "-coop_combat", 1, true) then
 			scenario = mp_coop_scenario_combat.tick
