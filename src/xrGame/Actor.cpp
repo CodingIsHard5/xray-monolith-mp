@@ -875,6 +875,13 @@ void CActor::HitSignal(float perc, Fvector& vLocalDir, CObject* who, s16 element
 void start_tutorial(LPCSTR name);
 extern BOOL firstPersonDeath;
 
+// MP fork (§13): true on a co-op thin client (ENet transport, no local A-Life sim).
+// The server owns the world; peer actors are rendered as kinematic puppets.
+static inline bool coop_thin_client()
+{
+	return xr_enet::enabled() && !ai().get_alife();
+}
+
 void CActor::Die(CObject* who)
 {
 #ifdef HOLDERCUSTOM_NEW
@@ -1139,14 +1146,6 @@ float CActor::currentFOV()
 }
 
 #include "UI\UIInventoryUtilities.h"
-
-// MP fork (§13): true on a co-op thin client (ENet transport, no local A-Life sim).
-// The server owns the world; peer actors are rendered as kinematic puppets. Defined
-// here (above the first use in UpdateCL) so it is visible to all co-op paths below.
-static inline bool coop_thin_client()
-{
-	return xr_enet::enabled() && !ai().get_alife();
-}
 
 void CActor::UpdateCL()
 {
@@ -1869,11 +1868,14 @@ void CActor::coop_respawn()
 	clear_killer_id();
 
 	// Re-register in the seniority hierarchy (Die unregistered us).
+	// CSeniorityHierarchyHolder is only fully defined in client builds.
+#ifndef DEDICATED_SERVER
 	if (IsGameTypeSingle() && !registered_member())
 	{
 		Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(g_Group()).register_member(this);
 		set_registered_member(true);
 	}
+#endif
 
 	// --- Teleport to a respawn position ---
 	// For now: respawn at the death position (the player gets up where they fell).
