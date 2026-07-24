@@ -70,6 +70,10 @@
 #include "../Include/xrRender/UIRender.h"
 
 #include "ai_object_location.h"
+#include "seniority_hierarchy_holder.h"    // MP fork (§9): coop_respawn re-registers in team/squad
+#include "team_hierarchy_holder.h"
+#include "squad_hierarchy_holder.h"
+#include "group_hierarchy_holder.h"
 #include "ui/uiMotionIcon.h"
 #include "ui/UIActorMenu.h"
 #include "ActorHelmet.h"
@@ -1909,14 +1913,11 @@ void CActor::coop_respawn()
 	clear_killer_id();
 
 	// Re-register in the seniority hierarchy (Die unregistered us).
-	// CSeniorityHierarchyHolder is only fully defined in client builds.
-#ifndef DEDICATED_SERVER
 	if (IsGameTypeSingle() && !registered_member())
 	{
 		Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(g_Group()).register_member(this);
 		set_registered_member(true);
 	}
-#endif
 
 	// --- Teleport to a respawn position ---
 	// For now: respawn at the death position (the player gets up where they fell).
