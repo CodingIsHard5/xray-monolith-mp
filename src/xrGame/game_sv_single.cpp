@@ -745,7 +745,9 @@ void game_sv_Single::Update()
 			task->SetTaskState(eTaskStateInProgress);
 			task->m_ReceiveTime = GetGameTime();
 			Level().GameTaskManager().GiveGameTaskToActor(task, 0, false, 0);
-			Msg("- COOP_TEST_QUEST: synthetic task 'coop_test_quest_e2e' created, should replicate to clients");
+			// Force immediate broadcast — don't rely on UpdateTasks eChanged path
+			Level().GameTaskManager().coop_broadcast_tasks();
+			Msg("- COOP_TEST_QUEST: synthetic task 'coop_test_quest_e2e' created, broadcast forced");
 		}
 	}
 	/*	switch(phase) 	{

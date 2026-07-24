@@ -362,6 +362,10 @@ void CGameTaskManager::UpdateActiveTask()
 // so a task the server dropped disappears here too rather than lingering.
 void CGameTaskManager::coop_apply_tasks(NET_Packet& packet)
 {
+	// MP fork (quest E2E diag): log entry + guard state so we can tell if this is reached
+	if (strstr(Core.Params, "-dbg"))
+		Msg("* COOP_TASKS_CL: coop_apply_tasks called, alife=%p", ai().get_alife());
+
 	if (ai().get_alife()) // servers own the list; only a thin client adopts one
 		return;
 
@@ -432,7 +436,14 @@ namespace
 		{
 			xrClientData* const cl = static_cast<xrClientData*>(client);
 			if (!cl || !cl->net_Ready || !cl->owner)
+			{
+				// MP fork (quest E2E diag): log skipped clients so we can tell if the remote
+				// client is being skipped due to missing owner/net_Ready
+				if (strstr(Core.Params, "-dbg") && cl)
+					Msg("* COOP_TASKS_SV: SKIP client 0x%08x (net_Ready=%d owner=%p)",
+						cl->ID.value(), int(cl->net_Ready), cl->owner);
 				return;
+			}
 			const u16 actor_id = cl->owner->ID;
 
 			// Two passes so the count is written up front (NET_Packet has no seek-back write).
@@ -464,6 +475,11 @@ namespace
 			}
 
 			server->SendTo(cl->ID, packet, net_flags(TRUE, TRUE));
+
+			// MP fork (quest E2E diag): confirm packet sent to this client
+			if (strstr(Core.Params, "-dbg"))
+				Msg("* COOP_TASKS_SV: SENT %u task(s) to client 0x%08x (actor id %u)",
+					u32(mine.size()), cl->ID.value(), actor_id);
 		}
 	};
 }
