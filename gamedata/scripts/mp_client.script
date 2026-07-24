@@ -95,6 +95,36 @@ function on_client_level_start()
 		if not ok3 then printf("! MP co-op: precondition guard failed for %s.%s", mod_name, fn_name) end
 	end
 
+	-- CO-OP MARKER: an explicit, unambiguous flag other gamedata can test to know it is
+	-- running on a co-op thin client (set here because on_client_level_start only runs on
+	-- the co-op client, never in single-player).
+	_G.mp_coop_client = true
+
+	-- SAVE/LOAD (§9 design / §14 step 7): under Option B the SERVER owns and persists the
+	-- one authoritative world (console `save` -> .scop). A thin client holds only a partial,
+	-- replicated VIEW, so:
+	--   * LOAD from a client is already inert — the client's save dir has no .scop, so the
+	--     load list is empty (nothing to load). This is the intended state, not a bug.
+	--   * SAVE from a client would write a misleading local .scop that, if ever loaded, spins
+	--     up a DIVERGENT single-player world. Block it via the stock on_before_save_input hook
+	--     (the same mechanism soulslike/hardcore-save modes use — see soulslike.script:511),
+	--     with an on-screen message so it reads as "disabled by design", not "broken".
+	-- Full co-op save/load (a server-authoritative world snapshot + client rejoin) is §14
+	-- step 7 (deferred). NOTE: this blocks the manual menu Save; autosave paths that call the
+	-- engine `save` directly are a separate step-7 concern (a thin client has little to persist).
+	local oks, errs = pcall(function()
+		local function coop_block_save(flags, typ, text)
+			if not _G.mp_coop_client then return end -- never affects single-player
+			local str = "Co-op: the server owns the world — local saving is disabled (server-side save/load is a later milestone)."
+			if actor_menu and actor_menu.set_msg then actor_menu.set_msg(1, str, 5) end
+			exec_console_cmd("main_menu off")
+			flags.ret = true -- cancel the save
+		end
+		RegisterScriptCallback("on_before_save_input", coop_block_save)
+		printf("~ MP co-op: registered save-block (server owns saves; local save disabled)")
+	end)
+	if not oks then printf("! MP co-op: save-block register failed: %s", tostring(errs)) end
+
 	-- (future thin-client globals get initialised here — one place, no engine
 	--  rebuild needed to add more.)
 end
