@@ -110,20 +110,37 @@ local function valid_lvid(vid)
 	return vid ~= nil and vid ~= 4294967295 and vid ~= 65535
 end
 
--- KIND_FLEE: how far to run from a threat per decision (a reachable vertex this far opposite the threat).
+-- KIND_FLEE: how far to probe for a flee vertex per decision.
 local FLEE_DIST = 12
+local FLEE_DIRS = {
+	{ 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
+	{ 0.7071, 0.7071 }, { -0.7071, 0.7071 }, { 0.7071, -0.7071 }, { -0.7071, -0.7071 },
+}
 
--- Compute a flee target: a reachable nav vertex FLEE_DIST away from the subject along `dir` (the
--- away-from-threat direction). Mirrors the server's choose_target vertex resolution; falls back to a
--- raw offset point if the graph walk fails.
-local function compute_flee_target(obj, dir)
+-- Compute a flee target: sweep 8 compass directions from the subject (like the server's choose_target,
+-- which is reliable — a single "directly away" probe often hits a blocked/off-mesh vertex and returns
+-- a vertex on the WRONG side), and pick the reachable vertex that MAXIMISES distance from the threat.
+-- Measuring the actual resulting positions makes this robust to any vertex_in_direction quirk. Falls
+-- back to a raw offset directly away from the threat if no vertex resolves.
+local function compute_flee_target(obj, threat_pos)
+	local lvid = obj:level_vertex_id()
 	local sp = obj:position()
-	local vid = nil
-	pcall(function() vid = level.vertex_in_direction(obj:level_vertex_id(), dir, FLEE_DIST) end)
-	if valid_lvid(vid) then
-		local ok, pos = pcall(function() return level.vertex_position(vid) end)
-		if ok and type(pos) == "userdata" then return pos end
+	local best_pos, best_td = nil, -1
+	for _, dd in ipairs(FLEE_DIRS) do
+		local dir = vector():set(dd[1], 0, dd[2])
+		local vid = nil
+		pcall(function() vid = level.vertex_in_direction(lvid, dir, FLEE_DIST) end)
+		if valid_lvid(vid) then
+			local ok, pos = pcall(function() return level.vertex_position(vid) end)
+			if ok and type(pos) == "userdata" then
+				local td = dist_xz(pos, threat_pos)
+				if td > best_td then best_td, best_pos = td, pos end
+			end
+		end
 	end
+	if best_pos then return best_pos end
+	local dir = vector():set(sp.x - threat_pos.x, 0, sp.z - threat_pos.z)  -- directly away
+	if dir:magnitude() < 0.01 then dir:set(1, 0, 0) else dir:normalize() end
 	return vector():set(sp.x + dir.x * FLEE_DIST, sp.y, sp.z + dir.z * FLEE_DIST)
 end
 
@@ -279,11 +296,9 @@ function on_decision(subject_id, kind, hex_args)
 		end
 		local sp = obj:position()
 		local tp = threat:position()
-		local dir = vector():set(sp.x - tp.x, 0, sp.z - tp.z)   -- away from the threat
-		if dir:magnitude() < 0.01 then dir:set(1, 0, 0) else dir:normalize() end
-		local tgt = compute_flee_target(obj, dir)
-		logf("MP_COOP_FLEE: [CLIENT] subject=%s threat=%s threat_dist=%.2f flee_to=%.2f,%.2f,%.2f",
-			tostring(subject_id), tostring(threat_id), dist_xz(sp, tp), tgt.x, tgt.y, tgt.z)
+		local tgt = compute_flee_target(obj, tp)
+		logf("MP_COOP_FLEE: [CLIENT] subject=%s threat=%s threat_dist=%.2f flee_to=%.2f,%.2f,%.2f (flee_to_threat=%.2f)",
+			tostring(subject_id), tostring(threat_id), dist_xz(sp, tp), tgt.x, tgt.y, tgt.z, dist_xz(tgt, tp))
 		execute_move(subject_id, obj, tgt)
 		return
 	end
