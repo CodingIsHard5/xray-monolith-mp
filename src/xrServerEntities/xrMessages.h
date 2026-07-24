@@ -274,6 +274,10 @@ enum EGameMessages
 
 	//-----------------------------------------
 	GAME_EVENT_SCRIPT_BEGINS_FROM,
+
+	// MP fork (§9 co-op): client requests respawn after co-op death
+	GAME_EVENT_COOP_RESPAWN,
+
 	// don't add messages after this
 	GAME_EVENT_FORCEDWORD = u32(-1)
 };

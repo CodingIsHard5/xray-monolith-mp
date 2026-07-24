@@ -133,11 +133,16 @@ private:
 
 public:
 	IC u16 killer_id() const { return m_killer_id; };
+	void clear_killer_id() { m_killer_id = ALife::_OBJECT_ID(-1); }  // MP fork (§9): reset on respawn
 	virtual bool use_simplified_visual() const { return false; };
 
 public:
 	virtual void on_before_change_team();
 	virtual void on_after_change_team();
+
+	// MP fork (§9 co-op): re-register with seniority hierarchy after respawn.
+	bool registered_member() const { return m_registered_member; }
+	void set_registered_member(bool v) { m_registered_member = v; }
 
 private:
 	bool m_registered_member;

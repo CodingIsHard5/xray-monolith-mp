@@ -936,6 +936,46 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 			CheckNewPlayer(CL);
 		}
 		break;
+	// MP fork (§9 co-op): a co-op client's actor died and the respawn timer expired.
+	// The client has already restored its local health; we must do the same on the
+	// server's authoritative entity so that future hits, damage, and net_Export all
+	// see a living actor. The respawn position comes from the client for now; once
+	// the checkpoint system exists (§14 step 7) the server will choose the position.
+	case GAME_EVENT_COOP_RESPAWN:
+		{
+			const u16 actor_id = tNetPacket.r_u16();
+			Fvector   spawn_pos;
+			tNetPacket.r_vec3(spawn_pos);
+
+			CSE_Abstract* const e = get_entity_from_eid(actor_id);
+			CSE_ALifeCreatureAbstract* const creature = e ? smart_cast<CSE_ALifeCreatureAbstract*>(e) : NULL;
+			if (creature)
+			{
+				creature->set_health(1.f);
+				creature->o_Position.set(spawn_pos);
+				Msg("- COOP(respawn-sv): actor %u revived at (%.1f,%.1f,%.1f), health=%.1f",
+					actor_id, VPUSH(spawn_pos), creature->get_health());
+
+				// Also restore health on the game-object (CEntityAlive) in the server process.
+				// On a dedicated server the game object coexists in the same process.
+				CObject* const obj = Level().Objects.net_Find(actor_id);
+				CEntityAlive* const ea = obj ? smart_cast<CEntityAlive*>(obj) : NULL;
+				if (ea)
+				{
+					ea->SetfHealth(ea->GetMaxHealth());
+					ea->Position().set(spawn_pos);
+					// Clear death state so the entity is considered alive again
+					ea->m_level_death_time = 0;
+					ea->m_game_death_time  = 0;
+					ea->clear_killer_id();
+				}
+			}
+			else
+			{
+				Msg("! COOP(respawn-sv): actor %u not found or not a creature", actor_id);
+			}
+		}
+		break;
 	default:
 		{
 			string16 tmp;

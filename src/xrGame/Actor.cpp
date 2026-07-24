@@ -174,6 +174,11 @@ CActor::CActor() : CEntityAlive(), current_ik_cam_shift(0)
 	m_coop_yaw_target = 0.f;
 	m_coop_puppet_active = false;
 
+	// MP fork (§9 co-op): death/respawn state
+	m_coop_dead = false;
+	m_coop_respawn_timer = 0.f;
+	m_coop_death_pos.set(0, 0, 0);
+
 	b_DropActivated = 0;
 	f_DropPower = 0.f;
 
@@ -964,47 +969,50 @@ void CActor::Die(CObject* who)
 
 	if (IsGameTypeSingle())
 	{
-		// demonized: First Person Death
-		if (firstPersonDeath) {
-			cam_Set(eacFirstEye);
-			initFPCam();
-			Fvector pos = Device.vCameraPosition;
-			Fvector hpb;
-			hpb.set(
-				Device.vCameraDirection.getH(),
-				Device.vCameraDirection.getP(),
-				0
-			);
-			m_FPCam->m_Position.set(pos);
-			m_FPCam->m_HPB.set(hpb);
-			m_FPCam->m_Camera.setHPB(hpb.x, hpb.y, hpb.z).translate_over(pos);
-			m_FPCam->m_customSmoothing = 0;
-		}
-		else
+		// MP fork (§9 co-op): on a co-op thin client, skip "GAME OVER" -> main menu.
+		// Instead enter spectate mode with a respawn countdown.  The server's copy of
+		// this actor also received GE_DIE and is dead (health -1); coop_respawn() will
+		// restore both sides when the timer expires.
+		if (coop_thin_client() && this == Actor())
+		{
+			m_coop_dead           = true;
+			m_coop_respawn_timer  = 10.f;            // seconds until respawn (Appendix B tunable)
+			m_coop_death_pos      = Position();
 			cam_Set(eacFreeLook);
 
-		if (CurrentGameUI()) // null UI on headless server
-			CurrentGameUI()->HideShownDialogs();
+			if (CurrentGameUI())
+				CurrentGameUI()->HideShownDialogs();
 
-		/* avo: attempt to set camera on timer */
-		/*CTimer T;
-		T.Start();
-
-		if (!SwitchToThread())
-		Sleep(2);
-
-		while (true)
-		{
-		if (T.GetElapsed_sec() == 5)
-		{
-		cam_Set(eacFreeLook);
-		start_tutorial("game_over");
-		break;
+			Msg("- COOP(death): local player died at (%.1f,%.1f,%.1f), respawning in %.0f s",
+				VPUSH(m_coop_death_pos), m_coop_respawn_timer);
 		}
-		}*/
-		/* avo: end */
+		else
+		{
+			// Stock singleplayer death path
+			// demonized: First Person Death
+			if (firstPersonDeath) {
+				cam_Set(eacFirstEye);
+				initFPCam();
+				Fvector pos = Device.vCameraPosition;
+				Fvector hpb;
+				hpb.set(
+					Device.vCameraDirection.getH(),
+					Device.vCameraDirection.getP(),
+					0
+				);
+				m_FPCam->m_Position.set(pos);
+				m_FPCam->m_HPB.set(hpb);
+				m_FPCam->m_Camera.setHPB(hpb.x, hpb.y, hpb.z).translate_over(pos);
+				m_FPCam->m_customSmoothing = 0;
+			}
+			else
+				cam_Set(eacFreeLook);
 
-		start_tutorial("game_over");
+			if (CurrentGameUI()) // null UI on headless server
+				CurrentGameUI()->HideShownDialogs();
+
+			start_tutorial("game_over");
+		}
 	}
 	else
 	{
@@ -1188,6 +1196,14 @@ void CActor::UpdateCL()
 	// pose each frame (targets are refreshed at network rate in shedule_Update).
 	if (m_coop_puppet_active && Remote() && coop_thin_client())
 		coop_puppet_interpolate();
+
+	// MP fork (§9 co-op): tick the respawn countdown while dead
+	if (m_coop_dead && this == Actor() && coop_thin_client())
+	{
+		m_coop_respawn_timer -= Device.fTimeDelta;
+		if (m_coop_respawn_timer <= 0.f)
+			coop_respawn();
+	}
 
 	pickup_result_t pickup_result = {true, false};
 	if (g_Alive())
@@ -1825,6 +1841,93 @@ void CActor::coop_puppet_interpolate()
 	mXFORM.rotateY(-(r_model_yaw + r_model_yaw_delta));
 	mXFORM.c.set(Position());
 	XFORM().set(mXFORM);
+}
+
+// MP fork (§9 co-op): revive the local actor after a co-op death. This runs on the
+// CLIENT only; the server's entity is also dead (health -1 from GE_DIE), so we send
+// a network event to tell it to revive us too. The server receives the event in
+// xrServer_process_event.cpp as GE_GAME_EVENT / GAME_EVENT_COOP_RESPAWN.
+//
+// Design note (doc §9): full checkpoint-based respawn (inventory rollback, corpse
+// pile, item conservation) comes later when the save system is built (§14 step 7).
+// For now this is a simple positional respawn: restore health, teleport to a safe
+// position, and resume play — enough to keep the co-op session alive.
+void CActor::coop_respawn()
+{
+	VERIFY(m_coop_dead);
+	m_coop_dead = false;
+
+	// --- Restore health on the client ---
+	// SetfHealth clamps to [0,max]; a positive value makes g_Alive() true again.
+	SetfHealth(GetMaxHealth());
+
+	// --- Clear death bookkeeping ---
+	// m_level_death_time != 0  =>  AlreadyDie() == true, which blocks future deaths.
+	// m_killer_id persists the killer reference; clear it for a fresh life.
+	m_level_death_time  = 0;
+	m_game_death_time   = 0;
+	clear_killer_id();
+
+	// Re-register in the seniority hierarchy (Die unregistered us).
+	if (IsGameTypeSingle() && !registered_member())
+	{
+		Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(g_Group()).register_member(this);
+		set_registered_member(true);
+	}
+
+	// --- Teleport to a respawn position ---
+	// For now: respawn at the death position (the player gets up where they fell).
+	// TODO (§9.1): checkpoint system — respawn at the last safe base / campfire the
+	// player manually set as their checkpoint. The position here will come from the
+	// server's M_COOP_RESPAWN message once checkpoints exist.
+	Fvector spawn_pos = m_coop_death_pos;
+	spawn_pos.y += 0.5f;    // nudge up slightly to avoid ground-clip
+
+	Position().set(spawn_pos);
+	if (character_physics_support() && character_physics_support()->movement())
+		character_physics_support()->movement()->SetPosition(spawn_pos);
+
+	// rebuild the object transform in place
+	{
+		Fmatrix mXFORM;
+		mXFORM.rotateY(-(r_model_yaw));
+		mXFORM.c.set(spawn_pos);
+		XFORM().set(mXFORM);
+	}
+
+	// --- Reset camera back to first person ---
+	cam_Set(eacFirstEye);
+
+	// --- Clear the death effector if it's still running ---
+	if (conditions().m_death_effector)
+	{
+		conditions().m_death_effector->Stop();
+		xr_delete(conditions().m_death_effector);
+	}
+
+	// --- Re-enable input (death effector may have disabled it) ---
+	if (!g_dedicated_server && CurrentGameUI())
+	{
+		CurrentGameUI()->ShowGameIndicators(true);
+		CurrentGameUI()->ShowCrosshair(true);
+	}
+
+	// --- Restore movement capability ---
+	mstate_wishful = 0;
+	mstate_real    = 0;
+
+	// --- Notify the server so it also restores health on the authoritative entity ---
+	{
+		NET_Packet P;
+		u_EventGen(P, GE_GAME_EVENT, ID());
+		P.w_u16(GAME_EVENT_COOP_RESPAWN);
+		P.w_u16(ID());           // actor entity ID
+		P.w_vec3(spawn_pos);
+		u_EventSend(P);
+	}
+
+	Msg("- COOP(respawn): player revived at (%.1f,%.1f,%.1f)",
+		VPUSH(spawn_pos));
 }
 
 void CActor::shedule_Update(u32 DT)

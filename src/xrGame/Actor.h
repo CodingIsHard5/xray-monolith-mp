@@ -315,6 +315,14 @@ protected:
 	SRotation m_coop_torso_target;
 	bool      m_coop_puppet_active;
 
+	// MP fork (§9 co-op): death/respawn state for the co-op thin client.
+	// When the local actor dies, instead of "GAME OVER" -> main menu (SP behavior),
+	// the client enters spectate mode and respawns after a countdown.
+	bool      m_coop_dead;           // true between Die() and respawn
+	float     m_coop_respawn_timer;  // seconds remaining until respawn
+	Fvector   m_coop_death_pos;      // position at death (spectate camera origin)
+	void      coop_respawn();        // revive the actor after the timer
+
 public:
 	SActorMotions* m_anims;
 #ifdef ENABLE_CAR
