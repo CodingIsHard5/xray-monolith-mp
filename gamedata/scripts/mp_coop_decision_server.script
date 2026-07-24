@@ -21,6 +21,7 @@
 
 local KIND_MOVE     = mp_coop_decision_client.KIND_MOVE       -- = 1 (shared enum)
 local KIND_MOVE_OBJ = mp_coop_decision_client.KIND_MOVE_OBJ   -- = 3 (move toward a target object id)
+local KIND_FLEE     = mp_coop_decision_client.KIND_FLEE       -- = 4 (flee from a threat object id)
 
 -- Prefer a docile flesh (the Spike-2 driver used a flesh and it followed orders cleanly). Dogs
 -- are pack hunters and reassert native behaviour more aggressively.
@@ -48,8 +49,10 @@ local no_server_drive = false
 -- client's locally-driven flag ages out (TTL) and the NPC reverts to a dense-streamed puppet. nil = off.
 local burst_limit = nil
 -- §14 step 3 (broaden KINDs): -coop_move_obj originates KIND_MOVE_OBJ toward the player actor (a
--- dynamic object target) instead of the fixed-point KIND_MOVE.
+-- dynamic object target) instead of the fixed-point KIND_MOVE; -coop_flee originates KIND_FLEE AWAY
+-- from the actor (evade). One mode at a time; flee takes precedence if both are set.
 local move_obj_mode = false
+local flee_mode     = false
 
 local st = {
 	phase       = "wait",   -- wait -> spawning -> wait_online -> active -> failed
@@ -242,7 +245,11 @@ local function tick_impl(now_ms, real_count, actor_id)
 		-- the actor and drives the monster to it (a "regroup on the player" decision). Otherwise the
 		-- default fixed-point KIND_MOVE.
 		local kind, hex, what
-		if move_obj_mode and actor_id and actor_id ~= 0 then
+		if flee_mode and actor_id and actor_id ~= 0 then
+			kind = KIND_FLEE
+			hex  = mp_coop_decision_client.encode_u16(actor_id)
+			what = string.format("FLEE<-actor %d", actor_id)
+		elseif move_obj_mode and actor_id and actor_id ~= 0 then
 			kind = KIND_MOVE_OBJ
 			hex  = mp_coop_decision_client.encode_u16(actor_id)
 			what = string.format("MOVE_OBJ->actor %d", actor_id)
@@ -291,6 +298,10 @@ function tick(now_ms, real_count, actor_id)
 		move_obj_mode = string.find(cl, "-coop_move_obj", 1, true) ~= nil
 		if move_obj_mode then
 			logf("~ MP_COOP_SV: -coop_move_obj — originating KIND_MOVE_OBJ toward the player actor (broaden KINDs)")
+		end
+		flee_mode = string.find(cl, "-coop_flee", 1, true) ~= nil
+		if flee_mode then
+			logf("~ MP_COOP_SV: -coop_flee — originating KIND_FLEE away from the player actor (broaden KINDs)")
 		end
 		if string.find(cl, "-coop_combat", 1, true) then
 			scenario = mp_coop_scenario_combat.tick

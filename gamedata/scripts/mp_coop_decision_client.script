@@ -22,6 +22,9 @@ KIND_COMBAT   = 2   -- set an online NPC's combat enemy (args = enemy object id,
 KIND_MOVE_OBJ = 3   -- move an online NPC toward a target OBJECT (args = target object id, u16) — a
                     -- dynamic "follow/regroup" decision: the target is re-resolved each decision, so
                     -- the subject tracks a moving object. Reuses the move-execution machine below.
+KIND_FLEE     = 4   -- flee from a threat OBJECT (args = threat object id, u16): move AWAY from it. The
+                    -- flee target is recomputed each decision from the current positions (a reachable
+                    -- vertex FLEE_DIST away, opposite the threat), so the subject keeps evading.
 
 -- §14 step 3 (inversion): flip a decision-driven NPC to client-local AI ONLY when the client was
 -- launched with -coop_local_ai. Default OFF keeps the NPC a NET-driven puppet (the working move
@@ -105,6 +108,23 @@ local drive_state = {}
 
 local function valid_lvid(vid)
 	return vid ~= nil and vid ~= 4294967295 and vid ~= 65535
+end
+
+-- KIND_FLEE: how far to run from a threat per decision (a reachable vertex this far opposite the threat).
+local FLEE_DIST = 12
+
+-- Compute a flee target: a reachable nav vertex FLEE_DIST away from the subject along `dir` (the
+-- away-from-threat direction). Mirrors the server's choose_target vertex resolution; falls back to a
+-- raw offset point if the graph walk fails.
+local function compute_flee_target(obj, dir)
+	local sp = obj:position()
+	local vid = nil
+	pcall(function() vid = level.vertex_in_direction(obj:level_vertex_id(), dir, FLEE_DIST) end)
+	if valid_lvid(vid) then
+		local ok, pos = pcall(function() return level.vertex_position(vid) end)
+		if ok and type(pos) == "userdata" then return pos end
+	end
+	return vector():set(sp.x + dir.x * FLEE_DIST, sp.y, sp.z + dir.z * FLEE_DIST)
 end
 
 -- ---- executor ------------------------------------------------------------------------------
@@ -240,6 +260,30 @@ function on_decision(subject_id, kind, hex_args)
 		local tgt = tobj:position()
 		logf("MP_COOP_MOVEOBJ: [CLIENT] subject=%s target=%s target_pos=%.2f,%.2f,%.2f",
 			tostring(subject_id), tostring(target_id), tgt.x, tgt.y, tgt.z)
+		execute_move(subject_id, obj, tgt)
+		return
+	end
+
+	if kind == KIND_FLEE then
+		-- Flee from a threat OBJECT: move AWAY from it. The flee target is recomputed each decision
+		-- from the CURRENT positions (a reachable vertex FLEE_DIST opposite the threat), so as the
+		-- subject retreats the target keeps moving further away and it keeps evading — the shared
+		-- execute_move sees a >0.5m target shift each decision and re-paths (no false "arrival").
+		local threat_id = decode_u16(hex_args)
+		local obj    = level.object_by_id(subject_id)
+		local threat = level.object_by_id(threat_id)
+		if not obj or not threat then
+			logf("MP_COOP_FLEE: [CLIENT] subject=%s threat=%s NOT both online (subj=%s threat=%s)",
+				tostring(subject_id), tostring(threat_id), tostring(obj ~= nil), tostring(threat ~= nil))
+			return
+		end
+		local sp = obj:position()
+		local tp = threat:position()
+		local dir = vector():set(sp.x - tp.x, 0, sp.z - tp.z)   -- away from the threat
+		if dir:magnitude() < 0.01 then dir:set(1, 0, 0) else dir:normalize() end
+		local tgt = compute_flee_target(obj, dir)
+		logf("MP_COOP_FLEE: [CLIENT] subject=%s threat=%s threat_dist=%.2f flee_to=%.2f,%.2f,%.2f",
+			tostring(subject_id), tostring(threat_id), dist_xz(sp, tp), tgt.x, tgt.y, tgt.z)
 		execute_move(subject_id, obj, tgt)
 		return
 	end
