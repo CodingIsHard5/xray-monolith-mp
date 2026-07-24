@@ -1,0 +1,146 @@
+--[[
+	§4C COMBAT-ENGAGEMENT PROBE (mp_coop_scenario_monster_combat).
+
+	Tests the diagnosis (dev/DECISION_REPLICATION_PLAN.md §4C): can headless-spawned MONSTERS actually
+	FIGHT on the dedicated server? Monsters self-drive combat via their built-in state manager (Think ->
+	update_fsm -> StateMan->update) with NO xr_logic/gulag — provided they (a) have a combat enemy in
+	CBaseMonster::EnemyMan and (b) are NOT under script control (script control -> ProcessScripts instead
+	of Think).
+
+	So: spawn two aggressive monsters a few metres apart, give each the other as a FORCED enemy via
+	obj:set_enemy(other) (relaxed binding -> CBaseMonster::SetEnemy -> EnemyMan.script_enemy, which sets
+	the enemy DIRECTLY, bypassing team/relation/perception), and DO NOT take script control. Then observe:
+	do they close on each other and attack (distance shrinks, one eventually dies)?
+
+	Instrumentation each tick: each monster's position, the A-B distance, and monster_enemy() (the NEW
+	binding = EnemyMan.get_enemy() — best_enemy() is the STALKER manager and is always nil for monsters),
+	plus alive flags. Server-side only; no decision replication needed (this isolates whether the monster
+	combat stack runs headless at all, before wiring it into KIND_COMBAT).
+
+	Runs via mp_coop_decision_server's dispatcher under -coop_monster_combat.
+--]]
+
+-- Aggressive monsters (dogs/boars reassert native behaviour hard — good for a fight; the MOVE scenario
+-- avoids them for exactly that reason). Pick the first pair of available sections.
+local A_SECTIONS = { "dog_normal", "dog_strong", "pseudodog_normal", "boar_normal", "flesh_normal" }
+local B_SECTIONS = { "dog_strong", "dog_normal", "boar_normal", "pseudodog_normal", "flesh_normal" }
+
+local SPAWN_SIDE     = 8     -- m: spawn the pair this far to the actor's side
+local PAIR_GAP       = 4     -- m: distance between the two monsters (close, so they engage fast)
+local ONLINE_TIMEOUT = 25000
+local LOG_PERIOD_MS  = 2000  -- instrument this often
+
+local st = {
+	phase = "wait", a_id = nil, b_id = nil, spawn_ms = nil, last_log = 0, ticks = 0, enemy_set = false,
+}
+
+local function logf(...) printf("%s", string.format(...)) end
+
+local function pick_section(cands)
+	for _, s in ipairs(cands) do
+		if system_ini():section_exist(s) then return s end
+	end
+	return nil
+end
+
+local function dist_xz(a, b)
+	local dx, dz = a.x - b.x, a.z - b.z
+	return math.sqrt(dx * dx + dz * dz)
+end
+
+local function spawn_one(section, pos, actor)
+	local ok, se = pcall(function()
+		return alife():create(section, pos, actor:level_vertex_id(), actor:game_vertex_id())
+	end)
+	if ok and se then return se.id end
+	logf("! MP_COOP_MC: alife():create(%s) failed: %s", tostring(section), tostring(se))
+	return nil
+end
+
+local function do_spawn(actor)
+	local apos = actor:position()
+	local adir = actor:direction()
+	local d = vector():set(adir.x, 0, adir.z)
+	if d:magnitude() < 0.01 then d:set(1, 0, 0) else d:normalize() end
+	local perp = vector():set(-d.z, 0, d.x)
+	local asec = pick_section(A_SECTIONS)
+	local bsec = pick_section(B_SECTIONS)
+	if not asec or not bsec then
+		logf("! MP_COOP_MC: no monster sections (a=%s b=%s)", tostring(asec), tostring(bsec))
+		st.phase = "failed"; return
+	end
+	local base = vector():set(apos.x + perp.x * SPAWN_SIDE, apos.y, apos.z + perp.z * SPAWN_SIDE)
+	local apos_s = vector():set(base.x - d.x * PAIR_GAP * 0.5, base.y, base.z - d.z * PAIR_GAP * 0.5)
+	local bpos_s = vector():set(base.x + d.x * PAIR_GAP * 0.5, base.y, base.z + d.z * PAIR_GAP * 0.5)
+	st.a_id = spawn_one(asec, apos_s, actor)
+	st.b_id = spawn_one(bsec, bpos_s, actor)
+	if not st.a_id or not st.b_id then st.phase = "failed"; return end
+	st.spawn_ms = time_global()
+	st.phase = "wait_online"
+	logf("~ MP_COOP_MC: spawned %s id=%d + %s id=%d (gap %dm) — will force enemies, NO script control", asec, st.a_id, bsec, st.b_id, PAIR_GAP)
+end
+
+local function enemy_id(obj)                    -- the NEW monster_enemy() binding (EnemyMan.get_enemy)
+	local ok, e = pcall(function() return obj:monster_enemy() end)
+	if ok and e then return e:id() end
+	return nil
+end
+
+local function tick_impl(now_ms, real_count, actor_id)
+	if st.phase == "failed" then return end
+
+	if st.phase == "wait" then
+		if real_count < 1 or not actor_id or actor_id == 0 then return end
+		local actor = level.object_by_id(actor_id)
+		if not actor then return end
+		st.phase = "spawning"; do_spawn(actor); return
+	end
+
+	if st.phase == "wait_online" then
+		local a = level.object_by_id(st.a_id)
+		local b = level.object_by_id(st.b_id)
+		if a and b then
+			st.phase = "active"
+			logf("~ MP_COOP_MC: both online (a=%d b=%d) dist=%.2f", st.a_id, st.b_id, dist_xz(a:position(), b:position()))
+		elseif time_global() - (st.spawn_ms or 0) > ONLINE_TIMEOUT then
+			logf("! MP_COOP_MC: monsters never online within %dms (a=%s b=%s)", ONLINE_TIMEOUT, tostring(a ~= nil), tostring(b ~= nil))
+			st.phase = "failed"
+		end
+		return
+	end
+
+	if st.phase == "active" then
+		local a = level.object_by_id(st.a_id)
+		local b = level.object_by_id(st.b_id)
+		if not a or not b then
+			-- one may have died (combat success!) — report and stop instrumenting.
+			logf("~ MP_COOP_MC: a_online=%s b_online=%s (a monster gone may mean it DIED — combat worked)", tostring(a ~= nil), tostring(b ~= nil))
+			return
+		end
+
+		-- Force each as the other's enemy ONCE. set_enemy -> CBaseMonster::SetEnemy -> EnemyMan.script_enemy
+		-- (direct, perception-bypassing). Do NOT take obj:script(true) — that would suppress Think/StateMan.
+		if not st.enemy_set then
+			local ok = pcall(function() a:set_enemy(b); b:set_enemy(a) end)
+			st.enemy_set = true
+			logf("~ MP_COOP_MC: set_enemy applied both ways (ok=%s)", tostring(ok))
+		end
+
+		local elapsed = now_ms - st.last_log
+		if elapsed < 0 then elapsed = elapsed + 4294967296 end
+		if elapsed < LOG_PERIOD_MS then return end
+		st.last_log = now_ms
+		st.ticks = st.ticks + 1
+
+		local pa, pb = a:position(), b:position()
+		logf("~ MP_COOP_MC: #%d dist=%.2f | A id=%d hp=%.2f enemy=%s scripted=%s | B id=%d hp=%.2f enemy=%s scripted=%s",
+			st.ticks, dist_xz(pa, pb),
+			st.a_id, a:health(), tostring(enemy_id(a)), tostring(a:get_script()),
+			st.b_id, b:health(), tostring(enemy_id(b)), tostring(b:get_script()))
+	end
+end
+
+function tick(now_ms, real_count, actor_id)
+	local ok, err = pcall(tick_impl, now_ms, real_count, actor_id)
+	if not ok then logf("! MP_COOP_MC tick error: %s", tostring(err)); st.phase = "failed" end
+end

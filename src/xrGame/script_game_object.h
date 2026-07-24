@@ -347,6 +347,7 @@ public:
 	void set_manual_invisibility(bool val);
 	void set_alien_control(bool val);
 	void set_enemy(CScriptGameObject* e);
+	CScriptGameObject* monster_enemy(); // MP fork (§4C): CBaseMonster::EnemyMan.get_enemy() (best_enemy() is stalker-only)
 	void set_vis_state(float value);
 	void off_collision(bool val);
 	void bloodsucker_drag_jump(CScriptGameObject* e, LPCSTR e_str, const Fvector& position, float factor);

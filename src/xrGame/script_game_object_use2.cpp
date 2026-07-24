@@ -1,6 +1,7 @@
 #include "pch_script.h"
 #include "script_game_object.h"
 #include "script_game_object_impl.h"
+#include "ai/monsters/basemonster/base_monster.h"
 #include "ai/monsters/bloodsucker/bloodsucker.h"
 #include "ai/monsters/poltergeist/poltergeist.h"
 #include "ai/monsters/burer/burer.h"
@@ -230,16 +231,32 @@ void CScriptGameObject::bloodsucker_drag_jump(CScriptGameObject* e, LPCSTR e_str
 
 void CScriptGameObject::set_enemy(CScriptGameObject* e)
 {
-	CAI_Bloodsucker* monster = smart_cast<CAI_Bloodsucker*>(&object());
+	// MP fork (§4C combat): relaxed from CAI_Bloodsucker to CBaseMonster — CBaseMonster::SetEnemy
+	// (-> EnemyMan.script_enemy, a perception-bypassing forced enemy) works for ALL monsters, so any
+	// monster can be given a combat target from gamedata (the decision-replication combat path).
+	CBaseMonster* monster = smart_cast<CBaseMonster*>(&object());
 	if (!monster)
 	{
 		ai().script_engine().script_log(ScriptStorage::eLuaMessageTypeError,
-		                                "CAI_Bloodsucker : cannot access class member set_enemy!");
+		                                "CBaseMonster : cannot access class member set_enemy!");
 		return;
 	}
 	CGameObject* game_object = &e->object();
 	CEntityAlive* entity_alive = smart_cast<CEntityAlive*>(game_object);
 	monster->SetEnemy(entity_alive);
+}
+
+// MP fork (§4C combat): the monster analogue of best_enemy(). best_enemy() reads memory().enemy()
+// (the STALKER manager) and is ALWAYS nil for a monster; a monster's real combat target lives in the
+// separate CBaseMonster::EnemyMan. Returns EnemyMan.get_enemy() (or nil) so gamedata/tests can observe
+// whether a monster has actually engaged.
+CScriptGameObject* CScriptGameObject::monster_enemy()
+{
+	CBaseMonster* monster = smart_cast<CBaseMonster*>(&object());
+	if (!monster)
+		return (0);
+	const CEntityAlive* enemy = monster->EnemyMan.get_enemy();
+	return (enemy ? enemy->lua_game_object() : 0);
 }
 
 void CScriptGameObject::set_vis_state(float val)

@@ -249,6 +249,7 @@ class_<CScriptGameObject> script_register_game_object1(class_<CScriptGameObject>
 		.def("set_manual_invisibility", SAFE_WRAP(&CScriptGameObject::set_manual_invisibility))
 		.def("set_alien_control", SAFE_WRAP(&CScriptGameObject::set_alien_control))
 		.def("set_enemy", SAFE_WRAP(&CScriptGameObject::set_enemy))
+		.def("monster_enemy", SAFE_WRAP(&CScriptGameObject::monster_enemy))
 		.def("set_vis_state", SAFE_WRAP(&CScriptGameObject::set_vis_state))
 		.def("set_collision_off", SAFE_WRAP(&CScriptGameObject::off_collision))
 		.def("set_capture_anim", SAFE_WRAP(&CScriptGameObject::bloodsucker_drag_jump))
