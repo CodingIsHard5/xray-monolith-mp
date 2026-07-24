@@ -1226,7 +1226,9 @@ void IPureClient::Sync_Average()
 	if (frac > s64(size / 2)) summary_delta += (summary_delta < 0) ? -1 : 1;
 	net_TimeDelta_Calculated = s32(summary_delta);
 	net_TimeDelta = (net_TimeDelta * 5 + net_TimeDelta_Calculated) / 6;
-	//	Msg("* CLIENT: d(%d), dc(%d), s(%d)",net_TimeDelta,net_TimeDelta_Calculated,size);
+	// MP fork (C2 clock-skew measurement): log delta for acceptance harness
+	if (strstr(Core.Params, "-dbg"))
+		Msg("* CLOCK_SYNC: delta=%d calc=%d samples=%d", net_TimeDelta, net_TimeDelta_Calculated, size);
 }
 
 void sync_thread(void* P)
