@@ -12,6 +12,7 @@
 #include "xrMessages.h"                            // MP fork (§9.3): M_SPAWN_OBJECT_*, GE_DESTROY
 #include "Level.h"                                 // MP fork (§9.3): Level().timeServer()
 #include "GameTaskManager.h"                        // MP fork (§19): coop_broadcast_tasks on connect
+#include "GameTask.h"                               // MP fork (test): -coop_test_quest synthetic task
 #include "ai_space.h"                              // MP fork: ai().alife()
 #include "script_engine.h"                         // MP fork: server-side Lua init hook
 #include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
@@ -721,6 +722,32 @@ void game_sv_Single::Update()
 	inherited::Update();
 	coop_poll_spawns();    // MP fork (§14 co-op): give ready clients their own actor + reconnection
 	coop_update_anchors(); // MP fork (§15 co-op): re-centre A-Life on the players
+
+	// MP fork (test harness): -coop_test_quest creates a synthetic task after 10s,
+	// triggering quest replication to connected clients. For automated E2E testing.
+	if (xr_enet::enabled() && ai().get_alife())
+	{
+		static bool s_test_init = false;
+		static bool s_test_done = false;
+		static u32  s_test_start = 0;
+		if (!s_test_init)
+		{
+			s_test_init = true;
+			if (strstr(Core.Params, "-coop_test_quest"))
+				s_test_start = Device.dwTimeGlobal;
+		}
+		if (s_test_start && !s_test_done && Device.dwTimeGlobal - s_test_start > 10000)
+		{
+			s_test_done = true;
+			CGameTask* task = xr_new<CGameTask>();
+			task->m_ID = "coop_test_quest_e2e";
+			task->m_Title = "Test Quest";
+			task->SetTaskState(eTaskStateInProgress);
+			task->m_ReceiveTime = GetGameTime();
+			Level().GameTaskManager().GiveGameTaskToActor(task, 0, false, 0);
+			Msg("- COOP_TEST_QUEST: synthetic task 'coop_test_quest_e2e' created, should replicate to clients");
+		}
+	}
 	/*	switch(phase) 	{
 			case GAME_PHASE_PENDING : {
 				OnRoundStart();
