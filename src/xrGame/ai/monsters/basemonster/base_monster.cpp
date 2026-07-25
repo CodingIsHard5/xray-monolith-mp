@@ -324,6 +324,14 @@ void CBaseMonster::update_enemy_accessible_and_at_home_info()
 	}
 }
 
+// §3 item 3 inc3 (DIAGNOSTIC, temporary): same breadcrumb macro as base_monster_think.cpp — localizes the
+// POST-Think crash (the think phases all complete; the null+0x88 CSolverConditionValue crash is after
+// think_done, in control().update_schedule()/update_frame() or another post-Think step). Gated -coop_aiphase.
+#define MP_AIPHASE(ph) do { \
+	static int s_ap = -1; if (s_ap == -1) s_ap = strstr(Core.Params, "-coop_aiphase") ? 1 : 0; \
+	if (s_ap && Remote() && coop_locally_driven()) { Msg("- MP_AIPHASE: id=%u %s", ID(), ph); FlushLog(); } \
+} while(0)
+
 void CBaseMonster::UpdateCL()
 {
 #ifdef DEBUG
@@ -343,19 +351,25 @@ void CBaseMonster::UpdateCL()
 		EatedCorpse = NULL;
 	}
 
+	MP_AIPHASE("cl.inherited");
 	inherited::UpdateCL();
 
 	if (g_Alive())
 	{
+		MP_AIPHASE("cl.enemy_at_home");
 		update_enemy_accessible_and_at_home_info();
 		CStepManager::update(false);
 
+		MP_AIPHASE("cl.grouping");
 		update_pos_by_grouping_behaviour();
 	}
 
+	MP_AIPHASE("cl.ctrl_frame");
 	control().update_frame();
 
+	MP_AIPHASE("cl.physics");
 	m_pPhysics_support->in_UpdateCL();
+	MP_AIPHASE("cl.done");
 }
 
 void CBaseMonster::shedule_Update(u32 dt)
@@ -370,6 +384,7 @@ void CBaseMonster::shedule_Update(u32 dt)
 
 	inherited::shedule_Update(dt);
 
+	MP_AIPHASE("sched.eyes");
 	update_eyes_visibility();
 
 	if (m_anti_aim)
@@ -377,13 +392,16 @@ void CBaseMonster::shedule_Update(u32 dt)
 		m_anti_aim->update_schedule();
 	}
 
+	MP_AIPHASE("sched.auras");
 	m_psy_aura.update_schedule();
 	m_fire_aura.update_schedule();
 	m_base_aura.update_schedule();
 	m_radiation_aura.update_schedule();
 
+	MP_AIPHASE("sched.ctrl");
 	control().update_schedule();
 
+	MP_AIPHASE("sched.morale");
 	Morale.update_schedule(dt);
 
 	m_anomaly_detector->update_schedule();
