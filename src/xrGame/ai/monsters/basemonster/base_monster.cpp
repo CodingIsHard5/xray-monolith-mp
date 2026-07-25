@@ -415,7 +415,15 @@ void CBaseMonster::shedule_Update(u32 dt)
 	m_radiation_aura.update_schedule();
 
 	MP_AIPHASE("sched.ctrl");
-	control().update_schedule();
+	// §3 item 3 inc3 (GUARD, part 2): the same null-graph/path crash is reachable via BOTH monster control
+	// ticks — control().update_frame() (UpdateCL, guarded there) AND control().update_schedule() here (it
+	// builds/re-plans the path the frame tick executes). Guard this one identically so a thin-client
+	// autonomous flipped monster does no graph-path planning either — pure stream-hold, crash-stable.
+	{
+		const bool coop_thin_autonomous = Remote() && coop_locally_driven() && !GetScriptControl() && !ai().get_alife();
+		if (!coop_thin_autonomous)
+			control().update_schedule();
+	}
 
 	MP_AIPHASE("sched.morale");
 	Morale.update_schedule(dt);
