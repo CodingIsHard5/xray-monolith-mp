@@ -378,6 +378,7 @@ void xrServer::coop_relevance_despawn(xrClientData* CL, u16 id)
 void xrServer::coop_clear_relevance(u32 client_id)
 {
 	m_coop_rel_known.erase(client_id);
+	m_coop_c2_last_per_client.erase(client_id); // §3 inc3: drop this client's per-client throttle state too
 }
 
 // §3 win #2b inc2: forget one creature id everywhere its co-op replication state is tracked. Called at the
@@ -482,10 +483,24 @@ void xrServer::coop_relevance_diag()
 	ForEachClientDo(fd);
 }
 
-void xrServer::MakeUpdatePackets()
+void xrServer::MakeUpdatePackets(xrClientData* target_client)
 {
 	NET_Packet tmpPacket;
 	u32 position;
+
+	// §3 win #2b inc3 (per-client update packets): when target_client is set, this pass builds the update
+	// stream for THAT client only — ambient creatures are filtered to its relevance set (m_coop_rel_known),
+	// so spread players stop paying for each other's NPCs. Player actors + non-creature entities are NOT
+	// filtered (they stream to everyone). target_client == nullptr keeps the stock global-union build.
+	const bool per_client = (target_client != nullptr);
+	xr_map<u16, char>* known = per_client ? &m_coop_rel_known[target_client->ID.value()] : nullptr;
+
+	// §3 inc3: throttle bookkeeping — per-client in per-client mode (so -coop_npc_hz / -coop_update_throttle
+	// stay correct when a creature is relevant to several clients), the shared static map otherwise.
+	static xr_map<u16, u32> s_c2_last_sent_global; // last throttled send per creature (global-union mode)
+	xr_map<u16, u32>& c2_last = per_client
+		? m_coop_c2_last_per_client[target_client->ID.value()]
+		: s_c2_last_sent_global;
 
 	m_updator.begin_updates();
 
@@ -515,8 +530,10 @@ void xrServer::MakeUpdatePackets()
 		}
 	}
 	const bool cull_on = (s_cull_r2 > 0.f);
-	if (cull_on) coop_gather_cull_anchors();
-	const bool cull_active = cull_on && !m_coop_cull_anchors.empty();
+	// Global-union radius culling only applies to the stock (nullptr) build; the per-client build filters by
+	// the relevance set instead, so it needs no anchors.
+	if (cull_on && !per_client) coop_gather_cull_anchors();
+	const bool cull_active = cull_on && !per_client && !m_coop_cull_anchors.empty();
 
 	xrS_entities::iterator I = entities.begin();
 	xrS_entities::iterator E = entities.end();
@@ -554,11 +571,24 @@ void xrServer::MakeUpdatePackets()
 		if (!Test.Net_Relevant() && !(xr_enet::enabled() && Test.cast_creature_abstract()))
 			continue;
 
+		// §3 win #2b inc3 (per-client update packets): stream an AMBIENT creature to THIS client only if it
+		// is in the client's relevance set (i.e. actually spawned there — see coop_relevance_client_cb) or
+		// is decision-driven (always relevant). Player ACTORS (creature_abstract but smart_cast-actor) and
+		// non-creature entities are never filtered — they replicate to everyone. This drops the global-union
+		// waste: with spread players, client A no longer receives client B's NPCs' updates.
+		if (per_client)
+		{
+			if (Test.cast_creature_abstract() && !smart_cast<CSE_ALifeCreatureActor*>(&Test))
+			{
+				const bool have = (known->find(Test.ID) != known->end());
+				if (!have && !coop_is_decision_driven(Test.ID)) { if (s_npcdiag == 1) nd_culled++; continue; }
+			}
+		}
 		// §3 win #2 (radius culling): a creature that no real player is near is skipped — the client
 		// can't see it, so streaming its position/health is pure waste. Only cull CREATURES (players
 		// always stream); a decision-driven NPC is EXEMPT (the decision system owns its replication, and
 		// it's a tiny set). If it's within radius of ANY anchor, keep it.
-		if (cull_active && Test.cast_creature_abstract())
+		else if (cull_active && Test.cast_creature_abstract())
 		{
 			const bool decision_driven = (m_coop_decision_driven.find(Test.ID) != m_coop_decision_driven.end())
 				&& ((Device.dwTimeGlobal - m_coop_decision_driven[Test.ID]) < COOP_DECISION_DRIVEN_TTL_MS);
@@ -607,7 +637,6 @@ void xrServer::MakeUpdatePackets()
 		// throttle bookkeeping deferred to AFTER the write below (CodeRabbit): the timestamp must be
 		// stamped only once a NON-EMPTY update is actually queued, else an ObjectSize==0 pass (packet
 		// dropped) would still consume a throttle window and suppress the next real correction.
-		static xr_map<u16, u32> s_c2_last_sent; // per throttled creature: last throttled send time
 		bool c2_throttled_send = false;         // any throttled creature (C2 driven OR §3 -coop_npc_hz)
 		bool c2_is_driven = false;              // was the interval the decision-driven C2 window?
 		u32  c2_gap = 0;
@@ -624,15 +653,15 @@ void xrServer::MakeUpdatePackets()
 			if (eff_ms > 0)
 			{
 				c2_eff_ms = eff_ms; c2_is_driven = driven;
-				auto it = s_c2_last_sent.find(Test.ID);
-				if (it == s_c2_last_sent.end())
+				auto it = c2_last.find(Test.ID);
+				if (it == c2_last.end())
 				{
 					// First time throttled: seed a per-id PHASE (id % interval) so creatures don't all
 					// align on the same window boundary. Without this the whole population sends on the
 					// same pass every <interval> ms (thundering herd) — the average drops but the PEAK
 					// payload stays full; the phase spreads sends across passes, flattening the peak
 					// toward the ideal rate. Its first update lands on its staggered window.
-					s_c2_last_sent[Test.ID] = now - (Test.ID % u32(eff_ms));
+					c2_last[Test.ID] = now - (Test.ID % u32(eff_ms));
 					continue;
 				}
 				if ((now - it->second) < u32(eff_ms))
@@ -663,7 +692,7 @@ void xrServer::MakeUpdatePackets()
 				// jitter then decays after one cycle and the thundering-herd peak returns. Advancing by
 				// the interval keeps each creature on its own staggered cadence. Resync to `now` only after
 				// a big gap (creature just came online / server hitch) so we never burst-catch-up.
-				u32& ls = s_c2_last_sent[Test.ID];
+				u32& ls = c2_last[Test.ID];
 				ls = (Device.dwTimeGlobal - ls > 2u * u32(c2_eff_ms)) ? Device.dwTimeGlobal
 				                                                      : ls + u32(c2_eff_ms);
 				if (strstr(Core.Params, "-dbg"))
@@ -674,7 +703,9 @@ void xrServer::MakeUpdatePackets()
 		}
 	} //all entities
 
-	// §world-NPC-replication Phase 1: flush the per-pass creature tally at most once per ~3s.
+	// §world-NPC-replication Phase 1: flush the per-pass creature tally at most once per ~3s. Under inc3
+	// per-client builds this logs ONE client's view per window (population is the same; eligible/culled are
+	// that client's streamed / filtered-out counts) — the 3s static guard keeps it to one line per window.
 	if (s_npcdiag == 1)
 	{
 		static u32 s_nd_last = 0;
@@ -709,6 +740,35 @@ void xrServer::SendUpdatePacketsToAll()
 	}
 }
 
+// §3 win #2b inc3: collect one REAL client (owner set, id != 0 — the loopback self-client is excluded, as
+// in coop_gather_cull_anchors) as a per-client update target.
+void xrServer::coop_collect_update_target_cb(IClient* C)
+{
+	xrClientData* CL = static_cast<xrClientData*>(C);
+	if (CL && CL->owner && CL->owner->ID != 0)
+		m_coop_update_targets.push_back(CL);
+}
+
+// §3 win #2b inc3: send the packets built by MakeUpdatePackets(target) to ONE client (the per-client
+// update path). Mirrors SendUpdatePacketsToAll but SendTo a single client instead of SendBroadcast.
+void xrServer::SendUpdatePacketsTo(ClientID cid, bool save_demo)
+{
+	m_last_updates_size = 0; // this client's size (the caller aggregates across clients for the bw diag)
+	for (update_iterator_t i = m_update_begin; i != m_update_end; ++i)
+	{
+		NET_Packet& to_send = **i;
+		if (to_send.B.count > 2)
+		{
+			m_last_updates_size += to_send.B.count;
+			SendTo(cid, to_send, net_flags(FALSE, TRUE));
+			// Demo recording must capture the pass ONCE, not once per client (CodeRabbit): the per-client
+			// dispatch calls this for every real client, so only the first target saves.
+			if (save_demo && Level().IsDemoSave())
+				Level().SavePacket(to_send);
+		}
+	}
+}
+
 void xrServer::SendUpdatesToAll()
 {
 	// MP fork (§19 co-op): the co-op server runs game_sv_single, so IsGameTypeSingle() is TRUE
@@ -731,8 +791,44 @@ void xrServer::SendUpdatesToAll()
 
 	if ((Device.dwTimeGlobal - m_last_update_time) >= u32(1000 / psNET_ServerUpdate))
 	{
-		MakeUpdatePackets();
-		SendUpdatePacketsToAll();
+		// §3 win #2b inc3 (per-client update packets): under -coop_cull_radius, build+send a SEPARATE update
+		// stream per real client — each filtered to that client's relevance set — so spread players no longer
+		// pay for each other's NPCs. If there is no real client (loopback-only), or cull is off, fall back to
+		// the stock single global-union build broadcast to all. Gated; zero cost when the flag is off.
+		// NOTE: builds run sequentially (build client A → send A → build B → send B), reusing one compressor;
+		// this is safe ONLY while g_sv_traffic_optimization_level == eto_none (the co-op default — no
+		// cross-build delta cache / equal-update suppression that would share per-entity state across the
+		// per-client builds). If traffic optimization is ever enabled, we fall back to the stock global
+		// broadcast rather than risk cross-client corruption (guarded at runtime, not just documented).
+		bool per_client_sent = false;
+		if (coop_cull_on() && g_sv_traffic_optimization_level == eto_none)
+		{
+			m_coop_update_targets.clear();
+			fastdelegate::FastDelegate1<IClient*, void> cfd;
+			cfd.bind(this, &xrServer::coop_collect_update_target_cb);
+			ForEachClientDo(cfd);
+			if (!m_coop_update_targets.empty())
+			{
+				u32 total_sent = 0;
+				bool first = true;
+				for (xrClientData* CL : m_coop_update_targets)
+				{
+					MakeUpdatePackets(CL);              // build THIS client's filtered stream
+					SendUpdatePacketsTo(CL->ID, first);  // send only to it; demo-save the pass once (first only)
+					total_sent += m_last_updates_size;
+					first = false;
+				}
+				// bw diag samples m_last_updates_size as one client's rate — report the per-client AVERAGE
+				// across this pass, not just the last client's size (CodeRabbit).
+				m_last_updates_size = total_sent / (u32)m_coop_update_targets.size();
+				per_client_sent = true;
+			}
+		}
+		if (!per_client_sent)
+		{
+			MakeUpdatePackets();
+			SendUpdatePacketsToAll();
+		}
 
 		// §3 bandwidth quantification (-coop_npcdiag): the co-op server dense-streams the whole online
 		// creature population's M_UPDATE to EVERY client (Phase-1 diag: ~84 creatures, eligible==all). §3

@@ -107,10 +107,22 @@ private:
 	// MP fork (§19 co-op): run a dialogue action a thin client asked us to perform.
 	void coop_run_dialog_action(NET_Packet& P);
 
-	void MakeUpdatePackets();
+	// §3 win #2b inc3 (per-client update packets): when target_client != nullptr, build the update stream
+	// for JUST that client — ambient creatures are filtered to its relevance set (m_coop_rel_known), while
+	// player actors + non-creature entities still stream to everyone. nullptr = the stock global-union build
+	// (byte-identical to before). See DECISION_REPLICATION_PLAN.md.
+	void MakeUpdatePackets(xrClientData* target_client = nullptr);
 	void SendUpdatePacketsToAll();
+	void SendUpdatePacketsTo(ClientID cid, bool save_demo = true); // §3 inc3: send just-built packets to ONE client
 	u32 m_last_updates_size;
 	u32 m_last_update_time;
+	// §3 inc3: per-client throttle bookkeeping ([clientID][creatureID] = last throttled send). Keeping the
+	// throttle state per-client keeps -coop_npc_hz / -coop_update_throttle correct when they stack on the
+	// per-client stream (a creature relevant to two clients is rate-limited independently for each).
+	xr_map<u32, xr_map<u16, u32>> m_coop_c2_last_per_client;
+	// §3 inc3: real clients to build per-client update streams for (rebuilt each update pass; loopback excluded).
+	xr_vector<xrClientData*> m_coop_update_targets;
+	void coop_collect_update_target_cb(IClient* C); // ForEachClientDo callback: collect one real client
 
 
 	void SendServerInfoToClient(ClientID const& new_client);
