@@ -179,6 +179,15 @@ protected:
 	void coop_gather_cull_anchors();          // fill m_coop_cull_anchors from connected real clients
 	void coop_cull_anchor_cb(IClient* C);     // ForEachClientDo callback: push one client's actor pos
 
+	// §3 win #2b (per-client relevance, increment 1 = DIAGNOSTIC): per real client, the SIMULATED set of
+	// creature ids currently relevant (within the hysteresis band of that client's actor). The relevance
+	// pass computes would-spawn / would-despawn deltas against this and logs COOP_REL — no actual
+	// spawn/despawn yet (increment 2 wires those). Keyed by client id value. See DECISION_REPLICATION_PLAN.md.
+	xr_map<u32, xr_map<u16, char>> m_coop_rel_known;
+	u32 m_coop_rel_last = 0;                   // last relevance-pass time (throttled to ~2 Hz)
+	void coop_relevance_diag();                // run one relevance pass (all real clients)
+	void coop_relevance_client_cb(IClient* C); // ForEachClientDo callback: one client's delta + COOP_REL log
+
 public:
 	game_sv_GameState* game;
 

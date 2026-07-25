@@ -318,6 +318,66 @@ void xrServer::coop_gather_cull_anchors()
 	ForEachClientDo(fd);
 }
 
+// §3 win #2b increment 1 (DIAGNOSTIC): for one real client, compute the per-client relevance delta
+// (would-spawn = near+not-known, would-despawn = far+known, with R_in/R_out hysteresis) against the
+// SIMULATED known set, update that set, and log COOP_REL. No actual spawn/despawn — this sizes the
+// churn + steady-state relevant-set size to de-risk increment 2. Gated by -coop_cull_radius.
+void xrServer::coop_relevance_client_cb(IClient* C)
+{
+	xrClientData* CL = static_cast<xrClientData*>(C);
+	if (!CL || !CL->owner || CL->owner->ID == 0 || !_valid(CL->owner->o_Position))
+		return;
+
+	// R_in = cull radius; R_out = 1.33x (hysteresis band kills boundary flicker).
+	static float s_rin2 = -1.f, s_rout2 = -1.f;
+	if (s_rin2 < 0.f)
+	{
+		float r = 150.f;
+		if (const char* p = strstr(Core.Params, "-coop_cull_radius "))
+		{
+			const float v = (float)atof(p + xr_strlen("-coop_cull_radius "));
+			if (v > 0.f) r = v;
+		}
+		s_rin2 = r * r;
+		s_rout2 = (r * 1.33f) * (r * 1.33f);
+	}
+
+	const Fvector apos = CL->owner->o_Position;
+	xr_map<u16, char>& known = m_coop_rel_known[CL->ID.value()];
+	int would_spawn = 0, would_despawn = 0;
+
+	// spawn deltas: near creatures not yet known
+	for (xrS_entities::iterator I = entities.begin(); I != entities.end(); ++I)
+	{
+		CSE_Abstract& E = *(I->second);
+		if (0 == E.owner || !E.cast_creature_abstract()) continue;
+		const float d2 = apos.distance_to_sqr(E.o_Position);
+		const bool is_known = (known.find(E.ID) != known.end());
+		if (!is_known && d2 <= s_rin2) { known[E.ID] = 1; ++would_spawn; }
+	}
+	// despawn deltas: known creatures now beyond R_out, or gone offline
+	for (xr_map<u16, char>::iterator it = known.begin(); it != known.end(); )
+	{
+		CSE_Abstract* E = ID_to_entity(it->first);
+		bool drop = false;
+		if (!E || !E->cast_creature_abstract() || 0 == E->owner) drop = true;
+		else if (apos.distance_to_sqr(E->o_Position) > s_rout2) drop = true;
+		if (drop) { it = known.erase(it); ++would_despawn; }
+		else ++it;
+	}
+
+	Msg("~ COOP_REL: [client 0x%08x] relevant=%u would_spawn=%d would_despawn=%d",
+		CL->ID.value(), (u32)known.size(), would_spawn, would_despawn);
+	FlushLog();
+}
+
+void xrServer::coop_relevance_diag()
+{
+	fastdelegate::FastDelegate1<IClient*, void> fd;
+	fd.bind(this, &xrServer::coop_relevance_client_cb);
+	ForEachClientDo(fd);
+}
+
 void xrServer::MakeUpdatePackets()
 {
 	NET_Packet tmpPacket;
@@ -606,6 +666,20 @@ void xrServer::SendUpdatesToAll()
 #endif
 		m_last_update_time = Device.dwTimeGlobal;
 	}
+
+	// §3 win #2b increment 1 (DIAGNOSTIC): run the per-client relevance pass at ~2 Hz (relevance changes
+	// at player speed, not per 30 Hz update pass) when -coop_cull_radius is on. Computes + logs per-client
+	// spawn/despawn deltas (COOP_REL); no actual spawn/despawn yet. Gated; zero cost when the flag is off.
+	{
+		static int s_rel = -2; // -2 unparsed, -1 off, 1 on
+		if (s_rel == -2) s_rel = strstr(Core.Params, "-coop_cull_radius ") ? 1 : -1;
+		if (s_rel == 1 && (Device.dwTimeGlobal - m_coop_rel_last) >= 500)
+		{
+			m_coop_rel_last = Device.dwTimeGlobal;
+			coop_relevance_diag();
+		}
+	}
+
 	if (m_file_transfers)
 	{
 		m_file_transfers->update_transfer();
