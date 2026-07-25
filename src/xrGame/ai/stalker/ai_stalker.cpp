@@ -991,6 +991,40 @@ void CAI_Stalker::net_Import(NET_Packet& P)
 
 	float health;
 	P.r_float(health);
+	// MP fork (§world-NPC-replication Phase 2, -coop_npcdeath): CAI_Stalker OVERRIDES net_Import and does
+	// NOT chain to CCustomMonster::net_Import, so the death/streaming diagnostic there NEVER ran for
+	// stalkers (the scope commit's "0 MP_NPCDEATH" was measured in a function stalkers bypass). Stalkers
+	// are the combat NPCs that get killed, so instrument HERE. Reveals whether a server-killed stalker's
+	// health actually streams to <=0 on the client, and whether the puppet then dies (g_Alive()).
+	{
+		static int s_nd = -1;
+		if (s_nd < 0) s_nd = strstr(Core.Params, "-coop_npcdeath") ? 1 : 0;
+		if (s_nd && xr_enet::enabled() && !ai().get_alife())
+		{
+			const float old_hp = GetfHealth();
+			if (health <= 0.f && old_hp > 0.f)
+			{
+				Msg("~ MP_NPCDEATH: [CLIENT] STALKER id=%u DIED via stream (hp %.2f->%.2f) alive_before=%d",
+					ID(), old_hp, health, g_Alive() ? 1 : 0);
+				FlushLog();
+			}
+			else if (health < old_hp - 0.05f)
+			{
+				Msg("~ MP_NPCDEATH: [CLIENT] STALKER id=%u took damage (hp %.2f->%.2f)", ID(), old_hp, health);
+				FlushLog();
+			}
+			static u32 s_su = 0; static float s_smin = 1e9f; static u32 s_slast = 0;
+			s_su++; if (health < s_smin) s_smin = health;
+			if ((Device.dwTimeGlobal - s_slast) >= 5000)
+			{
+				s_slast = Device.dwTimeGlobal;
+				Msg("~ COOP_NPCHP: [CLIENT] STALKER net_Import updates=%u minhp_seen=%.2f (last id=%u hp=%.2f alive=%d)",
+					s_su, (s_smin > 1e8f ? -1.f : s_smin), ID(), health, g_Alive() ? 1 : 0);
+				FlushLog();
+				s_su = 0; s_smin = 1e9f;
+			}
+		}
+	}
 	SetfHealth(health);
 	//	fEntityHealth = health;
 
