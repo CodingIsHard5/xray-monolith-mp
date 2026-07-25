@@ -895,38 +895,51 @@ void CCustomMonster::UpdateCL()
 		// manager integrates its AI path via move_along_path) exactly like a Local object; it fills
 		// NET_Last.p_pos (by reference) with the locally-computed advanced position. The apply block
 		// below then writes that into the object XFORM (see the C1b note there).
-		if ((Local() || m_coop_locally_driven) && g_Alive())
+		//
+		// §3 item 3 inc2 (autonomous fall fix): SELF-INTEGRATION must be conditional for the AUTONOMOUS
+		// case. A locally-driven monster with NO script order (the -coop_autolocal generalisation: it runs
+		// its own StateMan) sits in an IDLE/rest state whenever it has no enemy/target, so movement() is
+		// DISABLED. Self-integrating then runs the client physics with no locomotion holding the body and it
+		// FREE-FALLS through the floor (observed: Y 27→-19→-54). So an autonomous (NOT script-controlled)
+		// locally-driven monster self-integrates ONLY while its AI is actively moving (movement().enabled());
+		// when idle it falls through to the streamed-puppet position below (NET_Last is the interpolated
+		// stream here), letting the sparse server correction hold it in place — the soft-correction design
+		// (idle ⇒ server holds, active ⇒ local AI drives). SCRIPT-CONTROLLED locally-driven NPCs (the proven
+		// decision-driven KIND_MOVE/C1b/C2 path) are UNCHANGED — they always self-integrate as before.
+		const bool coop_local_active =
+			m_coop_locally_driven && (GetScriptControl() || movement().enabled());
+		// §14 step 3 (increment C1b): confirm the local movement pipeline is live and the body is
+		// advancing. GATED behind -coop_local_ai (parsed once) so it is silent in normal play, and
+		// throttled with no per-sample FlushLog — CodeRabbit: avoid per-frame synchronous I/O and
+		// unconditional hot-path logging. Logged for ANY locally-driven monster (idle or active) so the
+		// selfint decision is observable.
+		static int s_c1b_enabled = -1; // -1 unparsed, 0 off, 1 on
+		if (s_c1b_enabled == -1)
+			s_c1b_enabled = strstr(Core.Params, "-coop_local_ai") ? 1 : 0;
+		if (s_c1b_enabled && Remote() && m_coop_locally_driven)
+		{
+			static u32 s_c1b_log = 0;
+			if ((s_c1b_log++ % 30) == 0)
+			{
+				CPHMovementControl* mc = character_physics_support() ? character_physics_support()->movement() : NULL;
+				const Fvector p = Position();
+				Msg("- MP_C1B: id=%u en=%d selfint=%d sctrl=%d path_n=%u desspd=%.3f pcompl=%d spd=%.3f chExist=%d chEn=%d pos=%.2f,%.2f",
+					ID(),
+					movement().enabled() ? 1 : 0,
+					coop_local_active ? 1 : 0,
+					GetScriptControl() ? 1 : 0,
+					(u32)movement().detail().path().size(),
+					movement().old_desirable_speed(),
+					movement().path_completed() ? 1 : 0,
+					movement().speed(),
+					mc ? (mc->CharacterExist() ? 1 : 0) : -1,
+					(mc && mc->CharacterExist()) ? (mc->IsCharacterEnabled() ? 1 : 0) : -1,
+					p.x, p.z);
+			}
+		}
+		if ((Local() || coop_local_active) && g_Alive())
 		{
 #pragma todo("Dima to All : this is FAKE, network is not supported here!")
-
-			// §14 step 3 (increment C1b): confirm the local movement pipeline is live and the body is
-			// advancing. Logs the pipeline state + the object's current XZ (which reflects the PRIOR
-			// frame's translate_over apply, so it advances frame-to-frame). GATED behind -coop_local_ai
-			// (the C-workstream opt-in, parsed once) so it is silent in normal play, and throttled with
-			// no per-sample FlushLog (relies on the normal log cadence) — CodeRabbit: avoid per-frame
-			// synchronous I/O and unconditional hot-path logging.
-			static int s_c1b_enabled = -1; // -1 unparsed, 0 off, 1 on
-			if (s_c1b_enabled == -1)
-				s_c1b_enabled = strstr(Core.Params, "-coop_local_ai") ? 1 : 0;
-			if (s_c1b_enabled && Remote() && m_coop_locally_driven)
-			{
-				static u32 s_c1b_log = 0;
-				if ((s_c1b_log++ % 30) == 0)
-				{
-					CPHMovementControl* mc = character_physics_support() ? character_physics_support()->movement() : NULL;
-					const Fvector p = Position();
-					Msg("- MP_C1B: id=%u en=%d path_n=%u desspd=%.3f pcompl=%d spd=%.3f chExist=%d chEn=%d pos=%.2f,%.2f",
-						ID(),
-						movement().enabled() ? 1 : 0,
-						(u32)movement().detail().path().size(),
-						movement().old_desirable_speed(),
-						movement().path_completed() ? 1 : 0,
-						movement().speed(),
-						mc ? (mc->CharacterExist() ? 1 : 0) : -1,
-						(mc && mc->CharacterExist()) ? (mc->IsCharacterEnabled() ? 1 : 0) : -1,
-						p.x, p.z);
-				}
-			}
 			UpdatePositionAnimation();
 		}
 
