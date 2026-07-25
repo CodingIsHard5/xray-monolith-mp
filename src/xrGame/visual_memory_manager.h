@@ -118,6 +118,11 @@ public:
 	// some time ago <= current_params.m_still_visible_time
 	bool visible_now(const CGameObject* game_object) const;
 
+	// MP fork (§4C headless perception diag): expose the renderer-supplied luminocity of a target
+	// (the multiplier in the visible() spotting accumulator). ~0 headless -> that is the root cause
+	// of visible_now=false for feel_vision-visible enemies. Read-only.
+	float coop_vissdbg_luminocity(const CGameObject* game_object) const { return object_luminocity(game_object); }
+
 public:
 	void enable(const CObject* object, bool enable);
 

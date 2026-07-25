@@ -1119,12 +1119,13 @@ void CCustomMonster::coop_vissdbg_dump(const CGameObject* target)
 	const u32   seen_cnt = feel_vision_seen_count();
 	const bool  in_frus  = feel_vision_in_frustum(target_obj);
 	const float fuzzy    = feel_vision_fuzzy_of(target_obj);
+	const float lum      = memory().visual().coop_vissdbg_luminocity(target);
 	const bool  vis_now  = memory().visual().visible_now(target);
 	const bool  vis_rn   = memory().visual().visible_right_now(target);
 
-	Msg("~ MP_VISSDBG: id=%u target=%u dist=%.2f ang=%.1f fov=%.1f range=%.1f | enabled=%d seen=%u in_frustum=%d fuzzy=%.3f | visible_right_now=%d visible_now=%d",
+	Msg("~ MP_VISSDBG: id=%u target=%u dist=%.2f ang=%.1f fov=%.1f range=%.1f | enabled=%d seen=%u in_frustum=%d fuzzy=%.3f lum=%.4f | visible_right_now=%d visible_now=%d",
 		ID(), target->ID(), dist, ang_deg, eye_fov, eye_range,
-		en ? 1 : 0, seen_cnt, in_frus ? 1 : 0, fuzzy,
+		en ? 1 : 0, seen_cnt, in_frus ? 1 : 0, fuzzy, lum,
 		vis_rn ? 1 : 0, vis_now ? 1 : 0);
 	FlushLog();
 }

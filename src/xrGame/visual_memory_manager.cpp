@@ -30,6 +30,10 @@
 
 float g_ai_vision_speed_boost = 1.0f;
 
+// MP fork (§4C headless perception): the renderless authoritative server has no lighting, so the
+// light-dependent spotting model below cannot work. See CVisualMemoryManager::visible().
+extern ENGINE_API bool g_dedicated_server;
+
 #ifndef MASTER_GOLD
 #	include "actor.h"
 #	include "ai_debug.h"
@@ -417,6 +421,21 @@ bool CVisualMemoryManager::visible(const CGameObject* game_object, float time_de
 
 	if (game_object->getDestroy())
 		return (false);
+
+	// MP fork (§4C headless perception): on the renderless authoritative server there is no
+	// lighting, so the gradual light-dependent spotting accumulator below never accrues —
+	// object_luminocity() -> ROS()->get_luminocity() is ~0 headless, and it multiplies
+	// get_visible_value(), so m_value never crosses m_visibility_threshold. The result is that
+	// enemies feel_vision already reports as geometrically visible (in-frustum, LOS-clear,
+	// fuzzy=1.0) never become visible_now, so server-side stalkers can't aim/fire (melee monsters,
+	// which trigger on adjacency, are unaffected). Root-caused with the -coop_vissdbg diagnostic:
+	// enabled=1, in_frustum=1, fuzzy=1.0, yet visible_now=0 (dev/HEADLESS_VISIBILITY_SCOPE.md).
+	// This function is called ONLY for feel_vision_get results (add_visible_object), so an object
+	// reaching here is already geometrically visible; treat it as perceived. Perception on the
+	// server is thus LOS/geometry-based — exactly the deterministic authoritative model we want,
+	// and independent of any renderer. Gated to the dedicated server; SP/clients are unchanged.
+	if (g_dedicated_server)
+		return (true);
 
 #ifndef USE_STALKER_VISION_FOR_MONSTERS
 	if (!m_stalker && !m_client)
