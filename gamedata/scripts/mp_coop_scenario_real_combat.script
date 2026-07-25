@@ -1,0 +1,140 @@
+--[[
+	Probe: do REAL online STALKER squad members FIGHT when made hostile? (dev/ALIFE_SQUAD_DECISIONS.md)
+
+	The §4C diagnosis: a SPAWNED stalker won't fight because it has no combat SCHEME. A REAL A-Life stalker
+	(from a squad) HAS active gulag/xr_logic including combat behaviour — so forcing an enemy into its
+	memory should make it actually FIGHT via its own scheme (best_enemy is the correct probe for stalkers,
+	unlike monsters). We do NOT take script control (that would suppress the scheme).
+
+	Recipe: anchor STALKER squads online -> find two online stalkers near each other -> force hostile
+	(set_relation enemy + force_set_goodwill both ways) + force PERCEPTION (make_object_visible_somewhen,
+	stalker-only) -> observe best_enemy / distance / hp. Server-side, under -coop_real_combat.
+--]]
+
+local ANCHOR_BASE = 8
+local TOP_SQUADS  = 8
+local SETTLE_MS   = 14000
+local NEAR_M      = 60     -- the two stalkers must start within this of each other
+
+local st = { phase = "wait", last = 0, a = nil, b = nil, applied = false, ticks = 0 }
+
+local function logf(...) printf("%s", string.format(...)) end
+local function dist_xz(a, b) local dx, dz = a.x - b.x, a.z - b.z; return math.sqrt(dx * dx + dz * dz) end
+local function se_pos(se) local p; pcall(function() p = se.position end); if type(p) ~= "userdata" then pcall(function() p = se:position() end) end; return (type(p) == "userdata") and p or nil end
+local function se_level(se) local l; pcall(function() l = game_graph():vertex(se.m_game_vertex_id):level_id() end); return l end
+
+local function is_monster_squad(squad, squad_id)
+	local fac, nm = "", ""
+	pcall(function() fac = tostring(squad.player_id) end)
+	pcall(function() nm = tostring(alife():object(squad_id):name()) end)
+	return (string.find(fac, "monster", 1, true) ~= nil) or (string.find(nm, "simulation_", 1, true) ~= nil)
+end
+
+-- anchor the nearest same-level STALKER (non-monster) squads' positions -> switch them online
+local function anchor_stalker_squads(actor_lvl, ap)
+	local board; pcall(function() board = sim_board.get_sim_board() end)
+	if not board or not board.smarts then return 0 end
+	local out = {}
+	for smart_id, sd in pairs(board.smarts) do
+		local squads; pcall(function() squads = sd.squads end)
+		if squads then
+			for squad_id, squad in pairs(squads) do
+				if not is_monster_squad(squad, squad_id) then
+					local se; pcall(function() se = alife():object(squad_id) end)
+					if se then
+						local lvl, pos = se_level(se), se_pos(se)
+						if pos and (actor_lvl == nil or lvl == actor_lvl) then
+							out[#out + 1] = { pos = pos, d = ap and dist_xz(pos, ap) or 1e9 }
+						end
+					end
+				end
+			end
+		end
+	end
+	table.sort(out, function(a, b) return a.d < b.d end)
+	local n = 0
+	for i = 1, math.min(#out, TOP_SQUADS) do
+		if pcall(function() game.mp_anchor_set(ANCHOR_BASE + i - 1, out[i].pos) end) then n = n + 1 end
+	end
+	st.anchor_pts = out
+	return n
+end
+
+-- collect online alive stalkers near the anchors; return the first PAIR within NEAR_M of each other
+local function find_stalker_pair()
+	if not st.anchor_pts then return nil, nil end
+	local seen, list = {}, {}
+	for i = 1, math.min(#st.anchor_pts, TOP_SQUADS) do
+		local ap = st.anchor_pts[i].pos
+		pcall(function()
+			level.iterate_nearest(ap, 80, function(o)
+				if o and o:alive() and o:is_stalker() and not seen[o:id()] then
+					seen[o:id()] = true; list[#list + 1] = o
+				end
+				return false
+			end)
+		end)
+	end
+	for i = 1, #list do
+		for j = i + 1, #list do
+			if dist_xz(list[i]:position(), list[j]:position()) <= NEAR_M then
+				return list[i], list[j]
+			end
+		end
+	end
+	return nil, nil
+end
+
+local function make_hostile(a, b)
+	pcall(function() a:set_relation(game_object.enemy, b); a:force_set_goodwill(-3000, b) end)
+	pcall(function() b:set_relation(game_object.enemy, a); b:force_set_goodwill(-3000, a) end)
+	-- force each into the other's VISUAL memory so best_enemy populates and the combat scheme engages
+	pcall(function() a:make_object_visible_somewhen(b) end)
+	pcall(function() b:make_object_visible_somewhen(a) end)
+end
+
+local function enemy_id(o) local be = o:best_enemy(); return be and be:id() or nil end
+
+local function tick_impl(now_ms, real_count, actor_id)
+	if real_count < 1 or not actor_id or actor_id == 0 then return end
+	local e = now_ms - st.last; if e < 0 then e = e + 4294967296 end
+	if e < 1500 then return end
+	st.last = now_ms
+	local actor = level.object_by_id(actor_id)
+	local ase; pcall(function() ase = alife():object(actor_id) end)
+	local alvl = ase and se_level(ase) or nil
+	local ap = actor and actor:position() or nil
+
+	if st.phase == "wait" then
+		local n = anchor_stalker_squads(alvl, ap)
+		logf("~ MP_RC: anchored %d stalker-squad positions (switching online); settling %dms", n, SETTLE_MS)
+		st.phase = "settle"; st.settle_start = now_ms; return
+	end
+	if st.phase == "settle" then
+		local s = now_ms - st.settle_start; if s < 0 then s = s + 4294967296 end
+		if s < SETTLE_MS then return end
+		st.phase = "find"; return
+	end
+	if st.phase == "find" then
+		local a, b = find_stalker_pair()
+		if not a then logf("~ MP_RC: no online stalker pair near each other yet; retry"); return end
+		st.a, st.b = a:id(), b:id()
+		logf("~ MP_RC: PAIR A=%d(%s,%s) B=%d(%s,%s) dist=%.1f", st.a, a:name(), a:character_community(), st.b, b:name(), b:character_community(), dist_xz(a:position(), b:position()))
+		st.phase = "fight"; return
+	end
+	if st.phase == "fight" then
+		local a, b = level.object_by_id(st.a), level.object_by_id(st.b)
+		if not a or not b then logf("~ MP_RC: A or B gone (a=%s b=%s) — a stalker may have DIED", tostring(a ~= nil), tostring(b ~= nil)); return end
+		if not st.applied then make_hostile(a, b); st.applied = true; logf("~ MP_RC: made hostile + forced mutual perception") end
+		-- re-force perception each tick (memory can decay); do NOT take script control (scheme must run)
+		pcall(function() a:make_object_visible_somewhen(b); b:make_object_visible_somewhen(a) end)
+		st.ticks = st.ticks + 1
+		logf("~ MP_RC: [REAL] #%d dist=%.2f | A hp=%.2f best_enemy=%s | B hp=%.2f best_enemy=%s",
+			st.ticks, dist_xz(a:position(), b:position()), a.health, tostring(enemy_id(a)), b.health, tostring(enemy_id(b)))
+	end
+end
+
+function tick(now_ms, real_count, actor_id)
+	local ok, err = pcall(tick_impl, now_ms, real_count, actor_id)
+	if not ok then logf("! MP_RC error: %s", tostring(err)) end
+end
