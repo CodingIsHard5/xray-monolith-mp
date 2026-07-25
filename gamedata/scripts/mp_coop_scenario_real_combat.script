@@ -140,6 +140,11 @@ local function tick_impl(now_ms, real_count, actor_id)
 		if not st.applied then make_hostile(a, b); st.applied = true; logf("~ MP_RC: made hostile + forced mutual perception") end
 		-- re-force perception each tick (memory can decay); do NOT take script control (scheme must run)
 		pcall(function() a:make_object_visible_somewhen(b); b:make_object_visible_somewhen(a) end)
+		-- EXPERIMENT (headless-visibility scope): force each to LOOK AT + FIRE AT the other. set_sight(obj,
+		-- torso_look, fire_object=true) points the head at the enemy (bootstraps the first sighting past the
+		-- sight-orientation deadlock) and commands firing. If they now damage each other, lethal stalker
+		-- combat is a GAMEDATA fix (no engine change).
+		pcall(function() a:set_sight(b, true, true); b:set_sight(a, true, true) end)
 		st.ticks = st.ticks + 1
 		-- diagnostics: does each SEE the other (LOS, needed to aim/fire), have a weapon, and is it DRAWN?
 		local a_see, b_see, a_wpn, b_wpn, a_un, b_un = "?","?","?","?","?","?"
