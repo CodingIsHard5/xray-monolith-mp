@@ -440,7 +440,14 @@ void xrServer::MakeUpdatePackets()
 			// §4 step 3 (C2): a real update is going out — NOW stamp the throttle time (see above).
 			if (c2_throttled_send)
 			{
-				s_c2_last_sent[Test.ID] = Device.dwTimeGlobal;
+				// PHASE-PRESERVING: advance the schedule by exactly one interval, not to `now`. Stamping
+				// `now` re-aligns every creature that happened to send on the same pass — the per-id phase
+				// jitter then decays after one cycle and the thundering-herd peak returns. Advancing by
+				// the interval keeps each creature on its own staggered cadence. Resync to `now` only after
+				// a big gap (creature just came online / server hitch) so we never burst-catch-up.
+				u32& ls = s_c2_last_sent[Test.ID];
+				ls = (Device.dwTimeGlobal - ls > 2u * u32(c2_eff_ms)) ? Device.dwTimeGlobal
+				                                                      : ls + u32(c2_eff_ms);
 				if (strstr(Core.Params, "-dbg"))
 					Msg("* COOP_THROTTLE: id=%u SENT gap=%ums (interval=%dms, %s)",
 					    Test.ID, c2_gap, c2_eff_ms, c2_is_driven ? "driven" : "npc_hz");
