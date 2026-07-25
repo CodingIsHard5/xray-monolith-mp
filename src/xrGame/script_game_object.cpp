@@ -346,7 +346,9 @@ bool CScriptGameObject::CheckObjectVisibility(const CScriptGameObject* tpLuaGame
 // enemy selection (nil headless). Localizes B (raycast/frustum drop) vs C (feel_vision off).
 void CScriptGameObject::VisDbg(const CScriptGameObject* tpLuaGameObject)
 {
-	if (!tpLuaGameObject)
+	// This is bound plainly (not via SAFE_WRAP, which would validate for us), so guard both
+	// wrappers explicitly — a Lua call with a cleared/stale object must not crash the server.
+	if (!is_valid() || !tpLuaGameObject || !tpLuaGameObject->is_valid())
 		return;
 	CCustomMonster* monster = smart_cast<CCustomMonster*>(&object());
 	if (!monster)
