@@ -390,8 +390,10 @@ void xrServer::MakeUpdatePackets()
 		// stamped only once a NON-EMPTY update is actually queued, else an ObjectSize==0 pass (packet
 		// dropped) would still consume a throttle window and suppress the next real correction.
 		static xr_map<u16, u32> s_c2_last_sent; // per throttled creature: last throttled send time
-		bool c2_driven_send = false;
+		bool c2_throttled_send = false;         // any throttled creature (C2 driven OR §3 -coop_npc_hz)
+		bool c2_is_driven = false;              // was the interval the decision-driven C2 window?
 		u32  c2_gap = 0;
+		int  c2_eff_ms = 0;                     // the interval actually applied (for the -dbg log)
 		if ((s_throttle_ms > 0 || s_npc_hz_ms > 0) && xr_enet::enabled() && Test.cast_creature_abstract())
 		{
 			const u32 now = Device.dwTimeGlobal;
@@ -403,11 +405,22 @@ void xrServer::MakeUpdatePackets()
 			const int eff_ms = (driven && s_throttle_ms > 0) ? s_throttle_ms : s_npc_hz_ms;
 			if (eff_ms > 0)
 			{
+				c2_eff_ms = eff_ms; c2_is_driven = driven;
 				auto it = s_c2_last_sent.find(Test.ID);
-				if (it != s_c2_last_sent.end() && (now - it->second) < u32(eff_ms))
+				if (it == s_c2_last_sent.end())
+				{
+					// First time throttled: seed a per-id PHASE (id % interval) so creatures don't all
+					// align on the same window boundary. Without this the whole population sends on the
+					// same pass every <interval> ms (thundering herd) — the average drops but the PEAK
+					// payload stays full; the phase spreads sends across passes, flattening the peak
+					// toward the ideal rate. Its first update lands on its staggered window.
+					s_c2_last_sent[Test.ID] = now - (Test.ID % u32(eff_ms));
+					continue;
+				}
+				if ((now - it->second) < u32(eff_ms))
 					continue; // within the throttle window — skip this creature's update this pass
-				c2_driven_send = true;
-				c2_gap = (it != s_c2_last_sent.end()) ? (now - it->second) : 0;
+				c2_throttled_send = true;
+				c2_gap = now - it->second;
 			}
 		}
 
@@ -425,12 +438,12 @@ void xrServer::MakeUpdatePackets()
 			if (g_Dump_Update_Write) Msg("* %s : %d", Test.name(), ObjectSize);
 #endif
 			// §4 step 3 (C2): a real update is going out — NOW stamp the throttle time (see above).
-			if (c2_driven_send)
+			if (c2_throttled_send)
 			{
 				s_c2_last_sent[Test.ID] = Device.dwTimeGlobal;
 				if (strstr(Core.Params, "-dbg"))
-					Msg("* COOP_C2_THROTTLE: id=%u SENT gap=%ums (throttle=%dms, driven)",
-					    Test.ID, c2_gap, s_throttle_ms);
+					Msg("* COOP_THROTTLE: id=%u SENT gap=%ums (interval=%dms, %s)",
+					    Test.ID, c2_gap, c2_eff_ms, c2_is_driven ? "driven" : "npc_hz");
 			}
 			m_updator.write_update_for(Test.ID, tmpPacket);
 		}
