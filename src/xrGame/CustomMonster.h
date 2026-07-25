@@ -163,6 +163,10 @@ public:
 	virtual void eye_pp_s0();
 	void eye_pp_s1();
 	void eye_pp_s2();
+	// MP fork (§4C headless-visibility diag, -coop_vissdbg): throttled per-schedule dump of
+	// this NPC's feel_vision internals against its selected enemy. Localizes B (o_trace/raycast
+	// drops a frustum hit) vs C (feel_vision not enabled / not updating) on the dedicated server.
+	void coop_vissdbg_log();
 
 	virtual void UpdateCamera();
 

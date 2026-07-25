@@ -59,6 +59,24 @@ namespace Feel
 			for (; I != E; ++I) if (positive(I->fuzzy)) R.push_back(I->O);
 		}
 
+		// MP fork (§4C headless-visibility diag, -coop_vissdbg): read-only probes of the
+		// internal frustum/trace state for one target object. `seen` is private, so expose
+		// how many objects survived the q_frustum pass, whether a given target is among them,
+		// and its o_trace fuzzy (potentially-visible list; -2 = never entered that list).
+		u32 feel_vision_seen_count() const { return (u32)seen.size(); }
+		bool feel_vision_in_frustum(CObject* O) const
+		{
+			for (xr_vector<CObject*>::const_iterator I = seen.begin(); I != seen.end(); ++I)
+				if (*I == O) return true;
+			return false;
+		}
+		float feel_vision_fuzzy_of(CObject* O) const
+		{
+			for (xr_vector<feel_visible_Item>::const_iterator I = feel_visible.begin(); I != feel_visible.end(); ++I)
+				if (I->O == O) return I->fuzzy;
+			return -2.f;
+		}
+
 		Fvector feel_vision_get_vispoint(CObject* _O)
 		{
 			xr_vector<feel_visible_Item>::iterator I = feel_visible.begin(), E = feel_visible.end();
