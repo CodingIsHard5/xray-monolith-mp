@@ -1,0 +1,159 @@
+--[[
+	Drive a REAL online A-Life squad member with KIND_MOVE (dev/ALIFE_SQUAD_DECISIONS.md, Level A).
+
+	Uses the proven recipe to put real squads online (persistent anchors at squad positions), then picks an
+	online MONSTER squad member near an anchor (Spike 2: monsters obey scripted movement; bipeds freeze),
+	and drives it to a decided target with the same move order the spawned-monster demos use. The NEW thing
+	vs those demos: the NPC is a REAL A-Life member with an ACTIVE gulag/xr_logic job that FIGHTS script
+	control — so we PERSISTENTLY re-capture (re-take + re-issue whenever the gulag reclaims it). Also
+	broadcasts KIND_MOVE so a client in range replicates it.
+
+	Server-side; runs via the decision tick under -coop_real_move (pair with -coop_sqsw for [SQSW] logs).
+--]]
+
+local KIND_MOVE = mp_coop_decision_client.KIND_MOVE
+local ANCHOR_BASE = 8
+local TOP_SQUADS  = 8
+local SETTLE_MS   = 14000
+local TARGET_DIST = 15
+local DIST_TO_END = 1.5
+local REACH_M     = 3.0
+local BCAST_MS    = 3000
+local LEAD_MS     = 500
+
+local st = { phase = "wait", last = 0, subject = nil, tvid = nil, tpos = nil, last_bcast = 0, recaptures = 0, issued = false }
+
+local function logf(...) printf("%s", string.format(...)) end
+local function dist_xz(a, b) local dx, dz = a.x - b.x, a.z - b.z; return math.sqrt(dx * dx + dz * dz) end
+local function valid_lvid(v) return v ~= nil and v ~= 4294967295 and v ~= 65535 end
+
+local function se_pos(se) local p; pcall(function() p = se.position end); if type(p) ~= "userdata" then pcall(function() p = se:position() end) end; return (type(p) == "userdata") and p or nil end
+local function se_level(se) local l; pcall(function() l = game_graph():vertex(se.m_game_vertex_id):level_id() end); return l end
+
+-- anchor the nearest same-level squads' se positions (switches them online) — persistent range [8,16)
+local function anchor_squads(actor_lvl, ap)
+	local board; pcall(function() board = sim_board.get_sim_board() end)
+	if not board or not board.smarts then return 0 end
+	local out = {}
+	for smart_id, sd in pairs(board.smarts) do
+		local squads; pcall(function() squads = sd.squads end)
+		if squads then
+			for squad_id in pairs(squads) do
+				local se; pcall(function() se = alife():object(squad_id) end)
+				if se then
+					local lvl, pos = se_level(se), se_pos(se)
+					if pos and (actor_lvl == nil or lvl == actor_lvl) then
+						out[#out + 1] = { pos = pos, d = ap and dist_xz(pos, ap) or 1e9 }
+					end
+				end
+			end
+		end
+	end
+	table.sort(out, function(a, b) return a.d < b.d end)
+	local n = 0
+	for i = 1, math.min(#out, TOP_SQUADS) do
+		if pcall(function() game.mp_anchor_set(ANCHOR_BASE + i - 1, out[i].pos) end) then n = n + 1 end
+	end
+	st.anchor_pts = out
+	return n
+end
+
+-- find an online, alive MONSTER near any anchor
+local function find_monster()
+	if not st.anchor_pts then return nil end
+	local found = nil
+	for i = 1, math.min(#st.anchor_pts, TOP_SQUADS) do
+		local ap = st.anchor_pts[i].pos
+		pcall(function()
+			level.iterate_nearest(ap, 40, function(o)
+				if o and o:alive() and o:is_monster() and o:get_script() == false then
+					found = o; return true
+				end
+				return false
+			end)
+		end)
+		if found then return found end
+	end
+	return nil
+end
+
+-- choose a reachable target vertex ~TARGET_DIST from the monster (8 headings, farthest)
+local DIRS = { {1,0},{-1,0},{0,1},{0,-1},{0.7071,0.7071},{-0.7071,0.7071},{0.7071,-0.7071},{-0.7071,-0.7071} }
+local function choose_target(obj)
+	local lvid0 = obj:level_vertex_id(); local p = obj:position()
+	local bvid, bpos, bd = nil, nil, 0
+	for _, dd in ipairs(DIRS) do
+		local vid; pcall(function() vid = level.vertex_in_direction(lvid0, vector():set(dd[1],0,dd[2]), TARGET_DIST) end)
+		if valid_lvid(vid) then
+			local pos; pcall(function() pos = level.vertex_position(vid) end)
+			if type(pos) == "userdata" then local d = dist_xz(p, pos); if d > bd then bd, bvid, bpos = d, vid, pos end end
+		end
+	end
+	if bvid then return bvid, bpos end
+	return lvid0, p
+end
+
+-- drive the monster to (vid,pos). Persistent re-capture: real NPC gulag reclaims control, so re-take.
+local function drive(obj, vid, pos)
+	if obj:get_script() == false then
+		obj:script(true, "mp_coop_scenario_real_move"); obj:enable_vision(false)
+		st.recaptures = st.recaptures + 1; st.issued = false
+	end
+	if not st.issued then
+		local a = entity_action()
+		if valid_lvid(vid) then a:set_action(move(move.walk_fwd, vid, vector():set(pos.x,pos.y,pos.z), DIST_TO_END))
+		else a:set_action(move(move.walk_fwd, vector():set(pos.x,pos.y,pos.z), DIST_TO_END)) end
+		a:set_action(cond(cond.move_end))
+		obj:reset_action_queue(); obj:command(a, false); st.issued = true
+	end
+end
+
+local function tick_impl(now_ms, real_count, actor_id)
+	if real_count < 1 or not actor_id or actor_id == 0 then return end
+	local e = now_ms - st.last; if e < 0 then e = e + 4294967296 end
+	if e < 1000 then return end
+	st.last = now_ms
+	local actor = level.object_by_id(actor_id)
+	local ase; pcall(function() ase = alife():object(actor_id) end)
+	local alvl = ase and se_level(ase) or nil
+	local ap = actor and actor:position() or nil
+
+	if st.phase == "wait" then
+		local n = anchor_squads(alvl, ap)
+		logf("~ MP_RM: anchored %d squad positions (switching online); settling %dms", n, SETTLE_MS)
+		st.phase = "settle"; st.settle_start = now_ms; return
+	end
+	if st.phase == "settle" then
+		local s = now_ms - st.settle_start; if s < 0 then s = s + 4294967296 end
+		if s < SETTLE_MS then return end
+		st.phase = "find"; return
+	end
+	if st.phase == "find" then
+		local m = find_monster()
+		if not m then logf("~ MP_RM: no online monster found near anchors yet; retry"); return end
+		st.subject = m:id()
+		st.tvid, st.tpos = choose_target(m)
+		logf("~ MP_RM: SUBJECT real monster id=%d name=%s at %.1f,%.1f,%.1f -> target vid=%s %.1f,%.1f,%.1f (dist %.1f)",
+			st.subject, m:name(), m:position().x, m:position().y, m:position().z, tostring(st.tvid), st.tpos.x, st.tpos.y, st.tpos.z, dist_xz(m:position(), st.tpos))
+		st.phase = "drive"; return
+	end
+	if st.phase == "drive" then
+		local obj = level.object_by_id(st.subject)
+		if not obj then logf("~ MP_RM: subject %d went offline; re-find", st.subject); st.phase = "find"; st.subject = nil; return end
+		if not obj:alive() then logf("~ MP_RM: subject %d died; re-find", st.subject); st.phase = "find"; st.subject = nil; return end
+		local ok = pcall(drive, obj, st.tvid, st.tpos)
+		local d = dist_xz(obj:position(), st.tpos)
+		-- broadcast to any client in range
+		local be = now_ms - st.last_bcast; if be < 0 then be = be + 4294967296 end
+		if be >= BCAST_MS then st.last_bcast = now_ms
+			pcall(function() game.mp_broadcast_decision(st.subject, KIND_MOVE, mp_coop_decision_client.encode_point(st.tpos), LEAD_MS) end)
+		end
+		logf("~ MP_RM: [REAL] subject=%d dist=%.2f scripted=%s recaptures=%d drive_ok=%s", st.subject, d, tostring(obj:get_script()), st.recaptures, tostring(ok))
+		if d <= REACH_M then logf("~ MP_RM: *** REAL SQUAD MEMBER REACHED TARGET (dist %.2f) under KIND_MOVE despite gulag ***", d) end
+	end
+end
+
+function tick(now_ms, real_count, actor_id)
+	local ok, err = pcall(tick_impl, now_ms, real_count, actor_id)
+	if not ok then logf("! MP_RM error: %s", tostring(err)) end
+end
