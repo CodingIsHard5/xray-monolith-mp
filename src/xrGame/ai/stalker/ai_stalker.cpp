@@ -1007,11 +1007,6 @@ void CAI_Stalker::net_Import(NET_Packet& P)
 				Msg("~ MP_NPCDEATH: [CLIENT] STALKER id=%u DIED via stream (hp %.2f->%.2f) alive_before=%d",
 					ID(), old_hp, health, g_Alive() ? 1 : 0);
 				FlushLog();
-				// §world-NPC-replication Phase 2 FIX (-coop_deathfix): flag the death; shedule_Update runs
-				// the local Die() so the ragdoll/death animation renders (deferred out of this net read).
-				static int s_fix = -1;
-				if (s_fix < 0) s_fix = strstr(Core.Params, "-coop_deathfix") ? 1 : 0;
-				if (s_fix && !AlreadyDie()) m_coop_pending_death = true;
 			}
 			else if (health < old_hp - 0.05f)
 			{
