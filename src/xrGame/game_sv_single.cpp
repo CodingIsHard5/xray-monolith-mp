@@ -706,13 +706,15 @@ void game_sv_Single::coop_update_anchors()
 			xrClientData* CL = static_cast<xrClientData*>(client);
 			if (CL == self->m_server->GetServerClient()) return; // no player on the server
 			if (!CL->owner) return;                              // client without an actor yet
-			if (idx >= mp_anchors::max_anchors) return;
+			if (idx >= mp_anchors::gamedata_anchor_base) return; // reserve [base, max) for gamedata anchors
 			mp_anchors::set(idx, CL->owner->o_Position);
 			++idx;
 		}
 	};
 
-	mp_anchors::clear_all();
+	// MP fork (§4): clear only the per-actor range so PERSISTENT gamedata anchors ([base, max), e.g. a
+	// populated smart pinned online for the decision system) survive across frames.
+	mp_anchors::clear_below(mp_anchors::gamedata_anchor_base);
 	anchor_feeder f; f.idx = 0; f.self = this;
 	m_server->ForEachClientDo(f);
 }

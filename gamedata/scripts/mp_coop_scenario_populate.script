@@ -14,9 +14,13 @@
 	not yet runtime-verified on the dedicated build. Runs via the decision tick under -coop_populate.
 --]]
 
-local SETTLE_MS   = 8000    -- after anchoring, wait this long for the A-Life switch pass before enumerating
+local SETTLE_MS   = 12000   -- after anchoring, wait this long for the A-Life switch pass before enumerating
 local LOG_PERIOD  = 4000
-local TOP_SMARTS  = 8       -- anchor this many top-populated same-level smarts (mp_anchors has a max)
+-- Persistent gamedata anchor range is [8, 16) (mp_anchors::gamedata_anchor_base); coop_update_anchors
+-- rewrites [0,8) each frame for the actors and now leaves [8,16) alone. Set our smart anchors there so
+-- they SURVIVE (a plain idx-1.. set was wiped every frame -> squads never stayed anchored -> never online).
+local ANCHOR_BASE = 8
+local TOP_SMARTS  = 8       -- anchor up to this many top-populated same-level smarts (8 persistent slots)
 
 local st = { phase = "probe", last = 0, anchored_at = nil, reported = false }
 
@@ -118,7 +122,7 @@ local function tick_impl(now_ms, real_count, actor_id)
 			local s = smarts[i]
 			local d = ap and dist_xz(s.pos, ap) or -1
 			logf("~ MP_POP:   #%d smart=%s squads=%d dist=%.0fm pos=%.1f,%.1f,%.1f", i, tostring(s.id), s.squads, d, s.pos.x, s.pos.y, s.pos.z)
-			local ok = pcall(function() game.mp_anchor_set(i, s.pos) end)   -- idx i (0 is the actor's, set by coop_update_anchors)
+			local ok = pcall(function() game.mp_anchor_set(ANCHOR_BASE + i - 1, s.pos) end)  -- persistent range [8,16)
 			if ok then anchored = anchored + 1 end
 		end
 		local acnt = 0; pcall(function() acnt = game.mp_anchor_count() end)

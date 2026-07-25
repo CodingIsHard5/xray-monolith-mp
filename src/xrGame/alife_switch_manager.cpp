@@ -49,6 +49,14 @@ namespace mp_anchors
 		s_count = 0;
 	}
 
+	// MP fork (§4): clear only the per-actor range [0, n), leaving persistent gamedata anchors [n, max).
+	void clear_below(u32 n)
+	{
+		if (n > max_anchors) n = max_anchors;
+		for (u32 i = 0; i < n; ++i)
+			if (s_anchors[i].used) { s_anchors[i].used = false; --s_count; }
+	}
+
 	u32 count() { return s_count; }
 
 	float min_distance_to(const Fvector& pos, const Fvector& fallback_pos)

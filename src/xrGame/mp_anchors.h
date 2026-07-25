@@ -16,10 +16,16 @@
 namespace mp_anchors
 {
 	static const u32 max_anchors = 16;
+	// MP fork (§4 A-Life squad decisions): indices [0, gamedata_anchor_base) are the per-actor anchors
+	// that coop_update_anchors rewrites every frame; [gamedata_anchor_base, max_anchors) are PERSISTENT
+	// anchors set from gamedata (e.g. to pin a populated smart online for the decision system). They
+	// survive coop_update_anchors, which now clears only the actor range.
+	static const u32 gamedata_anchor_base = 8;
 
 	void set(u32 idx, const Fvector& position); // add or move an anchor
 	void clear(u32 idx);
 	void clear_all();
+	void clear_below(u32 n);                     // clear only indices [0, n) — preserves persistent anchors
 	u32 count();
 
 	// min distance from pos to any anchor; falls back to fallback_pos
