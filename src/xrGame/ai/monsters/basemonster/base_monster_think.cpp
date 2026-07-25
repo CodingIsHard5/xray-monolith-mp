@@ -10,17 +10,6 @@
 #include "../../../level.h"
 #include "../control_animation_base.h"
 
-// §3 item 3 inc3 (DIAGNOSTIC, temporary): breadcrumb which AI sub-phase a locally-driven Remote monster
-// is in, so the LAST-flushed phase before the graph-engine-solver crash (null+0x88 in CSolverConditionValue
-// emplace) localizes the culprit caller — the single-address symbol + ICF-fold hide it statically (see
-// dev/DECISION_REPLICATION_PLAN.md "graph-engine-solver crash"). Gated on -coop_aiphase (off by default,
-// zero cost when off — short-circuits before any call); FlushLog each set so it survives the crash. Fires
-// only for Remote() && coop_locally_driven() monsters (the flipped population). REMOVE once pinned+guarded.
-#define MP_AIPHASE(ph) do { \
-	static int s_ap = -1; if (s_ap == -1) s_ap = strstr(Core.Params, "-coop_aiphase") ? 1 : 0; \
-	if (s_ap && Remote() && coop_locally_driven()) { Msg("- MP_AIPHASE: id=%u %s", ID(), ph); FlushLog(); } \
-} while(0)
-
 void CBaseMonster::Think()
 {
 	START_PROFILE("Base Monster/Think")
@@ -29,49 +18,40 @@ void CBaseMonster::Think()
 		if (!g_Alive() || getDestroy()) return;
 
 		// Инициализировать
-		MP_AIPHASE("init");
 		InitThink();
 		anim().ScheduledInit();
 
 		// Обновить память
 		START_PROFILE("Base Monster/Think/Update Memory")
 			;
-			MP_AIPHASE("mem");
 			UpdateMemory();
 		STOP_PROFILE;
 
 		// Обновить сквад
 		START_PROFILE("Base Monster/Think/Update Squad")
 			;
-			MP_AIPHASE("squad");
 			monster_squad().update(this);
 		STOP_PROFILE;
 
 		// Запустить FSM
 		START_PROFILE("Base Monster/Think/FSM")
 			;
-			MP_AIPHASE("fsm");
 			update_fsm();
 		STOP_PROFILE;
 
-		MP_AIPHASE("think_done");
 	STOP_PROFILE;
 }
 
 void CBaseMonster::update_fsm()
 {
-	MP_AIPHASE("fsm.state");
 	StateMan->update();
 
 	// завершить обработку установленных в FSM параметров
-	MP_AIPHASE("fsm.post");
 	post_fsm_update();
 
-	MP_AIPHASE("fsm.path");
 	TranslateActionToPathParams();
 
 	// информировать squad о своих целях
-	MP_AIPHASE("fsm.squadnotify");
 	squad_notify();
 
 #ifdef DEBUG
