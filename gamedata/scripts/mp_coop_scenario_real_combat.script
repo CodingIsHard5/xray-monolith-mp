@@ -60,7 +60,14 @@ local function anchor_stalker_squads(actor_lvl, ap)
 	return n
 end
 
--- collect online alive stalkers near the anchors; return the first PAIR within NEAR_M of each other
+-- non-combatant stalker communities that won't fight (traders/mechanics/etc.) — skip them
+local NONCOMBAT = { trader = true, mechanic = true, barman = true, medic = true, ecolog_scientist_leader = true }
+local function is_combatant(o)
+	local c = ""; pcall(function() c = o:character_community() end)
+	return not NONCOMBAT[c]
+end
+
+-- collect online alive COMBATANT stalkers near the anchors; return the first PAIR within NEAR_M
 local function find_stalker_pair()
 	if not st.anchor_pts then return nil, nil end
 	local seen, list = {}, {}
@@ -68,7 +75,7 @@ local function find_stalker_pair()
 		local ap = st.anchor_pts[i].pos
 		pcall(function()
 			level.iterate_nearest(ap, 80, function(o)
-				if o and o:alive() and o:is_stalker() and not seen[o:id()] then
+				if o and o:alive() and o:is_stalker() and is_combatant(o) and not seen[o:id()] then
 					seen[o:id()] = true; list[#list + 1] = o
 				end
 				return false
