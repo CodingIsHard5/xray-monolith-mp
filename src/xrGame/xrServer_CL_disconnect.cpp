@@ -17,6 +17,10 @@ void xrServer::OnCL_Disconnected(IClient* CL)
 	xrClientData* xrCData = (xrClientData*)(CL);
 	VERIFY(xrCData);
 
+	// §3 win #2b inc2 (CodeRabbit inc1): drop this client's per-client relevance known-set so a reused
+	// client id never inherits stale spawn state. Safe to call unconditionally (no-op if absent / cull off).
+	coop_clear_relevance(CL->ID.value());
+
 	if (!xrCData->ps)
 		return;
 

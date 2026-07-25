@@ -318,10 +318,85 @@ void xrServer::coop_gather_cull_anchors()
 	ForEachClientDo(fd);
 }
 
-// §3 win #2b increment 1 (DIAGNOSTIC): for one real client, compute the per-client relevance delta
-// (would-spawn = near+not-known, would-despawn = far+known, with R_in/R_out hysteresis) against the
-// SIMULATED known set, update that set, and log COOP_REL. No actual spawn/despawn — this sizes the
-// churn + steady-state relevant-set size to de-risk increment 2. Gated by -coop_cull_radius.
+// §3 win #2b inc2: is -coop_cull_radius active (cached). Under cull, the relevance manager owns
+// per-client creature spawn/despawn, so the stock global creature-spawn broadcast is gated off.
+bool xrServer::coop_cull_on()
+{
+	if (m_coop_cull_on < 0)
+		m_coop_cull_on = strstr(Core.Params, "-coop_cull_radius ") ? 1 : 0;
+	return m_coop_cull_on == 1;
+}
+
+// §3 win #2b inc2: an AMBIENT creature (monster or human NPC) whose stock spawn to real clients must be
+// suppressed under cull, so the relevance manager is the sole per-client spawner. The player ACTOR is a
+// creature_abstract too but is neither monster_abstract nor human_abstract — it is NEVER gated (peer
+// bodies must always replicate). Zero cost (returns false) when cull is off.
+bool xrServer::coop_cull_gate_creature(CSE_Abstract* E)
+{
+	return coop_cull_on() && E && E->cast_creature_abstract()
+		&& (E->cast_monster_abstract() || E->cast_human_abstract());
+}
+
+// §3 win #2b inc2: does the decision system currently own this creature's replication (within TTL)?
+// Decision-driven creatures are always relevant — the relevance manager never despawns them.
+bool xrServer::coop_is_decision_driven(u16 id)
+{
+	xr_map<u16, u32>::iterator it = m_coop_decision_driven.find(id);
+	return it != m_coop_decision_driven.end()
+		&& (Device.dwTimeGlobal - it->second) < COOP_DECISION_DRIVEN_TTL_MS;
+}
+
+// §3 win #2b inc2: net_Spawn creature E on ONE client as a stripped/remote copy (server stays
+// authoritative). Mirrors Perform_connect_spawn's owner!=0 branch + the §9.3 reconnection primitive.
+void xrServer::coop_relevance_spawn(xrClientData* CL, CSE_Abstract* E)
+{
+	NET_Packet P;
+	Flags16 save = E->s_flags;
+	E->s_flags.set(M_SPAWN_UPDATE, TRUE);
+	E->Spawn_Write(P, FALSE);   // FALSE = remote/stripped (client does NOT take authoritative control)
+	E->UPDATE_Write(P);
+	E->s_flags = save;
+	SendTo(CL->ID, P, net_flags(TRUE, TRUE));
+}
+
+// §3 win #2b inc2: destroy one creature's copy on ONE client (SendTo bypasses server event processing,
+// so only that client acts). Mirrors the §9.3 reconnection despawn primitive (game_sv_single.cpp).
+void xrServer::coop_relevance_despawn(xrClientData* CL, u16 id)
+{
+	NET_Packet P;
+	P.w_begin(M_EVENT);
+	P.w_u32(Level().timeServer());
+	P.w_u16(GE_DESTROY);
+	P.w_u16(id);
+	SendTo(CL->ID, P, net_flags(TRUE, TRUE));
+}
+
+// §3 win #2b inc2: drop a client's known-set (CodeRabbit inc1 — call on disconnect so a reused client id
+// never inherits stale relevance state).
+void xrServer::coop_clear_relevance(u32 client_id)
+{
+	m_coop_rel_known.erase(client_id);
+}
+
+// §3 win #2b inc2: forget one creature id everywhere its co-op replication state is tracked. Called at the
+// stock GE_DESTROY broadcast site (Perform_destroy) so state stays in lockstep with what the client holds —
+// this closes an id-reuse race: an id freed on offline and re-used <500ms later by a new creature would
+// otherwise linger and mis-drive replication. The decision-driven TTL is cleared UNCONDITIONALLY (a reused
+// id must not inherit the previous occupant's throttle/relevance for up to COOP_DECISION_DRIVEN_TTL_MS —
+// CodeRabbit); the per-client known-sets only exist under cull, so that pass is cull-gated.
+void xrServer::coop_forget_relevance_id(u16 id)
+{
+	m_coop_decision_driven.erase(id);
+	if (!coop_cull_on()) return;
+	for (auto& kv : m_coop_rel_known)
+		kv.second.erase(id);
+}
+
+// §3 win #2b increment 2 (WIRED): for one real client, spawn near ambient creatures + despawn far/offline
+// ones per-client, keeping m_coop_rel_known[CL] == the set actually spawned on that client. R_in/R_out
+// hysteresis kills boundary flicker; decision-driven creatures are never despawned (the decision system
+// owns them). Runs at ~2 Hz under -coop_cull_radius; the stock global creature-spawn broadcast is gated
+// off (coop_cull_gate_creature) so this is the sole owner of per-client creature spawn/despawn.
 void xrServer::coop_relevance_client_cb(IClient* C)
 {
 	xrClientData* CL = static_cast<xrClientData*>(C);
@@ -344,31 +419,56 @@ void xrServer::coop_relevance_client_cb(IClient* C)
 
 	const Fvector apos = CL->owner->o_Position;
 	xr_map<u16, char>& known = m_coop_rel_known[CL->ID.value()];
-	int would_spawn = 0, would_despawn = 0;
+	int spawned = 0, despawned = 0;
 
-	// spawn deltas: near creatures not yet known
+	// SPAWN pass: near ambient creatures not yet spawned on this client.
 	for (xrS_entities::iterator I = entities.begin(); I != entities.end(); ++I)
 	{
 		CSE_Abstract& E = *(I->second);
-		if (0 == E.owner || !E.cast_creature_abstract()) continue;
-		const float d2 = apos.distance_to_sqr(E.o_Position);
-		const bool is_known = (known.find(E.ID) != known.end());
-		if (!is_known && d2 <= s_rin2) { known[E.ID] = 1; ++would_spawn; }
+		if (0 == E.owner || !coop_cull_gate_creature(&E)) continue; // ambient (non-actor) creatures only
+		if (E.owner == CL) continue;                                // client already owns an authoritative copy
+		if (known.find(E.ID) != known.end()) continue;             // already spawned on this client
+		// Spawn near creatures, OR any decision-driven creature regardless of distance — the decision
+		// system resolves subject_id via object_by_id on the client, so it MUST exist there even when the
+		// player is far (with the global broadcast now gated, this pass is its only spawn path under cull).
+		if (coop_is_decision_driven(E.ID) || apos.distance_to_sqr(E.o_Position) <= s_rin2)
+		{
+			coop_relevance_spawn(CL, &E);
+			known[E.ID] = 1;
+			++spawned;
+		}
 	}
-	// despawn deltas: known creatures now beyond R_out, or gone offline
+	// DESPAWN pass: known creatures now beyond R_out, or gone offline.
 	for (xr_map<u16, char>::iterator it = known.begin(); it != known.end(); )
 	{
 		CSE_Abstract* E = ID_to_entity(it->first);
-		bool drop = false;
-		if (!E || !E->cast_creature_abstract() || 0 == E->owner) drop = true;
-		else if (apos.distance_to_sqr(E->o_Position) > s_rout2) drop = true;
-		if (drop) { it = known.erase(it); ++would_despawn; }
+		// "gone" = no longer a live creature entity (offline/destroyed). A transiently OWNERLESS but still
+		// online+near creature is NOT gone — despawning on that would flicker (creatures are ownerless for
+		// ~1 frame on switch); real removal is handled at the Perform_destroy GE_DESTROY site instead.
+		const bool gone = (!E || !E->cast_creature_abstract());
+		if (!gone && coop_is_decision_driven(E->ID)) { ++it; continue; } // decision system owns it — keep
+		if (gone)
+		{
+			// Already destroyed on the client by the stock offline GE_DESTROY broadcast (Perform_destroy);
+			// just forget it — do NOT re-send a GE_DESTROY for a now-unknown id.
+			it = known.erase(it);
+			++despawned;
+		}
+		else if (apos.distance_to_sqr(E->o_Position) > s_rout2)
+		{
+			coop_relevance_despawn(CL, it->first);
+			it = known.erase(it);
+			++despawned;
+		}
 		else ++it;
 	}
 
-	Msg("~ COOP_REL: [client 0x%08x] relevant=%u would_spawn=%d would_despawn=%d",
-		CL->ID.value(), (u32)known.size(), would_spawn, would_despawn);
-	FlushLog();
+	if (spawned || despawned)
+	{
+		Msg("~ COOP_REL: [client 0x%08x] relevant=%u spawned=%d despawned=%d",
+			CL->ID.value(), (u32)known.size(), spawned, despawned);
+		FlushLog();
+	}
 }
 
 void xrServer::coop_relevance_diag()
@@ -667,17 +767,14 @@ void xrServer::SendUpdatesToAll()
 		m_last_update_time = Device.dwTimeGlobal;
 	}
 
-	// §3 win #2b increment 1 (DIAGNOSTIC): run the per-client relevance pass at ~2 Hz (relevance changes
-	// at player speed, not per 30 Hz update pass) when -coop_cull_radius is on. Computes + logs per-client
-	// spawn/despawn deltas (COOP_REL); no actual spawn/despawn yet. Gated; zero cost when the flag is off.
+	// §3 win #2b increment 2 (WIRED): run the per-client relevance pass at ~2 Hz (relevance changes at
+	// player speed, not per 30 Hz update pass) when -coop_cull_radius is on. Spawns near ambient creatures
+	// + despawns far/offline ones per-client (the sole owner of per-client creature spawn/despawn — the
+	// stock global creature-spawn broadcast is gated off). Gated; zero cost when the flag is off.
+	if (coop_cull_on() && (Device.dwTimeGlobal - m_coop_rel_last) >= 500)
 	{
-		static int s_rel = -2; // -2 unparsed, -1 off, 1 on
-		if (s_rel == -2) s_rel = strstr(Core.Params, "-coop_cull_radius ") ? 1 : -1;
-		if (s_rel == 1 && (Device.dwTimeGlobal - m_coop_rel_last) >= 500)
-		{
-			m_coop_rel_last = Device.dwTimeGlobal;
-			coop_relevance_diag();
-		}
+		m_coop_rel_last = Device.dwTimeGlobal;
+		coop_relevance_diag();
 	}
 
 	if (m_file_transfers)

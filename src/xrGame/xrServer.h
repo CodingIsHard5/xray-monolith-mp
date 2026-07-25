@@ -179,14 +179,26 @@ protected:
 	void coop_gather_cull_anchors();          // fill m_coop_cull_anchors from connected real clients
 	void coop_cull_anchor_cb(IClient* C);     // ForEachClientDo callback: push one client's actor pos
 
-	// §3 win #2b (per-client relevance, increment 1 = DIAGNOSTIC): per real client, the SIMULATED set of
-	// creature ids currently relevant (within the hysteresis band of that client's actor). The relevance
-	// pass computes would-spawn / would-despawn deltas against this and logs COOP_REL — no actual
-	// spawn/despawn yet (increment 2 wires those). Keyed by client id value. See DECISION_REPLICATION_PLAN.md.
+	// §3 win #2b (per-client relevance, increment 2 = WIRED): per real client, the set of creature ids
+	// ACTUALLY spawned on that client (within the hysteresis band of its actor). The relevance pass now
+	// really spawns near creatures + despawns far/offline ones per-client (was diagnostic-only in inc1),
+	// and is the SOLE owner of per-client creature spawn/despawn under -coop_cull_radius (the global
+	// creature-spawn broadcast is gated off — see coop_cull_gate_creature). Keyed by client id value.
 	xr_map<u32, xr_map<u16, char>> m_coop_rel_known;
 	u32 m_coop_rel_last = 0;                   // last relevance-pass time (throttled to ~2 Hz)
 	void coop_relevance_diag();                // run one relevance pass (all real clients)
-	void coop_relevance_client_cb(IClient* C); // ForEachClientDo callback: one client's delta + COOP_REL log
+	void coop_relevance_client_cb(IClient* C); // ForEachClientDo callback: one client's spawn/despawn + COOP_REL log
+	void coop_relevance_spawn(xrClientData* CL, CSE_Abstract* E);   // stripped/remote net_Spawn of E to one client
+	void coop_relevance_despawn(xrClientData* CL, u16 id);         // SendTo(GE_DESTROY) of one id to one client
+	void coop_clear_relevance(u32 client_id);  // drop a client's known-set (on disconnect — CodeRabbit inc1)
+	void coop_forget_relevance_id(u16 id);     // forget one creature id across ALL clients (stock GE_DESTROY site)
+
+	// §3 win #2b inc2: cached -coop_cull_radius on/off (-1 unparsed). Under cull, the relevance manager
+	// owns per-client creature spawn/despawn, so the stock global creature-spawn broadcast is gated off.
+	int m_coop_cull_on = -1;
+	bool coop_cull_on();                                // is -coop_cull_radius active (cached)
+	bool coop_cull_gate_creature(CSE_Abstract* E);      // true => suppress the stock spawn of this ambient creature
+	bool coop_is_decision_driven(u16 id);               // decision system owns this creature's replication (TTL)
 
 public:
 	game_sv_GameState* game;

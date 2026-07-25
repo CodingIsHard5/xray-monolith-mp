@@ -141,6 +141,13 @@ CSE_Abstract* xrServer::Process_spawn(NET_Packet& P, ClientID sender, BOOL bSpaw
 		}
 	}
 
+	// §3 win #2b inc2: under -coop_cull_radius the per-client relevance manager owns per-client creature
+	// spawn/despawn, so an ambient creature switching online must NOT be auto-broadcast to real clients
+	// (they'd get a distant frozen NPC). Suppress ONLY the stripped/remote broadcast for such creatures;
+	// the authoritative local copy (to the owning/loopback client) still goes out so server simulation is
+	// unchanged. The relevance pass spawns it per-client when a real player comes within radius.
+	const bool cull_gate = coop_cull_gate_creature(E);
+
 	// create packet and broadcast packet to everybody
 	NET_Packet Packet;
 	if (CL)
@@ -152,12 +159,15 @@ CSE_Abstract* xrServer::Process_spawn(NET_Packet& P, ClientID sender, BOOL bSpaw
 		SendTo(CL->ID, Packet, net_flags(TRUE,TRUE));
 
 		// For everybody, except client, which contains authorative copy
-		E->Spawn_Write(Packet,FALSE);
-		if (E->s_flags.is(M_SPAWN_UPDATE))
-			E->UPDATE_Write(Packet);
-		SendBroadcast(CL->ID, Packet, net_flags(TRUE,TRUE));
+		if (!cull_gate)
+		{
+			E->Spawn_Write(Packet,FALSE);
+			if (E->s_flags.is(M_SPAWN_UPDATE))
+				E->UPDATE_Write(Packet);
+			SendBroadcast(CL->ID, Packet, net_flags(TRUE,TRUE));
+		}
 	}
-	else
+	else if (!cull_gate)
 	{
 		E->Spawn_Write(Packet,FALSE);
 		if (E->s_flags.is(M_SPAWN_UPDATE))

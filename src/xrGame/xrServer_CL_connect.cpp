@@ -21,6 +21,18 @@ void xrServer::Perform_connect_spawn(CSE_Abstract* E, xrClientData* CL, NET_Pack
 	if (E->net_Processed) return;
 	if (E->s_flags.is(M_SPAWN_OBJECT_PHANTOM)) return;
 
+	// §3 win #2b inc2: under -coop_cull_radius the per-client relevance manager owns per-client creature
+	// spawn, so ambient creatures must NOT be spawned to a connecting client here (their known-set starts
+	// empty; the relevance pass spawns near ones). Also skip any entity with a culled creature ANYWHERE in
+	// its parent chain (e.g. inventory item, or item inside a container held by an NPC) — spawning a
+	// descendant whose ancestor creature we skipped would leave a dangling parent on the client (CodeRabbit).
+	if (coop_cull_gate_creature(E)) return;
+	for (CSE_Abstract* anc = (E->ID_Parent == 0xffff) ? 0 : ID_to_entity(E->ID_Parent);
+		anc; anc = (anc->ID_Parent == 0xffff) ? 0 : ID_to_entity(anc->ID_Parent))
+	{
+		if (coop_cull_gate_creature(anc)) return;
+	}
+
 	//.	Msg("Perform connect spawn [%d][%s]", E->ID, E->s_name.c_str());
 
 	// Connectivity order

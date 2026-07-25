@@ -56,6 +56,10 @@ void xrServer::Perform_destroy(CSE_Abstract* object, u32 mode)
 	P.w_u16(GE_DESTROY);
 	P.w_u16(object_id);
 	SendBroadcast(BroadcastCID, P, mode);
+
+	// §3 win #2b inc2: keep the per-client relevance known-sets in lockstep with this stock GE_DESTROY
+	// broadcast so a freed (and possibly reused) id never lingers as "spawned" on a client. Cull-gated.
+	coop_forget_relevance_id(object_id);
 }
 
 void xrServer::SLS_Clear()
