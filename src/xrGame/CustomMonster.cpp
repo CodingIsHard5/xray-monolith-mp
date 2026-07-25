@@ -427,6 +427,23 @@ void CCustomMonster::net_Import(NET_Packet& P)
 				Msg("~ MP_NPCDEATH: [CLIENT] puppet id=%u took damage (hp %.2f->%.2f)", ID(), old_hp, health);
 				FlushLog();
 			}
+
+			// §world-NPC-replication Phase 2: aggregate streaming visibility. Phase 1 proved ambient
+			// NPCs spawn + are stream-eligible, yet a server KILL produced 0 MP_NPCDEATH — so either
+			// net_Import isn't streaming these NPCs, or it streams but health never moves (server isn't
+			// sending the damage/death). This 5s aggregate tells them apart: updates=0 => not streaming;
+			// minhp_seen stays ~1.00 => streaming but the server never streams a health drop (the death
+			// must ride a GE_DIE event, not the health value); minhp<1 => damage DOES stream (timing).
+			static u32 s_hp_updates = 0; static float s_hp_min = 1e9f; static u32 s_hp_last = 0;
+			s_hp_updates++; if (health < s_hp_min) s_hp_min = health;
+			if ((Device.dwTimeGlobal - s_hp_last) >= 5000)
+			{
+				s_hp_last = Device.dwTimeGlobal;
+				Msg("~ COOP_NPCHP: [CLIENT] ambient net_Import updates=%u minhp_seen=%.2f (last id=%u hp=%.2f)",
+					s_hp_updates, (s_hp_min > 1e8f ? -1.f : s_hp_min), ID(), health);
+				FlushLog();
+				s_hp_updates = 0; s_hp_min = 1e9f;
+			}
 		}
 	}
 	SetfHealth(health);
@@ -1306,6 +1323,20 @@ void CCustomMonster::OnEvent(NET_Packet& P, u16 type)
 
 void CCustomMonster::net_Destroy()
 {
+	// §world-NPC-replication Phase 2 (-coop_npcdeath): does a server NPC death reach the client as a
+	// DESTROY rather than a streamed health→0? If a killed NPC's puppet is net_Destroy'd here (instead
+	// of MP_NPCDEATH firing in net_Import), the server removes the dead NPC and the client just makes it
+	// vanish — so "death rendering" means handling that destroy as a corpse, not a health event.
+	{
+		static int s_nd = -1;
+		if (s_nd < 0) s_nd = strstr(Core.Params, "-coop_npcdeath") ? 1 : 0;
+		if (s_nd && xr_enet::enabled() && !ai().get_alife())
+		{
+			Msg("~ COOP_NPCHP: [CLIENT] ambient puppet id=%u net_Destroy (hp=%.2f alive=%d)",
+				ID(), GetfHealth(), g_Alive() ? 1 : 0);
+			FlushLog();
+		}
+	}
 	inherited::net_Destroy();
 	CScriptEntity::net_Destroy();
 	sound().unload();
