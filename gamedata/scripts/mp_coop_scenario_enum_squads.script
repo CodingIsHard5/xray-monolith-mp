@@ -1,0 +1,99 @@
+--[[
+	Real A-Life squad ENUMERATION PROBE (read-only; dev/ALIFE_SQUAD_DECISIONS.md).
+
+	First step to wiring real squads into the decision system: SEE what real online population the
+	dedicated server has near the client's actor. Purely logging — NO behavior change, no script control,
+	no decisions broadcast. Runs server-side via the decision tick under -coop_enum_squads.
+
+	Enumerates squads from sim_board.get_sim_board().smarts[*].squads[*], filters to those with ONLINE
+	members (level.object_by_id(member_id) resolves) and reports id/name/faction/member counts/positions/
+	current smart. Everything defensive (pcall) because the exact squad-member accessor shape is confirmed
+	from source but not yet runtime-verified on the dedicated build.
+--]]
+
+local NEAR_M      = 150    -- report squads with an online member within this of the actor
+local LOG_PERIOD  = 3000
+
+local st = { last = 0, dumped_shape = false }
+
+local function logf(...) printf("%s", string.format(...)) end
+
+local function dist_xz(a, b)
+	local dx, dz = a.x - b.x, a.z - b.z
+	return math.sqrt(dx * dx + dz * dz)
+end
+
+-- squad_members() yields member records; Anomaly exposes the id as `.id`. Guarded either way.
+local function member_id(m)
+	if type(m) == "table" or type(m) == "userdata" then
+		local ok, id = pcall(function() return m.id end)
+		if ok and id then return id end
+		local ok2, id2 = pcall(function() return m:id() end)
+		if ok2 and id2 then return id2 end
+	end
+	return nil
+end
+
+local function enum_once(actor_id)
+	local board = nil
+	pcall(function() board = sim_board.get_sim_board() end)
+	if not board then logf("~ MP_ENUM: no sim_board on the server"); return end
+	local smarts = nil
+	pcall(function() smarts = board.smarts end)
+	if not smarts then logf("~ MP_ENUM: board has no .smarts (API differs — probe once)"); return end
+
+	local actor = actor_id and level.object_by_id(actor_id) or nil
+	local ap = actor and actor:position() or nil
+
+	local n_smarts, n_squads, n_online_squads, n_near = 0, 0, 0, 0
+	for smart_id, sd in pairs(smarts) do
+		n_smarts = n_smarts + 1
+		local squads = nil
+		pcall(function() squads = sd.squads end)
+		if squads then
+			for squad_id, squad in pairs(squads) do
+				n_squads = n_squads + 1
+				local online, nearest = {}, nil
+				pcall(function()
+					for m in squad:squad_members() do
+						local id = member_id(m)
+						local mo = id and level.object_by_id(id) or nil
+						if mo then
+							online[#online + 1] = id
+							if ap then
+								local d = dist_xz(mo:position(), ap)
+								if not nearest or d < nearest then nearest = d end
+							end
+						end
+					end
+				end)
+				if #online > 0 then
+					n_online_squads = n_online_squads + 1
+					if nearest and nearest <= NEAR_M then
+						n_near = n_near + 1
+						local name, faction, cmd, smrt = "?", "?", "?", tostring(squad_id)
+						pcall(function() name = squad:name() end)
+						pcall(function() faction = tostring(squad.player_id) end)
+						pcall(function() cmd = tostring(squad:commander_id()) end)
+						pcall(function() smrt = tostring(squad.smart_id) end)
+						logf("~ MP_ENUM: SQUAD id=%s name=%s faction=%s cmd=%s online=%d nearest=%.1fm smart=%s ids=%s",
+							tostring(squad_id), tostring(name), faction, cmd, #online, nearest, smrt,
+							table.concat(online, ","))
+					end
+				end
+			end
+		end
+	end
+	logf("~ MP_ENUM: smarts=%d squads=%d online_squads=%d near_actor(<=%dm)=%d",
+		n_smarts, n_squads, n_online_squads, NEAR_M, n_near)
+end
+
+function tick(now_ms, real_count, actor_id)
+	if real_count < 1 or not actor_id or actor_id == 0 then return end
+	local elapsed = now_ms - st.last
+	if elapsed < 0 then elapsed = elapsed + 4294967296 end
+	if elapsed < LOG_PERIOD then return end
+	st.last = now_ms
+	local ok, err = pcall(enum_once, actor_id)
+	if not ok then logf("! MP_ENUM error: %s", tostring(err)) end
+end

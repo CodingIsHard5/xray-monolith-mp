@@ -303,7 +303,10 @@ function tick(now_ms, real_count, actor_id)
 		if flee_mode then
 			logf("~ MP_COOP_SV: -coop_flee — originating KIND_FLEE away from the player actor (broaden KINDs)")
 		end
-		if string.find(cl, "-coop_monster_combat", 1, true) then
+		if string.find(cl, "-coop_enum_squads", 1, true) then
+			scenario = mp_coop_scenario_enum_squads.tick
+			logf("~ MP_COOP_SV: scenario = ENUM_SQUADS (read-only real-A-Life-squad enumeration probe)")
+		elseif string.find(cl, "-coop_monster_combat", 1, true) then
 			scenario = mp_coop_scenario_monster_combat.tick
 			logf("~ MP_COOP_SV: scenario = MONSTER_COMBAT (mp_coop_scenario_monster_combat — §4C probe)")
 		elseif string.find(cl, "-coop_combat", 1, true) then
