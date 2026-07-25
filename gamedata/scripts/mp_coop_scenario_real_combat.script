@@ -60,8 +60,9 @@ local function anchor_stalker_squads(actor_lvl, ap)
 	return n
 end
 
--- non-combatant stalker communities that won't fight (traders/mechanics/etc.) — skip them
-local NONCOMBAT = { trader = true, mechanic = true, barman = true, medic = true, ecolog_scientist_leader = true }
+-- non-combatant / abnormal-combat stalker communities to skip (traders/mechanics + zombied, which shamble
+-- and don't shoot normally) — we want two NORMAL armed stalkers.
+local NONCOMBAT = { trader = true, mechanic = true, barman = true, medic = true, ecolog_scientist_leader = true, zombied = true }
 local function is_combatant(o)
 	local c = ""; pcall(function() c = o:character_community() end)
 	return not NONCOMBAT[c]
@@ -140,8 +141,14 @@ local function tick_impl(now_ms, real_count, actor_id)
 		-- re-force perception each tick (memory can decay); do NOT take script control (scheme must run)
 		pcall(function() a:make_object_visible_somewhen(b); b:make_object_visible_somewhen(a) end)
 		st.ticks = st.ticks + 1
-		logf("~ MP_RC: [REAL] #%d dist=%.2f | A hp=%.2f best_enemy=%s | B hp=%.2f best_enemy=%s",
-			st.ticks, dist_xz(a:position(), b:position()), a.health, tostring(enemy_id(a)), b.health, tostring(enemy_id(b)))
+		-- diagnostics: does each SEE the other (LOS, needed to aim/fire), have a weapon, and is it DRAWN?
+		local a_see, b_see, a_wpn, b_wpn, a_un, b_un = "?","?","?","?","?","?"
+		pcall(function() a_see = tostring(a:see(b)) end); pcall(function() b_see = tostring(b:see(a)) end)
+		pcall(function() a_wpn = a:best_weapon() and "y" or "n" end); pcall(function() b_wpn = b:best_weapon() and "y" or "n" end)
+		pcall(function() a_un = tostring(a:weapon_unstrapped()) end); pcall(function() b_un = tostring(b:weapon_unstrapped()) end)
+		logf("~ MP_RC: [REAL] #%d dist=%.2f | A hp=%.2f enemy=%s see=%s wpn=%s drawn=%s | B hp=%.2f enemy=%s see=%s wpn=%s drawn=%s",
+			st.ticks, dist_xz(a:position(), b:position()), a.health, tostring(enemy_id(a)), a_see, a_wpn, a_un,
+			b.health, tostring(enemy_id(b)), b_see, b_wpn, b_un)
 	end
 end
 
