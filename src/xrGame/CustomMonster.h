@@ -163,10 +163,13 @@ public:
 	virtual void eye_pp_s0();
 	void eye_pp_s1();
 	void eye_pp_s2();
-	// MP fork (§4C headless-visibility diag, -coop_vissdbg): throttled per-schedule dump of
-	// this NPC's feel_vision internals against its selected enemy. Localizes B (o_trace/raycast
-	// drops a frustum hit) vs C (feel_vision not enabled / not updating) on the dedicated server.
-	void coop_vissdbg_log();
+	// MP fork (§4C headless-visibility diag): dump this NPC's feel_vision internals against an
+	// EXPLICIT target (the caller supplies the pair, so this does not depend on enemy selection —
+	// which is itself nil headless because selection needs the visible_now we are debugging).
+	// Localizes B (o_trace/raycast drops a frustum hit, or q_frustum never returns it) vs C
+	// (feel_vision not enabled / not updating) on the dedicated server. Driven from Lua via
+	// game_object:vissdbg(target) in the real-combat scenario.
+	void coop_vissdbg_dump(const CGameObject* target);
 
 	virtual void UpdateCamera();
 

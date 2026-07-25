@@ -146,6 +146,11 @@ local function tick_impl(now_ms, real_count, actor_id)
 		-- combat is a GAMEDATA fix (no engine change).
 		pcall(function() a:set_sight(b, true, true); b:set_sight(a, true, true) end)
 		st.ticks = st.ticks + 1
+		-- ENGINE DIAGNOSTIC (-coop_vissdbg build): dump each NPC's feel_vision internals vs the
+		-- EXPLICIT other (frustum `seen`, o_trace fuzzy, visible_right_now/now) so we can localize
+		-- the visible_now=false drop to B (raycast/frustum) vs C (feel_vision off). Uses the known
+		-- pair, so it does not depend on enemy selection (nil headless). Emits "~ MP_VISSDBG:".
+		pcall(function() a:vissdbg(b); b:vissdbg(a) end)
 		-- diagnostics: does each SEE the other (LOS, needed to aim/fire), have a weapon, and is it DRAWN?
 		local a_see, b_see, a_wpn, b_wpn, a_un, b_un = "?","?","?","?","?","?"
 		pcall(function() a_see = tostring(a:see(b)) end); pcall(function() b_see = tostring(b:see(a)) end)

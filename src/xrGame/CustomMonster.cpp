@@ -506,7 +506,6 @@ void CCustomMonster::shedule_Update(u32 DT)
 		else
 			Exec_Visibility();
 		memory().update(dt);
-		coop_vissdbg_log();
 	}
 	inherited::shedule_Update(DT);
 
@@ -1088,35 +1087,23 @@ void CCustomMonster::Exec_Visibility()
 	Device.Statistic->AI_Vis.End();
 }
 
-// MP fork (§4C headless-visibility diag, -coop_vissdbg): dump this NPC's feel_vision internals
-// against its selected enemy. The forced-combat scenario (mp_coop_scenario_real_combat) leaves
-// exactly the adjacent stalker pair with a selected enemy, so no id plumbing from Lua is needed.
+// MP fork (§4C headless-visibility diag): dump this NPC's feel_vision internals against an
+// EXPLICIT target (the caller — the real-combat scenario via game_object:vissdbg(target) — knows
+// the forced pair, so this does NOT depend on memory().enemy().selected(), which is itself nil
+// headless because enemy selection needs the visible_now we are debugging).
 // Disambiguates the visible_now=false drop that blocks headless ranged aiming:
 //   in_frustum=1 but visible_now=0 (fuzzy<=0) -> B: o_trace/RayQuery reports occlusion on a clear LOS
 //   in_frustum=0 while ang < fov/2 and dist < range -> the q_frustum pass never returns the target
-//   enabled=0 / seen always 0 -> C: feel_vision not enabled/updating for this NPC headless
-void CCustomMonster::coop_vissdbg_log()
+//   enabled=0 / seen==0 -> C: feel_vision not enabled/updating for this NPC headless
+void CCustomMonster::coop_vissdbg_dump(const CGameObject* target)
 {
-	static int s_on = -1;
-	if (s_on < 0) s_on = strstr(Core.Params, "-coop_vissdbg") ? 1 : 0;
-	if (!s_on) return;
+	if (!target) return;
 
-	if (!g_Alive() || !human_being()) return;
+	CObject* target_obj = const_cast<CObject*>(static_cast<const CObject*>(target));
 
-	const CEntityAlive* enemy = memory().enemy().selected();
-	if (!enemy) return;
-
-	// throttle: eye_pp runs every schedule; only the forced pair reaches here, so a modest
-	// shared counter keeps both represented without flooding the log.
-	static u32 s_n = 0;
-	if ((s_n++ % 10) != 0) return;
-
-	const CGameObject* enemy_go = enemy;                                   // CEntityAlive is-a CGameObject
-	CObject* enemy_obj = const_cast<CObject*>(static_cast<const CObject*>(enemy));
-
-	// geometry: enemy offset from this NPC's own eye, angle off the eye forward (eye_matrix.k)
+	// geometry: target offset from this NPC's own eye, angle off the eye forward (eye_matrix.k)
 	Fvector to;
-	to.sub(enemy->Position(), eye_matrix.c);
+	to.sub(target->Position(), eye_matrix.c);
 	float dist = to.magnitude();
 	float ang_deg = -1.f;
 	if (dist > EPS_S)
@@ -1130,13 +1117,13 @@ void CCustomMonster::coop_vissdbg_log()
 
 	const bool  en       = memory().visual().enabled();
 	const u32   seen_cnt = feel_vision_seen_count();
-	const bool  in_frus  = feel_vision_in_frustum(enemy_obj);
-	const float fuzzy    = feel_vision_fuzzy_of(enemy_obj);
-	const bool  vis_now  = memory().visual().visible_now(enemy_go);
-	const bool  vis_rn   = memory().visual().visible_right_now(enemy_go);
+	const bool  in_frus  = feel_vision_in_frustum(target_obj);
+	const float fuzzy    = feel_vision_fuzzy_of(target_obj);
+	const bool  vis_now  = memory().visual().visible_now(target);
+	const bool  vis_rn   = memory().visual().visible_right_now(target);
 
-	Msg("~ MP_VISSDBG: id=%u enemy=%u dist=%.2f ang=%.1f fov=%.1f range=%.1f | enabled=%d seen=%u in_frustum=%d fuzzy=%.3f | visible_right_now=%d visible_now=%d",
-		ID(), enemy->ID(), dist, ang_deg, eye_fov, eye_range,
+	Msg("~ MP_VISSDBG: id=%u target=%u dist=%.2f ang=%.1f fov=%.1f range=%.1f | enabled=%d seen=%u in_frustum=%d fuzzy=%.3f | visible_right_now=%d visible_now=%d",
+		ID(), target->ID(), dist, ang_deg, eye_fov, eye_range,
 		en ? 1 : 0, seen_cnt, in_frus ? 1 : 0, fuzzy,
 		vis_rn ? 1 : 0, vis_now ? 1 : 0);
 	FlushLog();

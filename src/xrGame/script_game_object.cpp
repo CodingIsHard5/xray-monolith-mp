@@ -341,6 +341,19 @@ bool CScriptGameObject::CheckObjectVisibility(const CScriptGameObject* tpLuaGame
 	return (script_entity->CheckObjectVisibility(&tpLuaGameObject->object()));
 }
 
+// MP fork (§4C headless-visibility diag): dump feel_vision internals of this NPC vs an explicit
+// target. Driven from mp_coop_scenario_real_combat (a:vissdbg(b)) so it does not depend on
+// enemy selection (nil headless). Localizes B (raycast/frustum drop) vs C (feel_vision off).
+void CScriptGameObject::VisDbg(const CScriptGameObject* tpLuaGameObject)
+{
+	if (!tpLuaGameObject)
+		return;
+	CCustomMonster* monster = smart_cast<CCustomMonster*>(&object());
+	if (!monster)
+		return;
+	monster->coop_vissdbg_dump(&tpLuaGameObject->object());
+}
+
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////

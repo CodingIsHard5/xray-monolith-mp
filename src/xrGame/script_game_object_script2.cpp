@@ -137,6 +137,7 @@ class_<CScriptGameObject> script_register_game_object1(class_<CScriptGameObject>
 		.def("reset_action_queue", SAFE_WRAP(&CScriptGameObject::ResetActionQueue))
 		.def("see", SAFE_WRAP(&CScriptGameObject::CheckObjectVisibility))
 		.def("see", SAFE_WRAP(&CScriptGameObject::CheckTypeVisibility))
+		.def("vissdbg", &CScriptGameObject::VisDbg)
 		.def("get_object_visible_distance", SAFE_WRAP(&CScriptGameObject::GetObjectVisibleDistance))
 		.def("get_object_luminocity", SAFE_WRAP(&CScriptGameObject::GetObjectLuminocity))
 

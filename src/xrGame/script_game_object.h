@@ -305,6 +305,9 @@ public:
 	// CCustomMonster
 	bool CheckObjectVisibility(const CScriptGameObject* tpLuaGameObject);
 	bool CheckTypeVisibility(const char* section_name);
+	// MP fork (§4C headless-visibility diag): dump this NPC's feel_vision internals vs an explicit
+	// target (no enemy-selection dependency). Bound as game_object:vissdbg(target).
+	void VisDbg(const CScriptGameObject* tpLuaGameObject);
 	LPCSTR WhoHitName();
 	LPCSTR WhoHitSectionName();
 
