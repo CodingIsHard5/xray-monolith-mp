@@ -400,10 +400,10 @@ void xrServer::MakeUpdatePackets()
 				&& ((Device.dwTimeGlobal - m_coop_decision_driven[Test.ID]) < COOP_DECISION_DRIVEN_TTL_MS);
 			if (!decision_driven)
 			{
-				bool near = false;
+				bool in_range = false; // NB: 'near' is a legacy Windows macro (windef.h) — do not use it
 				for (const Fvector& a : m_coop_cull_anchors)
-					if (a.distance_to_sqr(Test.o_Position) <= s_cull_r2) { near = true; break; }
-				if (!near) { if (s_npcdiag == 1) nd_culled++; continue; }
+					if (a.distance_to_sqr(Test.o_Position) <= s_cull_r2) { in_range = true; break; }
+				if (!in_range) { if (s_npcdiag == 1) nd_culled++; continue; }
 			}
 		}
 
