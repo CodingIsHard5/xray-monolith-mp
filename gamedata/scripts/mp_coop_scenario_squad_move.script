@@ -33,10 +33,12 @@ local function scan(actor_lvl, ap)
 		if pos and (actor_lvl == nil or lvl == actor_lvl) then
 			smarts[smart_id] = pos
 			local squads; pcall(function() squads = sd.squads end)
-			if squads then for sid, squad in pairs(squads) do
+			if squads then for sid in pairs(squads) do
+				-- the sim_squad object is alife():object(sid) (board.smarts[].squads[sid] is a set MARKER,
+				-- often `true`, not the squad) — needed for assign_squad_to_smart / smart_id / squad_members.
 				local sse; pcall(function() sse = alife():object(sid) end)
 				local spos = sse and se_pos(sse) or nil
-				if spos then sq[#sq+1] = { id = sid, squad = squad, pos = spos, smart = smart_id, d = ap and dist_xz(spos, ap) or 1e9 } end
+				if sse and spos then sq[#sq+1] = { id = sid, squad = sse, pos = spos, smart = smart_id, d = ap and dist_xz(spos, ap) or 1e9 } end
 			end end
 		end
 	end
@@ -86,13 +88,10 @@ local function tick_impl(now_ms, real_count, actor_id)
 		st.phase = "assign"; return
 	end
 	if st.phase == "assign" then
-		-- pick the nearest squad that has an ONLINE member (so we can watch it move)
-		local pick = nil
-		for _, r in ipairs(st.squads or {}) do
-			local _, online = squad_pos(r)
-			if online > 0 then pick = r; break end
-		end
-		if not pick then logf("~ MP_SM: no squad with online members yet; retry"); return end
+		-- Assign the NEAREST squad (assignment works on the squad regardless of member online-ness — the
+		-- target-smart change IS the Level-B proof; online members are only for watching the travel).
+		local pick = (st.squads or {})[1]
+		if not pick then logf("~ MP_SM: no squads found; retry"); return end
 		-- choose a target smart FARTHEST from the squad (a clear move)
 		local best_id, best_pos, best_d = nil, nil, 0
 		for smart_id, pos in pairs(st.smarts) do
