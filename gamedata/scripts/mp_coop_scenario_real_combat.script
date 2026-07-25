@@ -95,6 +95,10 @@ end
 local function make_hostile(a, b)
 	pcall(function() a:set_relation(game_object.enemy, b); a:force_set_goodwill(-3000, b) end)
 	pcall(function() b:set_relation(game_object.enemy, a); b:force_set_goodwill(-3000, a) end)
+	-- Remove the gulag job's movement restriction so they can PURSUE into weapon range (they engaged but
+	-- were pulled back to their posts by the out_restrictor — same as the boar's clipped move).
+	pcall(function() a:remove_all_restrictions() end)
+	pcall(function() b:remove_all_restrictions() end)
 	-- force each into the other's VISUAL memory so best_enemy populates and the combat scheme engages
 	pcall(function() a:make_object_visible_somewhen(b) end)
 	pcall(function() b:make_object_visible_somewhen(a) end)
