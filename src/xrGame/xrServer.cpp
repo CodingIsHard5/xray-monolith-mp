@@ -300,6 +300,24 @@ void xrServer::coop_mark_decision_driven(u16 id)
 	m_coop_decision_driven[id] = Device.dwTimeGlobal;
 }
 
+// §3 win #2 (radius culling): push one connected client's actor position as a cull anchor. Only REAL
+// player actors count (owner set, id != 0) — the dedicated server's loopback self-client (fake host,
+// owner id 0) is not a real viewer. o_Position is kept live by the M_CL_UPDATE peek (see OnMessage).
+void xrServer::coop_cull_anchor_cb(IClient* C)
+{
+	xrClientData* CL = static_cast<xrClientData*>(C);
+	if (CL && CL->owner && CL->owner->ID != 0 && _valid(CL->owner->o_Position))
+		m_coop_cull_anchors.push_back(CL->owner->o_Position);
+}
+
+void xrServer::coop_gather_cull_anchors()
+{
+	m_coop_cull_anchors.clear();
+	fastdelegate::FastDelegate1<IClient*, void> fd;
+	fd.bind(this, &xrServer::coop_cull_anchor_cb);
+	ForEachClientDo(fd);
+}
+
 void xrServer::MakeUpdatePackets()
 {
 	NET_Packet tmpPacket;
@@ -316,6 +334,25 @@ void xrServer::MakeUpdatePackets()
 	if (s_npcdiag == -2)
 		s_npcdiag = strstr(Core.Params, "-coop_npcdiag") ? 1 : -1;
 	int nd_creatures = 0, nd_owner0 = 0, nd_notready = 0, nd_phantom = 0, nd_notrel = 0, nd_eligible = 0;
+	int nd_culled = 0;
+
+	// §3 win #2: -coop_cull_radius <m> — stream a creature only if it is within <m> of SOME real player
+	// actor; skip the rest (a client only needs NPCs near it, so far ones cost nothing). Gathered ONCE
+	// per pass. If no real actor is anchored (empty), culling is disabled (stream all, as today) so the
+	// no-client / loopback-only case is never starved. Gated; zero cost when off.
+	static float s_cull_r2 = -2.f; // -2 unparsed, -1 off, else radius^2
+	if (s_cull_r2 == -2.f)
+	{
+		s_cull_r2 = -1.f;
+		if (const char* p = strstr(Core.Params, "-coop_cull_radius "))
+		{
+			const float r = (float)atof(p + xr_strlen("-coop_cull_radius "));
+			if (r > 0.f) s_cull_r2 = r * r;
+		}
+	}
+	const bool cull_on = (s_cull_r2 > 0.f);
+	if (cull_on) coop_gather_cull_anchors();
+	const bool cull_active = cull_on && !m_coop_cull_anchors.empty();
 
 	xrS_entities::iterator I = entities.begin();
 	xrS_entities::iterator E = entities.end();
@@ -352,6 +389,23 @@ void xrServer::MakeUpdatePackets()
 		// monster CSE classes and would need per-class disambiguation).
 		if (!Test.Net_Relevant() && !(xr_enet::enabled() && Test.cast_creature_abstract()))
 			continue;
+
+		// §3 win #2 (radius culling): a creature that no real player is near is skipped — the client
+		// can't see it, so streaming its position/health is pure waste. Only cull CREATURES (players
+		// always stream); a decision-driven NPC is EXEMPT (the decision system owns its replication, and
+		// it's a tiny set). If it's within radius of ANY anchor, keep it.
+		if (cull_active && Test.cast_creature_abstract())
+		{
+			const bool decision_driven = (m_coop_decision_driven.find(Test.ID) != m_coop_decision_driven.end())
+				&& ((Device.dwTimeGlobal - m_coop_decision_driven[Test.ID]) < COOP_DECISION_DRIVEN_TTL_MS);
+			if (!decision_driven)
+			{
+				bool near = false;
+				for (const Fvector& a : m_coop_cull_anchors)
+					if (a.distance_to_sqr(Test.o_Position) <= s_cull_r2) { near = true; break; }
+				if (!near) { if (s_npcdiag == 1) nd_culled++; continue; }
+			}
+		}
 
 		// MP fork (§4 step 3 recon): optional soft-correction CADENCE PROBE. Under
 		// -coop_update_throttle <ms>, cap each replicated creature's M_UPDATE to at most once per
@@ -463,8 +517,9 @@ void xrServer::MakeUpdatePackets()
 		if ((Device.dwTimeGlobal - s_nd_last) >= 3000)
 		{
 			s_nd_last = Device.dwTimeGlobal;
-			Msg("~ COOP_NPCDIAG: creatures=%d eligible=%d | skip: owner0=%d notready=%d phantom=%d notrel=%d (clients=%u)",
-				nd_creatures, nd_eligible, nd_owner0, nd_notready, nd_phantom, nd_notrel, GetClientsCount());
+			Msg("~ COOP_NPCDIAG: creatures=%d eligible=%d culled=%d | skip: owner0=%d notready=%d phantom=%d notrel=%d (clients=%u anchors=%u)",
+				nd_creatures, nd_eligible, nd_culled, nd_owner0, nd_notready, nd_phantom, nd_notrel,
+				GetClientsCount(), (u32)m_coop_cull_anchors.size());
 			FlushLog();
 		}
 	}

@@ -172,6 +172,13 @@ protected:
 	xr_map<u16, u32> m_coop_decision_driven;
 	enum { COOP_DECISION_DRIVEN_TTL_MS = 5000 };
 
+	// §3 win #2 (radius culling, -coop_cull_radius <m>): per-pass snapshot of each REAL player actor's
+	// position. MakeUpdatePackets skips streaming a creature whose distance to EVERY anchor exceeds the
+	// radius — a client only needs NPCs near its own actor, so far ones cost nothing. Rebuilt each pass.
+	xr_vector<Fvector> m_coop_cull_anchors;
+	void coop_gather_cull_anchors();          // fill m_coop_cull_anchors from connected real clients
+	void coop_cull_anchor_cb(IClient* C);     // ForEachClientDo callback: push one client's actor pos
+
 public:
 	game_sv_GameState* game;
 
