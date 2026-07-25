@@ -15,7 +15,7 @@ local KIND_MOVE = mp_coop_decision_client.KIND_MOVE
 local ANCHOR_BASE = 8
 local TOP_SQUADS  = 8
 local SETTLE_MS   = 14000
-local TARGET_DIST = 15
+local TARGET_DIST = 8
 local DIST_TO_END = 1.5
 local REACH_M     = 3.0
 local BCAST_MS    = 3000
@@ -111,6 +111,9 @@ end
 local function drive(obj, vid, pos)
 	if obj:get_script() == false then
 		obj:script(true, "mp_coop_scenario_real_move"); obj:enable_vision(false)
+		-- a REAL A-Life member is confined by its gulag job's movement restriction (out_restrictor), which
+		-- clips the scripted path ~m from home. Clear it so the decision can move it to the decided target.
+		pcall(function() obj:remove_all_restrictions() end)
 		st.recaptures = st.recaptures + 1; st.issued = false
 	end
 	if not st.issued then
@@ -155,8 +158,12 @@ local function tick_impl(now_ms, real_count, actor_id)
 		local obj = level.object_by_id(st.subject)
 		if not obj then logf("~ MP_RM: subject %d went offline; re-find", st.subject); st.phase = "find"; st.subject = nil; return end
 		if not obj:alive() then logf("~ MP_RM: subject %d died; re-find", st.subject); st.phase = "find"; st.subject = nil; return end
-		local ok = pcall(drive, obj, st.tvid, st.tpos)
 		local d = dist_xz(obj:position(), st.tpos)
+		-- stall-retry: a real member's path can END SHORT (nav/reachability); if it stops closing while
+		-- still far, re-path from its CURRENT position (re-issue) so it makes progressive hops to the target.
+		if st.last_d and d > st.last_d - 0.3 and d > REACH_M then st.issued = false end
+		st.last_d = d
+		local ok = pcall(drive, obj, st.tvid, st.tpos)
 		-- broadcast to any client in range
 		local be = now_ms - st.last_bcast; if be < 0 then be = be + 4294967296 end
 		if be >= BCAST_MS then st.last_bcast = now_ms
