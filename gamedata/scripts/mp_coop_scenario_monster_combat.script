@@ -25,13 +25,17 @@
 local A_SECTIONS = { "dog_normal", "dog_strong", "pseudodog_normal", "boar_normal", "flesh_normal" }
 local B_SECTIONS = { "dog_strong", "dog_normal", "boar_normal", "pseudodog_normal", "flesh_normal" }
 
+local KIND_COMBAT    = mp_coop_decision_client.KIND_COMBAT   -- = 2 (replicate the enemy to clients)
 local SPAWN_SIDE     = 8     -- m: spawn the pair this far to the actor's side
 local PAIR_GAP       = 4     -- m: distance between the two monsters (close, so they engage fast)
 local ONLINE_TIMEOUT = 25000
 local LOG_PERIOD_MS  = 2000  -- instrument this often
+local BCAST_PERIOD_MS = 1000 -- broadcast KIND_COMBAT this often (client re-applies the enemy)
+local LEAD_MS        = 300
 
 local st = {
 	phase = "wait", a_id = nil, b_id = nil, spawn_ms = nil, last_log = 0, ticks = 0, enemy_set = false,
+	last_bcast = 0,
 }
 
 local function logf(...) printf("%s", string.format(...)) end
@@ -128,6 +132,18 @@ local function tick_impl(now_ms, real_count, actor_id)
 			st.enemy_set = true
 			logf("~ MP_COOP_MC: set_enemy applied (ok=%s); immediate readback A.enemy=%s B.enemy=%s",
 				tostring(ok), tostring(enemy_id(a)), tostring(enemy_id(b)))
+		end
+
+		-- §4C KIND_COMBAT executor: REPLICATE the enemy to clients each ~1s so the client re-applies
+		-- set_enemy on its copies (a one-shot is dropped — see the client handler). Both directions.
+		local be = now_ms - st.last_bcast
+		if be < 0 then be = be + 4294967296 end
+		if be >= BCAST_PERIOD_MS then
+			st.last_bcast = now_ms
+			pcall(function()
+				game.mp_broadcast_decision(st.a_id, KIND_COMBAT, mp_coop_decision_client.encode_u16(st.b_id), LEAD_MS)
+				game.mp_broadcast_decision(st.b_id, KIND_COMBAT, mp_coop_decision_client.encode_u16(st.a_id), LEAD_MS)
+			end)
 		end
 
 		local elapsed = now_ms - st.last_log

@@ -304,9 +304,16 @@ function on_decision(subject_id, kind, hex_args)
 	end
 
 	if kind == KIND_COMBAT then
-		-- The server decided this online NPC's combat enemy. Replicate it so the client's copy
-		-- fights the SAME target. set_enemy is direct for a bloodsucker (CAI_Bloodsucker::SetEnemy);
-		-- set_relation is the stalker (InventoryOwner) path. Apply whichever the subject supports.
+		-- The server decided this online NPC's combat enemy. Apply it on the client's replicated copy.
+		-- §4C PROVEN: a MONSTER given set_enemy (-> CBaseMonster::SetEnemy -> EnemyMan.script_enemy,
+		-- perception/team-bypass — relaxed to all monsters) and NOT under script control self-drives
+		-- combat via StateMan. The enemy must be RE-APPLIED each decision: a one-shot at spawn is
+		-- dropped because EnemyMan.update() clears it while the target is momentarily !g_Alive. We do NOT
+		-- take obj:script(true) (that would suppress Think/StateMan). NB the co-op server stays
+		-- authoritative on outcomes (hp/death stream via M_UPDATE); the client copy's own combat is a
+		-- consistency/liveness bonus. (Stalker fallback: set_relation — a logic-less stalker still won't
+		-- fight, per the diagnosis.) monster_enemy() is the CORRECT engagement probe; best_enemy() is the
+		-- stalker manager and is always nil for a monster.
 		local enemy_id = decode_u16(hex_args)
 		local npc = level.object_by_id(subject_id)
 		local enemy = level.object_by_id(enemy_id)
@@ -315,18 +322,15 @@ function on_decision(subject_id, kind, hex_args)
 				tostring(subject_id), tostring(enemy_id), tostring(npc ~= nil), tostring(enemy ~= nil))
 			return
 		end
-		-- Apply the stalker relation path (the verifiable one: relation() reads back = enemy) and,
-		-- harmlessly, the bloodsucker path. best_enemy is the native-engagement signal (see the
-		-- scenario's KNOWN GAP note: it stays nil for logic-less headless-spawned NPCs).
-		pcall(function() npc:set_enemy(enemy) end)                         -- monster (bloodsucker)
-		pcall(function()                                                   -- stalker (InventoryOwner)
+		pcall(function() npc:set_enemy(enemy) end)                         -- monster (all CBaseMonster now)
+		pcall(function()                                                   -- stalker fallback (InventoryOwner)
 			npc:set_relation(game_object.enemy, enemy)
 			npc:force_set_goodwill(-3000, enemy)
 		end)
-		local rel = select(2, pcall(function() return npc:relation(enemy) end))
-		local be = npc:best_enemy()
-		logf("MP_COOP_CB: [CLIENT] subject=%s enemy=%s relation=%s best_enemy=%s",
-			tostring(subject_id), tostring(enemy_id), tostring(rel), be and tostring(be:id()) or "nil")
+		local me = select(2, pcall(function() return npc:monster_enemy() end))
+		logf("MP_COOP_CB: [CLIENT] subject=%s enemy=%s monster_enemy=%s hp=%.2f scripted=%s",
+			tostring(subject_id), tostring(enemy_id),
+			(type(me) == "userdata") and tostring(me:id()) or "nil", npc.health, tostring(npc:get_script()))
 		return
 	end
 
