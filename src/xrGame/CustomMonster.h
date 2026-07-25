@@ -143,6 +143,12 @@ public:
 	u32   m_coop_locally_driven_ts;   // §14 step 3 (D): time of the last decision that (re)set the flag
 	enum { COOP_LOCALLY_DRIVEN_TTL_MS = 5000 }; // auto-clear if no decision refresh within this (see .cpp)
 	IC bool coop_locally_driven() const { return m_coop_locally_driven; }
+	// §world-NPC-replication Phase 2 (-coop_deathfix): a Remote co-op puppet's death trigger
+	// (entity_alive.cpp:226) is Local()-gated and the server doesn't broadcast GE_DIE for ambient
+	// NPCs, so the puppet's streamed health reaches <=0 but it never plays its death. net_Import sets
+	// this flag when the streamed health crosses <=0; CCustomMonster::shedule_Update then runs the
+	// normal Die() path locally (deferred out of the mid-packet net_Import read). Default false.
+	bool  m_coop_pending_death = false;
 	// §14 step 3 (increment D): stamp the refresh time on set-true so UpdateCL can auto-clear the flag
 	// when the decision stream stops (defined in CustomMonster.cpp — needs Device.dwTimeGlobal).
 	void coop_set_locally_driven(bool v);

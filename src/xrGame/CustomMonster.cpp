@@ -421,6 +421,11 @@ void CCustomMonster::net_Import(NET_Packet& P)
 				Msg("~ MP_NPCDEATH: [CLIENT] puppet id=%u DIED via stream (hp %.2f->%.2f) alive_after=%d",
 					ID(), old_hp, health, (health > 0.f) ? 1 : 0);
 				FlushLog();
+				// §world-NPC-replication Phase 2 FIX (-coop_deathfix): flag the death; shedule_Update runs
+				// the local Die() so the ragdoll/death animation renders (deferred out of this net read).
+				static int s_fix = -1;
+				if (s_fix < 0) s_fix = strstr(Core.Params, "-coop_deathfix") ? 1 : 0;
+				if (s_fix && !AlreadyDie()) m_coop_pending_death = true;
 			}
 			else if (health < old_hp - 0.05f)
 			{
@@ -514,6 +519,21 @@ void CCustomMonster::shedule_Update(u32 DT)
 	// still bounded, so this cannot grow without limit.
 	const u32 keep = (Remote() && xr_enet::enabled() && !ai().get_alife()) ? 8u : 2u;
 	while ((NET.size() > keep) && (NET[1].dwTimeStamp < dwTimeCL)) NET.pop_front();
+
+	// §world-NPC-replication Phase 2 FIX (-coop_deathfix): net_Import flagged that this Remote co-op
+	// puppet's streamed health crossed <=0, but the Local()-gated death trigger (entity_alive.cpp:226)
+	// never fires for a Remote puppet and the server doesn't broadcast GE_DIE for ambient NPCs. Run the
+	// normal Die() path HERE (deferred out of the mid-packet net_Import read) so the ragdoll + death
+	// animation render. who=this: the killer id isn't streamed; self avoids the who->ID() deref in
+	// CEntityAlive::Die. Guarded !AlreadyDie() (idempotent). CRASH SURFACE: CAI_Stalker::Die reaches AI
+	// state the thin client may lack — expect to symbolicate on the first flip (gated, default is safe).
+	if (m_coop_pending_death && !AlreadyDie())
+	{
+		m_coop_pending_death = false;
+		Msg("~ MP_NPCDIE: [CLIENT] client-synth Die id=%u (hp=%.2f)", ID(), GetfHealth());
+		FlushLog();
+		Die(this);
+	}
 
 	float dt = float(DT) / 1000.f;
 

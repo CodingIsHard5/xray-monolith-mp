@@ -66,6 +66,19 @@ void CEntity::OnEvent(NET_Packet& P, u16 type)
 				if (this != who) /*if(bDebug) */ Msg("%s killed by %s ...", cName().c_str(), who->cName().c_str());
 				else /*if(bDebug) */ Msg("%s dies himself ...", cName().c_str());
 			}
+			// §world-NPC-replication Phase 2 (-coop_npcdeath): does a co-op client actually RECEIVE the
+			// NPC death event? If this logs for a killed NPC, the normal Die() path already runs and no
+			// client-synth is needed; if it NEVER logs (while the NPC's health streams to <=0), the server
+			// isn't broadcasting GE_DIE for ambient NPCs and -coop_deathfix (client-synth Die) is required.
+			{
+				static int s_nd = -1;
+				if (s_nd < 0) s_nd = strstr(Core.Params, "-coop_npcdeath") ? 1 : 0;
+				if (s_nd && !ai().get_alife())
+				{
+					Msg("~ MP_NPCDIE: [CLIENT] recv GE_DIE id=%u (killer=%u) alive_before=%d", ID(), id, g_Alive() ? 1 : 0);
+					FlushLog();
+				}
+			}
 			Die(who);
 		}
 		break;
