@@ -368,6 +368,18 @@ void xrServer::MakeUpdatePackets()
 			if (const char* p = strstr(Core.Params, "-coop_update_throttle "))
 				s_throttle_ms = atoi(p + xr_strlen("-coop_update_throttle "));
 		}
+		// §3 bandwidth win #1: -coop_npc_hz <ms> caps EVERY replicated creature's M_UPDATE to at most
+		// once per <ms> (a rate throttle for ALL creatures, not just the decision-driven set the C2
+		// throttle covers). COOP_BW measured ~210 KB/s/client at 30 Hz dense-stream; at 100 ms (~10 Hz)
+		// this is ~3x less, well within the interpolation budget (step-3 probe: ~1 Hz holds sub-metre
+		// for 1-2 m/s NPCs). Gated (default -1 = off) so stock/normal co-op is untouched.
+		static int s_npc_hz_ms = -2; // -2 = unparsed, -1 = disabled
+		if (s_npc_hz_ms == -2)
+		{
+			s_npc_hz_ms = -1;
+			if (const char* p = strstr(Core.Params, "-coop_npc_hz "))
+				s_npc_hz_ms = atoi(p + xr_strlen("-coop_npc_hz "));
+		}
 		// §4 step 3 (increment C2): the throttle now applies ONLY to creatures the decision system
 		// currently owns (a live, non-expired m_coop_decision_driven entry) — these run their AI on
 		// the client and need only a sparse soft-correction. Normal puppets are NOT in the set and
@@ -377,20 +389,23 @@ void xrServer::MakeUpdatePackets()
 		// throttle bookkeeping deferred to AFTER the write below (CodeRabbit): the timestamp must be
 		// stamped only once a NON-EMPTY update is actually queued, else an ObjectSize==0 pass (packet
 		// dropped) would still consume a throttle window and suppress the next real correction.
-		static xr_map<u16, u32> s_c2_last_sent; // per driven creature: last throttled send time
+		static xr_map<u16, u32> s_c2_last_sent; // per throttled creature: last throttled send time
 		bool c2_driven_send = false;
 		u32  c2_gap = 0;
-		if (s_throttle_ms > 0 && xr_enet::enabled() && Test.cast_creature_abstract())
+		if ((s_throttle_ms > 0 || s_npc_hz_ms > 0) && xr_enet::enabled() && Test.cast_creature_abstract())
 		{
 			const u32 now = Device.dwTimeGlobal;
 			auto dd = m_coop_decision_driven.find(Test.ID);
 			const bool driven = (dd != m_coop_decision_driven.end())
 				&& ((now - dd->second) < COOP_DECISION_DRIVEN_TTL_MS);
-			if (driven)
+			// Effective throttle for THIS creature: a decision-driven NPC uses the C2 soft-correct window
+			// (-coop_update_throttle); every other creature uses the §3 global rate cap (-coop_npc_hz).
+			const int eff_ms = (driven && s_throttle_ms > 0) ? s_throttle_ms : s_npc_hz_ms;
+			if (eff_ms > 0)
 			{
 				auto it = s_c2_last_sent.find(Test.ID);
-				if (it != s_c2_last_sent.end() && (now - it->second) < u32(s_throttle_ms))
-					continue; // within the throttle window — skip this driven creature's update
+				if (it != s_c2_last_sent.end() && (now - it->second) < u32(eff_ms))
+					continue; // within the throttle window — skip this creature's update this pass
 				c2_driven_send = true;
 				c2_gap = (it != s_c2_last_sent.end()) ? (now - it->second) : 0;
 			}
