@@ -365,7 +365,19 @@ void CBaseMonster::UpdateCL()
 	}
 
 	MP_AIPHASE("cl.ctrl_frame");
-	control().update_frame();
+	// §3 item 3 inc3 (GUARD): a locally-driven Remote monster on the THIN CLIENT (no A-Life / no full
+	// level-graph for its pathfinding) crashes INSIDE control().update_frame() when it executes an AI-set
+	// graph path — a null graph/path object (offset 0x88), pinned via the -coop_aiphase breadcrumbs to
+	// exactly this call (cl.ctrl_frame is the last phase before the fault). Skip the control frame-tick for
+	// such a monster so it HOLDS position (idle-hold, inc2-safe) instead of crashing: its position/animation
+	// are already driven above by inherited::UpdateCL (UpdatePositionAnimation when moving, else the streamed
+	// puppet path) + the sparse server correction. Server (get_alife) and SP (Local) are UNAFFECTED — they
+	// keep the full control tick. Trade-off: autonomous client-side PATHING is disabled for flipped monsters
+	// (they can't self-path on the thin client); the population's bandwidth win (KIND_SETLOCAL throttle) is
+	// intact, and this is regression-tested against KIND_COMBAT (test_coop_combat_local.sh).
+	const bool coop_thin_local = Remote() && coop_locally_driven() && !ai().get_alife();
+	if (!coop_thin_local)
+		control().update_frame();
 
 	MP_AIPHASE("cl.physics");
 	m_pPhysics_support->in_UpdateCL();
