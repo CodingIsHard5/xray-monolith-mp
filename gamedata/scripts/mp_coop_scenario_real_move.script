@@ -30,31 +30,45 @@ local function valid_lvid(v) return v ~= nil and v ~= 4294967295 and v ~= 65535 
 local function se_pos(se) local p; pcall(function() p = se.position end); if type(p) ~= "userdata" then pcall(function() p = se:position() end) end; return (type(p) == "userdata") and p or nil end
 local function se_level(se) local l; pcall(function() l = game_graph():vertex(se.m_game_vertex_id):level_id() end); return l end
 
--- anchor the nearest same-level squads' se positions (switches them online) — persistent range [8,16)
+local function is_monster_squad(squad, squad_id)
+	-- MONSTER squads move under scripted control (Spike 2); stalker/biped squads freeze. Prefer monster
+	-- FACTION (player_id contains "monster") or the generic "simulation_<species>" name.
+	local fac, nm = "", ""
+	pcall(function() fac = tostring(squad.player_id) end)
+	pcall(function() nm = tostring(alife():object(squad_id):name()) end)
+	return (string.find(fac, "monster", 1, true) ~= nil) or (string.find(nm, "simulation_", 1, true) ~= nil)
+end
+
+-- anchor the nearest same-level MONSTER squads' se positions (switches them online) — persistent [8,16)
 local function anchor_squads(actor_lvl, ap)
 	local board; pcall(function() board = sim_board.get_sim_board() end)
 	if not board or not board.smarts then return 0 end
-	local out = {}
+	local mon, any = {}, {}
 	for smart_id, sd in pairs(board.smarts) do
 		local squads; pcall(function() squads = sd.squads end)
 		if squads then
-			for squad_id in pairs(squads) do
+			for squad_id, squad in pairs(squads) do
 				local se; pcall(function() se = alife():object(squad_id) end)
 				if se then
 					local lvl, pos = se_level(se), se_pos(se)
 					if pos and (actor_lvl == nil or lvl == actor_lvl) then
-						out[#out + 1] = { pos = pos, d = ap and dist_xz(pos, ap) or 1e9 }
+						local rec = { pos = pos, d = ap and dist_xz(pos, ap) or 1e9 }
+						any[#any + 1] = rec
+						if is_monster_squad(squad, squad_id) then mon[#mon + 1] = rec end
 					end
 				end
 			end
 		end
 	end
+	-- prefer monster squads; fall back to any if none found on this level
+	local out = (#mon > 0) and mon or any
 	table.sort(out, function(a, b) return a.d < b.d end)
 	local n = 0
 	for i = 1, math.min(#out, TOP_SQUADS) do
 		if pcall(function() game.mp_anchor_set(ANCHOR_BASE + i - 1, out[i].pos) end) then n = n + 1 end
 	end
 	st.anchor_pts = out
+	logf("~ MP_RM: monster_squads=%d (of %d same-level); anchoring nearest %d", #mon, #any, math.min(#out, TOP_SQUADS))
 	return n
 end
 
@@ -65,7 +79,7 @@ local function find_monster()
 	for i = 1, math.min(#st.anchor_pts, TOP_SQUADS) do
 		local ap = st.anchor_pts[i].pos
 		pcall(function()
-			level.iterate_nearest(ap, 40, function(o)
+			level.iterate_nearest(ap, 60, function(o)
 				if o and o:alive() and o:is_monster() and o:get_script() == false then
 					found = o; return true
 				end
