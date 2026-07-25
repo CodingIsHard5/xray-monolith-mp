@@ -327,14 +327,16 @@ bool xrServer::coop_cull_on()
 	return m_coop_cull_on == 1;
 }
 
-// §3 win #2b inc2: an AMBIENT creature (monster or human NPC) whose stock spawn to real clients must be
-// suppressed under cull, so the relevance manager is the sole per-client spawner. The player ACTOR is a
-// creature_abstract too but is neither monster_abstract nor human_abstract — it is NEVER gated (peer
-// bodies must always replicate). Zero cost (returns false) when cull is off.
+// §3 win #2b inc2: an AMBIENT creature (any creature EXCEPT a player actor) whose stock spawn to real
+// clients must be suppressed under cull, so the relevance manager is the sole per-client spawner. This
+// covers monsters, human NPCs, AND lightweight creatures like crows (CSE_ALifeCreatureCrow derives from
+// CSE_ALifeCreatureAbstract but is neither monster_ nor human_abstract — an earlier monster||human gate
+// let crows slip to the stock path and re-broadcast every respawn). The player ACTOR is a creature too
+// but must ALWAYS replicate (peer bodies), so it is explicitly excluded. Zero cost (false) when cull off.
 bool xrServer::coop_cull_gate_creature(CSE_Abstract* E)
 {
 	return coop_cull_on() && E && E->cast_creature_abstract()
-		&& (E->cast_monster_abstract() || E->cast_human_abstract());
+		&& !smart_cast<CSE_ALifeCreatureActor*>(E);
 }
 
 // §3 win #2b inc2: does the decision system currently own this creature's replication (within TTL)?
@@ -442,10 +444,12 @@ void xrServer::coop_relevance_client_cb(IClient* C)
 	for (xr_map<u16, char>::iterator it = known.begin(); it != known.end(); )
 	{
 		CSE_Abstract* E = ID_to_entity(it->first);
-		// "gone" = no longer a live creature entity (offline/destroyed). A transiently OWNERLESS but still
-		// online+near creature is NOT gone — despawning on that would flicker (creatures are ownerless for
-		// ~1 frame on switch); real removal is handled at the Perform_destroy GE_DESTROY site instead.
-		const bool gone = (!E || !E->cast_creature_abstract());
+		// "gone" = no longer a cullable creature entity (offline/destroyed, or an id reused by a non-creature
+		// / a player actor). A transiently OWNERLESS but still online+near creature is NOT gone — despawning
+		// on that would flicker (creatures are ownerless for ~1 frame on switch); real removal is handled at
+		// the Perform_destroy GE_DESTROY site instead. The gone branch only forgets it (no GE_DESTROY re-send),
+		// so a reused id that became a peer actor never gets a stray despawn.
+		const bool gone = (!E || !coop_cull_gate_creature(E));
 		if (!gone && coop_is_decision_driven(E->ID)) { ++it; continue; } // decision system owns it — keep
 		if (gone)
 		{
