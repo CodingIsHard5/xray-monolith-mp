@@ -480,6 +480,33 @@ void xrServer::SendUpdatesToAll()
 		MakeUpdatePackets();
 		SendUpdatePacketsToAll();
 
+		// §3 bandwidth quantification (-coop_npcdiag): the co-op server dense-streams the whole online
+		// creature population's M_UPDATE to EVERY client (Phase-1 diag: ~84 creatures, eligible==all). §3
+		// ("replicate decisions, not the simulation") exists to avoid exactly that, so measure the real
+		// per-client cost: m_last_updates_size is the update payload bytes THIS pass, sent to each client
+		// at psNET_ServerUpdate Hz, so per-client rate ≈ size × Hz. Averaged + flushed every ~3s. Gated;
+		// zero cost when off. Sizes whether §3 radius-culling / the decision-inversion is urgent.
+		{
+			static int s_bw = -2; // -2 unparsed, -1 off, 1 on
+			if (s_bw == -2) s_bw = strstr(Core.Params, "-coop_npcdiag") ? 1 : -1;
+			if (s_bw == 1)
+			{
+				static u32 s_acc = 0, s_n = 0, s_max = 0, s_last = 0;
+				s_acc += m_last_updates_size; s_n++;
+				if (m_last_updates_size > s_max) s_max = m_last_updates_size;
+				if ((Device.dwTimeGlobal - s_last) >= 3000 && s_n > 0)
+				{
+					const u32 avg = s_acc / s_n;
+					const u32 hz  = psNET_ServerUpdate ? psNET_ServerUpdate : 10;
+					Msg("~ COOP_BW: update payload avg=%u max=%u bytes/pass | ~%u bytes/s per client "
+						"(%.1f KB/s, %u Hz) | clients=%u", avg, s_max, avg * hz,
+						(avg * hz) / 1024.f, hz, GetClientsCount());
+					FlushLog();
+					s_acc = 0; s_n = 0; s_max = 0; s_last = Device.dwTimeGlobal;
+				}
+			}
+		}
+
 #ifdef DEBUG
 		g_sv_SendUpdate = 0;
 #endif
