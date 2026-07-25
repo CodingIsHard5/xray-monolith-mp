@@ -1,0 +1,149 @@
+--[[
+	POPULATED-CONTEXT HARNESS (dev/ALIFE_SQUAD_DECISIONS.md).
+
+	The enum probe found 477 smarts / ~800 squads but 0 ONLINE near the actor: the co-op actor is anchored
+	(coop_update_anchors) but its Cordon spot has no squad cluster within online_distance, and most squads
+	are on other levels. This harness forces squads ONLINE so the decision system has real targets:
+	  1. Report the actor's LEVEL + position.
+	  2. Enumerate smarts ON THE ACTOR'S LEVEL that host squads; rank by squad/member count.
+	  3. Set mp_anchors at the top populated same-level smarts (game.mp_anchor_set) so their squads switch
+	     online (the fork switches online_offline_group by anchor distance).
+	  4. After a settle delay, enumerate ONLINE squads near those anchors — the real decision targets.
+
+	All defensive (pcall): the smart position/level + squad-member accessors are confirmed from source but
+	not yet runtime-verified on the dedicated build. Runs via the decision tick under -coop_populate.
+--]]
+
+local SETTLE_MS   = 8000    -- after anchoring, wait this long for the A-Life switch pass before enumerating
+local LOG_PERIOD  = 4000
+local TOP_SMARTS  = 8       -- anchor this many top-populated same-level smarts (mp_anchors has a max)
+
+local st = { phase = "probe", last = 0, anchored_at = nil, reported = false }
+
+local function logf(...) printf("%s", string.format(...)) end
+local function dist_xz(a, b) local dx, dz = a.x - b.x, a.z - b.z; return math.sqrt(dx * dx + dz * dz) end
+
+local function member_id(m)
+	if type(m) == "table" or type(m) == "userdata" then
+		local ok, id = pcall(function() return m.id end); if ok and id then return id end
+		local ok2, id2 = pcall(function() return m:id() end); if ok2 and id2 then return id2 end
+	end
+	return nil
+end
+
+-- se object level_id via the game graph (defensive)
+local function se_level(se)
+	local lvl = nil
+	pcall(function() lvl = game_graph():vertex(se.m_game_vertex_id):level_id() end)
+	return lvl
+end
+local function se_pos(se)
+	local p = nil
+	pcall(function() p = se.position end)
+	if type(p) ~= "userdata" then pcall(function() p = se:position() end) end
+	return (type(p) == "userdata") and p or nil
+end
+
+-- Collect same-level smarts that host squads, with position + squad count. Returns a sorted list.
+local function scan_smarts(actor_lvl)
+	local board = nil; pcall(function() board = sim_board.get_sim_board() end)
+	if not board or not board.smarts then return {} end
+	local out = {}
+	for smart_id, sd in pairs(board.smarts) do
+		local squads = nil; pcall(function() squads = sd.squads end)
+		local n_sq = 0
+		if squads then for _ in pairs(squads) do n_sq = n_sq + 1 end end
+		if n_sq > 0 then
+			local se = nil; pcall(function() se = alife():object(smart_id) end)
+			if se then
+				local lvl, pos = se_level(se), se_pos(se)
+				if pos and (actor_lvl == nil or lvl == actor_lvl) then
+					out[#out + 1] = { id = smart_id, pos = pos, squads = n_sq, lvl = lvl }
+				end
+			end
+		end
+	end
+	table.sort(out, function(a, b) return a.squads > b.squads end)
+	return out
+end
+
+-- Count ONLINE squad members across all squads (reuse enum), optionally near a point.
+local function count_online(near_pos)
+	local board = nil; pcall(function() board = sim_board.get_sim_board() end)
+	if not board or not board.smarts then return 0, 0 end
+	local online_sq, online_mem = 0, 0
+	for _, sd in pairs(board.smarts) do
+		local squads = nil; pcall(function() squads = sd.squads end)
+		if squads then
+			for squad_id, squad in pairs(squads) do
+				local on = 0
+				pcall(function()
+					for m in squad:squad_members() do
+						local id = member_id(m); local mo = id and level.object_by_id(id) or nil
+						if mo and (not near_pos or dist_xz(mo:position(), near_pos) < 200) then on = on + 1 end
+					end
+				end)
+				if on > 0 then
+					online_sq = online_sq + 1; online_mem = online_mem + on
+					local nm, fac = tostring(squad_id), "?"
+					pcall(function() nm = squad:name() end); pcall(function() fac = tostring(squad.player_id) end)
+					logf("~ MP_POP: ONLINE SQUAD id=%s name=%s faction=%s online_members=%d", tostring(squad_id), tostring(nm), fac, on)
+				end
+			end
+		end
+	end
+	return online_sq, online_mem
+end
+
+local function tick_impl(now_ms, real_count, actor_id)
+	if real_count < 1 or not actor_id or actor_id == 0 then return end
+	local elapsed = now_ms - st.last
+	if elapsed < 0 then elapsed = elapsed + 4294967296 end
+	if elapsed < LOG_PERIOD then return end
+	st.last = now_ms
+
+	local actor = level.object_by_id(actor_id)
+	local actor_se = nil; pcall(function() actor_se = alife():object(actor_id) end)
+	local actor_lvl = actor_se and se_level(actor_se) or nil
+	local ap = actor and actor:position() or nil
+
+	if st.phase == "probe" then
+		local lname = "?"; pcall(function() lname = level.name() end)
+		logf("~ MP_POP: actor id=%s level=%s level_id=%s pos=%s", tostring(actor_id), tostring(lname),
+			tostring(actor_lvl), ap and string.format("%.1f,%.1f,%.1f", ap.x, ap.y, ap.z) or "?")
+		local smarts = scan_smarts(actor_lvl)
+		logf("~ MP_POP: same-level smarts hosting squads = %d (top by squad count):", #smarts)
+		local anchored = 0
+		for i = 1, math.min(#smarts, TOP_SMARTS) do
+			local s = smarts[i]
+			local d = ap and dist_xz(s.pos, ap) or -1
+			logf("~ MP_POP:   #%d smart=%s squads=%d dist=%.0fm pos=%.1f,%.1f,%.1f", i, tostring(s.id), s.squads, d, s.pos.x, s.pos.y, s.pos.z)
+			local ok = pcall(function() game.mp_anchor_set(i, s.pos) end)   -- idx i (0 is the actor's, set by coop_update_anchors)
+			if ok then anchored = anchored + 1 end
+		end
+		local acnt = 0; pcall(function() acnt = game.mp_anchor_count() end)
+		logf("~ MP_POP: anchored %d populated smarts; mp_anchor_count=%d — settling %dms for the switch pass", anchored, acnt, SETTLE_MS)
+		st.phase = "settle"; st.settle_start = now_ms
+		return
+	end
+
+	if st.phase == "settle" then
+		local e = now_ms - st.settle_start; if e < 0 then e = e + 4294967296 end
+		if e < SETTLE_MS then return end
+		st.phase = "enum"
+		return
+	end
+
+	if st.phase == "enum" then
+		local osq, omem = count_online(nil)
+		logf("~ MP_POP: AFTER ANCHORING -> online_squads=%d online_members=%d", osq, omem)
+		-- keep re-anchoring + re-enumerating so the switch pass has time / stays engaged
+		st.phase = "probe"
+		return
+	end
+end
+
+function tick(now_ms, real_count, actor_id)
+	local ok, err = pcall(tick_impl, now_ms, real_count, actor_id)
+	if not ok then logf("! MP_POP error: %s", tostring(err)) end
+end
