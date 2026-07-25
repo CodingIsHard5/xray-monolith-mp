@@ -48,26 +48,29 @@ local function se_pos(se)
 	return (type(p) == "userdata") and p or nil
 end
 
--- Collect same-level smarts that host squads, with position + squad count. Returns a sorted list.
-local function scan_smarts(actor_lvl)
+-- Collect same-level SQUADS with their OWN se position (where the offline members are — NOT the smart
+-- position; a squad assigned to a smart 400m away won't switch online when we anchor the smart, because
+-- its members are elsewhere). Sorted by distance to the actor (anchor the nearest so they switch online).
+local function scan_squads(actor_lvl, ap)
 	local board = nil; pcall(function() board = sim_board.get_sim_board() end)
 	if not board or not board.smarts then return {} end
 	local out = {}
 	for smart_id, sd in pairs(board.smarts) do
 		local squads = nil; pcall(function() squads = sd.squads end)
-		local n_sq = 0
-		if squads then for _ in pairs(squads) do n_sq = n_sq + 1 end end
-		if n_sq > 0 then
-			local se = nil; pcall(function() se = alife():object(smart_id) end)
-			if se then
-				local lvl, pos = se_level(se), se_pos(se)
-				if pos and (actor_lvl == nil or lvl == actor_lvl) then
-					out[#out + 1] = { id = smart_id, pos = pos, squads = n_sq, lvl = lvl }
+		if squads then
+			for squad_id, squad in pairs(squads) do
+				local se = nil; pcall(function() se = alife():object(squad_id) end)
+				if se then
+					local lvl, pos = se_level(se), se_pos(se)
+					if pos and (actor_lvl == nil or lvl == actor_lvl) then
+						local d = ap and dist_xz(pos, ap) or 1e9
+						out[#out + 1] = { id = squad_id, smart = smart_id, pos = pos, dist = d }
+					end
 				end
 			end
 		end
 	end
-	table.sort(out, function(a, b) return a.squads > b.squads end)
+	table.sort(out, function(a, b) return a.dist < b.dist end)   -- nearest first
 	return out
 end
 
@@ -115,13 +118,12 @@ local function tick_impl(now_ms, real_count, actor_id)
 		local lname = "?"; pcall(function() lname = level.name() end)
 		logf("~ MP_POP: actor id=%s level=%s level_id=%s pos=%s", tostring(actor_id), tostring(lname),
 			tostring(actor_lvl), ap and string.format("%.1f,%.1f,%.1f", ap.x, ap.y, ap.z) or "?")
-		local smarts = scan_smarts(actor_lvl)
-		logf("~ MP_POP: same-level smarts hosting squads = %d (top by squad count):", #smarts)
+		local squads = scan_squads(actor_lvl, ap)
+		logf("~ MP_POP: same-level squads = %d (nearest to actor, anchoring their OWN positions):", #squads)
 		local anchored = 0
-		for i = 1, math.min(#smarts, TOP_SMARTS) do
-			local s = smarts[i]
-			local d = ap and dist_xz(s.pos, ap) or -1
-			logf("~ MP_POP:   #%d smart=%s squads=%d dist=%.0fm pos=%.1f,%.1f,%.1f", i, tostring(s.id), s.squads, d, s.pos.x, s.pos.y, s.pos.z)
+		for i = 1, math.min(#squads, TOP_SMARTS) do
+			local s = squads[i]
+			logf("~ MP_POP:   #%d squad=%s smart=%s dist=%.0fm pos=%.1f,%.1f,%.1f", i, tostring(s.id), tostring(s.smart), s.dist, s.pos.x, s.pos.y, s.pos.z)
 			local ok = pcall(function() game.mp_anchor_set(ANCHOR_BASE + i - 1, s.pos) end)  -- persistent range [8,16)
 			if ok then anchored = anchored + 1 end
 		end

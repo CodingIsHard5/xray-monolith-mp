@@ -201,17 +201,28 @@ bool CSE_ALifeOnlineOfflineGroup::synchronize_location()
 
 void CSE_ALifeOnlineOfflineGroup::try_switch_online()
 {
+	// MP fork (§4 A-Life squad decisions, DIAGNOSTIC): why don't anchored squads switch online?
+	// Log the gate results + the nearest member's anchor distance vs online_distance. -dbg gated,
+	// throttled by a per-object frame stamp so it doesn't spam every switch cycle.
+	const bool mpsw_dbg = strstr(Core.Params, "-coop_sqsw") != nullptr;
 	if (m_members.empty())
+	{
+		if (mpsw_dbg) Msg("[SQSW] [%d][%s] no members", ID, name_replace());
 		return;
+	}
 
 	if (!can_switch_online())
+	{
+		if (mpsw_dbg) Msg("[SQSW] [%d][%s] can_switch_online=FALSE", ID, name_replace());
 		return;
+	}
 
 	if (!can_switch_offline())
 	{
 		inherited1::try_switch_online();
 		return;
 	}
+	float best_d = flt_max;
 	MEMBERS::iterator I = m_members.begin();
 	MEMBERS::iterator E = m_members.end();
 	for (; I != E; ++I)
@@ -224,13 +235,19 @@ void CSE_ALifeOnlineOfflineGroup::try_switch_online()
 		VERIFY3((*I).second->can_switch_offline(),
 		        "Incorrect situation : some of the OnlineOffline group members cannot be switched online due to their personal properties",
 		        (*I).second->name_replace());
-		if (mp_anchors::min_distance_to((*I).second->o_Position, alife().graph().actor()->o_Position) > alife().online_distance())
+		const float d = mp_anchors::min_distance_to((*I).second->o_Position, alife().graph().actor()->o_Position);
+		if (d < best_d) best_d = d;
+		if (d > alife().online_distance())
 		{
 			continue;
 		}
+		if (mpsw_dbg) Msg("[SQSW] [%d][%s] SWITCHING ONLINE: member d=%.0f <= online_dist=%.0f (anchors=%d)",
+			ID, name_replace(), d, alife().online_distance(), mp_anchors::count());
 		inherited1::try_switch_online();
 		return;
 	}
+	if (mpsw_dbg) Msg("[SQSW] [%d][%s] no member in range: best_d=%.0f > online_dist=%.0f (members=%d anchors=%d)",
+		ID, name_replace(), best_d, alife().online_distance(), (int)m_members.size(), mp_anchors::count());
 	on_failed_switch_online();
 }
 
