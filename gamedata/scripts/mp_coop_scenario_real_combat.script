@@ -14,9 +14,21 @@
 local ANCHOR_BASE = 8
 local TOP_SQUADS  = 8
 local SETTLE_MS   = 14000
-local NEAR_M      = 60     -- the two stalkers must start within this of each other
+local NEAR_M      = 60      -- candidate proximity when first collecting a pair
+-- Cornering (headless perception is fixed, so this is about making the DEMO deterministic): keep the
+-- two stalkers pinned in a face-off band so a firefight actually resolves instead of drifting apart
+-- or wandering off to a third A-Life enemy.
+local ENGAGE_M    = 8.0     -- teleport target distance (in weapon range, LOS clear, not overlapping)
+local MAX_DRIFT_M = 20.0    -- re-corner ONLY if they wander this far apart. Never teleport when they are
+                            -- close: force_set_position resets a stalker to a holstered/idle state, so
+                            -- teleporting mid-firefight (the old MIN_DIST re-corner) cancelled the fight.
+                            -- Getting close is the GOAL — let them shoot it out once cornered.
+local REPICK_TICKS = 30     -- if no damage is dealt within this many fight ticks, the pair is a dud
+                            -- (generous: a far cross-community pair needs time to re-path after the
+                            -- corner-teleport and open fire)
 
-local st = { phase = "wait", last = 0, a = nil, b = nil, applied = false, ticks = 0 }
+local st = { phase = "wait", last = 0, a = nil, b = nil, applied = false, ticks = 0,
+             blocklist = {}, base_hp_a = 1.0, base_hp_b = 1.0, engaged = false, kills = 0 }
 
 local function logf(...) printf("%s", string.format(...)) end
 local function dist_xz(a, b) local dx, dz = a.x - b.x, a.z - b.z; return math.sqrt(dx * dx + dz * dz) end
@@ -63,34 +75,119 @@ end
 -- non-combatant / abnormal-combat stalker communities to skip (traders/mechanics + zombied, which shamble
 -- and don't shoot normally) — we want two NORMAL armed stalkers.
 local NONCOMBAT = { trader = true, mechanic = true, barman = true, medic = true, ecolog_scientist_leader = true, zombied = true }
+-- Community alone is not enough: A-Life "loner" stalkers whose SECTION NAME marks them a special role
+-- (mechanic/trader/barman/medic/guide) keep community "stalker" yet run a non-combat scheme and never
+-- engage (the earlier ...loner_mechanic... dud that logged enemy=nil the whole run). Filter by name too.
+local NONCOMBAT_NAME = { "mechanic", "trader", "barman", "medic", "guide", "zombied", "wounded" }
+local function name_is_noncombat(o)
+	local nm = ""; pcall(function() nm = o:name() or "" end); nm = string.lower(nm)
+	for _, k in ipairs(NONCOMBAT_NAME) do if string.find(nm, k, 1, true) then return true end end
+	return false
+end
 local function is_combatant(o)
 	local c = ""; pcall(function() c = o:character_community() end)
-	return not NONCOMBAT[c]
+	if NONCOMBAT[c] then return false end
+	if name_is_noncombat(o) then return false end
+	local wounded = false; pcall(function() wounded = o:critically_wounded() end)
+	if wounded then return false end
+	local armed = false; pcall(function() armed = (o:best_weapon() ~= nil) end)
+	return armed  -- must actually carry a weapon to fight
 end
 
--- collect online alive COMBATANT stalkers near the anchors; return the first PAIR within NEAR_M
-local function find_stalker_pair()
-	if not st.anchor_pts then return nil, nil end
+local function comm(o) local c = ""; pcall(function() c = o:character_community() end); return c end
+
+-- Collect online alive armed COMBATANT stalkers (skipping blocklisted duds) from a WIDE net around the
+-- actor and the anchors, and pick a pair. Same-faction stalkers will not shoot each other no matter how
+-- hard we force it (set_relation/goodwill/provoke all fail — the faction alliance overrides in the combat
+-- scheme; observed enemy=nil the whole run). So PREFER an OPPOSING-COMMUNITY pair (natural enemies) at ANY
+-- distance — cornering teleports them together — and only fall back to a same-community pair (best effort).
+local function find_stalker_pair(actor_pos)
 	local seen, list = {}, {}
-	for i = 1, math.min(#st.anchor_pts, TOP_SQUADS) do
-		local ap = st.anchor_pts[i].pos
+	local function sweep(center, r)
+		if not center then return end
 		pcall(function()
-			level.iterate_nearest(ap, 80, function(o)
-				if o and o:alive() and o:is_stalker() and is_combatant(o) and not seen[o:id()] then
+			level.iterate_nearest(center, r, function(o)
+				if o and o:alive() and o:is_stalker() and is_combatant(o)
+					and not seen[o:id()] and not st.blocklist[o:id()] then
 					seen[o:id()] = true; list[#list + 1] = o
 				end
 				return false
 			end)
 		end)
 	end
+	sweep(actor_pos, 250)
+	if st.anchor_pts then
+		for i = 1, math.min(#st.anchor_pts, TOP_SQUADS) do sweep(st.anchor_pts[i].pos, 120) end
+	end
+
+	-- one-time faction census so we know what is actually online near the actor
+	if not st.censused then
+		st.censused = true
+		local tally = {}
+		for _, o in ipairs(list) do local c = comm(o); tally[c] = (tally[c] or 0) + 1 end
+		local parts = {}
+		for c, n in pairs(tally) do parts[#parts + 1] = string.format("%s=%d", c, n) end
+		logf("~ MP_RC: candidate census (%d combatants): %s", #list, table.concat(parts, " "))
+	end
+
+	-- best DIFFERENT-community pair (natural enemies -> fight without forcing), closest such pair; and a
+	-- fallback closest SAME-community pair within NEAR_M.
+	local xa, xb, xd = nil, nil, 1e9     -- cross-community (preferred)
+	local sa, sb, sd = nil, nil, 1e9     -- same-community fallback
 	for i = 1, #list do
 		for j = i + 1, #list do
-			if dist_xz(list[i]:position(), list[j]:position()) <= NEAR_M then
-				return list[i], list[j]
+			local d = dist_xz(list[i]:position(), list[j]:position())
+			local ci, cj = comm(list[i]), comm(list[j])
+			if ci ~= cj then
+				if d < xd then xa, xb, xd = list[i], list[j], d end
+			elseif d <= NEAR_M and d < sd then
+				sa, sb, sd = list[i], list[j], d
 			end
 		end
 	end
-	return nil, nil
+	if xa then return xa, xb, true end   -- opposing factions: corner + let native combat run
+	return sa, sb, false                 -- same faction: forced best-effort
+end
+
+-- Corner B in front of A at ENGAGE_M, snapped to the navmesh, so the pair holds a face-off in weapon
+-- range. vertex_in_direction walks A's nav vertex along A's facing, so the drop point is on-mesh and
+-- clear ahead of A; set_sight then keeps them aimed at each other.
+local function corner(a, b)
+	local ap = a:position()
+	local a_vid; pcall(function() a_vid = level.vertex_id(ap) end)
+	local dir;   pcall(function() dir = a:direction() end)
+	if not a_vid or a_vid == 4294967295 or not dir then return false end
+	local tgt
+	pcall(function()
+		local vid = level.vertex_in_direction(a_vid, dir, ENGAGE_M)
+		if vid and vid ~= 4294967295 then tgt = level.vertex_position(vid) end
+	end)
+	if not tgt then return false end
+	local ok = false
+	pcall(function() b:force_set_position(tgt); ok = true end)
+	return ok
+end
+
+-- Provoke: land a near-zero fire_wound on `victim` with `attacker` as the draftsman. The victim's
+-- combat scheme registers the draftsman as its attacker -> best_enemy populates -> it fights back and
+-- keeps fighting natively. This is the strongest engagement trigger and works even between same-faction
+-- stalkers that set_relation alone won't make shoot each other. Power is ~0 so the kill comes from their
+-- own gunfire, not this nudge.
+local function provoke(attacker, victim)
+	pcall(function()
+		local ap, vp = attacker:position(), victim:position()
+		local dx, dy, dz = vp.x - ap.x, vp.y - ap.y, vp.z - ap.z
+		local mag = math.sqrt(dx * dx + dy * dy + dz * dz)
+		if mag < 0.01 then return end
+		local h = hit()
+		h:bone("bip01_spine")
+		h.power = 0.001
+		h.impulse = 0.0
+		h.direction = vector():set(dx / mag, dy / mag, dz / mag)
+		h.draftsman = attacker
+		h.type = hit.fire_wound
+		victim:hit(h)
+	end)
 end
 
 local function make_hostile(a, b)
@@ -128,23 +225,58 @@ local function tick_impl(now_ms, real_count, actor_id)
 		st.phase = "find"; return
 	end
 	if st.phase == "find" then
-		local a, b = find_stalker_pair()
-		if not a then logf("~ MP_RC: no online stalker pair near each other yet; retry"); return end
-		st.a, st.b = a:id(), b:id()
-		logf("~ MP_RC: PAIR A=%d(%s,%s) B=%d(%s,%s) dist=%.1f", st.a, a:name(), a:character_community(), st.b, b:name(), b:character_community(), dist_xz(a:position(), b:position()))
+		local a, b, natural = find_stalker_pair(ap)
+		if not a then logf("~ MP_RC: no online armed stalker pair available yet (blocklisted %d); retry", (function() local c=0; for _ in pairs(st.blocklist) do c=c+1 end; return c end)()); return end
+		st.a, st.b, st.natural = a:id(), b:id(), natural and true or false
+		-- reset per-pair fight state
+		st.applied, st.ticks, st.engaged = false, 0, false
+		st.base_hp_a, st.base_hp_b = a.health, b.health
+		logf("~ MP_RC: PAIR A=%d(%s,%s) B=%d(%s,%s) dist=%.1f natural_enemy=%s", st.a, a:name(), a:character_community(), st.b, b:name(), b:character_community(), dist_xz(a:position(), b:position()), tostring(st.natural))
 		st.phase = "fight"; return
 	end
 	if st.phase == "fight" then
 		local a, b = level.object_by_id(st.a), level.object_by_id(st.b)
-		if not a or not b then logf("~ MP_RC: A or B gone (a=%s b=%s) — a stalker may have DIED", tostring(a ~= nil), tostring(b ~= nil)); return end
-		if not st.applied then make_hostile(a, b); st.applied = true; logf("~ MP_RC: made hostile + forced mutual perception") end
-		-- re-force perception each tick (memory can decay); do NOT take script control (scheme must run)
+		-- a stalker vanishing (dead/offline) after a live fight is the LETHAL outcome we want; count it,
+		-- blocklist the pair and pick a fresh one so the demo keeps producing firefights.
+		local a_dead = (not a) or (function() local al=true; pcall(function() al=a:alive() end); return not al end)()
+		local b_dead = (not b) or (function() local al=true; pcall(function() al=b:alive() end); return not al end)()
+		if a_dead or b_dead then
+			if st.engaged then st.kills = st.kills + 1
+				logf("~ MP_RC: *** KILL *** pair A=%d B=%d resolved (a_dead=%s b_dead=%s) — lethal firefight #%d", st.a, st.b, tostring(a_dead), tostring(b_dead), st.kills)
+			else
+				logf("~ MP_RC: pair A=%d B=%d gone before engaging (a=%s b=%s) — re-picking", st.a, st.b, tostring(a ~= nil), tostring(b ~= nil))
+			end
+			st.blocklist[st.a] = true; st.blocklist[st.b] = true
+			st.phase = "find"; return
+		end
+		if not st.applied then
+			make_hostile(a, b)              -- for natural enemies this just reinforces goodwill + frees them
+			local cok = corner(a, b)        -- one-time face-off setup (bring them together to start)
+			if not cok then logf("~ MP_RC: WARNING initial corner failed for A=%d B=%d (bad vertex/direction)", st.a, st.b) end
+			st.applied = true
+			st.base_hp_a, st.base_hp_b = a.health, b.health
+			logf("~ MP_RC: made hostile + forced mutual perception + cornered=%s (natural=%s)", tostring(cok), tostring(st.natural))
+		end
+		-- refresh mutual perception (feeds best_enemy now that headless visible_now works); do NOT take
+		-- script control (the native combat scheme must run).
 		pcall(function() a:make_object_visible_somewhen(b); b:make_object_visible_somewhen(a) end)
-		-- EXPERIMENT (headless-visibility scope): force each to LOOK AT + FIRE AT the other. set_sight(obj,
-		-- torso_look, fire_object=true) points the head at the enemy (bootstraps the first sighting past the
-		-- sight-orientation deadlock) and commands firing. If they now damage each other, lethal stalker
-		-- combat is a GAMEDATA fix (no engine change).
-		pcall(function() a:set_sight(b, true, true); b:set_sight(a, true, true) end)
+		-- FORCED (same-faction) pairs need an engagement bootstrap until they're actually fighting: a
+		-- near-zero provoking hit each way makes each register the other as its attacker (best_enemy),
+		-- and set_sight points the head so the first real shots land. Stop once engaged, and never do
+		-- this to NATURAL enemies (their own combat scheme already runs — forcing would interrupt it).
+		if not st.natural and not st.engaged and st.ticks < 8 then
+			provoke(a, b); provoke(b, a)
+			pcall(function() a:set_sight(b, true, true); b:set_sight(a, true, true) end)
+		end
+		-- CORNER only if they WANDERED far apart (never when close — teleporting holsters them).
+		local dpre = dist_xz(a:position(), b:position())
+		if dpre > MAX_DRIFT_M then
+			if corner(a, b) then
+				logf("~ MP_RC: cornered B->A (was %.1f m, target %.1f m)", dpre, ENGAGE_M)
+			else
+				logf("~ MP_RC: WARNING drift-corner failed for A=%d B=%d (dist=%.1f m)", st.a, st.b, dpre)
+			end
+		end
 		st.ticks = st.ticks + 1
 		-- ENGINE DIAGNOSTIC (-coop_vissdbg build): dump each NPC's feel_vision internals vs the
 		-- EXPLICIT other (frustum `seen`, o_trace fuzzy, visible_right_now/now) so we can localize
@@ -159,6 +291,22 @@ local function tick_impl(now_ms, real_count, actor_id)
 		logf("~ MP_RC: [REAL] #%d dist=%.2f | A hp=%.2f enemy=%s see=%s wpn=%s drawn=%s | B hp=%.2f enemy=%s see=%s wpn=%s drawn=%s",
 			st.ticks, dist_xz(a:position(), b:position()), a.health, tostring(enemy_id(a)), a_see, a_wpn, a_un,
 			b.health, tostring(enemy_id(b)), b_see, b_wpn, b_un)
+
+		-- engagement / dud detection: cumulative REAL damage proves the pair is fighting. Threshold is
+		-- well above the total provoke nudge (<=8 ticks x 2 sides x 0.001 = 0.016) so only genuine
+		-- gunfire (>=~0.05) counts as engaged.
+		local dmg = (st.base_hp_a - a.health) + (st.base_hp_b - b.health)
+		if dmg > 0.05 and not st.engaged then
+			st.engaged = true
+			logf("~ MP_RC: ENGAGED — pair A=%d B=%d is exchanging fire (cumulative dmg=%.2f)", st.a, st.b, dmg)
+		end
+		-- if no damage after REPICK_TICKS, this pair won't fight (dud logic / non-combatant) — blocklist
+		-- both and pick a fresh pair, so the scenario reliably converges on two combatants.
+		if not st.engaged and st.ticks >= REPICK_TICKS then
+			logf("~ MP_RC: pair A=%d B=%d dealt no damage in %d ticks — blocklisting + re-picking", st.a, st.b, st.ticks)
+			st.blocklist[st.a] = true; st.blocklist[st.b] = true
+			st.phase = "find"
+		end
 	end
 end
 
