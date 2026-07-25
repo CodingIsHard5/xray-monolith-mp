@@ -406,6 +406,29 @@ void CCustomMonster::net_Import(NET_Packet& P)
 
 	float health;
 	P.r_float(health);
+	// MP fork (§4C combat-outcome replication diag, -coop_npcdeath): does a server-authoritative NPC's
+	// combat damage/death reach the co-op client? Health is streamed (below), so log on the client when a
+	// replicated NPC puppet takes damage or its health crosses to <=0 — and whether the engine then treats
+	// the puppet as dead (g_Alive()). Reveals if server kills render on the client or need a death event.
+	{
+		static int s_nd = -1;
+		if (s_nd < 0) s_nd = strstr(Core.Params, "-coop_npcdeath") ? 1 : 0;
+		if (s_nd && xr_enet::enabled() && !ai().get_alife())
+		{
+			const float old_hp = GetfHealth();
+			if (health <= 0.f && old_hp > 0.f)
+			{
+				Msg("~ MP_NPCDEATH: [CLIENT] puppet id=%u DIED via stream (hp %.2f->%.2f) alive_after=%d",
+					ID(), old_hp, health, (health > 0.f) ? 1 : 0);
+				FlushLog();
+			}
+			else if (health < old_hp - 0.05f)
+			{
+				Msg("~ MP_NPCDEATH: [CLIENT] puppet id=%u took damage (hp %.2f->%.2f)", ID(), old_hp, health);
+				FlushLog();
+			}
+		}
+	}
 	SetfHealth(health);
 
 	P.r_u32(N.dwTimeStamp);
