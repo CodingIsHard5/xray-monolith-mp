@@ -1,0 +1,128 @@
+--[[
+	Level B — SQUAD-LEVEL decision: redirect a REAL A-Life squad to a smart_terrain (design §3 "squad X ->
+	smart_terrain Y"). dev/ALIFE_SQUAD_DECISIONS.md. The CLEAN path: SIMBOARD:assign_squad_to_smart drives
+	the squad's OWN A-Life pathing to the target — NO script control, NO gulag fight (it IS the simulation).
+
+	Anchor squads online, pick an online squad + a DIFFERENT reachable target smart on the level, assign it,
+	and verify the squad accepted (its target smart_id changed) and its online members trend toward the
+	target smart's position. Server-side, under -coop_squad_move.
+--]]
+
+local ANCHOR_BASE = 8
+local TOP_SQUADS  = 8
+local SETTLE_MS   = 14000
+local LOG_MS      = 3000
+
+local st = { phase = "wait", last = 0, squad_id = nil, target_smart = nil, tpos = nil, first_d = nil, ticks = 0 }
+
+local function logf(...) printf("%s", string.format(...)) end
+local function dist_xz(a, b) local dx, dz = a.x - b.x, a.z - b.z; return math.sqrt(dx * dx + dz * dz) end
+local function se_pos(se) local p; pcall(function() p = se.position end); if type(p) ~= "userdata" then pcall(function() p = se:position() end) end; return (type(p) == "userdata") and p or nil end
+local function se_level(se) local l; pcall(function() l = game_graph():vertex(se.m_game_vertex_id):level_id() end); return l end
+local function member_id(m) if type(m)=="table" or type(m)=="userdata" then local ok,id=pcall(function() return m.id end); if ok and id then return id end; local ok2,id2=pcall(function() return m:id() end); if ok2 and id2 then return id2 end end return nil end
+
+-- collect same-level smarts (with positions) + squads; anchor the nearest squads to switch online
+local function scan(actor_lvl, ap)
+	local board; pcall(function() board = sim_board.get_sim_board() end)
+	if not board or not board.smarts then return nil end
+	local smarts, sq = {}, {}
+	for smart_id, sd in pairs(board.smarts) do
+		local se; pcall(function() se = alife():object(smart_id) end)
+		local pos = se and se_pos(se) or nil
+		local lvl = se and se_level(se) or nil
+		if pos and (actor_lvl == nil or lvl == actor_lvl) then
+			smarts[smart_id] = pos
+			local squads; pcall(function() squads = sd.squads end)
+			if squads then for sid, squad in pairs(squads) do
+				local sse; pcall(function() sse = alife():object(sid) end)
+				local spos = sse and se_pos(sse) or nil
+				if spos then sq[#sq+1] = { id = sid, squad = squad, pos = spos, smart = smart_id, d = ap and dist_xz(spos, ap) or 1e9 } end
+			end end
+		end
+	end
+	table.sort(sq, function(a,b) return a.d < b.d end)
+	st.board = board; st.smarts = smarts; st.squads = sq
+	local n = 0
+	for i = 1, math.min(#sq, TOP_SQUADS) do
+		if pcall(function() game.mp_anchor_set(ANCHOR_BASE + i - 1, sq[i].pos) end) then n = n + 1 end
+	end
+	return n
+end
+
+local function squad_target(squad)
+	local t; pcall(function() t = squad.assigned_target_id end)
+	if t == nil then pcall(function() t = squad.smart_id end) end
+	return t
+end
+
+-- online members' mean position (or the squad se position if none online)
+local function squad_pos(sqrec)
+	local sx, sz, n = 0, 0, 0
+	pcall(function() for m in sqrec.squad:squad_members() do
+		local id = member_id(m); local mo = id and level.object_by_id(id) or nil
+		if mo then local p = mo:position(); sx = sx + p.x; sz = sz + p.z; n = n + 1 end
+	end end)
+	if n > 0 then return vector():set(sx/n, 0, sz/n), n end
+	return sqrec.pos, 0
+end
+
+local function tick_impl(now_ms, real_count, actor_id)
+	if real_count < 1 or not actor_id or actor_id == 0 then return end
+	local e = now_ms - st.last; if e < 0 then e = e + 4294967296 end
+	if e < LOG_MS then return end
+	st.last = now_ms
+	local ase; pcall(function() ase = alife():object(actor_id) end)
+	local alvl = ase and se_level(ase) or nil
+	local actor = level.object_by_id(actor_id); local ap = actor and actor:position() or nil
+
+	if st.phase == "wait" then
+		local n = scan(alvl, ap)
+		logf("~ MP_SM: anchored %s squads (switching online); %s smarts on level; settling %dms", tostring(n), tostring(st.smarts and (function() local c=0 for _ in pairs(st.smarts) do c=c+1 end return c end)() or 0), SETTLE_MS)
+		st.phase = "settle"; st.settle_start = now_ms; return
+	end
+	if st.phase == "settle" then
+		local s = now_ms - st.settle_start; if s < 0 then s = s + 4294967296 end
+		if s < SETTLE_MS then return end
+		st.phase = "assign"; return
+	end
+	if st.phase == "assign" then
+		-- pick the nearest squad that has an ONLINE member (so we can watch it move)
+		local pick = nil
+		for _, r in ipairs(st.squads or {}) do
+			local _, online = squad_pos(r)
+			if online > 0 then pick = r; break end
+		end
+		if not pick then logf("~ MP_SM: no squad with online members yet; retry"); return end
+		-- choose a target smart FARTHEST from the squad (a clear move)
+		local best_id, best_pos, best_d = nil, nil, 0
+		for smart_id, pos in pairs(st.smarts) do
+			if smart_id ~= pick.smart then local d = dist_xz(pos, pick.pos); if d > best_d then best_d, best_id, best_pos = d, smart_id, pos end end
+		end
+		if not best_id then logf("~ MP_SM: no alternate smart found"); return end
+		st.squad_id = pick.id; st.squad_rec = pick; st.target_smart = best_id; st.tpos = best_pos
+		local before = squad_target(pick.squad)
+		local ok = pcall(function() st.board:assign_squad_to_smart(pick.squad, best_id) end)
+		local after = squad_target(pick.squad)
+		local sp = squad_pos(pick)
+		st.first_d = dist_xz(sp, best_pos)
+		logf("~ MP_SM: ASSIGNED squad=%s -> smart=%s (assign_ok=%s target %s->%s); squad->target dist=%.0f (%.0fm away)",
+			tostring(pick.id), tostring(best_id), tostring(ok), tostring(before), tostring(after), st.first_d, best_d)
+		st.phase = "watch"; return
+	end
+	if st.phase == "watch" then
+		st.ticks = st.ticks + 1
+		local sp, online = squad_pos(st.squad_rec)
+		local d = dist_xz(sp, st.tpos)
+		local tgt = squad_target(st.squad_rec.squad)
+		logf("~ MP_SM: [WATCH] #%d squad=%s target_smart=%s (want %s) online_members=%d dist_to_target=%.1f (from %.1f)",
+			st.ticks, tostring(st.squad_id), tostring(tgt), tostring(st.target_smart), online, d, st.first_d or -1)
+		if st.first_d and (st.first_d - d) >= 10 then
+			logf("~ MP_SM: *** SQUAD MOVED >=10m TOWARD THE DECIDED SMART (%.0f -> %.0f) — Level-B squad decision executes ***", st.first_d, d)
+		end
+	end
+end
+
+function tick(now_ms, real_count, actor_id)
+	local ok, err = pcall(tick_impl, now_ms, real_count, actor_id)
+	if not ok then logf("! MP_SM error: %s", tostring(err)) end
+end
