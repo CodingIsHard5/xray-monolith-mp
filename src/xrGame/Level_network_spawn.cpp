@@ -29,6 +29,21 @@ void CLevel::cl_Process_Spawn(NET_Packet& P)
 	if (E->s_flags.is(M_SPAWN_UPDATE))
 		E->UPDATE_Read(P);
 
+	// MP fork (§ world-NPC-replication Phase 1): -coop_npcdiag — does an ambient A-Life NPC spawn
+	// ever REACH this co-op client? Log every NON-actor creature spawn received (id/section/flags);
+	// its net_Spawn success/failure shows up as g_sv_Spawn's own "Failed to spawn entity" line for the
+	// same section. Diagnostic only, gated. See dev/WORLD_NPC_REPLICATION_PLAN.md.
+	static int s_npcdiag = -2; // -2 unparsed, -1 off, 1 on
+	if (s_npcdiag == -2)
+		s_npcdiag = strstr(Core.Params, "-coop_npcdiag") ? 1 : -1;
+	if (s_npcdiag == 1 && smart_cast<CSE_ALifeCreatureAbstract*>(E)
+		&& !smart_cast<CSE_ALifeCreatureActor*>(E))
+	{
+		Msg("~ COOP_NPCDIAG: RX creature spawn id=%u section='%s' flags=0x%x update=%d",
+			E->ID, *s_name, E->s_flags.flags, E->s_flags.is(M_SPAWN_UPDATE) ? 1 : 0);
+		FlushLog();
+	}
+
 	if (!E->match_configuration())
 	{
 		F_entity_Destroy(E);

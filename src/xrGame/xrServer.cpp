@@ -307,12 +307,32 @@ void xrServer::MakeUpdatePackets()
 
 	m_updator.begin_updates();
 
+	// MP fork (§ world-NPC-replication Phase 1): -coop_npcdiag — localize why ambient online
+	// A-Life creatures don't reach co-op clients. Per pass, categorize every creature CSE by the
+	// SAME gate it hits in this loop (owner==0 / !net_Ready / phantom / !relevant / eligible-to-
+	// stream), and flush ONE aggregate line every ~3s. Pure diagnostic (no behavior change), gated
+	// so stock/normal co-op is untouched. See dev/WORLD_NPC_REPLICATION_PLAN.md.
+	static int s_npcdiag = -2; // -2 unparsed, -1 off, 1 on
+	if (s_npcdiag == -2)
+		s_npcdiag = strstr(Core.Params, "-coop_npcdiag") ? 1 : -1;
+	int nd_creatures = 0, nd_owner0 = 0, nd_notready = 0, nd_phantom = 0, nd_notrel = 0, nd_eligible = 0;
+
 	xrS_entities::iterator I = entities.begin();
 	xrS_entities::iterator E = entities.end();
 	for (; I != E; ++I)
 	{
 		//all entities
 		CSE_Abstract& Test = *(I->second);
+
+		if (s_npcdiag == 1 && Test.cast_creature_abstract())
+		{
+			nd_creatures++;
+			if (0 == Test.owner)                                   nd_owner0++;
+			else if (!Test.net_Ready)                              nd_notready++;
+			else if (Test.s_flags.is(M_SPAWN_OBJECT_PHANTOM))      nd_phantom++;
+			else if (!Test.Net_Relevant() && !xr_enet::enabled())  nd_notrel++;
+			else                                                   nd_eligible++;
+		}
 
 		if (0 == Test.owner) continue;
 		if (!Test.net_Ready) continue;
@@ -400,6 +420,19 @@ void xrServer::MakeUpdatePackets()
 			m_updator.write_update_for(Test.ID, tmpPacket);
 		}
 	} //all entities
+
+	// §world-NPC-replication Phase 1: flush the per-pass creature tally at most once per ~3s.
+	if (s_npcdiag == 1)
+	{
+		static u32 s_nd_last = 0;
+		if ((Device.dwTimeGlobal - s_nd_last) >= 3000)
+		{
+			s_nd_last = Device.dwTimeGlobal;
+			Msg("~ COOP_NPCDIAG: creatures=%d eligible=%d | skip: owner0=%d notready=%d phantom=%d notrel=%d (clients=%u)",
+				nd_creatures, nd_eligible, nd_owner0, nd_notready, nd_phantom, nd_notrel, GetClientsCount());
+			FlushLog();
+		}
+	}
 
 	m_updator.end_updates(m_update_begin, m_update_end);
 }
