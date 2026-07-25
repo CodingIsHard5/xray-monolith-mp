@@ -906,8 +906,16 @@ void CCustomMonster::UpdateCL()
 		// stream here), letting the sparse server correction hold it in place — the soft-correction design
 		// (idle ⇒ server holds, active ⇒ local AI drives). SCRIPT-CONTROLLED locally-driven NPCs (the proven
 		// decision-driven KIND_MOVE/C1b/C2 path) are UNCHANGED — they always self-integrate as before.
+		// §3 item 3 inc3 (guard): a thin-client AUTONOMOUS flipped monster (not script-controlled, no A-Life)
+		// has its control frame-tick SKIPPED (see CBaseMonster::UpdateCL guard — it crashes executing an
+		// AI-set graph path on the thin client). Without the control tick, self-integrating a transiently-
+		// "moving" one drifts/falls (no locomotion driving it), so force it to STREAM-HOLD (self_integrate=
+		// false): it becomes a server-authoritative throttled puppet (bandwidth win intact, no fall, no crash).
+		// Script-controlled (KIND_MOVE) monsters are NOT thin-autonomous → keep self-integration as before.
+		const bool coop_thin_autonomous =
+			Remote() && m_coop_locally_driven && !GetScriptControl() && !ai().get_alife();
 		const bool coop_local_active =
-			m_coop_locally_driven && (GetScriptControl() || movement().enabled());
+			m_coop_locally_driven && (GetScriptControl() || movement().enabled()) && !coop_thin_autonomous;
 		// §14 step 3 (increment C1b): confirm the local movement pipeline is live and the body is
 		// advancing. GATED behind -coop_local_ai (parsed once) so it is silent in normal play, and
 		// throttled with no per-sample FlushLog — CodeRabbit: avoid per-frame synchronous I/O and

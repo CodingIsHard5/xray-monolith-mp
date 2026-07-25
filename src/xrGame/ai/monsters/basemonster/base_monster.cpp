@@ -375,8 +375,12 @@ void CBaseMonster::UpdateCL()
 	// keep the full control tick. Trade-off: autonomous client-side PATHING is disabled for flipped monsters
 	// (they can't self-path on the thin client); the population's bandwidth win (KIND_SETLOCAL throttle) is
 	// intact, and this is regression-tested against KIND_COMBAT (test_coop_combat_local.sh).
-	const bool coop_thin_local = Remote() && coop_locally_driven() && !ai().get_alife();
-	if (!coop_thin_local)
+	// EXCLUDE script-controlled monsters (!GetScriptControl()): a KIND_MOVE decision NPC is held under
+	// obj:script(true) and reaches its target via the scripted path (the proven C1b/C1c feature) — it needs the
+	// full control tick and must NOT be guarded. So only AUTONOMOUS client-side pathing is disabled (KIND_COMBAT
+	// chase + the autolocal population); KIND_MOVE is unaffected. Matches the CustomMonster::UpdateCL stream-hold.
+	const bool coop_thin_autonomous = Remote() && coop_locally_driven() && !GetScriptControl() && !ai().get_alife();
+	if (!coop_thin_autonomous)
 		control().update_frame();
 
 	MP_AIPHASE("cl.physics");
