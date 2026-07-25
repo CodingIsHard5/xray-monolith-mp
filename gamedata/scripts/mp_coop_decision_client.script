@@ -322,6 +322,14 @@ function on_decision(subject_id, kind, hex_args)
 				tostring(subject_id), tostring(enemy_id), tostring(npc ~= nil), tostring(enemy ~= nil))
 			return
 		end
+		-- §4C client-LOCAL combat (the inversion payoff): under -coop_local_ai, flip the subject to
+		-- locally-driven so shedule_Update runs Think()->StateMan on the CLIENT (it is NOT script-
+		-- controlled -> Think, not ProcessScripts), and its EnemyMan.update() reflects the forced enemy
+		-- -> the client's copy FIGHTS locally from the decision instead of only mirroring the server
+		-- stream. The ~1s KIND_COMBAT re-broadcast refreshes the locally-driven TTL. The server stays
+		-- authoritative on DEATH: health streams via net_Import regardless of locally-driven. Without
+		-- -coop_local_ai this is a no-op and the client stays a streamed puppet (server-authoritative).
+		flip_locally_driven(subject_id, npc)
 		pcall(function() npc:set_enemy(enemy) end)                         -- monster (all CBaseMonster now)
 		pcall(function()                                                   -- stalker fallback (InventoryOwner)
 			npc:set_relation(game_object.enemy, enemy)
