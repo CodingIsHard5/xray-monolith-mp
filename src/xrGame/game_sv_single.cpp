@@ -30,6 +30,8 @@ game_sv_Single::game_sv_Single()
 	m_coop_autosave_last = 0;
 	m_coop_autosave_init = false;
 	m_coop_test_checkpoint_ms = 0;
+	m_coop_test_checkpoint_armed = 0;
+	m_coop_test_checkpoint_retry = 0;
 	m_coop_test_checkpoint_init = false;
 	m_coop_test_checkpoint_done = false;
 };
@@ -933,6 +935,16 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 				c.items.push_back(it);
 			}
 
+			// A checkpoint whose item list was cut short would silently roll the player back
+			// with PART of their gear — worse than an honest "no checkpoint", because the
+			// loss looks like a game rule rather than a corrupt file. Drop it. (CodeRabbit)
+			if (truncated)
+			{
+				Msg("! COOP(bindings): checkpoint %u for '%s' has an incomplete item list — dropped",
+					i, c.player_name.size() ? c.player_name.c_str() : "");
+				break;
+			}
+
 			// A checkpoint you cannot be put back at is worse than none: drop unnamed or
 			// non-finite records rather than let a death teleport someone into the void.
 			if (!c.player_name.size() || !_valid(c.pos))
@@ -947,8 +959,6 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 				Msg("- COOP(checkpoint): restored '%s' pos %.1f,%.1f,%.1f hp=%.2f items=%u",
 					c.player_name.c_str(), c.pos.x, c.pos.y, c.pos.z, c.health, (u32)c.items.size());
 			}
-			if (truncated)
-				break;
 		}
 	}
 
@@ -1416,12 +1426,20 @@ void game_sv_Single::Update()
 				const float secs = (float)atof(p);
 				// NaN/inf fail every compare, so >0 also rejects non-finite input
 				m_coop_test_checkpoint_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 30000u;
-				Msg("- COOP(checkpoint): test auto-bank armed at %ums", m_coop_test_checkpoint_ms);
+				// Measure the delay from HERE, not from engine start: this flag is parsed on
+				// the first co-op Update, minutes into a dedicated boot, so comparing against
+				// an absolute Device.dwTimeGlobal made every value fire instantly. (CodeRabbit)
+				m_coop_test_checkpoint_armed = Device.dwTimeGlobal;
+				Msg("- COOP(checkpoint): test auto-bank armed, firing in %ums", m_coop_test_checkpoint_ms);
 			}
 		}
 		if (m_coop_test_checkpoint_ms && !m_coop_test_checkpoint_done &&
-		    Device.dwTimeGlobal >= m_coop_test_checkpoint_ms)
+		    Device.dwTimeGlobal - m_coop_test_checkpoint_armed >= m_coop_test_checkpoint_ms &&
+		    Device.dwTimeGlobal - m_coop_test_checkpoint_retry >= 5000)
 		{
+			// Retry every 5s (not every frame) until a player actually has an actor, so a
+			// failing bank cannot flood the log with one '!' line per frame. (CodeRabbit)
+			m_coop_test_checkpoint_retry = Device.dwTimeGlobal;
 			struct banker
 			{
 				game_sv_Single* self;

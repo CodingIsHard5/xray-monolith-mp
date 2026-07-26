@@ -120,7 +120,9 @@ private:
 	};
 	xr_vector<coop_checkpoint> m_coop_checkpoints;
 	coop_checkpoint* coop_find_checkpoint(LPCSTR player_name);
-	u32  m_coop_test_checkpoint_ms;   // -coop_test_checkpoint <seconds>: auto-bank (harness)
+	u32  m_coop_test_checkpoint_ms;      // -coop_test_checkpoint <seconds>: auto-bank (harness)
+	u32  m_coop_test_checkpoint_armed;   // when the flag was parsed — the delay runs from here
+	u32  m_coop_test_checkpoint_retry;   // last attempt, so retries are 5s apart not per-frame
 	bool m_coop_test_checkpoint_init;
 	bool m_coop_test_checkpoint_done;
 public:
