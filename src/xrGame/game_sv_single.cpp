@@ -543,7 +543,14 @@ void game_sv_Single::coop_freeze_restored_bodies()
 				entity->o_Position.x, entity->o_Position.y, entity->o_Position.z,
 				o.saved_pos.x, o.saved_pos.y, o.saved_pos.z);
 
+		// Clear BOTH directions of the ownership link. Process_spawn refuses to point a
+		// client's owner at an orphan, so the reverse pointer should never name this body —
+		// but a dangling CL->owner would be a client "owning" an unowned entity, which is
+		// exactly the confusion this phase exists to remove. (CodeRabbit)
+		xrClientData* previous_owner = entity->owner;
 		entity->owner = NULL;
+		if (previous_owner && previous_owner->owner == entity)
+			previous_owner->owner = NULL;
 		for (u16 child_id : entity->children)
 		{
 			CSE_Abstract* child = m_server->ID_to_entity(child_id);
