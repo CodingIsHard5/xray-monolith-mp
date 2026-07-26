@@ -412,6 +412,9 @@ void game_sv_Single::coop_orphan_actor(xrClientData* CL)
 	orphan.player_name = nm ? nm : "";   // unnamed => body is preserved but unmatchable
 	orphan.disconnect_time = Device.dwTimeGlobal;
 	orphan.persistent = false;   // live disconnect: expires on the reconnect timeout
+	orphan.saved_pos.set(0.f, 0.f, 0.f);
+	orphan.have_saved_pos = false; // live path: ownership is detached below, CSE pos is already right
+	orphan.frozen = true;          // ditto — nothing will overwrite it
 
 	// Mark the entity as orphaned so Perform_connect_spawn won't claim it for other
 	// connecting clients. Detach ownership so the update loop skips it (frozen body).
@@ -444,8 +447,11 @@ void game_sv_Single::OnCoopClientDisconnected(xrClientData* CL)
 	m_coop_seen.erase(CL->ID.value());
 }
 
-CSE_Abstract* game_sv_Single::coop_find_orphan(LPCSTR name)
+CSE_Abstract* game_sv_Single::coop_find_orphan(LPCSTR name, Fvector* out_pos, bool* out_have_pos)
 {
+	if (out_have_pos)
+		*out_have_pos = false;
+
 	// An unnamed client must never match an (equally unnamed) orphan — that would hand
 	// it whichever body happens to sit first in the list, quite possibly someone else's.
 	if (!name || !xr_strlen(name))
@@ -459,6 +465,11 @@ CSE_Abstract* game_sv_Single::coop_find_orphan(LPCSTR name)
 		{
 			u16 eid = it->entity_id;
 			const bool persisted = it->persistent;
+			if (out_pos && out_have_pos && it->have_saved_pos)
+			{
+				*out_pos = it->saved_pos;
+				*out_have_pos = true;
+			}
 			m_coop_orphans.erase(it);
 			CSE_Abstract* entity = m_server->ID_to_entity(eid);
 			if (entity)
@@ -505,6 +516,41 @@ CSE_Abstract* game_sv_Single::coop_find_orphan(LPCSTR name)
 		}
 	}
 	return NULL;
+}
+
+// MP fork (§14 step 7 phase 2): a body restored from a save switches online owned by the
+// server's loopback client — it has to, or Process_event's owner assert fires while its
+// inventory children attach. But an owned entity is one the server keeps in sync from its
+// own (never actually placed) object state, which overwrites the CSE position: run 3
+// measured the saved -235.6,27.9,253.9 becoming -0.1,0.2,0.7 before the owner logged in.
+// So as soon as a restored body IS online, detach ownership — the exact state a live
+// disconnect leaves behind (coop_orphan_actor), i.e. a frozen body nothing updates.
+void game_sv_Single::coop_freeze_restored_bodies()
+{
+	for (coop_orphan& o : m_coop_orphans)
+	{
+		if (!o.persistent || o.frozen)
+			continue;
+
+		CSE_Abstract* entity = m_server->ID_to_entity(o.entity_id);
+		if (!entity)
+			continue;               // still offline; nothing owns/updates it yet
+
+		if (o.have_saved_pos)
+			Msg("- COOP(bindings): freezing restored body id %u for '%s' — CSE pos %.1f,%.1f,%.1f "
+				"(saved %.1f,%.1f,%.1f), detaching server ownership",
+				o.entity_id, o.player_name.c_str(),
+				entity->o_Position.x, entity->o_Position.y, entity->o_Position.z,
+				o.saved_pos.x, o.saved_pos.y, o.saved_pos.z);
+
+		entity->owner = NULL;
+		for (u16 child_id : entity->children)
+		{
+			CSE_Abstract* child = m_server->ID_to_entity(child_id);
+			if (child) child->owner = NULL;
+		}
+		o.frozen = true;
+	}
 }
 
 void game_sv_Single::coop_cleanup_orphans()
@@ -778,6 +824,9 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 		o.player_name = name;
 		o.disconnect_time = Device.dwTimeGlobal;
 		o.persistent = true;          // never expires — see coop_cleanup_orphans()
+		o.saved_pos = entity->o_Position;   // authoritative: straight out of the .scop
+		o.have_saved_pos = true;
+		o.frozen = false;             // becomes true once it is online and detached
 		m_coop_orphans.push_back(o);
 		++restored;
 
@@ -799,6 +848,10 @@ void game_sv_Single::coop_poll_spawns()
 
 	// Expire orphaned actors past the reconnect timeout
 	coop_cleanup_orphans();
+
+	// Detach server ownership of save-restored bodies the moment they come online, so
+	// nothing overwrites the position their owner logged off at (§14 step 7 phase 2)
+	coop_freeze_restored_bodies();
 
 	// A co-op client never reliably sends M_CLIENTREADY, and it can't be net_Ready
 	// before it has a Local actor to export (chicken-and-egg). So use a grace period:
@@ -830,7 +883,8 @@ void game_sv_Single::coop_poll_spawns()
 		// actor from a previous disconnect. If so, re-associate the existing entity
 		// (preserving position, health, and inventory) instead of spawning fresh.
 		LPCSTR client_name = coop_player_name(CL);   // ps account name is empty on thin clients
-		CSE_Abstract* orphan = coop_find_orphan(client_name); // NULL name => never matches
+		Fvector saved_pos; bool have_saved_pos = false;
+		CSE_Abstract* orphan = coop_find_orphan(client_name, &saved_pos, &have_saved_pos);
 		if (orphan)
 		{
 			// Clear orphan state and restore ownership
@@ -838,6 +892,20 @@ void game_sv_Single::coop_poll_spawns()
 			orphan->owner = CL;
 			CL->owner = orphan;
 			orphan->set_name_replace(client_name);
+
+			// MP fork (§14 step 7 phase 2 / §9.3): a body restored from a save carries the
+			// position it was saved at; make sure that is what the returning player gets.
+			// Belt and braces with coop_freeze_restored_bodies() — if anything overwrote the
+			// CSE before we detached ownership, the .scop value still wins here, because the
+			// packets sent below (Spawn_Write/UPDATE_Write) are what place the player.
+			if (have_saved_pos && orphan->o_Position.distance_to(saved_pos) > 1.f)
+			{
+				Msg("- COOP(bindings): restoring saved position for '%s': %.1f,%.1f,%.1f "
+					"(CSE had %.1f,%.1f,%.1f)", client_name,
+					saved_pos.x, saved_pos.y, saved_pos.z,
+					orphan->o_Position.x, orphan->o_Position.y, orphan->o_Position.z);
+				orphan->o_Position = saved_pos;
+			}
 
 			// Restore children ownership
 			for (u16 child_id : orphan->children)

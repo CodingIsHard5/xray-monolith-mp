@@ -52,13 +52,24 @@ private:
 		// than from a live disconnect. A persisted binding must survive an arbitrarily
 		// long server downtime, so it is NEVER expired by coop_cleanup_orphans().
 		bool        persistent;
+		// The body's position as it came out of the .scop. A restored body switches online
+		// owned by the server's loopback client (it must, or Process_event asserts), and
+		// the server then writes its own unplaced object state back over the CSE — first
+		// run measured the saved position -235.6,27.9,253.9 becoming -0.1,0.2,0.7 before
+		// the owner reconnected. Keep the authoritative value here and restore it on
+		// reclaim so a player always resumes where they logged off (§9.3).
+		Fvector     saved_pos;
+		bool        have_saved_pos;
+		bool        frozen;      // ownership already detached (server no longer updates it)
 	};
 	xr_vector<coop_orphan> m_coop_orphans;
 	static const u32 RECONNECT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 	void coop_orphan_actor(xrClientData* CL);    // called on co-op client disconnect
 	void coop_cleanup_orphans();                  // expire stale orphans
-	CSE_Abstract* coop_find_orphan(LPCSTR name);  // find orphan by player name
+	void coop_freeze_restored_bodies();           // detach server ownership of restored bodies
+	// out_pos/out_have_pos (optional) report the .scop position of a RESTORED body.
+	CSE_Abstract* coop_find_orphan(LPCSTR name, Fvector* out_pos = NULL, bool* out_have_pos = NULL);
 
 	// MP fork (§9.4/9.5 co-op save/load — step 7 phase 1): the dedicated server owns the
 	// world and must snapshot it to disk on its own — no client, no console, no live actor.
