@@ -793,11 +793,19 @@ void game_sv_Single::Update()
 		if (!m_coop_autosave_init)
 		{
 			m_coop_autosave_init = true;
+			const float MIN_SECS = 1.f, MAX_SECS = 86400.f; // clamp: [1s, 24h]; 0 (autosave-only) disables
 			float secs = 120.f; // default: crash-loss window ~2 min
+			bool have_test = false, have_arg = false;
 			LPCSTR p = strstr(Core.Params, "-coop_test_autosave");
-			if (p) { p += sizeof("-coop_test_autosave") - 1; while (*p == ' ') ++p; secs = _max((float)atof(p), 1.f); }
+			if (p) { p += sizeof("-coop_test_autosave") - 1; while (*p == ' ') ++p; secs = (float)atof(p); have_test = true; }
 			else if ((p = strstr(Core.Params, "-coop_autosave")) != nullptr)
-			{ p += sizeof("-coop_autosave") - 1; while (*p == ' ') ++p; secs = _max((float)atof(p), 0.f); }
+			{ p += sizeof("-coop_autosave") - 1; while (*p == ' ') ++p; secs = (float)atof(p); have_arg = true; }
+			// Sanitize atof output: NaN/inf and out-of-range values would make secs*1000 an
+			// undefined u32 narrowing (CodeRabbit). NaN fails every compare, so >=0 catches it.
+			if (!(secs >= 0.f)) secs = have_test ? MIN_SECS : 0.f;         // non-finite -> safe default
+			else if ((have_arg || have_test) && secs > 0.f)               // an explicit positive value...
+				secs = _min(_max(secs, MIN_SECS), MAX_SECS);              // ...clamped to [1s, 24h]
+			// (have_arg with secs==0 means the operator explicitly disabled autosave -> keep 0)
 			m_coop_autosave_interval_ms = (secs <= 0.f) ? 0u : (u32)(secs * 1000.f);
 			m_coop_autosave_last = Device.dwTimeGlobal; // first save one interval from now
 			Msg("- COOP(autosave): interval=%ums (%s)", m_coop_autosave_interval_ms,
