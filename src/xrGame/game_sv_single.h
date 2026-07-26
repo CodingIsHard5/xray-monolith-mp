@@ -88,7 +88,9 @@ private:
 	void coop_save_bindings(LPCSTR save_name);    // write <save>.coop next to the .scop
 	void coop_load_bindings(LPCSTR save_name);    // read it back, seed persistent orphans
 	static const u32 COOP_BINDINGS_MAGIC = 0x50434F43;  // 'COCP' (LE) — sidecar file magic
-	static const u32 COOP_BINDINGS_VERSION = 1;
+	// v1 = ownership bindings only. v2 (phase 3 C2) appends the checkpoint block;
+	// the loader still accepts v1 — an older sidecar just means nobody has a checkpoint yet.
+	static const u32 COOP_BINDINGS_VERSION = 2;
 
 	// MP fork (§14 step 7 phase 3, gap C): per-player CHECKPOINT — the doc's §9.1/9.2
 	// person-state snapshot that death rolls back to. Three constraints from phases 1-2
@@ -125,8 +127,7 @@ public:
 	// Server-side bank path. Exposed so gamedata can trigger it at a campfire/base via the
 	// `game.mp_set_checkpoint(name)` luabind export; the engine does not care what triggered it.
 	bool coop_bank_checkpoint(LPCSTR player_name);
-private:
-public:
+
 	void OnCoopClientDisconnected(xrClientData* CL); // game-layer co-op disconnect handler
 public:
 	virtual BOOL OnTouch(u16 eid_who, u16 eid_what, BOOL bForced = FALSE);

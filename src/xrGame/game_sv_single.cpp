@@ -730,11 +730,52 @@ void game_sv_Single::coop_save_bindings(LPCSTR save_name)
 		writer->w_u16(b.entity_id);
 		writer->w_stringZ(b.player_name.c_str());
 	}
+
+	// MP fork (§14 step 7 phase 3 C2): version 2 appends the CHECKPOINT block after the
+	// binding records. A player's checkpoint is per-instance person-state (§9.1) and is
+	// useless if it dies with the process — the whole point is that death rolls you back
+	// to it, including a death after a server bounce. Readers of v1 files see no block.
+	writer->w_u32((u32)m_coop_checkpoints.size());
+	for (const coop_checkpoint& c : m_coop_checkpoints)
+	{
+		writer->w_stringZ(c.player_name.size() ? c.player_name.c_str() : "");
+		writer->w_fvector3(c.pos);
+		writer->w_fvector3(c.angle);
+		writer->w_float(c.health);
+		writer->w_u32(c.node_id);
+		writer->w_u16(c.graph_id);
+		writer->w_u32((u32)c.items.size());
+		for (const coop_checkpoint_item& it : c.items)
+		{
+			writer->w_stringZ(it.section.size() ? it.section.c_str() : "");
+			writer->w_float(it.condition);
+			writer->w_u16(it.ammo_elapsed);
+			writer->w_u8(it.ammo_type);
+			writer->w_u8(it.slot);
+		}
+	}
 	FS.w_close(writer);
 
-	Msg("- COOP(bindings): saved %u binding(s) to '%s'", (u32)bindings.size(), fname);
+	Msg("- COOP(bindings): saved %u binding(s) + %u checkpoint(s) to '%s'",
+		(u32)bindings.size(), (u32)m_coop_checkpoints.size(), fname);
 	for (const coop_orphan& b : bindings)
 		Msg("- COOP(bindings):   '%s' -> entity id %u", b.player_name.c_str(), b.entity_id);
+}
+
+// IReader::r_stringZ(shared_str&) constructs straight off the raw buffer and advances by the
+// string's length — with NO bounds check. A truncated or corrupt sidecar whose last record
+// lacks a terminator would read past the end of the file mapping (CodeRabbit). Confirm a NUL
+// exists in the bytes that remain before handing the buffer over; false = stop reading.
+static bool coop_read_stringZ(IReader* reader, shared_str& out)
+{
+	const char* raw = (const char*)reader->pointer();
+	const int left = reader->elapsed();
+	int len = 0;
+	while (len < left && raw[len]) ++len;
+	if (len >= left)
+		return false;
+	reader->r_stringZ(out);
+	return true;
 }
 
 // MP fork (§14 step 7 phase 2, gap B): read "<save_name>.coop" back after the world loads
@@ -770,9 +811,12 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 	}
 	const u32 magic = reader->r_u32();
 	const u32 version = reader->r_u32();
-	if (magic != COOP_BINDINGS_MAGIC || version != COOP_BINDINGS_VERSION)
+	// v1 = bindings only; v2 (phase 3 C2) appends a checkpoint block. Older files stay
+	// readable on purpose — a sidecar written before checkpoints existed must not cost a
+	// player their body, it just means they have no checkpoint yet.
+	if (magic != COOP_BINDINGS_MAGIC || version < 1 || version > COOP_BINDINGS_VERSION)
 	{
-		Msg("! COOP(bindings): '%s' has magic 0x%08x version %u (expected 0x%08x / %u) — ignored",
+		Msg("! COOP(bindings): '%s' has magic 0x%08x version %u (expected 0x%08x / <=%u) — ignored",
 			fname, magic, version, (u32)COOP_BINDINGS_MAGIC, (u32)COOP_BINDINGS_VERSION);
 		FS.r_close(reader);
 		return;
@@ -788,23 +832,12 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 		}
 		const u16 eid = reader->r_u16();
 
-		// IReader::r_stringZ(shared_str&) constructs straight off the raw buffer with NO
-		// bounds check, so a truncated/corrupt sidecar whose last record has no terminator
-		// would read past the end of the file mapping (CodeRabbit). Confirm a NUL exists in
-		// the bytes that remain before handing the buffer to it.
-		{
-			const char* raw = (const char*)reader->pointer();
-			const int left = reader->elapsed();
-			int len = 0;
-			while (len < left && raw[len]) ++len;
-			if (len >= left)
-			{
-				Msg("! COOP(bindings): '%s' record %u has an unterminated name — rest ignored", fname, i);
-				break;
-			}
-		}
 		shared_str name;
-		reader->r_stringZ(name);
+		if (!coop_read_stringZ(reader, name))
+		{
+			Msg("! COOP(bindings): '%s' record %u has an unterminated name — rest ignored", fname, i);
+			break;
+		}
 		if (!name.size())
 		{
 			Msg("! COOP(bindings): record %u has an empty player name — ignored", i);
@@ -846,9 +879,83 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 			(int)entity->children.size(),
 			entity->o_Position.x, entity->o_Position.y, entity->o_Position.z);
 	}
+	// --- v2: the CHECKPOINT block (§14 step 7 phase 3 C2) ---
+	u32 checkpoints = 0;
+	if (version >= 2 && reader->elapsed() >= (int)sizeof(u32))
+	{
+		const u32 cp_count = reader->r_u32();
+		for (u32 i = 0; i < cp_count; ++i)
+		{
+			coop_checkpoint c;
+			if (!coop_read_stringZ(reader, c.player_name))
+			{
+				Msg("! COOP(bindings): '%s' checkpoint %u has an unterminated name — rest ignored", fname, i);
+				break;
+			}
+			// fixed-size head: 2 vec3 + float + u32 + u16 + u32(item count)
+			const int head = (int)(2 * sizeof(Fvector) + sizeof(float) + sizeof(u32) + sizeof(u16) + sizeof(u32));
+			if (reader->elapsed() < head)
+			{
+				Msg("! COOP(bindings): '%s' checkpoint %u is truncated — rest ignored", fname, i);
+				break;
+			}
+			reader->r_fvector3(c.pos);
+			reader->r_fvector3(c.angle);
+			c.health = reader->r_float();
+			c.node_id = reader->r_u32();
+			c.graph_id = reader->r_u16();
+			c.banked_time = Device.dwTimeGlobal;   // runtime-only field; re-stamped on load
+			const u32 item_count = reader->r_u32();
+
+			bool truncated = false;
+			for (u32 k = 0; k < item_count; ++k)
+			{
+				coop_checkpoint_item it;
+				if (!coop_read_stringZ(reader, it.section))
+				{
+					Msg("! COOP(bindings): '%s' checkpoint %u item %u has an unterminated "
+						"section — rest ignored", fname, i, k);
+					truncated = true;
+					break;
+				}
+				const int item_tail = (int)(sizeof(float) + sizeof(u16) + 2 * sizeof(u8));
+				if (reader->elapsed() < item_tail)
+				{
+					Msg("! COOP(bindings): '%s' checkpoint %u item %u is truncated — rest ignored",
+						fname, i, k);
+					truncated = true;
+					break;
+				}
+				it.condition = reader->r_float();
+				it.ammo_elapsed = reader->r_u16();
+				it.ammo_type = reader->r_u8();
+				it.slot = reader->r_u8();
+				c.items.push_back(it);
+			}
+
+			// A checkpoint you cannot be put back at is worse than none: drop unnamed or
+			// non-finite records rather than let a death teleport someone into the void.
+			if (!c.player_name.size() || !_valid(c.pos))
+			{
+				Msg("! COOP(bindings): checkpoint %u is unusable (name='%s', finite pos=%s) — dropped",
+					i, c.player_name.size() ? c.player_name.c_str() : "", _valid(c.pos) ? "yes" : "no");
+			}
+			else
+			{
+				m_coop_checkpoints.push_back(c);
+				++checkpoints;
+				Msg("- COOP(checkpoint): restored '%s' pos %.1f,%.1f,%.1f hp=%.2f items=%u",
+					c.player_name.c_str(), c.pos.x, c.pos.y, c.pos.z, c.health, (u32)c.items.size());
+			}
+			if (truncated)
+				break;
+		}
+	}
+
 	FS.r_close(reader);
 
-	Msg("- COOP(bindings): loaded %u/%u binding(s) from '%s' (%u stale)", restored, count, fname, stale);
+	Msg("- COOP(bindings): loaded %u/%u binding(s) + %u checkpoint(s) from '%s' (%u stale)",
+		restored, count, checkpoints, fname, stale);
 }
 
 // MP fork (§14 step 7 phase 3, gap C): find a player's banked checkpoint (NULL if none).
