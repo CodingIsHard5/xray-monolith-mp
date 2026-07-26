@@ -374,6 +374,29 @@ void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
 // any client that is net_Ready (in the world, sending updates) but does not yet own an
 // entity (CL->owner == NULL) gets a fresh actor. spawn_end/Process_spawn replicates it
 // with per-recipient ownership (owner LOCAL+ASPLAYER, peers stripped -> remote render).
+// MP fork (§9.3 / §14 step 7 phase 2): THE co-op player identity string — the single
+// source of truth for every name-keyed co-op path (orphan store, reconnect lookup,
+// persisted ownership bindings). A co-op thin client HAS a game_PlayerState, but its
+// ACCOUNT name is empty: the thin client never sends profile data, and the name the
+// player actually connected with ("client(localhost/name=<x>)") arrives in the ENet
+// hello and lands in IClient::name. Reading ps->getName() alone therefore yields ""
+// for every player — which silently made reconnection key every orphan on the empty
+// string (any reconnecting client would match the FIRST orphan, i.e. could take
+// another player's body) and made phase 2 record zero bindings. Prefer the first
+// NON-EMPTY of (player-state account name, client connect name); NULL if neither.
+static LPCSTR coop_player_name(xrClientData* CL)
+{
+	if (!CL)
+		return NULL;
+	if (CL->ps)
+	{
+		LPCSTR n = CL->ps->getName();
+		if (n && xr_strlen(n))
+			return n;
+	}
+	return CL->name.size() ? CL->name.c_str() : NULL;
+}
+
 // MP fork (§9.3/9.4 co-op reconnection): orphan the actor when a co-op client disconnects.
 // The entity stays in the world (alive, at its last position) but has no owning client.
 // If the same player name reconnects within the timeout, the actor is re-associated.
@@ -383,9 +406,10 @@ void game_sv_Single::coop_orphan_actor(xrClientData* CL)
 		return;
 
 	CSE_Abstract* actor = CL->owner;
+	LPCSTR nm = coop_player_name(CL);
 	coop_orphan orphan;
 	orphan.entity_id = actor->ID;
-	orphan.player_name = CL->ps ? CL->ps->getName() : CL->name;
+	orphan.player_name = nm ? nm : "";   // unnamed => body is preserved but unmatchable
 	orphan.disconnect_time = Device.dwTimeGlobal;
 	orphan.persistent = false;   // live disconnect: expires on the reconnect timeout
 
@@ -422,8 +446,15 @@ void game_sv_Single::OnCoopClientDisconnected(xrClientData* CL)
 
 CSE_Abstract* game_sv_Single::coop_find_orphan(LPCSTR name)
 {
+	// An unnamed client must never match an (equally unnamed) orphan — that would hand
+	// it whichever body happens to sit first in the list, quite possibly someone else's.
+	if (!name || !xr_strlen(name))
+		return NULL;
+
 	for (auto it = m_coop_orphans.begin(); it != m_coop_orphans.end(); ++it)
 	{
+		if (!it->player_name.size())
+			continue;
 		if (!xr_strcmp(it->player_name.c_str(), name))
 		{
 			u16 eid = it->entity_id;
@@ -606,8 +637,8 @@ void game_sv_Single::coop_save_bindings(LPCSTR save_name)
 				xrClientData* cd = static_cast<xrClientData*>(client);
 				if (cd == self->m_server->GetServerClient()) return; // host save-actor (id 0) is not a player
 				if (!cd->owner) return;
-				LPCSTR nm = cd->ps ? cd->ps->getName() : cd->name.c_str();
-				if (!nm || !xr_strlen(nm)) return;                   // unnamed client: nothing to match on
+				LPCSTR nm = coop_player_name(cd);
+				if (!nm) return;                                     // unnamed client: nothing to match on
 				coop_orphan b;
 				b.entity_id = cd->owner->ID;
 				b.player_name = nm;
@@ -798,8 +829,8 @@ void game_sv_Single::coop_poll_spawns()
 		// MP fork (§9.3/9.4 co-op reconnection): check if this client matches an orphaned
 		// actor from a previous disconnect. If so, re-associate the existing entity
 		// (preserving position, health, and inventory) instead of spawning fresh.
-		LPCSTR client_name = CL->ps ? CL->ps->getName() : CL->name.c_str();
-		CSE_Abstract* orphan = coop_find_orphan(client_name);
+		LPCSTR client_name = coop_player_name(CL);   // ps account name is empty on thin clients
+		CSE_Abstract* orphan = coop_find_orphan(client_name); // NULL name => never matches
 		if (orphan)
 		{
 			// Clear orphan state and restore ownership
