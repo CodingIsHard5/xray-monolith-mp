@@ -141,10 +141,35 @@ private:
 		u16        graph_id;
 		float      health;
 		u32        sampled_time; // Device.dwTimeGlobal when sampled (runtime-only; re-stamped on load)
+		// MP fork (§14 step 7 phase 4 D2): true only for a record read back out of a sidecar,
+		// i.e. one describing the PREVIOUS process. That is the whole boot decision: a record
+		// exists for a player only if they were still CONNECTED when that process ended (a
+		// graceful logoff drops it — coop_orphan_actor), so its presence, not the dirty flag,
+		// is what says "hand this player back where they actually were" (§9.4).
+		bool       persisted;
 	};
 	xr_vector<coop_recovery> m_coop_recoveries;
 	coop_recovery* coop_find_recovery(LPCSTR player_name);
 	void coop_sample_recoveries();   // snapshot every connected player, on the autosave tick
+	void coop_drop_recovery(LPCSTR player_name);  // graceful logoff: this player is not "in the world"
+
+	// MP fork (§14 step 7 phase 4 D2, gap D / doc §9.4): how the LAST process ended, and how
+	// THIS one can be asked to stop.
+	//
+	// The flag is a separate file, not a byte in the sidecar, so a process that died while the
+	// sidecar was being written is still detectable. It is deliberately NOT load-bearing for
+	// the resume POSITION — the per-player recovery lifecycle above already resolves all four
+	// crash/clean x connected/logged-off cases — it is the record of how the last process ended,
+	// which §9.4 policy, logging and any later anti-abuse rule will want.
+	void coop_mark_dirty();          // boot: report the previous process, then claim the flag
+	void coop_clear_dirty();         // clean stop: the world on disk is complete
+	void coop_check_stop_request();  // poll the stop file (the only clean stop this server has)
+	void coop_clean_shutdown(LPCSTR reason);
+	static const u32 COOP_DIRTY_MAGIC = 0x54524944;   // 'DIRT' (LE)
+	static const u32 COOP_DIRTY_VERSION = 1;
+	bool m_coop_prev_crash;          // a dirty flag was present at boot => the last process died
+	bool m_coop_dirty_checked;       // one-shot: the flag is claimed once per process
+	u32  m_coop_stop_poll_last;      // Device.dwTimeGlobal of the last stop-file probe
 	bool coop_spawn_checkpoint_item(CSE_Abstract* owner, xrClientData* CL,
 	                                const coop_checkpoint_item& rec);
 	void coop_test_drop_world_item();    // harness: §9.2 negative case (see below)

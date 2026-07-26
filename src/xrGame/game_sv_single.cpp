@@ -22,6 +22,28 @@
 #include "../xrEngine/dedicated_server_only.h"
 #include "../xrEngine/no_single.h"
 
+// MP fork (§14 step 7, co-op save/load): the ONE co-op world slot. Everything that names the
+// server's own save — the autosave, its ownership sidecar, and the D2 dirty flag — goes through
+// this constant so the three can never drift apart. Space-free so it survives inside
+// server(<name>/single/alife/load) on reload (see dedicated.sh).
+static const char* const COOP_SAVE_SLOT = "coop_world";
+
+// MP fork (§14 step 7 phase 4 D2): the only clean stop this server has. A dedicated co-op
+// server is started detached under wine and stopped with `wineserver -k`, which terminates the
+// process — the engine's own exit path never runs, so "a clean shutdown clears the flag" would
+// have been dead code in every existing harness and every real stop. So the operator asks for a
+// stop by dropping this file next to the saves, and the server performs the stop itself.
+static const char* const COOP_STOP_FILE = "coop_stop";
+
+// The FS file registry is built by scanning at startup and updated by w_open/file_delete, so it
+// cannot see a file another process created while we were running (the stop file, by definition).
+// Ask the OS directly. (The dirty flag WOULD be in the registry at boot, but it is read through
+// the same helper so both answers come from the same place.)
+static bool coop_file_on_disk(LPCSTR full_path)
+{
+	return GetFileAttributesA(full_path) != INVALID_FILE_ATTRIBUTES;
+}
+
 game_sv_Single::game_sv_Single()
 {
 	m_alife_simulator = NULL;
@@ -36,6 +58,9 @@ game_sv_Single::game_sv_Single()
 	m_coop_test_checkpoint_retry = 0;
 	m_coop_test_checkpoint_init = false;
 	m_coop_test_checkpoint_done = false;
+	m_coop_prev_crash = false;
+	m_coop_dirty_checked = false;
+	m_coop_stop_poll_last = 0;
 };
 
 game_sv_Single::~game_sv_Single()
@@ -75,6 +100,11 @@ void game_sv_Single::Create(shared_str& options)
 	// only the returned option string.) Co-op (ENet) only — stock SP/MP untouched.
 	if (xr_enet::enabled() && m_alife_simulator)
 	{
+		// MP fork (§14 step 7 phase 4 D2): read how the LAST process ended BEFORE anything
+		// else is restored, so the log reads "the previous process died" and then what this
+		// one recovered, and claim the flag for this process.
+		coop_mark_dirty();
+
 		const IGame_Persistent::params& gp = g_pGamePersistent->m_game_params;
 		if (!xr_strcmp(gp.m_new_or_load, "load"))
 			coop_load_bindings(gp.m_game_or_spawn);
@@ -452,6 +482,12 @@ void game_sv_Single::coop_orphan_actor(xrClientData* CL)
 	m_coop_orphans.push_back(orphan);
 	Msg("- XRNET(dbg): co-op actor id %u orphaned for player '%s' (reconnect window %ds)",
 		orphan.entity_id, orphan.player_name.c_str(), RECONNECT_TIMEOUT_MS / 1000);
+
+	// MP fork (§14 step 7 phase 4 D2): this player is no longer in the world, so they no longer
+	// have a recovery position — the binding record written just above is what describes them.
+	// Done AFTER the orphan exists, so there is never an instant where neither record does.
+	if (nm)
+		coop_drop_recovery(nm);
 }
 
 void game_sv_Single::OnCoopClientDisconnected(xrClientData* CL)
@@ -630,9 +666,9 @@ void game_sv_Single::coop_autosave()
 	if (!ai().get_alife())
 		return;
 
-	// Save name (Appendix B): fixed co-op world slot. Space-free so it survives inside
-	// server(<name>/single/alife/load) on reload (see dedicated.sh).
-	LPCSTR save_name = "coop_world";
+	// Save name (Appendix B): the fixed co-op world slot, shared with the sidecar and the
+	// D2 dirty flag (see COOP_SAVE_SLOT).
+	LPCSTR save_name = COOP_SAVE_SLOT;
 
 	// --- diag (feeds phase 2, gap B): how many co-op player actors exist, and how many
 	// are A-Life-registered (=> actually written into the .scop)? Co-op actors spawn with
@@ -777,6 +813,10 @@ void game_sv_Single::coop_sample_recoveries()
 			r.graph_id = 0;
 			r.health = 1.f;
 			r.sampled_time = Device.dwTimeGlobal;
+			// Sampled here and now: this describes THIS process, so a reclaim must not treat it
+			// as a previous process's crash record (D2). Assigned over any persisted record the
+			// same player still had, which is exactly the intent — they are back and connected.
+			r.persisted = false;
 			if (CSE_ALifeCreatureAbstract* creature = smart_cast<CSE_ALifeCreatureAbstract*>(actor))
 				r.health = creature->get_health();
 			if (CSE_ALifeDynamicObject* dyn = smart_cast<CSE_ALifeDynamicObject*>(actor))
@@ -799,6 +839,163 @@ void game_sv_Single::coop_sample_recoveries()
 	m_server->ForEachClientDo(s);
 	Msg("- COOP(recovery): sampled %u connected player(s), %u record(s) held",
 		s.sampled, (u32)m_coop_recoveries.size());
+}
+
+// MP fork (§14 step 7 phase 4 D2, gap D+E / doc §9.3-9.4): a player who logs off GRACEFULLY is
+// no longer "in the world", so they stop having a recovery position — from here on they are
+// described by their binding record, which coop_orphan_actor has just stamped with the position
+// they left at. This one line is what makes the dirty flag non-load-bearing for POSITION: with
+// the record dropped on logoff, its mere presence answers all four cases the flag was invented
+// to separate — connected-at-crash => recovery (their real spot), logged-off-then-crash => no
+// record => binding (where they left), connected-at-clean-quit => recovery (also where they
+// were), logged-off-then-clean-quit => binding. No shutdown path has to be trusted for a player
+// to resume in the right place.
+void game_sv_Single::coop_drop_recovery(LPCSTR player_name)
+{
+	if (!player_name || !xr_strlen(player_name))
+		return;
+	for (auto it = m_coop_recoveries.begin(); it != m_coop_recoveries.end(); ++it)
+	{
+		if (xr_strcmp(it->player_name.c_str(), player_name))
+			continue;
+		Msg("- COOP(recovery): dropped '%s' recovery record on a graceful logoff — their binding "
+			"record (logged-off position) describes them now", player_name);
+		m_coop_recoveries.erase(it);
+		return;
+	}
+}
+
+// MP fork (§14 step 7 phase 4 D2, gap D / doc §9.4): claim the dirty flag for this process, and
+// report how the LAST one ended. Present at boot => the previous process died without performing
+// a stop (crash, OOM kill, `wineserver -k`).
+//
+// Deliberately NOT load-bearing for any player's resume position — coop_drop_recovery() above
+// resolves that on its own. What this earns: §9.4 wants to KNOW a session was interrupted (for
+// policy, for logging, and for whatever anti-abuse rule reads it later), and that is a fact no
+// per-player record can carry, because a process can die before it ever writes one.
+void game_sv_Single::coop_mark_dirty()
+{
+	if (m_coop_dirty_checked)
+		return;
+	m_coop_dirty_checked = true;
+
+	string_path fname, path;
+	strconcat(sizeof(fname), fname, COOP_SAVE_SLOT, ".coop.dirty");
+	FS.update_path(path, "$game_saves$", fname);
+
+	m_coop_prev_crash = coop_file_on_disk(path);
+	if (m_coop_prev_crash)
+	{
+		// Plain stdio, not FS.r_open: this file is written by one process and read by the NEXT
+		// one, and FS's reader only serves files that are in its registry. Reading it the same
+		// way coop_file_on_disk() tests for it keeps the two answers from ever disagreeing.
+		u32 hdr[4] = {0, 0, 0, 0};
+		if (FILE* f = fopen(path, "rb"))
+		{
+			if (fread(hdr, sizeof(u32), 4, f) != 4)
+				hdr[0] = 0;
+			fclose(f);
+		}
+		const u32 magic = hdr[0], version = hdr[1], pid = hdr[2], stamp = hdr[3];
+		if (magic == COOP_DIRTY_MAGIC)
+			Msg("! COOP(shutdown): previous process ended DIRTY — '%s' left behind by pid %u "
+				"(v%u, unix time %u). Players who were still CONNECTED resume at their recovery "
+				"position; anyone who had logged off resumes where they logged off.",
+				fname, pid, version, stamp);
+		else
+			Msg("! COOP(shutdown): previous process ended DIRTY — '%s' is present but unreadable "
+				"(magic 0x%08x); treating it as a crash, which is the safe reading.", fname, magic);
+	}
+	else
+	{
+		Msg("- COOP(shutdown): previous process ended CLEAN — no '%s'", fname);
+	}
+
+	const u32 out[4] = {(u32)COOP_DIRTY_MAGIC, (u32)COOP_DIRTY_VERSION,
+	                    (u32)GetCurrentProcessId(), (u32)time(NULL)};
+	FILE* w = fopen(path, "wb");
+	if (!w || fwrite(out, sizeof(u32), 4, w) != 4)
+	{
+		// Not fatal: the flag is diagnostic. Say so loudly rather than let a later boot read
+		// "clean" off a flag we simply failed to write.
+		Msg("! COOP(shutdown): cannot write '%s' — a crash of THIS process will look clean", fname);
+		if (w) fclose(w);
+		return;
+	}
+	fclose(w);   // flushed and closed NOW: the next thing this flag has to survive is a kill -9
+	Msg("- COOP(shutdown): dirty flag '%s' claimed by pid %u", fname, out[2]);
+}
+
+// MP fork (§14 step 7 phase 4 D2): the world on disk is complete and this process is going away
+// on purpose. Called only from the clean-stop sequence, and only AFTER the final autosave.
+void game_sv_Single::coop_clear_dirty()
+{
+	string_path fname, path;
+	strconcat(sizeof(fname), fname, COOP_SAVE_SLOT, ".coop.dirty");
+	FS.update_path(path, "$game_saves$", fname);
+
+	DeleteFileA(path);               // the flag is written with stdio, so delete it at the OS level
+	FS.file_delete(path);            // ...and drop any registry entry a scan may have made
+
+	if (coop_file_on_disk(path))
+		Msg("! COOP(shutdown): could NOT delete '%s' — the next boot will read this stop as a crash", fname);
+	else
+		Msg("- COOP(shutdown): dirty flag '%s' cleared", fname);
+}
+
+// MP fork (§14 step 7 phase 4 D2): poll for the stop file. Once a second, off the co-op Update
+// tick — an operator stop is not worth a syscall per frame.
+void game_sv_Single::coop_check_stop_request()
+{
+	if (!xr_enet::enabled() || !ai().get_alife())
+		return;
+	const u32 now = Device.dwTimeGlobal;
+	if (m_coop_stop_poll_last && now - m_coop_stop_poll_last < 1000)
+		return;
+	m_coop_stop_poll_last = now;
+
+	string_path path;
+	FS.update_path(path, "$game_saves$", COOP_STOP_FILE);
+	if (!coop_file_on_disk(path))
+		return;
+
+	// Consume the request FIRST: if anything below fails, the next boot must not stop itself
+	// again the moment it comes up. (Created by another process, so it is an OS-level delete —
+	// FS.file_delete only touches files its own registry knows about.)
+	DeleteFileA(path);
+	FS.file_delete(path);
+	if (coop_file_on_disk(path))
+		Msg("! COOP(shutdown): could not delete the stop file '%s' — delete it before rebooting", path);
+
+	coop_clean_shutdown(COOP_STOP_FILE);
+}
+
+// MP fork (§14 step 7 phase 4 D2 / doc §9.4): the clean stop. Flush the world and the sidecar,
+// release the dirty flag, then go.
+//
+// Why this does NOT drive the engine's own `quit` (Console->Execute("quit") =>
+// KERNEL:disconnect + KERNEL:quit): disconnect tears the level down through every online
+// object's net_Destroy, which is the same per-object script-callback machinery P1 §3a proved
+// fatal on the flat co-op gamedata (an AV in the LuaJIT VM), and §3c then confirmed in a live
+// playtest. Running it here would put a crash surface INSIDE the shutdown whose whole purpose is
+// to be crash-free, and a hang there would leave the port held with no way to observe it. A
+// co-op clean stop is therefore defined by what reached DISK — the final autosave, the sidecar,
+// the cleared flag — and the process exits immediately once those are done. Nothing later in a
+// stock teardown writes co-op state.
+void game_sv_Single::coop_clean_shutdown(LPCSTR reason)
+{
+	// An operator who ran with -coop_autosave 0 asked this server NOT to write the world; a stop
+	// is not the moment to overrule them. (Before the flag is parsed we do not know yet, and the
+	// conservative answer there is to persist.)
+	const bool autosave_off = m_coop_autosave_init && m_coop_autosave_interval_ms == 0;
+	Msg("- COOP(shutdown): clean stop requested (%s) — %s", reason ? reason : "?",
+		autosave_off ? "autosave is disabled, NOT writing the world" : "taking a final autosave");
+	if (!autosave_off)
+		coop_autosave();             // world + sidecar as of the stop instant
+	coop_clear_dirty();
+	Msg("- COOP(shutdown): clean stop complete — exiting");
+	FlushLog();
+	TerminateProcess(GetCurrentProcess(), 0);
 }
 
 // MP fork (§14 step 7 phase 2, gap B): write the player_name -> entity_id ownership map
@@ -1217,6 +1414,10 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 			r.graph_id = reader->r_u16();
 			r.health = reader->r_float();
 			r.sampled_time = Device.dwTimeGlobal;   // runtime-only field; re-stamped on load
+			// D2: this record came out of a file, so it describes the PREVIOUS process — i.e.
+			// a player who was still connected when it ended. That is the flag the reclaim
+			// reads to decide it owes them their real position rather than a logged-off one.
+			r.persisted = true;
 
 			// Same rule as the checkpoint block: a position nobody can be put back at is worse
 			// than no record, because the player resumes in the void instead of at their
@@ -1664,6 +1865,37 @@ void game_sv_Single::coop_poll_spawns()
 		CSE_Abstract* orphan = coop_find_orphan(client_name, &saved_pos, &have_saved_pos);
 		if (orphan)
 		{
+			// MP fork (§14 step 7 phase 4 D2 / doc §9.4) — THE BOOT DECISION. Two candidate
+			// positions reach this point and exactly one is right:
+			//   * a PERSISTED recovery record, which exists only for a player who was still
+			//     connected when the previous process ended (a graceful logoff drops it), so it
+			//     is the last place they actually were. A crash is not a death: it must not cost
+			//     them the walk, and it must never hand them their CHECKPOINT — that belongs to
+			//     the death path (P3 C3) and is deliberately not consulted here;
+			//   * otherwise the binding record's position: where they logged off (§9.3), or for
+			//     a live reconnect within one process, where the body was frozen.
+			// The dirty flag agrees with this by construction and is not consulted either — see
+			// coop_drop_recovery() for the four-case argument.
+			LPCSTR pos_source = have_saved_pos ? "LOGGED-OFF" : "none";
+			if (coop_recovery* rec = coop_find_recovery(client_name))
+			{
+				if (rec->persisted && _valid(rec->pos))
+				{
+					saved_pos = rec->pos;
+					have_saved_pos = true;
+					pos_source = "RECOVERY";
+					// Consumed: from here on this player is live and the sampler owns their record.
+					rec->persisted = false;
+				}
+			}
+			Msg("- COOP(resume): '%s' resumes at the %s position %.1f,%.1f,%.1f "
+				"(previous process ended %s, checkpoint NOT consulted)",
+				client_name, pos_source,
+				have_saved_pos ? saved_pos.x : orphan->o_Position.x,
+				have_saved_pos ? saved_pos.y : orphan->o_Position.y,
+				have_saved_pos ? saved_pos.z : orphan->o_Position.z,
+				m_coop_prev_crash ? "dirty" : "clean");
+
 			// Clear orphan state and restore ownership
 			orphan->m_coop_orphaned = false;
 			orphan->owner = CL;
@@ -1902,6 +2134,9 @@ void game_sv_Single::Update()
 	inherited::Update();
 	coop_poll_spawns();    // MP fork (§14 co-op): give ready clients their own actor + reconnection
 	coop_update_anchors(); // MP fork (§15 co-op): re-centre A-Life on the players
+	// MP fork (§14 step 7 phase 4 D2): an operator/harness stop request. Does not return if one
+	// is pending — the clean stop flushes the world and exits from inside it.
+	coop_check_stop_request();
 
 	// MP fork (§9.4/9.5 co-op save/load — step 7 phase 1): server-authoritative autosave.
 	// Interval (Appendix B) via -coop_autosave <seconds> (default 120s; 0 disables). The
