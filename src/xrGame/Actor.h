@@ -323,7 +323,17 @@ protected:
 	Fvector   m_coop_death_pos;      // position at death (spectate camera origin)
 	void      coop_respawn();        // revive the actor after the timer
 
+	// MP fork (§14 step 7 phase 3 C3): where the SERVER says this death puts us. Only the
+	// server holds the checkpoint, so it sends M_XRNET_COOP_RESPAWN with the rollback
+	// position; coop_respawn() prefers it over the death position. A player with no
+	// checkpoint never receives one and still revives where they fell.
+	Fvector   m_coop_respawn_pos;
+	bool      m_coop_have_respawn_pos;
+
 public:
+	// Applied from M_XRNET_COOP_RESPAWN (Level_network_messages.cpp). If we already
+	// respawned by the time it lands, it teleports us to the checkpoint instead.
+	void      coop_set_respawn_position(const Fvector& pos, float health);
 	bool      coop_is_dead() const       { return m_coop_dead; }
 	float     coop_respawn_timer() const { return m_coop_respawn_timer; }
 	SActorMotions* m_anims;

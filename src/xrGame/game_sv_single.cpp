@@ -29,6 +29,8 @@ game_sv_Single::game_sv_Single()
 	m_coop_autosave_interval_ms = 0;
 	m_coop_autosave_last = 0;
 	m_coop_autosave_init = false;
+	m_coop_test_worlditem_id = 0xffff;
+	m_coop_test_worlditem_pos.set(0.f, 0.f, 0.f);
 	m_coop_test_checkpoint_ms = 0;
 	m_coop_test_checkpoint_armed = 0;
 	m_coop_test_checkpoint_retry = 0;
@@ -1090,6 +1092,217 @@ bool game_sv_Single::coop_bank_checkpoint(LPCSTR player_name)
 	return true;
 }
 
+// MP fork (§14 step 7 phase 3 C3, harness): drop one item into the WORLD (unparented, next
+// to the player) right after the checkpoint is banked, and remember it. §9.2 says a death
+// rewinds the PERSON and leaves the WORLD untouched — so the rollback re-checks this entity
+// and reports whether it is still there and unmoved. Gated on -coop_test_worlditem [section].
+void game_sv_Single::coop_test_drop_world_item()
+{
+	LPCSTR p = strstr(Core.Params, "-coop_test_worlditem");
+	if (!p)
+		return;
+
+	// optional section argument; default to something every install has
+	string64 section = "";
+	p += sizeof("-coop_test_worlditem") - 1;
+	while (*p == ' ') ++p;
+	if (*p && *p != '-')
+	{
+		u32 i = 0;
+		while (*p && *p != ' ' && i < sizeof(section) - 1) section[i++] = *p++;
+		section[i] = 0;
+	}
+	if (!xr_strlen(section))
+		xr_strcpy(section, "medkit");
+
+	// place it beside the first player we can find (any actor will do — it just has to be
+	// somewhere the world is loaded, so the entity is real and online)
+	struct any_actor
+	{
+		game_sv_Single* self; CSE_Abstract* found;
+		void operator()(IClient* client)
+		{
+			if (found) return;
+			xrClientData* cd = static_cast<xrClientData*>(client);
+			if (cd == self->m_server->GetServerClient()) return;
+			if (cd->owner) found = cd->owner;
+		}
+	};
+	any_actor a; a.self = this; a.found = NULL;
+	m_server->ForEachClientDo(a);
+	if (!a.found)
+		return;
+
+	CSE_Abstract* it = F_entity_Create(section);
+	if (!it)
+	{
+		Msg("! COOP(checkpoint-test): world item section '%s' invalid", section);
+		return;
+	}
+	CSE_ALifeDynamicObject* od = smart_cast<CSE_ALifeDynamicObject*>(a.found);
+	it->s_name = section;
+	it->set_name_replace("");
+	it->s_RP = 0xFE;
+	it->ID = 0xffff;
+	it->ID_Phantom = 0xffff;
+	it->ID_Parent = 0xffff;             // WORLD item: parented to nobody
+	it->RespawnTime = 0;
+	it->o_Position = a.found->o_Position;
+	it->o_Position.x += 2.f;            // beside the player, not inside them
+	it->s_flags.assign(M_SPAWN_OBJECT_LOCAL);
+	if (CSE_ALifeDynamicObject* dyn = smart_cast<CSE_ALifeDynamicObject*>(it))
+		if (od) { dyn->m_tNodeID = od->m_tNodeID; dyn->m_tGraphID = od->m_tGraphID; }
+	if (CSE_ALifeObject* al = smart_cast<CSE_ALifeObject*>(it))
+	{
+		al->m_story_id = INVALID_STORY_ID;
+		al->m_spawn_story_id = INVALID_SPAWN_STORY_ID;
+	}
+
+	CSE_Abstract* N = spawn_end(it, m_server->GetServerClient()->ID);
+	if (!N)
+	{
+		Msg("! COOP(checkpoint-test): failed to spawn world item '%s'", section);
+		return;
+	}
+	m_coop_test_worlditem_id = N->ID;
+	m_coop_test_worlditem_pos = N->o_Position;
+	Msg("- COOP(checkpoint-test): world item '%s' id=%u pos %.1f,%.1f,%.1f",
+		section, N->ID, N->o_Position.x, N->o_Position.y, N->o_Position.z);
+}
+
+// MP fork (§14 step 7 phase 3 C3 / doc §9.1-9.2): roll a dead player's PERSON back to their
+// checkpoint. The WORLD is deliberately untouched — anything they dropped, opened or killed
+// stays exactly as it is; only entities parented to the actor are rewound. Returns true (and
+// fills io_pos with the checkpoint position) when a checkpoint was applied; false leaves the
+// caller's existing death-position behaviour alone, which is what a player with no checkpoint
+// still gets.
+bool game_sv_Single::coop_checkpoint_respawn(u16 actor_id, xrClientData* CL, Fvector& io_pos, float& io_health)
+{
+	if (!xr_enet::enabled() || !ai().get_alife())
+		return false;
+
+	LPCSTR nm = coop_player_name(CL);
+	coop_checkpoint* cp = coop_find_checkpoint(nm);
+	if (!cp)
+		return false;
+	if (!_valid(cp->pos))
+	{
+		Msg("! COOP(checkpoint): '%s' has a non-finite checkpoint — falling back to death position", nm);
+		return false;
+	}
+
+	CSE_Abstract* actor = get_entity_from_eid(actor_id);
+	if (!actor)
+	{
+		Msg("! COOP(checkpoint): respawn for '%s': actor %u not found", nm, actor_id);
+		return false;
+	}
+
+	// --- position + health (the CSE is authoritative; the client is told separately) ---
+	io_pos = cp->pos;
+	io_health = (cp->health > 0.f) ? cp->health : 1.f;
+	actor->o_Position = cp->pos;
+	actor->o_Angle = cp->angle;
+	if (CSE_ALifeDynamicObject* dyn = smart_cast<CSE_ALifeDynamicObject*>(actor))
+	{
+		dyn->m_tNodeID = cp->node_id;     // land on the nav mesh, not merely at a point
+		dyn->m_tGraphID = cp->graph_id;
+	}
+
+	// --- inventory rollback: destroy what they are carrying now, restore what they banked ---
+	// Snapshot the child ids first: Perform_destroy mutates the children vector as it goes.
+	xr_vector<u16> current = actor->children;
+	u32 destroyed = 0;
+	for (u16 child_id : current)
+	{
+		CSE_Abstract* child = m_server->ID_to_entity(child_id);
+		if (!child)
+			continue;
+		m_server->Perform_destroy(child, net_flags(TRUE, TRUE));
+		++destroyed;
+	}
+
+	u32 restored = 0;
+	for (const coop_checkpoint_item& it : cp->items)
+	{
+		if (!it.section.size())
+			continue;
+		if (coop_spawn_checkpoint_item(actor, CL, it))
+			++restored;
+	}
+
+	Msg("- COOP(checkpoint): ROLLBACK '%s' -> pos %.1f,%.1f,%.1f hp=%.2f "
+		"(dropped %u carried item(s), restored %u of %u banked)",
+		nm, cp->pos.x, cp->pos.y, cp->pos.z, io_health, destroyed, restored, (u32)cp->items.size());
+
+	// §9.2: the rollback must NOT have touched the world. Report the harness's world item.
+	if (m_coop_test_worlditem_id != 0xffff)
+	{
+		CSE_Abstract* w = m_server->ID_to_entity(m_coop_test_worlditem_id);
+		if (!w)
+			w = ai().alife().objects().object(m_coop_test_worlditem_id, true);
+		if (w)
+			Msg("- COOP(checkpoint-test): world item id=%u PRESENT at %.1f,%.1f,%.1f (was %.1f,%.1f,%.1f)",
+				m_coop_test_worlditem_id, w->o_Position.x, w->o_Position.y, w->o_Position.z,
+				m_coop_test_worlditem_pos.x, m_coop_test_worlditem_pos.y, m_coop_test_worlditem_pos.z);
+		else
+			Msg("! COOP(checkpoint-test): world item id=%u MISSING after rollback — the rollback "
+				"ate a world entity", m_coop_test_worlditem_id);
+	}
+	return true;
+}
+
+// Spawn one banked item back into the player's inventory. Same shape as
+// coop_give_starting_kit's per-item path (parented => Process_spawn attaches and replicates
+// it LOCAL to the owner), with the banked condition and magazine state applied.
+bool game_sv_Single::coop_spawn_checkpoint_item(CSE_Abstract* owner, xrClientData* CL,
+                                                const coop_checkpoint_item& rec)
+{
+	if (!owner || !CL)
+		return false;
+
+	LPCSTR sec = rec.section.c_str();
+	CSE_Abstract* it = F_entity_Create(sec);
+	if (!it)
+	{
+		Msg("! COOP(checkpoint): rollback section '%s' invalid (skipped)", sec);
+		return false;
+	}
+	it->s_name = sec;
+	it->set_name_replace("");
+	it->s_RP = 0xFE;
+	it->ID = 0xffff;
+	it->ID_Phantom = 0xffff;
+	it->ID_Parent = owner->ID;
+	it->RespawnTime = 0;
+	it->o_Position = owner->o_Position;
+	it->s_flags.assign(M_SPAWN_OBJECT_LOCAL);
+
+	CSE_ALifeDynamicObject* od = smart_cast<CSE_ALifeDynamicObject*>(owner);
+	if (CSE_ALifeDynamicObject* dyn = smart_cast<CSE_ALifeDynamicObject*>(it))
+		if (od) { dyn->m_tNodeID = od->m_tNodeID; dyn->m_tGraphID = od->m_tGraphID; }
+	// Story ids must be cleared for the same reason coop_clone_inventory_for clears them:
+	// a duplicate story object collides in the client's story registry and fails to spawn.
+	if (CSE_ALifeObject* al = smart_cast<CSE_ALifeObject*>(it))
+	{
+		al->m_story_id = INVALID_STORY_ID;
+		al->m_spawn_story_id = INVALID_SPAWN_STORY_ID;
+	}
+	if (CSE_ALifeInventoryItem* inv = smart_cast<CSE_ALifeInventoryItem*>(it))
+		if (rec.condition > 0.f && rec.condition <= 1.f)
+			inv->m_fCondition = rec.condition;
+	if (CSE_ALifeItemWeapon* wpn = smart_cast<CSE_ALifeItemWeapon*>(it))
+	{
+		wpn->a_elapsed = rec.ammo_elapsed;
+		wpn->ammo_type = rec.ammo_type;
+	}
+	else if (CSE_ALifeItemAmmo* ammo = smart_cast<CSE_ALifeItemAmmo*>(it))
+		if (rec.ammo_elapsed)
+			ammo->a_elapsed = rec.ammo_elapsed;
+
+	return spawn_end(it, CL->ID) != NULL;
+}
+
 void game_sv_Single::coop_poll_spawns()
 {
 	if (!xr_enet::enabled() || !ai().get_alife())
@@ -1459,6 +1672,7 @@ void game_sv_Single::Update()
 			{
 				m_coop_test_checkpoint_done = true;   // one-shot, only once someone was banked
 				Msg("- COOP(checkpoint): test auto-bank done (%u player(s))", b.banked);
+				coop_test_drop_world_item();          // harness: §9.2 negative case (see header)
 			}
 		}
 	}

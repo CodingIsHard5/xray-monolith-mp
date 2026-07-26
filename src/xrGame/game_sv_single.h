@@ -120,6 +120,16 @@ private:
 	};
 	xr_vector<coop_checkpoint> m_coop_checkpoints;
 	coop_checkpoint* coop_find_checkpoint(LPCSTR player_name);
+	bool coop_spawn_checkpoint_item(CSE_Abstract* owner, xrClientData* CL,
+	                                const coop_checkpoint_item& rec);
+	void coop_test_drop_world_item();    // harness: §9.2 negative case (see below)
+	// MP fork (§14 step 7 phase 3 C3, harness): -coop_test_worlditem drops one item into the
+	// WORLD (unparented) right after the auto-bank. §9.2's whole point is that a death
+	// rewinds the PERSON and leaves the WORLD alone, so the rollback re-checks this entity
+	// and logs whether it is still there, unmoved. Without it a position-only test would
+	// happily pass a rollback that had wiped everything the player left lying around.
+	u16  m_coop_test_worlditem_id;       // 0xffff = none
+	Fvector m_coop_test_worlditem_pos;
 	u32  m_coop_test_checkpoint_ms;      // -coop_test_checkpoint <seconds>: auto-bank (harness)
 	u32  m_coop_test_checkpoint_armed;   // when the flag was parsed — the delay runs from here
 	u32  m_coop_test_checkpoint_retry;   // last attempt, so retries are 5s apart not per-frame
@@ -129,6 +139,12 @@ public:
 	// Server-side bank path. Exposed so gamedata can trigger it at a campfire/base via the
 	// `game.mp_set_checkpoint(name)` luabind export; the engine does not care what triggered it.
 	bool coop_bank_checkpoint(LPCSTR player_name);
+
+	// MP fork (§14 step 7 phase 3 C3 / §9.1-9.2): death rollback. Restores the PERSON —
+	// checkpoint position, health and banked inventory — and leaves the WORLD untouched.
+	// true => io_pos/io_health hold the checkpoint values the client must be told about;
+	// false => the caller keeps its existing death-position behaviour (no checkpoint).
+	bool coop_checkpoint_respawn(u16 actor_id, xrClientData* CL, Fvector& io_pos, float& io_health);
 
 	void OnCoopClientDisconnected(xrClientData* CL); // game-layer co-op disconnect handler
 public:

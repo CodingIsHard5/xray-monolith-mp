@@ -156,6 +156,22 @@ void CLevel::ClientReceive()
 				coop_recv_decision(*P);
 			}
 			break;
+		case M_XRNET_COOP_RESPAWN:
+			{
+				// MP fork (§14 step 7 phase 3 C3 / §9.1): the server rolled this death back to
+				// the player's checkpoint and is telling us where that is. Sent to ONE client,
+				// but check the actor id anyway — we only move the body we control.
+				const u16 actor_id = P->r_u16();
+				Fvector pos;
+				P->r_vec3(pos);
+				const float health = P->r_float();
+
+				CObject* const controlled = CurrentControlEntity();
+				CActor* const actor = controlled ? smart_cast<CActor*>(controlled) : NULL;
+				if (actor && controlled->ID() == actor_id)
+					actor->coop_set_respawn_position(pos, health);
+			}
+			break;
 		case M_XRNET_OPEN_MENU:
 			{
 				// MP fork (§19 co-op): the server ran a dialogue action that wanted to open a

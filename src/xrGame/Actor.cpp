@@ -182,6 +182,9 @@ CActor::CActor() : CEntityAlive(), current_ik_cam_shift(0)
 	m_coop_dead = false;
 	m_coop_respawn_timer = 0.f;
 	m_coop_death_pos.set(0, 0, 0);
+	// MP fork (§14 step 7 phase 3 C3): server-chosen respawn position (checkpoint)
+	m_coop_respawn_pos.set(0, 0, 0);
+	m_coop_have_respawn_pos = false;
 
 	b_DropActivated = 0;
 	f_DropPower = 0.f;
@@ -1905,6 +1908,45 @@ void CActor::coop_puppet_interpolate()
 // pile, item conservation) comes later when the save system is built (§14 step 7).
 // For now this is a simple positional respawn: restore health, teleport to a safe
 // position, and resume play — enough to keep the co-op session alive.
+// MP fork (§14 step 7 phase 3 C3 / §9.1): the server tells us where this death puts us —
+// our checkpoint — because only it holds that record. Two orderings are possible and both
+// must work: the message normally arrives while we are still in the spectate countdown (so
+// we just stash it for coop_respawn), but if the countdown already elapsed we have revived
+// at the death position and must move to the checkpoint now.
+void CActor::coop_set_respawn_position(const Fvector& pos, float health)
+{
+	if (!_valid(pos))
+	{
+		Msg("! COOP(respawn-cl): server sent a non-finite respawn position — ignored");
+		return;
+	}
+
+	m_coop_respawn_pos = pos;
+	m_coop_have_respawn_pos = true;
+
+	if (m_coop_dead)
+	{
+		Msg("- COOP(respawn-cl): checkpoint position %.1f,%.1f,%.1f queued for respawn (hp=%.2f)",
+			pos.x, pos.y, pos.z, health);
+		return;
+	}
+
+	// Already back on our feet: apply it immediately, same teleport coop_respawn does.
+	Fvector at = pos;
+	at.y += 0.5f;
+	Position().set(at);
+	if (character_physics_support() && character_physics_support()->movement())
+		character_physics_support()->movement()->SetPosition(at);
+	{
+		Fmatrix mXFORM;
+		mXFORM.rotateY(-(r_model_yaw));
+		mXFORM.c.set(at);
+		XFORM().set(mXFORM);
+	}
+	m_coop_have_respawn_pos = false;
+	Msg("- COOP(respawn-cl): checkpoint position %.1f,%.1f,%.1f applied post-respawn", at.x, at.y, at.z);
+}
+
 void CActor::coop_respawn()
 {
 	VERIFY(m_coop_dead);
@@ -1929,11 +1971,11 @@ void CActor::coop_respawn()
 	}
 
 	// --- Teleport to a respawn position ---
-	// For now: respawn at the death position (the player gets up where they fell).
-	// TODO (§9.1): checkpoint system — respawn at the last safe base / campfire the
-	// player manually set as their checkpoint. The position here will come from the
-	// server's M_COOP_RESPAWN message once checkpoints exist.
-	Fvector spawn_pos = m_coop_death_pos;
+	// MP fork (§14 step 7 phase 3 C3 / §9.1): the SERVER chooses this — it is the only
+	// side holding the checkpoint — and sends it as M_XRNET_COOP_RESPAWN. Without a
+	// checkpoint no such message arrives and we revive where we fell, as before.
+	Fvector spawn_pos = m_coop_have_respawn_pos ? m_coop_respawn_pos : m_coop_death_pos;
+	m_coop_have_respawn_pos = false;   // one respawn, one position
 	spawn_pos.y += 0.5f;    // nudge up slightly to avoid ground-clip
 
 	Position().set(spawn_pos);

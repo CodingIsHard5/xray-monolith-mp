@@ -112,6 +112,13 @@ enum
 	// See dev/DECISION_REPLICATION_PLAN.md.
 	M_XRNET_DECISION,
 
+	// MP fork (§14 step 7 phase 3 / §9.1): server -> ONE client. Where that player's
+	// death rolls them back to. Payload: u16 actor_id, Fvector position, float health.
+	// The server owns respawn placement because only it holds the checkpoint; the client
+	// used to pick its own death position. A client that receives this before its respawn
+	// timer expires stashes it; one that already respawned applies it immediately.
+	M_XRNET_COOP_RESPAWN,
+
 	MSG_FORCEDWORD = u32(-1)
 };
 

@@ -20,6 +20,8 @@
 #include "hit.h"
 #include "GameObject.h"
 #include "entity_alive.h"                          // MP fork (§19 co-op): GetfHealth/g_Alive
+#include "game_sv_single.h"                        // MP fork (§14 step 7 C3): checkpoint rollback
+#include "xrMessages.h"                            // MP fork (§14 step 7 C3): M_XRNET_COOP_RESPAWN
 
 extern ENGINE_API bool g_dedicated_server;
 
@@ -947,14 +949,38 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 			Fvector   spawn_pos;
 			tNetPacket.r_vec3(spawn_pos);
 
+			// MP fork (§14 step 7 phase 3 C3): the SERVER decides where a death puts you,
+			// because only it holds the checkpoint. If this player has banked one, their
+			// person-state (position, health, inventory) rolls back to it and the client is
+			// told the position via M_XRNET_COOP_RESPAWN; the world keeps everything they
+			// left in it. No checkpoint => the pre-C3 behaviour (revive where you fell).
+			float spawn_health = 1.f;
+			bool  from_checkpoint = false;
+			{
+				xrClientData* const CL = m_server->ID_to_client(sender);
+				game_sv_Single* const single = smart_cast<game_sv_Single*>(this);
+				if (single && CL)
+					from_checkpoint = single->coop_checkpoint_respawn(actor_id, CL, spawn_pos, spawn_health);
+				if (from_checkpoint && CL)
+				{
+					NET_Packet P;
+					P.w_begin(M_XRNET_COOP_RESPAWN);
+					P.w_u16(actor_id);
+					P.w_vec3(spawn_pos);
+					P.w_float(spawn_health);
+					m_server->SendTo(CL->ID, P, net_flags(TRUE, TRUE));
+				}
+			}
+
 			CSE_Abstract* const e = get_entity_from_eid(actor_id);
 			CSE_ALifeCreatureAbstract* const creature = e ? smart_cast<CSE_ALifeCreatureAbstract*>(e) : NULL;
 			if (creature)
 			{
-				creature->set_health(1.f);
+				creature->set_health(spawn_health);
 				creature->o_Position.set(spawn_pos);
-				Msg("- COOP(respawn-sv): actor %u revived at (%.1f,%.1f,%.1f), health=%.1f",
-					actor_id, VPUSH(spawn_pos), creature->get_health());
+				Msg("- COOP(respawn-sv): actor %u revived at (%.1f,%.1f,%.1f), health=%.1f%s",
+					actor_id, VPUSH(spawn_pos), creature->get_health(),
+					from_checkpoint ? " [checkpoint]" : " [death position]");
 
 				// Also restore health on the game-object (CEntityAlive) in the server process.
 				// On a dedicated server the game object coexists in the same process.
