@@ -5,6 +5,7 @@
 #include "alife_simulator.h"
 #include "alife_object_registry.h"
 #include "alife_graph_registry.h"
+#include "game_graph.h"                            // MP fork (§14 step 7 phase 2): level_id check before add_online
 #include "alife_time_manager.h"
 #include "object_broker.h"
 #include "gamepersistent.h"
@@ -58,6 +59,18 @@ void game_sv_Single::Create(shared_str& options)
 		::luabind::functor<void> server_init;
 		if (ai().script_engine().functor("mp_client.on_server_game_start", server_init))
 			server_init();
+	}
+
+	// MP fork (§14 step 7 phase 2): when this server booted FROM a save, the persisted
+	// actors are now in the world but ownerless. Re-seed the player_name -> entity_id
+	// bindings from the save's sidecar so returning players reclaim their own bodies.
+	// (m_game_params still holds the parsed server options; the A-Life ctor above rewrote
+	// only the returned option string.) Co-op (ENet) only — stock SP/MP untouched.
+	if (xr_enet::enabled() && m_alife_simulator)
+	{
+		const IGame_Persistent::params& gp = g_pGamePersistent->m_game_params;
+		if (!xr_strcmp(gp.m_new_or_load, "load"))
+			coop_load_bindings(gp.m_game_or_spawn);
 	}
 
 	switch_Phase(GAME_PHASE_INPROGRESS);
@@ -374,6 +387,7 @@ void game_sv_Single::coop_orphan_actor(xrClientData* CL)
 	orphan.entity_id = actor->ID;
 	orphan.player_name = CL->ps ? CL->ps->getName() : CL->name;
 	orphan.disconnect_time = Device.dwTimeGlobal;
+	orphan.persistent = false;   // live disconnect: expires on the reconnect timeout
 
 	// Mark the entity as orphaned so Perform_connect_spawn won't claim it for other
 	// connecting clients. Detach ownership so the update loop skips it (frozen body).
@@ -413,13 +427,48 @@ CSE_Abstract* game_sv_Single::coop_find_orphan(LPCSTR name)
 		if (!xr_strcmp(it->player_name.c_str(), name))
 		{
 			u16 eid = it->entity_id;
+			const bool persisted = it->persistent;
 			m_coop_orphans.erase(it);
 			CSE_Abstract* entity = m_server->ID_to_entity(eid);
 			if (entity)
 			{
-				Msg("- XRNET(dbg): co-op orphan matched for player '%s' -> entity id %u", name, eid);
+				Msg("- XRNET(dbg): co-op orphan matched for player '%s' -> entity id %u%s", name, eid,
+					persisted ? " (restored from save)" : "");
 				return entity;
 			}
+
+			// MP fork (§14 step 7 phase 2): a binding restored from a save points at an
+			// A-Life entity that may still be OFFLINE — offline objects live only in the
+			// A-Life object registry, not in the server's online entity map. Bring it
+			// online so the re-association path (Spawn_Write to the client) has a real
+			// server entity to send. add_online() asserts the object is on the current
+			// level, so refuse anything that graphs elsewhere and fall back to a fresh
+			// spawn rather than trip the assert.
+			CSE_ALifeDynamicObject* dyn = ai().get_alife()
+				? ai().alife().objects().object(eid, true)
+				: NULL;
+			if (dyn && !dyn->m_bOnline)
+			{
+				const bool same_level = ai().game_graph().valid_vertex_id(dyn->m_tGraphID) &&
+					ai().game_graph().vertex(dyn->m_tGraphID)->level_id() ==
+					ai().alife().graph().level().level_id();
+				if (same_level)
+				{
+					alife().add_online(dyn);
+					entity = m_server->ID_to_entity(eid);
+					if (entity)
+					{
+						Msg("- COOP(bindings): player '%s' -> persisted actor id %u switched ONLINE for reclaim",
+							name, eid);
+						return entity;
+					}
+				}
+				Msg("! COOP(bindings): persisted actor id %u for player '%s' is offline and not "
+					"reclaimable here (same_level=%s) — falling back to a fresh spawn",
+					eid, name, same_level ? "yes" : "no");
+				return NULL;
+			}
+
 			Msg("! XRNET(dbg): co-op orphan entity id %u no longer exists for player '%s'", eid, name);
 			return NULL;
 		}
@@ -435,6 +484,14 @@ void game_sv_Single::coop_cleanup_orphans()
 	const u32 now = Device.dwTimeGlobal;
 	for (auto it = m_coop_orphans.begin(); it != m_coop_orphans.end(); )
 	{
+		// MP fork (§14 step 7 phase 2 / §9.3): bindings restored from a save never expire —
+		// a player must be able to reclaim their body however long the server was down (and
+		// however long it has been up before they log back in). Only LIVE disconnects age out.
+		if (it->persistent)
+		{
+			++it;
+			continue;
+		}
 		if (now - it->disconnect_time > RECONNECT_TIMEOUT_MS)
 		{
 			u16 eid = it->entity_id;
@@ -519,7 +576,173 @@ void game_sv_Single::coop_autosave()
 	// dedicated.sh). Trade-off: online objects' live runtime state is not re-flushed to CSE at
 	// the save instant (as-of-last-sync); a Lua-free position flush is a later refinement.
 	alife().save(save_name, false);
+	// MP fork (§14 step 7 phase 2): the .scop holds the actor ENTITIES; the sidecar holds
+	// who owns them. Written after the world so a sidecar never describes a save that
+	// doesn't exist.
+	coop_save_bindings(save_name);
 	Msg("- COOP(autosave): saved '%s'", save_name);
+}
+
+// MP fork (§14 step 7 phase 2, gap B): write the player_name -> entity_id ownership map
+// for <save_name> to "$game_saves$/<save_name>.coop". Covers both currently connected
+// players (CL->owner) and orphaned-but-alive actors (disconnected within the reconnect
+// window) — both of those entities are in the .scop, so both must be re-claimable.
+// Format: u32 magic, u32 version, u32 count, then count * { u16 entity_id, stringZ name }.
+void game_sv_Single::coop_save_bindings(LPCSTR save_name)
+{
+	if (!save_name || !xr_strlen(save_name))
+		return;
+
+	// Collect: live clients first, then orphans (a name can only appear once — a
+	// reconnected player's orphan entry is erased on re-association).
+	xr_vector<coop_orphan> bindings;
+	{
+		struct collector
+		{
+			game_sv_Single* self;
+			xr_vector<coop_orphan>* out;
+			void operator()(IClient* client)
+			{
+				xrClientData* cd = static_cast<xrClientData*>(client);
+				if (cd == self->m_server->GetServerClient()) return; // host save-actor (id 0) is not a player
+				if (!cd->owner) return;
+				LPCSTR nm = cd->ps ? cd->ps->getName() : cd->name.c_str();
+				if (!nm || !xr_strlen(nm)) return;                   // unnamed client: nothing to match on
+				coop_orphan b;
+				b.entity_id = cd->owner->ID;
+				b.player_name = nm;
+				b.disconnect_time = 0;
+				b.persistent = true;
+				out->push_back(b);
+			}
+		};
+		collector c; c.self = this; c.out = &bindings;
+		m_server->ForEachClientDo(c);
+		for (const coop_orphan& o : m_coop_orphans)
+		{
+			if (!o.player_name.size()) continue;   // unnamed: nothing to match on
+			bindings.push_back(o);
+		}
+	}
+
+	string_path fname, path;
+	strconcat(sizeof(fname), fname, save_name, ".coop");
+	FS.update_path(path, "$game_saves$", fname);
+
+	IWriter* writer = FS.w_open(path);
+	if (!writer)
+	{
+		Msg("! COOP(bindings): cannot open '%s' for writing — ownership will NOT persist", path);
+		return;
+	}
+	writer->w_u32((u32)COOP_BINDINGS_MAGIC);
+	writer->w_u32((u32)COOP_BINDINGS_VERSION);
+	writer->w_u32((u32)bindings.size());
+	for (const coop_orphan& b : bindings)
+	{
+		writer->w_u16(b.entity_id);
+		writer->w_stringZ(b.player_name.c_str());
+	}
+	FS.w_close(writer);
+
+	Msg("- COOP(bindings): saved %u binding(s) to '%s'", (u32)bindings.size(), fname);
+	for (const coop_orphan& b : bindings)
+		Msg("- COOP(bindings):   '%s' -> entity id %u", b.player_name.c_str(), b.entity_id);
+}
+
+// MP fork (§14 step 7 phase 2, gap B): read "<save_name>.coop" back after the world loads
+// and seed m_coop_orphans with PERSISTENT entries, so the first client that connects under
+// a recorded name re-claims its own persisted actor through the existing reconnection path
+// instead of being handed a fresh spawn. The entities are also flagged m_coop_orphaned so
+// Perform_connect_spawn cannot hand a persisted body to the wrong (or an unnamed) client.
+// A missing sidecar is normal (fresh world / save written before phase 2) -> no-op.
+void game_sv_Single::coop_load_bindings(LPCSTR save_name)
+{
+	if (!save_name || !xr_strlen(save_name) || !ai().get_alife())
+		return;
+
+	string_path fname, path;
+	strconcat(sizeof(fname), fname, save_name, ".coop");
+	FS.update_path(path, "$game_saves$", fname);
+
+	// Absent sidecar is the NORMAL case for a fresh world or a pre-phase-2 save: r_open
+	// returns NULL and every player simply gets a fresh actor (existing behaviour).
+	IReader* reader = FS.r_open(path);
+	if (!reader)
+	{
+		Msg("- COOP(bindings): no ownership sidecar '%s' — every player gets a fresh actor", fname);
+		return;
+	}
+
+	u32 restored = 0, stale = 0, count = 0;
+	if (reader->elapsed() < (int)(3 * sizeof(u32)))
+	{
+		Msg("! COOP(bindings): '%s' is truncated (%d bytes) — ignored", fname, reader->elapsed());
+		FS.r_close(reader);
+		return;
+	}
+	const u32 magic = reader->r_u32();
+	const u32 version = reader->r_u32();
+	if (magic != COOP_BINDINGS_MAGIC || version != COOP_BINDINGS_VERSION)
+	{
+		Msg("! COOP(bindings): '%s' has magic 0x%08x version %u (expected 0x%08x / %u) — ignored",
+			fname, magic, version, (u32)COOP_BINDINGS_MAGIC, (u32)COOP_BINDINGS_VERSION);
+		FS.r_close(reader);
+		return;
+	}
+	count = reader->r_u32();
+
+	for (u32 i = 0; i < count; ++i)
+	{
+		if (reader->elapsed() < (int)sizeof(u16))
+		{
+			Msg("! COOP(bindings): '%s' ends after %u of %u record(s) — rest ignored", fname, i, count);
+			break;
+		}
+		const u16 eid = reader->r_u16();
+		shared_str name;
+		reader->r_stringZ(name);
+		if (!name.size())
+		{
+			Msg("! COOP(bindings): record %u has an empty player name — ignored", i);
+			++stale;
+			continue;
+		}
+
+		CSE_Abstract* entity = ai().alife().objects().object(eid, true);
+		if (!entity)
+		{
+			Msg("! COOP(bindings): '%s' -> entity id %u is NOT in the loaded world — will get a fresh actor",
+				name.c_str(), eid);
+			++stale;
+			continue;
+		}
+
+		// Reserve the body: nothing else may claim it before its owner logs in.
+		entity->m_coop_orphaned = true;
+		for (u16 child_id : entity->children)
+		{
+			CSE_Abstract* child = ai().alife().objects().object(child_id, true);
+			if (child) child->m_coop_orphaned = true;
+		}
+
+		coop_orphan o;
+		o.entity_id = eid;
+		o.player_name = name;
+		o.disconnect_time = Device.dwTimeGlobal;
+		o.persistent = true;          // never expires — see coop_cleanup_orphans()
+		m_coop_orphans.push_back(o);
+		++restored;
+
+		CSE_ALifeDynamicObject* dyn = smart_cast<CSE_ALifeDynamicObject*>(entity);
+		Msg("- COOP(bindings): restored '%s' -> entity id %u (online=%s, %d item(s), pos %.1f,%.1f,%.1f)",
+			name.c_str(), eid, (dyn && dyn->m_bOnline) ? "yes" : "no",
+			(int)entity->children.size(),
+			entity->o_Position.x, entity->o_Position.y, entity->o_Position.z);
+	}
+	FS.r_close(reader);
+
+	Msg("- COOP(bindings): loaded %u/%u binding(s) from '%s' (%u stale)", restored, count, fname, stale);
 }
 
 void game_sv_Single::coop_poll_spawns()

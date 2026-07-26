@@ -48,6 +48,10 @@ private:
 		u16         entity_id;   // server entity ID of the orphaned actor
 		shared_str  player_name; // name used to match the reconnecting client
 		u32         disconnect_time; // Device.dwTimeGlobal when disconnected
+		// MP fork (§14 step 7 phase 2): restored from a save's ownership sidecar rather
+		// than from a live disconnect. A persisted binding must survive an arbitrarily
+		// long server downtime, so it is NEVER expired by coop_cleanup_orphans().
+		bool        persistent;
 	};
 	xr_vector<coop_orphan> m_coop_orphans;
 	static const u32 RECONNECT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -63,6 +67,17 @@ private:
 	u32  m_coop_autosave_interval_ms;             // 0 = disabled; else save period
 	u32  m_coop_autosave_last;                    // Device.dwTimeGlobal of last save (0 = never)
 	bool m_coop_autosave_init;                    // one-shot flag parse
+
+	// MP fork (§14 step 7 phase 2): player identity persistence. The actor ENTITY already
+	// survives in the .scop (phase-1 measurement: alife_reg=1), but the player_name ->
+	// entity_id BINDING lives only in runtime state (CL->owner / m_coop_orphans), so after
+	// a restart nothing says which persisted actor belongs to which player. Snapshot every
+	// binding into a "<save>.coop" sidecar next to the .scop, and on load seed m_coop_orphans
+	// so the existing reconnection path (coop_find_orphan) re-claims the right body.
+	void coop_save_bindings(LPCSTR save_name);    // write <save>.coop next to the .scop
+	void coop_load_bindings(LPCSTR save_name);    // read it back, seed persistent orphans
+	static const u32 COOP_BINDINGS_MAGIC = 0x50434F43;  // 'COCP' (LE) — sidecar file magic
+	static const u32 COOP_BINDINGS_VERSION = 1;
 public:
 	void OnCoopClientDisconnected(xrClientData* CL); // game-layer co-op disconnect handler
 public:
