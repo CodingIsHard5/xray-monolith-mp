@@ -1954,6 +1954,27 @@ u32 mp_broadcast_decision(u32 subject_id, u32 kind, LPCSTR hex_args, u32 lead_ms
 	                                       u16(bytes.size()), lead_ms);
 }
 
+// MP fork (§14 step 7 phase 3 / doc §9.1): let SERVER gamedata bank a player's CHECKPOINT —
+// the person-state snapshot a death rolls back to — when they rest at a safe base/campfire.
+// The engine snapshots position/health/location and every inventory item off the ENGINE CSEs;
+// what counts as "safe" is entirely gamedata's call. Returns true if a snapshot was taken
+// (false if there is no such connected player, or this is a client with no server game).
+bool mp_set_checkpoint(LPCSTR player_name)
+{
+	if (!Level().Server)
+	{
+		Msg("! mp_set_checkpoint: no server on this instance (client?)");
+		return false;
+	}
+	game_sv_Single* tpGame = smart_cast<game_sv_Single*>(Level().Server->game);
+	if (!tpGame)
+	{
+		Msg("! mp_set_checkpoint: server game is not game_sv_Single");
+		return false;
+	}
+	return tpGame->coop_bank_checkpoint(player_name);
+}
+
 //ability to update level netpacket
 void g_send(NET_Packet& P, bool bReliable = 0, bool bSequential = 1, bool bHighPriority = 0, bool bSendImmediately = 0)
 {
@@ -2883,6 +2904,9 @@ void CLevel::script_register(lua_State* L)
         def("mp_anchor_count", &mp_anchor_count),
 
         // MP fork (§3/§4): server gamedata originates a scheduled decision
-        def("mp_broadcast_decision", &mp_broadcast_decision)
+        def("mp_broadcast_decision", &mp_broadcast_decision),
+
+        // MP fork (§14 step 7 phase 3 / §9.1): server gamedata banks a player checkpoint
+        def("mp_set_checkpoint", &mp_set_checkpoint)
 	];
 }

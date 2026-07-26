@@ -29,6 +29,9 @@ game_sv_Single::game_sv_Single()
 	m_coop_autosave_interval_ms = 0;
 	m_coop_autosave_last = 0;
 	m_coop_autosave_init = false;
+	m_coop_test_checkpoint_ms = 0;
+	m_coop_test_checkpoint_init = false;
+	m_coop_test_checkpoint_done = false;
 };
 
 game_sv_Single::~game_sv_Single()
@@ -848,6 +851,128 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 	Msg("- COOP(bindings): loaded %u/%u binding(s) from '%s' (%u stale)", restored, count, fname, stale);
 }
 
+// MP fork (§14 step 7 phase 3, gap C): find a player's banked checkpoint (NULL if none).
+game_sv_Single::coop_checkpoint* game_sv_Single::coop_find_checkpoint(LPCSTR player_name)
+{
+	if (!player_name || !xr_strlen(player_name))
+		return NULL;
+	for (coop_checkpoint& c : m_coop_checkpoints)
+		if (!xr_strcmp(c.player_name.c_str(), player_name))
+			return &c;
+	return NULL;
+}
+
+// MP fork (§14 step 7 phase 3, gap C / doc §9.1): snapshot one player's PERSON-state — the
+// thing a death rolls back to, while everything they added to the WORLD stays put. Read
+// entirely off the ENGINE CSEs: the actor entity for position/health/location and its child
+// item entities for the inventory. Deliberately NOT via the GAMMA script save-manager (P1
+// §3a: firing per-object Lua save callbacks on the dedicated server corrupts the LuaJIT VM).
+// Re-banking replaces the player's previous checkpoint. Returns true if a snapshot was taken.
+bool game_sv_Single::coop_bank_checkpoint(LPCSTR player_name)
+{
+	if (!xr_enet::enabled() || !ai().get_alife())
+		return false;
+	if (!player_name || !xr_strlen(player_name))
+	{
+		Msg("! COOP(checkpoint): refusing to bank a checkpoint for an unnamed player");
+		return false;
+	}
+
+	// Locate that player's live actor. Same name rule as every other per-player record.
+	struct finder
+	{
+		game_sv_Single* self;
+		LPCSTR want;
+		CSE_Abstract* found;
+		void operator()(IClient* client)
+		{
+			if (found) return;
+			xrClientData* cd = static_cast<xrClientData*>(client);
+			if (cd == self->m_server->GetServerClient()) return; // host save-actor is not a player
+			if (!cd->owner) return;
+			LPCSTR nm = coop_player_name(cd);
+			if (nm && !xr_strcmp(nm, want)) found = cd->owner;
+		}
+	};
+	finder f; f.self = this; f.want = player_name; f.found = NULL;
+	m_server->ForEachClientDo(f);
+	if (!f.found)
+	{
+		Msg("! COOP(checkpoint): no connected player '%s' owns an actor — nothing to bank", player_name);
+		return false;
+	}
+
+	CSE_Abstract* actor = f.found;
+	// P2 §3b found that an actor CSE can carry garbage coordinates after a load->online
+	// round trip. A checkpoint exists to put a player BACK somewhere, so refuse to bank a
+	// position that isn't finite rather than store a trap they respawn into.
+	if (!_valid(actor->o_Position))
+	{
+		Msg("! COOP(checkpoint): '%s' has a non-finite actor position — NOT banking", player_name);
+		return false;
+	}
+
+	coop_checkpoint cp;
+	cp.player_name = player_name;
+	cp.pos = actor->o_Position;
+	cp.angle = actor->o_Angle;
+	cp.health = 1.f;
+	cp.node_id = 0;
+	cp.graph_id = 0;
+	cp.banked_time = Device.dwTimeGlobal;
+
+	if (CSE_ALifeCreatureAbstract* creature = smart_cast<CSE_ALifeCreatureAbstract*>(actor))
+		cp.health = creature->get_health();
+	if (CSE_ALifeDynamicObject* dyn = smart_cast<CSE_ALifeDynamicObject*>(actor))
+	{
+		cp.node_id = dyn->m_tNodeID;      // rollback lands on the nav mesh, not just a point
+		cp.graph_id = dyn->m_tGraphID;
+	}
+
+	for (u16 child_id : actor->children)
+	{
+		CSE_Abstract* child = m_server->ID_to_entity(child_id);
+		if (!child)
+			child = ai().alife().objects().object(child_id, true);   // offline items still count
+		if (!child)
+			continue;
+
+		coop_checkpoint_item it;
+		it.section = child->s_name;
+		it.condition = 1.f;
+		it.ammo_elapsed = 0;
+		it.ammo_type = 0;
+		it.slot = 0xff;
+
+		if (CSE_ALifeInventoryItem* inv = smart_cast<CSE_ALifeInventoryItem*>(child))
+			it.condition = inv->m_fCondition;
+		if (CSE_ALifeItemWeapon* wpn = smart_cast<CSE_ALifeItemWeapon*>(child))
+		{
+			it.ammo_elapsed = wpn->a_elapsed;   // rounds in the magazine
+			it.ammo_type = wpn->ammo_type;
+			// get_slot() is a bare pSettings->r_u8(s_name,"slot") — a section without that
+			// line would hard-error the server mid-snapshot. Banking must never be able to
+			// kill the server, so read it only when the line exists.
+			it.slot = pSettings->line_exist(child->s_name, "slot")
+				? (u8)pSettings->r_u8(child->s_name, "slot") : u8(0xff);
+		}
+		else if (CSE_ALifeItemAmmo* ammo = smart_cast<CSE_ALifeItemAmmo*>(child))
+			it.ammo_elapsed = ammo->a_elapsed;  // rounds left in the box
+
+		cp.items.push_back(it);
+	}
+
+	// Re-banking replaces the previous checkpoint for this player.
+	if (coop_checkpoint* existing = coop_find_checkpoint(player_name))
+		*existing = cp;
+	else
+		m_coop_checkpoints.push_back(cp);
+
+	Msg("- COOP(checkpoint): banked '%s' pos %.1f,%.1f,%.1f hp=%.2f node=%u items=%u",
+		player_name, cp.pos.x, cp.pos.y, cp.pos.z, cp.health, cp.node_id, (u32)cp.items.size());
+	return true;
+}
+
 void game_sv_Single::coop_poll_spawns()
 {
 	if (!xr_enet::enabled() || !ai().get_alife())
@@ -1164,6 +1289,52 @@ void game_sv_Single::Update()
 		{
 			m_coop_autosave_last = Device.dwTimeGlobal;
 			coop_autosave();
+		}
+	}
+
+	// MP fork (§14 step 7 phase 3, test harness): -coop_test_checkpoint <seconds> banks a
+	// checkpoint for every connected player once, N seconds in. Gamedata drives the real
+	// thing via game.mp_set_checkpoint(name) at a campfire/base; this is just so the
+	// headless acceptance test can bank one without a scripted trigger.
+	if (xr_enet::enabled() && ai().get_alife())
+	{
+		if (!m_coop_test_checkpoint_init)
+		{
+			m_coop_test_checkpoint_init = true;
+			LPCSTR p = strstr(Core.Params, "-coop_test_checkpoint");
+			if (p)
+			{
+				p += sizeof("-coop_test_checkpoint") - 1;
+				while (*p == ' ') ++p;
+				const float secs = (float)atof(p);
+				// NaN/inf fail every compare, so >0 also rejects non-finite input
+				m_coop_test_checkpoint_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 30000u;
+				Msg("- COOP(checkpoint): test auto-bank armed at %ums", m_coop_test_checkpoint_ms);
+			}
+		}
+		if (m_coop_test_checkpoint_ms && !m_coop_test_checkpoint_done &&
+		    Device.dwTimeGlobal >= m_coop_test_checkpoint_ms)
+		{
+			struct banker
+			{
+				game_sv_Single* self;
+				u32 banked;
+				void operator()(IClient* client)
+				{
+					xrClientData* cd = static_cast<xrClientData*>(client);
+					if (cd == self->m_server->GetServerClient()) return;
+					if (!cd->owner) return;
+					LPCSTR nm = coop_player_name(cd);
+					if (nm && self->coop_bank_checkpoint(nm)) ++banked;
+				}
+			};
+			banker b; b.self = this; b.banked = 0;
+			m_server->ForEachClientDo(b);
+			if (b.banked)
+			{
+				m_coop_test_checkpoint_done = true;   // one-shot, only once someone was banked
+				Msg("- COOP(checkpoint): test auto-bank done (%u player(s))", b.banked);
+			}
 		}
 	}
 

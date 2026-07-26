@@ -89,6 +89,43 @@ private:
 	void coop_load_bindings(LPCSTR save_name);    // read it back, seed persistent orphans
 	static const u32 COOP_BINDINGS_MAGIC = 0x50434F43;  // 'COCP' (LE) — sidecar file magic
 	static const u32 COOP_BINDINGS_VERSION = 1;
+
+	// MP fork (§14 step 7 phase 3, gap C): per-player CHECKPOINT — the doc's §9.1/9.2
+	// person-state snapshot that death rolls back to. Three constraints from phases 1-2
+	// shape it: it is recorded from ENGINE CSE state only (P1 §3a: driving the GAMMA per-
+	// object Lua save callbacks on the dedicated server corrupts the LuaJIT VM), the
+	// position is a value the server records DELIBERATELY (P2 §3b: a reloaded actor's live
+	// o_Position is garbage), and it is keyed on coop_player_name() like every other
+	// per-player record (P2: the player-state account name is empty on thin clients).
+	struct coop_checkpoint_item
+	{
+		shared_str section;      // s_name — what to re-create on rollback
+		float      condition;    // CSE_ALifeInventoryItem::m_fCondition
+		u16        ammo_elapsed; // weapons: rounds left in the magazine
+		u8         ammo_type;    // weapons: which ammo section that magazine holds
+		u8         slot;         // weapons: inventory slot
+	};
+	struct coop_checkpoint
+	{
+		shared_str player_name;
+		Fvector    pos;          // where the player rolls back TO
+		Fvector    angle;
+		float      health;
+		u32        node_id;      // level vertex, so the rollback lands on the nav mesh
+		u16        graph_id;
+		u32        banked_time;  // Device.dwTimeGlobal when banked
+		xr_vector<coop_checkpoint_item> items;
+	};
+	xr_vector<coop_checkpoint> m_coop_checkpoints;
+	coop_checkpoint* coop_find_checkpoint(LPCSTR player_name);
+	u32  m_coop_test_checkpoint_ms;   // -coop_test_checkpoint <seconds>: auto-bank (harness)
+	bool m_coop_test_checkpoint_init;
+	bool m_coop_test_checkpoint_done;
+public:
+	// Server-side bank path. Exposed so gamedata can trigger it at a campfire/base via the
+	// `game.mp_set_checkpoint(name)` luabind export; the engine does not care what triggered it.
+	bool coop_bank_checkpoint(LPCSTR player_name);
+private:
 public:
 	void OnCoopClientDisconnected(xrClientData* CL); // game-layer co-op disconnect handler
 public:
