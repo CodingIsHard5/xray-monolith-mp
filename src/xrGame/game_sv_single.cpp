@@ -44,6 +44,19 @@ static bool coop_file_on_disk(LPCSTR full_path)
 	return GetFileAttributesA(full_path) != INVALID_FILE_ATTRIBUTES;
 }
 
+// MP fork (§14 step 7 phase 4 D2): is this a position a player could actually be standing at?
+// `_valid()` only rejects NaN/inf, and the corruption this codebase keeps meeting is not NaN — it
+// is uninitialized memory that happens to be finite. Measured values from the two occurrences:
+// `-421888.0, 1.1e17, 142.2` (P2 §3b) and `114688.0, -4.4e17, -3128.0` (D2). An X-Ray level fits
+// inside a few thousand metres of the origin, so a magnitude gate separates the two cases cleanly,
+// and a record that fails it must be DROPPED rather than persisted: keeping the last good value is
+// always better than writing a position nobody can be put back at.
+static bool coop_plausible_pos(const Fvector& p)
+{
+	const float LIMIT = 32768.f;   // ~16x the largest real level extent
+	return !!_valid(p) && _abs(p.x) < LIMIT && _abs(p.y) < LIMIT && _abs(p.z) < LIMIT;
+}
+
 game_sv_Single::game_sv_Single()
 {
 	m_alife_simulator = NULL;
@@ -455,7 +468,7 @@ void game_sv_Single::coop_orphan_actor(xrClientData* CL)
 	// rides into the v3 sidecar, and a reclaim after a RESTART must not have to read a position
 	// back off a reloaded entity (P2 §3b rule 2). Non-finite => record nothing rather than a
 	// trap the player would resume into.
-	orphan.have_saved_pos = !!_valid(actor->o_Position);
+	orphan.have_saved_pos = coop_plausible_pos(actor->o_Position);
 	if (orphan.have_saved_pos)
 		orphan.saved_pos = actor->o_Position;
 	else
@@ -497,6 +510,33 @@ void game_sv_Single::OnCoopClientDisconnected(xrClientData* CL)
 	coop_orphan_actor(CL);
 	// Clean up the grace-period entry so a reconnecting client gets a fresh grace window
 	m_coop_seen.erase(CL->ID.value());
+}
+
+// MP fork (§14 step 7 phase 4 D2, reclaim delivery): does this entity belong to the orphaned body
+// reserved for CL's player? Walks the parent chain, so the actor's inventory children answer yes
+// too. See the declaration for why the connection snapshot has to know.
+bool game_sv_Single::coop_is_own_orphan(CSE_Abstract* E, xrClientData* CL)
+{
+	if (!xr_enet::enabled() || !E || !CL || !m_server || m_coop_orphans.empty())
+		return false;
+	LPCSTR nm = coop_player_name(CL);
+	if (!nm || !xr_strlen(nm))
+		return false;   // an unnamed client owns nothing (P2 §3b)
+
+	// Bounded walk: a malformed parent chain must not spin here, and inventory nests shallowly
+	// (item -> container -> actor is the deepest real case).
+	CSE_Abstract* cur = E;
+	for (int depth = 0; cur && depth < 8; ++depth)
+	{
+		for (const coop_orphan& o : m_coop_orphans)
+		{
+			if (o.entity_id != cur->ID || !o.player_name.size())
+				continue;
+			return !xr_strcmp(o.player_name.c_str(), nm);
+		}
+		cur = (cur->ID_Parent == 0xffff) ? NULL : m_server->ID_to_entity(cur->ID_Parent);
+	}
+	return false;
 }
 
 CSE_Abstract* game_sv_Single::coop_find_orphan(LPCSTR name, Fvector* out_pos, bool* out_have_pos)
@@ -799,10 +839,15 @@ void game_sv_Single::coop_sample_recoveries()
 
 			CSE_Abstract* actor = cd->owner;
 			// Same rule as the checkpoint bank: a position you cannot be put back at is worse
-			// than none, so refuse a non-finite one instead of persisting a trap.
-			if (!_valid(actor->o_Position))
+			// than none, so refuse an implausible one instead of persisting a trap. This is not
+			// hypothetical — a body whose reclaim delivery failed reads as finite garbage
+			// (114688, -4.4e17, -3128 measured 2026-07-26), and sampling it would overwrite the
+			// good record the player's own crash recovery depends on. Keep the last good one.
+			if (!coop_plausible_pos(actor->o_Position))
 			{
-				Msg("! COOP(recovery): '%s' has a non-finite actor position — NOT sampled", nm);
+				Msg("! COOP(recovery): '%s' has an implausible actor position %.1f,%.1f,%.1f — NOT "
+					"sampled (keeping any earlier record)", nm,
+					actor->o_Position.x, actor->o_Position.y, actor->o_Position.z);
 				return;
 			}
 
@@ -1039,7 +1084,7 @@ void game_sv_Single::coop_save_bindings(LPCSTR save_name)
 				// MP fork (§14 step 7 phase 4, increment E): a connected player's binding
 				// carries their live position too, so the v3 record means the same thing for
 				// a player who was online at save time as for one who had logged off.
-				b.have_saved_pos = !!_valid(cd->owner->o_Position);
+				b.have_saved_pos = coop_plausible_pos(cd->owner->o_Position);
 				if (b.have_saved_pos)
 					b.saved_pos = cd->owner->o_Position;
 				else
@@ -1231,7 +1276,7 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 			reader->r_fvector3(rec_pos);
 			// A recorded position that isn't finite is exactly the trap this field exists to
 			// avoid restoring; fall back to the .scop entity rather than resume into the void.
-			if (rec_have_pos && !_valid(rec_pos))
+			if (rec_have_pos && !coop_plausible_pos(rec_pos))
 			{
 				Msg("! COOP(bindings): '%s' record %u has a non-finite saved position — ignoring it",
 					fname, i);
@@ -1281,7 +1326,7 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 		else
 		{
 			o.saved_pos = entity->o_Position;   // v1/v2 sidecar: straight out of the .scop
-			o.have_saved_pos = !!_valid(entity->o_Position);
+			o.have_saved_pos = coop_plausible_pos(entity->o_Position);
 		}
 		o.frozen = false;             // becomes true once it is online and detached
 		m_coop_orphans.push_back(o);
@@ -1370,10 +1415,10 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 
 			// A checkpoint you cannot be put back at is worse than none: drop unnamed or
 			// non-finite records rather than let a death teleport someone into the void.
-			if (!c.player_name.size() || !_valid(c.pos))
+			if (!c.player_name.size() || !coop_plausible_pos(c.pos))
 			{
 				Msg("! COOP(bindings): checkpoint %u is unusable (name='%s', finite pos=%s) — dropped",
-					i, c.player_name.size() ? c.player_name.c_str() : "", _valid(c.pos) ? "yes" : "no");
+					i, c.player_name.size() ? c.player_name.c_str() : "", coop_plausible_pos(c.pos) ? "yes" : "no");
 			}
 			else
 			{
@@ -1422,10 +1467,10 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 			// Same rule as the checkpoint block: a position nobody can be put back at is worse
 			// than no record, because the player resumes in the void instead of at their
 			// logged-off position. Drop it and let the other two candidates answer.
-			if (!r.player_name.size() || !_valid(r.pos))
+			if (!r.player_name.size() || !coop_plausible_pos(r.pos))
 			{
 				Msg("! COOP(bindings): recovery %u is unusable (name='%s', finite pos=%s) — dropped",
-					i, r.player_name.size() ? r.player_name.c_str() : "", _valid(r.pos) ? "yes" : "no");
+					i, r.player_name.size() ? r.player_name.c_str() : "", coop_plausible_pos(r.pos) ? "yes" : "no");
 				continue;
 			}
 
@@ -1501,10 +1546,12 @@ bool game_sv_Single::coop_bank_checkpoint(LPCSTR player_name)
 	CSE_Abstract* actor = f.found;
 	// P2 §3b found that an actor CSE can carry garbage coordinates after a load->online
 	// round trip. A checkpoint exists to put a player BACK somewhere, so refuse to bank a
-	// position that isn't finite rather than store a trap they respawn into.
-	if (!_valid(actor->o_Position))
+	// position that isn't plausible rather than store a trap they respawn into. The garbage is
+	// finite, so this needs the magnitude gate and not just _valid() — see coop_plausible_pos().
+	if (!coop_plausible_pos(actor->o_Position))
 	{
-		Msg("! COOP(checkpoint): '%s' has a non-finite actor position — NOT banking", player_name);
+		Msg("! COOP(checkpoint): '%s' has an implausible actor position %.1f,%.1f,%.1f — NOT banking",
+			player_name, actor->o_Position.x, actor->o_Position.y, actor->o_Position.z);
 		return false;
 	}
 
@@ -1662,9 +1709,9 @@ bool game_sv_Single::coop_checkpoint_respawn(u16 actor_id, xrClientData* CL, Fve
 	coop_checkpoint* cp = coop_find_checkpoint(nm);
 	if (!cp)
 		return false;
-	if (!_valid(cp->pos))
+	if (!coop_plausible_pos(cp->pos))
 	{
-		Msg("! COOP(checkpoint): '%s' has a non-finite checkpoint — falling back to death position", nm);
+		Msg("! COOP(checkpoint): '%s' has an implausible checkpoint — falling back to death position", nm);
 		return false;
 	}
 
@@ -1879,7 +1926,7 @@ void game_sv_Single::coop_poll_spawns()
 			LPCSTR pos_source = have_saved_pos ? "LOGGED-OFF" : "none";
 			if (coop_recovery* rec = coop_find_recovery(client_name))
 			{
-				if (rec->persisted && _valid(rec->pos))
+				if (rec->persisted && coop_plausible_pos(rec->pos))
 				{
 					saved_pos = rec->pos;
 					have_saved_pos = true;
@@ -1927,20 +1974,22 @@ void game_sv_Single::coop_poll_spawns()
 				}
 			}
 
-			// The reconnecting client already received this entity as stripped/remote
-			// during SendConnectionData. Destroy that client-side representation and
-			// re-send as LOCAL+ASPLAYER so the client takes control of it.
+			// Hand the body over as LOCAL+ASPLAYER so the client takes control of it.
 			// (SendTo bypasses server event processing — only the client acts on it.)
+			//
+			// MP fork (§14 step 7 phase 4 D2): this used to send a GE_DESTROY first, to clear the
+			// stripped copy the connection snapshot had given the client. That could not work: the
+			// destroy is an M_EVENT (queued and executed by timestamp) while the spawn is applied on
+			// receipt, and `setDestroy` only MARKS an object, so the spawn still sees it and the
+			// duplicate-actor guard drops it — leaving the client with no body, nine
+			// "GE_DESTROY ... has parent" errors, and a FATAL in `CAttachmentOwner::net_Destroy`
+			// (measured 2026-07-26 on a save-restored reclaim). The fix is upstream:
+			// `Perform_connect_spawn` now withholds a client's own orphaned body, so there is
+			// nothing to destroy and one packet does the whole job. Anything else that could put a
+			// copy on the client before the reclaim — today only the §3 per-client relevance pass,
+			// which is inert unless -coop_cull_radius is set — would need the same treatment.
 			{
-				// Destroy the stripped entity on the reconnecting client
-				NET_Packet P;
-				P.w_begin(M_EVENT);
-				P.w_u32(Level().timeServer());
-				P.w_u16(GE_DESTROY);
-				P.w_u16(orphan->ID);
-				m_server->SendTo(CL->ID, P, net_flags(TRUE, TRUE));
-
-				// Re-send the actor as LOCAL+ASPLAYER
+				// Send the actor as LOCAL+ASPLAYER
 				NET_Packet P2;
 				Flags16 save = orphan->s_flags;
 				orphan->s_flags.set(M_SPAWN_UPDATE, TRUE);
@@ -1950,21 +1999,15 @@ void game_sv_Single::coop_poll_spawns()
 				orphan->s_flags = save;
 				m_server->SendTo(CL->ID, P2, net_flags(TRUE, TRUE));
 
-				// Re-send children (inventory items) as LOCAL
+				// Children (inventory items) as LOCAL — same story as the actor above: they were
+				// withheld at connect, so they are spawned here rather than destroyed and re-sent.
+				// Their GE_DESTROYs were the ones the client refused outright, because a child that
+				// still has a parent is never destroyed by the stock handler (GameObject.cpp).
 				for (u16 child_id : orphan->children)
 				{
 					CSE_Abstract* child = m_server->ID_to_entity(child_id);
 					if (!child) continue;
 
-					// Destroy stripped child on client
-					NET_Packet Pd;
-					Pd.w_begin(M_EVENT);
-					Pd.w_u32(Level().timeServer());
-					Pd.w_u16(GE_DESTROY);
-					Pd.w_u16(child->ID);
-					m_server->SendTo(CL->ID, Pd, net_flags(TRUE, TRUE));
-
-					// Re-send as LOCAL
 					NET_Packet Ps;
 					Flags16 csave = child->s_flags;
 					child->s_flags.set(M_SPAWN_UPDATE, TRUE);

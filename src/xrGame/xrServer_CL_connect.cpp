@@ -4,6 +4,8 @@
 #include "xrserver_objects.h"
 #include "xrServer_Objects_Alife_Monsters.h"
 #include "Level.h"
+#include "game_sv_single.h"                       // MP fork (§14 step 7 P4 D2): own-orphan check
+#include "../xrNetServer/xr_enet_transport.h"     // MP fork: xr_enet::enabled()
 
 
 void xrServer::Perform_connect_spawn(CSE_Abstract* E, xrClientData* CL, NET_Packet& P)
@@ -31,6 +33,28 @@ void xrServer::Perform_connect_spawn(CSE_Abstract* E, xrClientData* CL, NET_Pack
 		anc; anc = (anc->ID_Parent == 0xffff) ? 0 : ID_to_entity(anc->ID_Parent))
 	{
 		if (coop_cull_gate_creature(anc)) return;
+	}
+
+	// MP fork (§14 step 7 phase 4 D2): never hand a client its OWN orphaned body here. The reclaim
+	// (game_sv_Single::coop_poll_spawns) delivers that same entity as LOCAL+ASPLAYER a few seconds
+	// later, and a client that already holds a copy cannot take it: the duplicate-actor guard in
+	// Level_network_spawn drops the real spawn, and the GE_DESTROY that was meant to clear the ghost
+	// then kills an actor whose inventory children are still attached —
+	// `CAttachmentOwner::net_Destroy: attached_objects().empty()`, a client FATAL. Measured
+	// 2026-07-26 on a save-restored reclaim (client log: remote spawn at connect, "DROPPING
+	// duplicate actor spawn", nine "GE_DESTROY ... has parent" errors, then the assert).
+	// Other players' orphaned bodies are still sent below — they are scenery to this client.
+	if (E->m_coop_orphaned)
+	{
+		if (game_sv_Single* sv_single = smart_cast<game_sv_Single*>(game))
+		{
+			if (sv_single->coop_is_own_orphan(E, CL))
+			{
+				Msg("- COOP(bindings): withholding orphaned entity %u from its own owner at connect "
+					"— the reclaim delivers it as LOCAL", E->ID);
+				return;
+			}
+		}
 	}
 
 	//.	Msg("Perform connect spawn [%d][%s]", E->ID, E->s_name.c_str());

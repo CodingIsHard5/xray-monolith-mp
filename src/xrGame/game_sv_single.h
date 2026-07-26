@@ -197,6 +197,13 @@ public:
 	bool coop_checkpoint_respawn(u16 actor_id, xrClientData* CL, Fvector& io_pos, float& io_health);
 
 	void OnCoopClientDisconnected(xrClientData* CL); // game-layer co-op disconnect handler
+
+	// MP fork (§14 step 7 phase 4 D2, reclaim delivery): is E — or anything it hangs off — an
+	// orphaned body reserved for THIS client's player name? `xrServer::Perform_connect_spawn` asks
+	// so it can leave that body OUT of the connection snapshot: the reclaim hands the same entity
+	// over as LOCAL+ASPLAYER seconds later, and a client that already holds a copy drops the real
+	// one as a duplicate and then FATALs destroying the ghost. Measured 2026-07-26, see the plan.
+	bool coop_is_own_orphan(CSE_Abstract* E, xrClientData* CL);
 public:
 	virtual BOOL OnTouch(u16 eid_who, u16 eid_what, BOOL bForced = FALSE);
 	virtual void OnDetach(u16 eid_who, u16 eid_what);
