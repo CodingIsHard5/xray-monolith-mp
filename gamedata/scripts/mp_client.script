@@ -250,4 +250,19 @@ function on_server_game_start()
 		end)
 		if not ok then printf("! MP co-op: stub failed for %s.%s", mod_name, fn_name) end
 	end
+
+	-- WORLD-SAVE COMPLETENESS (§14 step 7): the server-authoritative autosave
+	-- (game_sv_Single::coop_autosave) serializes the CSE/ALife world. During the save GAMMA
+	-- per-object save-callbacks fire; hf_obj_manager.save_state iterates game_objects_iter(),
+	-- a global the flat co-op gamedata never defines (its real definer wasn't flattened; blast
+	-- radius is that one caller). The bare nil-call errors mid-save-callback, and the co-op
+	-- continue-on-Lua-error handler swallows it in a way that corrupts the LuaJIT VM -> AV in
+	-- lj_vm_return (crash symbolicated, build 30184076690/30184982768). Define a safe EMPTY
+	-- iterator: the co-op server has no player hideout furniture, so save_state becomes a clean
+	-- no-op. Only fill the nil (a real definer, if ever flattened, wins). See memory
+	-- xray-coop-save-lua-callback-crash.
+	if not game_objects_iter then
+		_G.game_objects_iter = function() return function() return nil end end
+		printf("~ MP co-op: defined server-side game_objects_iter fallback (empty; unblocks world autosave)")
+	end
 end
