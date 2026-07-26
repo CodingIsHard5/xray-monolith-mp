@@ -1261,6 +1261,64 @@ void CActor::UpdateCL()
 		}
 	}
 
+	// MP fork (§14 step 7 phase 4, D0 harness): displace this client's own actor by N metres
+	// after M seconds, so a test can ask whether the SERVER's CSE follows a client-owned actor
+	// that has moved. Launch with: -coop_test_walk <metres> [-coop_test_walk_after <seconds>]
+	// (default 30 s, i.e. after the world has settled). One-shot, thin client only. A
+	// displacement reports through M_CL_UPDATE exactly like a walked one, which is the point.
+	if (g_Alive() && this == Actor() && coop_thin_client())
+	{
+		static float s_walk_m     = -1.f;
+		static float s_walk_after = 30.f;
+		static float s_walk_accum = 0.f;
+		static bool  s_walk_init  = false;
+		if (!s_walk_init)
+		{
+			s_walk_init = true;
+			LPCSTR p = strstr(Core.Params, "-coop_test_walk");
+			if (p)
+			{
+				p += sizeof("-coop_test_walk") - 1;
+				while (*p == ' ') ++p;
+				s_walk_m = (float)atof(p);
+				if (s_walk_m <= 0.f) s_walk_m = 10.f;
+				LPCSTR q = strstr(Core.Params, "-coop_test_walk_after");
+				if (q)
+				{
+					q += sizeof("-coop_test_walk_after") - 1;
+					while (*q == ' ') ++q;
+					const float after = (float)atof(q);
+					if (after > 0.f) s_walk_after = after;
+				}
+				Msg("- COOP(test): will displace the actor %.1f m in %.0f seconds", s_walk_m, s_walk_after);
+			}
+		}
+		if (s_walk_m > 0.f)
+		{
+			s_walk_accum += Device.fTimeDelta;
+			if (s_walk_accum >= s_walk_after)
+			{
+				const Fvector from = Position();
+				Fvector to = from;
+				to.x += s_walk_m;
+				s_walk_m = -1.f;   // one-shot
+				// Same sequence coop_respawn() uses — position, physics movement, and the
+				// object transform all have to agree or the actor snaps back next frame.
+				Position().set(to);
+				if (character_physics_support() && character_physics_support()->movement())
+					character_physics_support()->movement()->SetPosition(to);
+				{
+					Fmatrix mXFORM;
+					mXFORM.rotateY(-(r_model_yaw));
+					mXFORM.c.set(to);
+					XFORM().set(mXFORM);
+				}
+				Msg("- COOP(test): displaced actor (%.1f,%.1f,%.1f) -> (%.1f,%.1f,%.1f)",
+					VPUSH(from), VPUSH(Position()));
+			}
+		}
+	}
+
 	pickup_result_t pickup_result = {true, false};
 	if (g_Alive())
 		pickup_result = PickupModeUpdate();

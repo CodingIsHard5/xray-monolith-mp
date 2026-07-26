@@ -1212,6 +1212,18 @@ bool game_sv_Single::coop_checkpoint_respawn(u16 actor_id, xrClientData* CL, Fve
 	// --- inventory rollback: destroy what they are carrying now, restore what they banked ---
 	// Snapshot the child ids first: Perform_destroy mutates the children vector as it goes.
 	xr_vector<u16> current = actor->children;
+	// Name what is on the body BEFORE destroying it — after the loop these entities are gone
+	// from both the server map and A-Life, so the sections are unreadable.
+	string4096 at_death;
+	at_death[0] = 0;
+	for (u16 child_id : current)
+	{
+		CSE_Abstract* c = m_server->ID_to_entity(child_id);
+		if (!c)
+			c = ai().alife().objects().object(child_id, true);
+		xr_strcat(at_death, sizeof(at_death), c ? c->s_name.c_str() : "<unknown>");
+		xr_strcat(at_death, sizeof(at_death), " ");
+	}
 	u32 destroyed = 0;
 	u32 skipped = 0;
 	for (u16 child_id : current)
@@ -1232,11 +1244,22 @@ bool game_sv_Single::coop_checkpoint_respawn(u16 actor_id, xrClientData* CL, Fve
 		++destroyed;
 	}
 	// The counts that matter for the duplication question: how many children the actor had at
-	// death vs how many the checkpoint banked. A shrunk child list means something detached the
-	// item between bank and death (client death handling); an equal list with skips means the
-	// bank/destroy asymmetry above.
+	// death vs how many the checkpoint banked. Measured: the list SHRINKS by one across the
+	// death itself (9 banked, 8 present) and not with elapsed time, so the death detaches or
+	// consumes exactly one item. These two section lists name it.
 	Msg("- COOP(checkpoint): rollback children at death=%u (destroyed %u, skipped %u), banked=%u",
 		(u32)current.size(), destroyed, skipped, (u32)cp->items.size());
+	{
+		string4096 at_bank;
+		at_bank[0] = 0;
+		for (const coop_checkpoint_item& it : cp->items)
+		{
+			xr_strcat(at_bank, sizeof(at_bank), it.section.size() ? it.section.c_str() : "<empty>");
+			xr_strcat(at_bank, sizeof(at_bank), " ");
+		}
+		Msg("- COOP(checkpoint):   at bank : %s", at_bank);
+		Msg("- COOP(checkpoint):   at death: %s", at_death);
+	}
 
 	u32 restored = 0;
 	for (const coop_checkpoint_item& it : cp->items)
