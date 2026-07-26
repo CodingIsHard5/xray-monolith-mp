@@ -55,6 +55,14 @@ private:
 	void coop_orphan_actor(xrClientData* CL);    // called on co-op client disconnect
 	void coop_cleanup_orphans();                  // expire stale orphans
 	CSE_Abstract* coop_find_orphan(LPCSTR name);  // find orphan by player name
+
+	// MP fork (§9.4/9.5 co-op save/load — step 7 phase 1): the dedicated server owns the
+	// world and must snapshot it to disk on its own — no client, no console, no live actor.
+	// coop_autosave() drives the existing atomic ALife save directly (prepare + save).
+	void coop_autosave();                         // server-authoritative atomic world save
+	u32  m_coop_autosave_interval_ms;             // 0 = disabled; else save period
+	u32  m_coop_autosave_last;                    // Device.dwTimeGlobal of last save (0 = never)
+	bool m_coop_autosave_init;                    // one-shot flag parse
 public:
 	void OnCoopClientDisconnected(xrClientData* CL); // game-layer co-op disconnect handler
 public:

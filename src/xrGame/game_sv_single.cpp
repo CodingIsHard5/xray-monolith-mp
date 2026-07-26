@@ -25,6 +25,9 @@ game_sv_Single::game_sv_Single()
 {
 	m_alife_simulator = NULL;
 	m_type = eGameIDSingle;
+	m_coop_autosave_interval_ms = 0;
+	m_coop_autosave_last = 0;
+	m_coop_autosave_init = false;
 };
 
 game_sv_Single::~game_sv_Single()
@@ -459,6 +462,63 @@ void game_sv_Single::coop_cleanup_orphans()
 	}
 }
 
+// MP fork (§9.4/9.5 co-op save/load — step 7 phase 1): server-authoritative atomic
+// world save. The dedicated server owns the one true world; it snapshots to disk on
+// its own timer — no client, no console `save`, no live/alive actor required. This
+// drives the SAME atomic ALife save the console path uses (prepare_objects_for_save =
+// flush live online state -> CSE, then compress+write the .scop), but invoked directly
+// server-side. update_name=false leaves the "current save name" untouched.
+void game_sv_Single::coop_autosave()
+{
+	if (!ai().get_alife())
+		return;
+
+	// Save name (Appendix B): fixed co-op world slot. Space-free so it survives inside
+	// server(<name>/single/alife/load) on reload (see dedicated.sh).
+	LPCSTR save_name = "coop_world";
+
+	// --- diag (feeds phase 2, gap B): how many co-op player actors exist, and how many
+	// are A-Life-registered (=> actually written into the .scop)? Co-op actors spawn with
+	// m_bALifeControl=false, so this is an open question the save must answer empirically.
+	u32 coop_actors = 0, alife_reg = 0;
+	{
+		struct counter
+		{
+			game_sv_Single* self;
+			u32* n; u32* reg;
+			void operator()(IClient* client)
+			{
+				xrClientData* cd = static_cast<xrClientData*>(client);
+				if (cd == self->m_server->GetServerClient()) return; // skip host save-actor (id 0)
+				if (!cd->owner) return;
+				++(*n);
+				if (ai().alife().objects().object(cd->owner->ID, true)) ++(*reg);
+			}
+		};
+		counter c; c.self = this; c.n = &coop_actors; c.reg = &alife_reg;
+		m_server->ForEachClientDo(c);
+		// orphaned (disconnected-but-alive) co-op actors count too
+		for (const coop_orphan& o : m_coop_orphans)
+		{
+			++coop_actors;
+			if (ai().alife().objects().object(o.entity_id, true)) ++alife_reg;
+		}
+	}
+	Msg("- COOP(autosave-diag): coop_actors=%u alife_reg=%u", coop_actors, alife_reg);
+
+	// Drive the atomic save via the public NET_Packet form — same entry the console/network
+	// `save` path uses, so prepare_objects_for_save() (private) runs internally: name, then
+	// update_name flag = 0 (leave the current save name untouched). No w_begin: the buffer is
+	// just the payload the server-side save reader expects (r_stringZ + r_u8), read from pos 0.
+	NET_Packet P;
+	P.B.count = 0;
+	P.w_stringZ(save_name);
+	P.w_u8(0); // update_name = false
+	P.read_start();
+	alife().save(P);
+	Msg("- COOP(autosave): saved '%s'", save_name);
+}
+
 void game_sv_Single::coop_poll_spawns()
 {
 	if (!xr_enet::enabled() || !ai().get_alife())
@@ -724,6 +784,32 @@ void game_sv_Single::Update()
 	inherited::Update();
 	coop_poll_spawns();    // MP fork (§14 co-op): give ready clients their own actor + reconnection
 	coop_update_anchors(); // MP fork (§15 co-op): re-centre A-Life on the players
+
+	// MP fork (§9.4/9.5 co-op save/load — step 7 phase 1): server-authoritative autosave.
+	// Interval (Appendix B) via -coop_autosave <seconds> (default 120s; 0 disables). The
+	// harness fast-path -coop_test_autosave <seconds> overrides it for a short-interval E2E.
+	if (xr_enet::enabled() && ai().get_alife())
+	{
+		if (!m_coop_autosave_init)
+		{
+			m_coop_autosave_init = true;
+			float secs = 120.f; // default: crash-loss window ~2 min
+			LPCSTR p = strstr(Core.Params, "-coop_test_autosave");
+			if (p) { p += sizeof("-coop_test_autosave") - 1; while (*p == ' ') ++p; secs = _max((float)atof(p), 1.f); }
+			else if ((p = strstr(Core.Params, "-coop_autosave")) != nullptr)
+			{ p += sizeof("-coop_autosave") - 1; while (*p == ' ') ++p; secs = _max((float)atof(p), 0.f); }
+			m_coop_autosave_interval_ms = (secs <= 0.f) ? 0u : (u32)(secs * 1000.f);
+			m_coop_autosave_last = Device.dwTimeGlobal; // first save one interval from now
+			Msg("- COOP(autosave): interval=%ums (%s)", m_coop_autosave_interval_ms,
+				m_coop_autosave_interval_ms ? "enabled" : "disabled");
+		}
+		if (m_coop_autosave_interval_ms &&
+		    Device.dwTimeGlobal - m_coop_autosave_last >= m_coop_autosave_interval_ms)
+		{
+			m_coop_autosave_last = Device.dwTimeGlobal;
+			coop_autosave();
+		}
+	}
 
 	// MP fork (test harness): -coop_test_quest creates a synthetic task after 10s,
 	// triggering quest replication to connected clients. For automated E2E testing.
