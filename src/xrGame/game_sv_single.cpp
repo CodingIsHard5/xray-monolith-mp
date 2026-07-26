@@ -419,9 +419,18 @@ void game_sv_Single::coop_orphan_actor(xrClientData* CL)
 	orphan.player_name = nm ? nm : "";   // unnamed => body is preserved but unmatchable
 	orphan.disconnect_time = Device.dwTimeGlobal;
 	orphan.persistent = false;   // live disconnect: expires on the reconnect timeout
-	orphan.saved_pos.set(0.f, 0.f, 0.f);
-	orphan.have_saved_pos = false; // live path: ownership is detached below, CSE pos is already right
-	orphan.frozen = true;          // ditto — nothing will overwrite it
+	// MP fork (§14 step 7 phase 4, increment E / §9.3): record the logged-off position HERE,
+	// at the instant ownership is detached and while the CSE is still known-good. Within one
+	// process the frozen body's CSE would answer the same question, but this value is what
+	// rides into the v3 sidecar, and a reclaim after a RESTART must not have to read a position
+	// back off a reloaded entity (P2 §3b rule 2). Non-finite => record nothing rather than a
+	// trap the player would resume into.
+	orphan.have_saved_pos = !!_valid(actor->o_Position);
+	if (orphan.have_saved_pos)
+		orphan.saved_pos = actor->o_Position;
+	else
+		orphan.saved_pos.set(0.f, 0.f, 0.f);
+	orphan.frozen = true;          // ownership is detached below — nothing will overwrite it
 
 	// Mark the entity as orphaned so Perform_connect_spawn won't claim it for other
 	// connecting clients. Detach ownership so the update loop skips it (frozen body).
@@ -654,6 +663,11 @@ void game_sv_Single::coop_autosave()
 	}
 	Msg("- COOP(autosave-diag): coop_actors=%u alife_reg=%u", coop_actors, alife_reg);
 
+	// MP fork (§14 step 7 phase 4 D1): sample every connected player's recovery position from
+	// the same CSE state this save is about to write, BEFORE the write — so the sidecar's
+	// recovery record and the .scop describe one instant, not two.
+	coop_sample_recoveries();
+
 	// Save the CSE/ALife world directly via the public save(name, update_name=false) form —
 	// deliberately NOT the NET_Packet form. The NET_Packet form runs prepare_objects_for_save()
 	// = Level().ClientSend()+ClientSave(); ClientSave() flushes every ONLINE object through
@@ -674,11 +688,96 @@ void game_sv_Single::coop_autosave()
 	Msg("- COOP(autosave): saved '%s'", save_name);
 }
 
+// MP fork (§14 step 7 phase 4 D1, gap D): find a player's recovery record (NULL if none).
+game_sv_Single::coop_recovery* game_sv_Single::coop_find_recovery(LPCSTR player_name)
+{
+	if (!player_name || !xr_strlen(player_name))
+		return NULL;
+	for (coop_recovery& r : m_coop_recoveries)
+		if (!xr_strcmp(r.player_name.c_str(), player_name))
+			return &r;
+	return NULL;
+}
+
+// MP fork (§14 step 7 phase 4 D1, gap D / doc §9.4): snapshot where every connected player
+// ACTUALLY is, so a `kill -9` costs them at most one autosave interval instead of rewinding
+// them to a checkpoint they banked an hour ago (a crash is not a death — §9.4). D0 settled
+// where the number comes from: a client-owned actor's M_CL_UPDATE stream keeps the server CSE
+// current, measured exact on all three axes after a 15 m walk, so the CSE read here IS the
+// authoritative position. Only CONNECTED players are sampled — a player who logged off has a
+// binding record with their logoff position (increment E) and no business having their
+// recovery position moved by someone else's autosave. Each player keeps exactly one record,
+// replaced in place; players sampled by an earlier autosave and since gone keep theirs (which
+// of the three positions a boot actually hands back is increment D2's decision, not this one).
+void game_sv_Single::coop_sample_recoveries()
+{
+	if (!xr_enet::enabled())
+		return;
+
+	struct sampler
+	{
+		game_sv_Single* self;
+		u32 sampled;
+		void operator()(IClient* client)
+		{
+			xrClientData* cd = static_cast<xrClientData*>(client);
+			if (cd == self->m_server->GetServerClient()) return;  // host save-actor is not a player
+			if (!cd->owner) return;                               // no body yet: nothing to recover to
+			LPCSTR nm = coop_player_name(cd);
+			if (!nm || !xr_strlen(nm)) return;                    // unnamed: nothing to key on
+
+			CSE_Abstract* actor = cd->owner;
+			// Same rule as the checkpoint bank: a position you cannot be put back at is worse
+			// than none, so refuse a non-finite one instead of persisting a trap.
+			if (!_valid(actor->o_Position))
+			{
+				Msg("! COOP(recovery): '%s' has a non-finite actor position — NOT sampled", nm);
+				return;
+			}
+
+			coop_recovery r;
+			r.player_name = nm;
+			r.pos = actor->o_Position;
+			r.node_id = 0;
+			r.graph_id = 0;
+			r.health = 1.f;
+			r.sampled_time = Device.dwTimeGlobal;
+			if (CSE_ALifeCreatureAbstract* creature = smart_cast<CSE_ALifeCreatureAbstract*>(actor))
+				r.health = creature->get_health();
+			if (CSE_ALifeDynamicObject* dyn = smart_cast<CSE_ALifeDynamicObject*>(actor))
+			{
+				r.node_id = dyn->m_tNodeID;
+				r.graph_id = dyn->m_tGraphID;
+			}
+
+			if (coop_recovery* existing = self->coop_find_recovery(nm))
+				*existing = r;
+			else
+				self->m_coop_recoveries.push_back(r);
+			++sampled;
+
+			Msg("- COOP(recovery): sampled '%s' pos %.1f,%.1f,%.1f hp=%.2f node=%u",
+				nm, r.pos.x, r.pos.y, r.pos.z, r.health, r.node_id);
+		}
+	};
+	sampler s; s.self = this; s.sampled = 0;
+	m_server->ForEachClientDo(s);
+	Msg("- COOP(recovery): sampled %u connected player(s), %u record(s) held",
+		s.sampled, (u32)m_coop_recoveries.size());
+}
+
 // MP fork (§14 step 7 phase 2, gap B): write the player_name -> entity_id ownership map
 // for <save_name> to "$game_saves$/<save_name>.coop". Covers both currently connected
 // players (CL->owner) and orphaned-but-alive actors (disconnected within the reconnect
 // window) — both of those entities are in the .scop, so both must be re-claimable.
-// Format: u32 magic, u32 version, u32 count, then count * { u16 entity_id, stringZ name }.
+// Format (v3): u32 magic, u32 version,
+//   u32 count,      count      * { u16 entity_id, stringZ name, u8 have_pos, fvector3 pos }
+//   u32 checkpoints, checkpoints * { stringZ name, fvector3 pos, fvector3 angle, float health,
+//                                    u32 node, u16 graph, u32 items, items * {...} }   (v2+)
+//   u32 recoveries,  recoveries  * { stringZ name, fvector3 pos, u32 node, u16 graph,
+//                                    float health }                                    (v3+)
+// v1 stops after the bindings and v2 after the checkpoints, and each binding record is
+// { u16, stringZ } there; the reader keys every one of those off `version`.
 void game_sv_Single::coop_save_bindings(LPCSTR save_name)
 {
 	if (!save_name || !xr_strlen(save_name))
@@ -704,6 +803,15 @@ void game_sv_Single::coop_save_bindings(LPCSTR save_name)
 				b.player_name = nm;
 				b.disconnect_time = 0;
 				b.persistent = true;
+				b.frozen = false;
+				// MP fork (§14 step 7 phase 4, increment E): a connected player's binding
+				// carries their live position too, so the v3 record means the same thing for
+				// a player who was online at save time as for one who had logged off.
+				b.have_saved_pos = !!_valid(cd->owner->o_Position);
+				if (b.have_saved_pos)
+					b.saved_pos = cd->owner->o_Position;
+				else
+					b.saved_pos.set(0.f, 0.f, 0.f);
 				out->push_back(b);
 			}
 		};
@@ -733,6 +841,12 @@ void game_sv_Single::coop_save_bindings(LPCSTR save_name)
 	{
 		writer->w_u16(b.entity_id);
 		writer->w_stringZ(b.player_name.c_str());
+		// v3 (phase 4, increment E): the position the server recorded for this body — at
+		// logoff for an orphan, at save time for a connected player. A reclaim after a
+		// RESTART then has a deliberately-recorded value to restore and never has to trust
+		// what a reloaded entity says about itself (P2 §3b rule 2).
+		writer->w_u8(b.have_saved_pos ? 1 : 0);
+		writer->w_fvector3(b.saved_pos);
 	}
 
 	// MP fork (§14 step 7 phase 3 C2): version 2 appends the CHECKPOINT block after the
@@ -758,10 +872,25 @@ void game_sv_Single::coop_save_bindings(LPCSTR save_name)
 			writer->w_u8(it.slot);
 		}
 	}
+
+	// MP fork (§14 step 7 phase 4 D1): version 3 appends the RECOVERY block after the
+	// checkpoints — where each player actually was as of this save (§9.4). Written last so a
+	// v1/v2 reader's stream ends exactly where it always did. sampled_time is deliberately not
+	// written: it is a Device.dwTimeGlobal, which restarts with the process and would be
+	// meaningless (the checkpoint block drops banked_time for the same reason).
+	writer->w_u32((u32)m_coop_recoveries.size());
+	for (const coop_recovery& r : m_coop_recoveries)
+	{
+		writer->w_stringZ(r.player_name.size() ? r.player_name.c_str() : "");
+		writer->w_fvector3(r.pos);
+		writer->w_u32(r.node_id);
+		writer->w_u16(r.graph_id);
+		writer->w_float(r.health);
+	}
 	FS.w_close(writer);
 
-	Msg("- COOP(bindings): saved %u binding(s) + %u checkpoint(s) to '%s'",
-		(u32)bindings.size(), (u32)m_coop_checkpoints.size(), fname);
+	Msg("- COOP(bindings): saved %u binding(s) + %u checkpoint(s) + %u recovery record(s) to '%s'",
+		(u32)bindings.size(), (u32)m_coop_checkpoints.size(), (u32)m_coop_recoveries.size(), fname);
 	for (const coop_orphan& b : bindings)
 		Msg("- COOP(bindings):   '%s' -> entity id %u", b.player_name.c_str(), b.entity_id);
 }
@@ -807,6 +936,11 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 	}
 
 	u32 restored = 0, stale = 0, count = 0;
+	// Blocks are positional: the checkpoint block starts where the bindings ended and the
+	// recovery block where the checkpoints ended. So the moment ONE block gives up mid-record
+	// the read cursor no longer points at a block header, and every later block must be
+	// abandoned rather than parsed out of whatever bytes happen to be under the cursor.
+	bool stream_ok = true;
 	if (reader->elapsed() < (int)(3 * sizeof(u32)))
 	{
 		Msg("! COOP(bindings): '%s' is truncated (%d bytes) — ignored", fname, reader->elapsed());
@@ -815,9 +949,10 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 	}
 	const u32 magic = reader->r_u32();
 	const u32 version = reader->r_u32();
-	// v1 = bindings only; v2 (phase 3 C2) appends a checkpoint block. Older files stay
-	// readable on purpose — a sidecar written before checkpoints existed must not cost a
-	// player their body, it just means they have no checkpoint yet.
+	// v1 = bindings only; v2 (phase 3 C2) appends a checkpoint block; v3 (phase 4 D1/E) widens
+	// the binding record and appends a recovery block. Older files stay readable on purpose —
+	// a sidecar written before checkpoints or recovery existed must not cost a player their
+	// body, it just means they have neither yet.
 	if (magic != COOP_BINDINGS_MAGIC || version < 1 || version > COOP_BINDINGS_VERSION)
 	{
 		Msg("! COOP(bindings): '%s' has magic 0x%08x version %u (expected 0x%08x / <=%u) — ignored",
@@ -832,6 +967,7 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 		if (reader->elapsed() < (int)sizeof(u16))
 		{
 			Msg("! COOP(bindings): '%s' ends after %u of %u record(s) — rest ignored", fname, i, count);
+			stream_ok = false;
 			break;
 		}
 		const u16 eid = reader->r_u16();
@@ -840,8 +976,37 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 		if (!coop_read_stringZ(reader, name))
 		{
 			Msg("! COOP(bindings): '%s' record %u has an unterminated name — rest ignored", fname, i);
+			stream_ok = false;
 			break;
 		}
+
+		// v3 (phase 4, increment E): the recorded position rides in the record itself. Read it
+		// BEFORE any of the skip paths below — a record that is ignored must still be consumed
+		// whole, or every later record (and block) reads from the wrong offset.
+		Fvector rec_pos; rec_pos.set(0.f, 0.f, 0.f);
+		bool rec_have_pos = false;
+		if (version >= 3)
+		{
+			const int tail = (int)(sizeof(u8) + sizeof(Fvector));
+			if (reader->elapsed() < tail)
+			{
+				Msg("! COOP(bindings): '%s' record %u is truncated before its position — rest ignored",
+					fname, i);
+				stream_ok = false;
+				break;
+			}
+			rec_have_pos = reader->r_u8() != 0;
+			reader->r_fvector3(rec_pos);
+			// A recorded position that isn't finite is exactly the trap this field exists to
+			// avoid restoring; fall back to the .scop entity rather than resume into the void.
+			if (rec_have_pos && !_valid(rec_pos))
+			{
+				Msg("! COOP(bindings): '%s' record %u has a non-finite saved position — ignoring it",
+					fname, i);
+				rec_have_pos = false;
+			}
+		}
+
 		if (!name.size())
 		{
 			Msg("! COOP(bindings): record %u has an empty player name — ignored", i);
@@ -871,11 +1036,32 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 		o.player_name = name;
 		o.disconnect_time = Device.dwTimeGlobal;
 		o.persistent = true;          // never expires — see coop_cleanup_orphans()
-		o.saved_pos = entity->o_Position;   // authoritative: straight out of the .scop
-		o.have_saved_pos = true;
+		// Prefer the position the SERVER recorded for this body (v3, increment E) over the one
+		// the entity carries: for a player who logged off it is the logoff position taken at
+		// freeze time, and it cannot have been touched by the load->online round trip. Reading
+		// the entity is the v1/v2 fallback and is safe HERE (this runs at load, before the body
+		// goes online and before P2 §3b's corruption) — but only here.
+		if (rec_have_pos)
+		{
+			o.saved_pos = rec_pos;
+			o.have_saved_pos = true;
+		}
+		else
+		{
+			o.saved_pos = entity->o_Position;   // v1/v2 sidecar: straight out of the .scop
+			o.have_saved_pos = !!_valid(entity->o_Position);
+		}
 		o.frozen = false;             // becomes true once it is online and detached
 		m_coop_orphans.push_back(o);
 		++restored;
+
+		// The harness scrapes this line for the position a body came back at — keep the
+		// existing shape and report the SIDECAR value separately when v3 supplied one, so a
+		// disagreement between the two is visible in the log instead of silently resolved.
+		if (rec_have_pos)
+			Msg("- COOP(bindings): '%s' sidecar position %.1f,%.1f,%.1f (entity says %.1f,%.1f,%.1f)",
+				name.c_str(), rec_pos.x, rec_pos.y, rec_pos.z,
+				entity->o_Position.x, entity->o_Position.y, entity->o_Position.z);
 
 		CSE_ALifeDynamicObject* dyn = smart_cast<CSE_ALifeDynamicObject*>(entity);
 		Msg("- COOP(bindings): restored '%s' -> entity id %u (online=%s, %d item(s), pos %.1f,%.1f,%.1f)",
@@ -885,7 +1071,7 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 	}
 	// --- v2: the CHECKPOINT block (§14 step 7 phase 3 C2) ---
 	u32 checkpoints = 0;
-	if (version >= 2 && reader->elapsed() >= (int)sizeof(u32))
+	if (stream_ok && version >= 2 && reader->elapsed() >= (int)sizeof(u32))
 	{
 		const u32 cp_count = reader->r_u32();
 		for (u32 i = 0; i < cp_count; ++i)
@@ -894,6 +1080,7 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 			if (!coop_read_stringZ(reader, c.player_name))
 			{
 				Msg("! COOP(bindings): '%s' checkpoint %u has an unterminated name — rest ignored", fname, i);
+				stream_ok = false;
 				break;
 			}
 			// fixed-size head: 2 vec3 + float + u32 + u16 + u32(item count)
@@ -901,6 +1088,7 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 			if (reader->elapsed() < head)
 			{
 				Msg("! COOP(bindings): '%s' checkpoint %u is truncated — rest ignored", fname, i);
+				stream_ok = false;
 				break;
 			}
 			reader->r_fvector3(c.pos);
@@ -944,6 +1132,7 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 			{
 				Msg("! COOP(bindings): checkpoint %u for '%s' has an incomplete item list — dropped",
 					i, c.player_name.size() ? c.player_name.c_str() : "");
+				stream_ok = false;
 				break;
 			}
 
@@ -964,10 +1153,62 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 		}
 	}
 
+	// --- v3: the RECOVERY block (§14 step 7 phase 4 D1) ---
+	// Where each player actually was as of the save this sidecar belongs to. Loading it is all
+	// D1 does with it: nothing reads m_coop_recoveries at boot yet — increment D2 adds the
+	// dirty flag that decides between this position, the logged-off one, and the checkpoint.
+	u32 recoveries = 0;
+	if (stream_ok && version >= 3 && reader->elapsed() >= (int)sizeof(u32))
+	{
+		const u32 rec_count = reader->r_u32();
+		for (u32 i = 0; i < rec_count; ++i)
+		{
+			coop_recovery r;
+			if (!coop_read_stringZ(reader, r.player_name))
+			{
+				Msg("! COOP(bindings): '%s' recovery %u has an unterminated name — rest ignored", fname, i);
+				stream_ok = false;
+				break;
+			}
+			const int head = (int)(sizeof(Fvector) + sizeof(u32) + sizeof(u16) + sizeof(float));
+			if (reader->elapsed() < head)
+			{
+				Msg("! COOP(bindings): '%s' recovery %u is truncated — rest ignored", fname, i);
+				stream_ok = false;
+				break;
+			}
+			reader->r_fvector3(r.pos);
+			r.node_id = reader->r_u32();
+			r.graph_id = reader->r_u16();
+			r.health = reader->r_float();
+			r.sampled_time = Device.dwTimeGlobal;   // runtime-only field; re-stamped on load
+
+			// Same rule as the checkpoint block: a position nobody can be put back at is worse
+			// than no record, because the player resumes in the void instead of at their
+			// logged-off position. Drop it and let the other two candidates answer.
+			if (!r.player_name.size() || !_valid(r.pos))
+			{
+				Msg("! COOP(bindings): recovery %u is unusable (name='%s', finite pos=%s) — dropped",
+					i, r.player_name.size() ? r.player_name.c_str() : "", _valid(r.pos) ? "yes" : "no");
+				continue;
+			}
+
+			// One record per player, as the sampler maintains it.
+			if (coop_recovery* existing = coop_find_recovery(r.player_name.c_str()))
+				*existing = r;
+			else
+				m_coop_recoveries.push_back(r);
+			++recoveries;
+			Msg("- COOP(recovery): restored '%s' pos %.1f,%.1f,%.1f hp=%.2f node=%u",
+				r.player_name.c_str(), r.pos.x, r.pos.y, r.pos.z, r.health, r.node_id);
+		}
+	}
+
 	FS.r_close(reader);
 
-	Msg("- COOP(bindings): loaded %u/%u binding(s) + %u checkpoint(s) from '%s' (%u stale)",
-		restored, count, checkpoints, fname, stale);
+	Msg("- COOP(bindings): loaded %u/%u binding(s) + %u checkpoint(s) + %u recovery record(s) "
+		"from '%s' (v%u, %u stale)",
+		restored, count, checkpoints, recoveries, fname, version, stale);
 }
 
 // MP fork (§14 step 7 phase 3, gap C): find a player's banked checkpoint (NULL if none).

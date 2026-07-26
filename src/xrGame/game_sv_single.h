@@ -89,8 +89,10 @@ private:
 	void coop_load_bindings(LPCSTR save_name);    // read it back, seed persistent orphans
 	static const u32 COOP_BINDINGS_MAGIC = 0x50434F43;  // 'COCP' (LE) — sidecar file magic
 	// v1 = ownership bindings only. v2 (phase 3 C2) appends the checkpoint block;
-	// the loader still accepts v1 — an older sidecar just means nobody has a checkpoint yet.
-	static const u32 COOP_BINDINGS_VERSION = 2;
+	// v3 (phase 4 D1/E) widens each binding record with the logged-off position and appends
+	// the recovery block. The loader still accepts v1 and v2 — an older sidecar just means
+	// nobody has a checkpoint / recovery record yet, never a load failure.
+	static const u32 COOP_BINDINGS_VERSION = 3;
 
 	// MP fork (§14 step 7 phase 3, gap C): per-player CHECKPOINT — the doc's §9.1/9.2
 	// person-state snapshot that death rolls back to. Three constraints from phases 1-2
@@ -120,6 +122,29 @@ private:
 	};
 	xr_vector<coop_checkpoint> m_coop_checkpoints;
 	coop_checkpoint* coop_find_checkpoint(LPCSTR player_name);
+
+	// MP fork (§14 step 7 phase 4 D1, gap D / doc §9.4): per-player RECOVERY record — where a
+	// player actually WAS, so a process that dies mid-session does not cost them their walk.
+	// D0 measured that a client-owned actor's M_CL_UPDATE stream keeps the server CSE current
+	// (restored 0.00 m from the post-walk point), so this is PERSISTENCE, not a new sampling
+	// subsystem: the server copies that already-authoritative value on the autosave tick, at
+	// the same instant the .scop is written. It is still recorded DELIBERATELY rather than read
+	// back off an entity after a reload (P2 §3b rule 2: a restored actor's live o_Position is
+	// garbage), and keyed on coop_player_name() like every other per-player record (rule 3).
+	// Which of recovery / logged-off / checkpoint a boot hands back is increment D2's decision;
+	// D1 only makes the value survive.
+	struct coop_recovery
+	{
+		shared_str player_name;
+		Fvector    pos;
+		u32        node_id;      // level vertex, so a recovery lands on the nav mesh
+		u16        graph_id;
+		float      health;
+		u32        sampled_time; // Device.dwTimeGlobal when sampled (runtime-only; re-stamped on load)
+	};
+	xr_vector<coop_recovery> m_coop_recoveries;
+	coop_recovery* coop_find_recovery(LPCSTR player_name);
+	void coop_sample_recoveries();   // snapshot every connected player, on the autosave tick
 	bool coop_spawn_checkpoint_item(CSE_Abstract* owner, xrClientData* CL,
 	                                const coop_checkpoint_item& rec);
 	void coop_test_drop_world_item();    // harness: §9.2 negative case (see below)
