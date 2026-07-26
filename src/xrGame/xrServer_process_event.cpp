@@ -32,7 +32,12 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
 	CSE_Abstract* receiver = game->get_entity_from_eid(destination);
 	if (receiver)
 	{
-		R_ASSERT(receiver->owner);
+		// MP fork (§9.3 co-op reconnection): an ORPHANED body — a disconnected player's
+		// actor kept alive in the world for reconnection — deliberately has no owning
+		// client (coop_orphan_actor nulls it). Anything addressing that body (a peer
+		// shooting the corpse, an item event) would otherwise trip this assert and take
+		// the whole server down. Handling the event is fine; only the assertion is wrong.
+		R_ASSERT(receiver->owner || receiver->m_coop_orphaned);
 		receiver->OnEvent(P, type, timestamp, sender);
 	};
 
