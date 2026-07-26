@@ -663,10 +663,28 @@ void game_sv_Single::coop_autosave()
 	}
 	Msg("- COOP(autosave-diag): coop_actors=%u alife_reg=%u", coop_actors, alife_reg);
 
-	// MP fork (§14 step 7 phase 4 D1): sample every connected player's recovery position from
-	// the same CSE state this save is about to write, BEFORE the write — so the sidecar's
-	// recovery record and the .scop describe one instant, not two.
-	coop_sample_recoveries();
+	// MP fork (§14 step 7 phase 4 D1, diagnostic): the player CSE positions as they stand
+	// BEFORE the world write. Paired with the COOP(recovery) line logged after it, this
+	// measures how far a player's CSE moves across one save — see coop_sample_recoveries()
+	// for why that window is not zero.
+	{
+		struct prober
+		{
+			game_sv_Single* self;
+			void operator()(IClient* client)
+			{
+				xrClientData* cd = static_cast<xrClientData*>(client);
+				if (cd == self->m_server->GetServerClient()) return;
+				if (!cd->owner) return;
+				LPCSTR nm = coop_player_name(cd);
+				Msg("- COOP(autosave-diag): '%s' CSE pos %.2f,%.2f,%.2f before the world write",
+					nm ? nm : "<unnamed>", cd->owner->o_Position.x,
+					cd->owner->o_Position.y, cd->owner->o_Position.z);
+			}
+		};
+		prober pr; pr.self = this;
+		m_server->ForEachClientDo(pr);
+	}
 
 	// Save the CSE/ALife world directly via the public save(name, update_name=false) form —
 	// deliberately NOT the NET_Packet form. The NET_Packet form runs prepare_objects_for_save()
@@ -681,6 +699,11 @@ void game_sv_Single::coop_autosave()
 	// dedicated.sh). Trade-off: online objects' live runtime state is not re-flushed to CSE at
 	// the save instant (as-of-last-sync); a Lua-free position flush is a later refinement.
 	alife().save(save_name, false);
+	// MP fork (§14 step 7 phase 4 D1): sample recovery positions AFTER the world write and
+	// immediately before the sidecar, so the recovery record, the binding record and the
+	// `.scop` all describe the same read of the same field. Sampling before the write was
+	// measured to disagree with the file by the full length of a walk (see the function).
+	coop_sample_recoveries();
 	// MP fork (§14 step 7 phase 2): the .scop holds the actor ENTITIES; the sidecar holds
 	// who owns them. Written after the world so a sidecar never describes a save that
 	// doesn't exist.
@@ -704,11 +727,23 @@ game_sv_Single::coop_recovery* game_sv_Single::coop_find_recovery(LPCSTR player_
 // them to a checkpoint they banked an hour ago (a crash is not a death — §9.4). D0 settled
 // where the number comes from: a client-owned actor's M_CL_UPDATE stream keeps the server CSE
 // current, measured exact on all three axes after a 15 m walk, so the CSE read here IS the
-// authoritative position. Only CONNECTED players are sampled — a player who logged off has a
-// binding record with their logoff position (increment E) and no business having their
-// recovery position moved by someone else's autosave. Each player keeps exactly one record,
-// replaced in place; players sampled by an earlier autosave and since gone keep theirs (which
-// of the three positions a boot actually hands back is increment D2's decision, not this one).
+// authoritative position.
+//
+// WHEN this runs is load-bearing, and the first D1 run got it wrong. That stream is applied by
+// the ENet PUMP THREAD, not the game thread: `xrServer::OnMessage` peeks the position out of
+// each M_CL_UPDATE and assigns `CL->owner->o_Position` (xrServer.cpp, §15 co-op). So the field
+// can change under the game thread at any instant, and in particular across the ~1 s the world
+// write takes. Sampling BEFORE `alife().save()` measured -235.6 (the spawn point) while the
+// same field read after it — the value the `.scop` and the binding record both carry — was
+// -220.6, the walked-to point: a 15 m disagreement inside one save. Sampling last makes all
+// three agree by construction; a race can then only cost the player one client update, which
+// is a fraction of the autosave interval this record is already accurate to.
+//
+// Only CONNECTED players are sampled — a player who logged off has a binding record with their
+// logoff position (increment E) and no business having their recovery position moved by someone
+// else's autosave. Each player keeps exactly one record, replaced in place; players sampled by
+// an earlier autosave and since gone keep theirs (which of the three positions a boot actually
+// hands back is increment D2's decision, not this one).
 void game_sv_Single::coop_sample_recoveries()
 {
 	if (!xr_enet::enabled())
