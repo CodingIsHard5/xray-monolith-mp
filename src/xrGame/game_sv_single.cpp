@@ -473,6 +473,16 @@ void game_sv_Single::coop_orphan_actor(xrClientData* CL)
 		orphan.saved_pos = actor->o_Position;
 	else
 		orphan.saved_pos.set(0.f, 0.f, 0.f);
+	// D2 run 2: the health travels with the position for the same reason — a live disconnect
+	// keeps the body's CSE intact, but a RESTART in between does not, and the reclaim ships
+	// whatever the CSE says to the client.
+	orphan.have_saved_health = false;
+	orphan.saved_health = 1.f;
+	if (CSE_ALifeCreatureAbstract* creature = smart_cast<CSE_ALifeCreatureAbstract*>(actor))
+	{
+		orphan.saved_health = creature->get_health();
+		orphan.have_saved_health = orphan.saved_health > 0.f;
+	}
 	orphan.frozen = true;          // ownership is detached below — nothing will overwrite it
 
 	// Mark the entity as orphaned so Perform_connect_spawn won't claim it for other
@@ -539,10 +549,13 @@ bool game_sv_Single::coop_is_own_orphan(CSE_Abstract* E, xrClientData* CL)
 	return false;
 }
 
-CSE_Abstract* game_sv_Single::coop_find_orphan(LPCSTR name, Fvector* out_pos, bool* out_have_pos)
+CSE_Abstract* game_sv_Single::coop_find_orphan(LPCSTR name, Fvector* out_pos, bool* out_have_pos,
+                                               float* out_health)
 {
 	if (out_have_pos)
 		*out_have_pos = false;
+	if (out_health)
+		*out_health = -1.f;   // "no recorded health"; the caller falls through to its next source
 
 	// An unnamed client must never match an (equally unnamed) orphan — that would hand
 	// it whichever body happens to sit first in the list, quite possibly someone else's.
@@ -562,6 +575,8 @@ CSE_Abstract* game_sv_Single::coop_find_orphan(LPCSTR name, Fvector* out_pos, bo
 				*out_pos = it->saved_pos;
 				*out_have_pos = true;
 			}
+			if (out_health && it->have_saved_health)
+				*out_health = it->saved_health;
 			m_coop_orphans.erase(it);
 			CSE_Abstract* entity = m_server->ID_to_entity(eid);
 			if (entity)
@@ -628,12 +643,30 @@ void game_sv_Single::coop_freeze_restored_bodies()
 		if (!entity)
 			continue;               // still offline; nothing owns/updates it yet
 
+		// MP fork (§14 step 7 phase 4 D2, run 2): THIS is the last instant the restored body's
+		// CSE is known-good — leg 2 measured it holding the exact saved position here and
+		// -0.1,0.2,0.7 / hp 0.00 two minutes later, before its owner had even connected. The
+		// position was already covered (the sidecar carries it); the HEALTH was not, and the
+		// reclaim ships the CSE's health to the client, so the returning player was handed a
+		// corpse: dead on the client => never net_Relevant => never sends an M_CL_UPDATE =>
+		// the server's CSE stays garbage and the sampler persists it. Snapshot it here.
+		if (CSE_ALifeCreatureAbstract* creature = smart_cast<CSE_ALifeCreatureAbstract*>(entity))
+		{
+			const float hp = creature->get_health();
+			if (hp > 0.f)
+			{
+				o.saved_health = hp;
+				o.have_saved_health = true;
+			}
+		}
+
 		if (o.have_saved_pos)
 			Msg("- COOP(bindings): freezing restored body id %u for '%s' — CSE pos %.1f,%.1f,%.1f "
-				"(saved %.1f,%.1f,%.1f), detaching server ownership",
+				"(saved %.1f,%.1f,%.1f) hp %.2f%s, detaching server ownership",
 				o.entity_id, o.player_name.c_str(),
 				entity->o_Position.x, entity->o_Position.y, entity->o_Position.z,
-				o.saved_pos.x, o.saved_pos.y, o.saved_pos.z);
+				o.saved_pos.x, o.saved_pos.y, o.saved_pos.z,
+				o.saved_health, o.have_saved_health ? " (snapshotted)" : " (NOT usable)");
 
 		// Clear BOTH directions of the ownership link. Process_spawn refuses to point a
 		// client's owner at an orphan, so the reverse pointer should never name this body —
@@ -838,6 +871,20 @@ void game_sv_Single::coop_sample_recoveries()
 			if (!nm || !xr_strlen(nm)) return;                    // unnamed: nothing to key on
 
 			CSE_Abstract* actor = cd->owner;
+			// MP fork (§14 step 7 phase 4 D2, run 2): only sample a body its client is actually
+			// DRIVING. The magnitude gate below catches the wild garbage but not the quiet kind:
+			// leg 2 measured a failed hand-over leaving the CSE at -0.1,0.2,0.7 with hp 0.00 —
+			// perfectly plausible coordinates, near the world origin, and the sampler dutifully
+			// wrote them over the crash-recovery record the player's own return depended on. A
+			// client that has never sent an M_CL_UPDATE has never told us where it is, so the
+			// server's copy is the server's own invention. Keep the earlier record instead.
+			if (cd->m_coop_cl_update_count == 0)
+			{
+				Msg("! COOP(recovery): '%s' has never sent a client update — NOT sampled (the CSE "
+					"describes the server's own copy, not the player; keeping any earlier record)", nm);
+				return;
+			}
+
 			// Same rule as the checkpoint bank: a position you cannot be put back at is worse
 			// than none, so refuse an implausible one instead of persisting a trap. This is not
 			// hypothetical — a body whose reclaim delivery failed reads as finite garbage
@@ -1327,6 +1374,18 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 		{
 			o.saved_pos = entity->o_Position;   // v1/v2 sidecar: straight out of the .scop
 			o.have_saved_pos = coop_plausible_pos(entity->o_Position);
+		}
+		// D2 run 2: read the health straight out of the freshly loaded entity, for the same
+		// reason the position may be read here and nowhere later — this runs BEFORE the body
+		// goes online, so it is the .scop's value and not the corruption's. If the save itself
+		// holds a dead body, leave have_saved_health false and let the reclaim's later sources
+		// answer; a checkpoint respawn (P3) is what a genuinely dead player gets.
+		o.have_saved_health = false;
+		o.saved_health = 1.f;
+		if (CSE_ALifeCreatureAbstract* creature = smart_cast<CSE_ALifeCreatureAbstract*>(entity))
+		{
+			o.saved_health = creature->get_health();
+			o.have_saved_health = o.saved_health > 0.f;
 		}
 		o.frozen = false;             // becomes true once it is online and detached
 		m_coop_orphans.push_back(o);
@@ -1908,8 +1967,8 @@ void game_sv_Single::coop_poll_spawns()
 		// actor from a previous disconnect. If so, re-associate the existing entity
 		// (preserving position, health, and inventory) instead of spawning fresh.
 		LPCSTR client_name = coop_player_name(CL);   // ps account name is empty on thin clients
-		Fvector saved_pos; bool have_saved_pos = false;
-		CSE_Abstract* orphan = coop_find_orphan(client_name, &saved_pos, &have_saved_pos);
+		Fvector saved_pos; bool have_saved_pos = false; float saved_health = -1.f;
+		CSE_Abstract* orphan = coop_find_orphan(client_name, &saved_pos, &have_saved_pos, &saved_health);
 		if (orphan)
 		{
 			// MP fork (§14 step 7 phase 4 D2 / doc §9.4) — THE BOOT DECISION. Two candidate
@@ -1931,6 +1990,11 @@ void game_sv_Single::coop_poll_spawns()
 					saved_pos = rec->pos;
 					have_saved_pos = true;
 					pos_source = "RECOVERY";
+					// D2 run 2: the health rides with the position, out of the SAME record. It has
+					// to come from one place — a recovery position paired with a freeze-time health
+					// would describe a player who was somewhere else when that health was taken.
+					if (rec->health > 0.f)
+						saved_health = rec->health;
 					// Consumed: from here on this player is live and the sampler owns their record.
 					rec->persisted = false;
 				}
@@ -1961,6 +2025,40 @@ void game_sv_Single::coop_poll_spawns()
 					saved_pos.x, saved_pos.y, saved_pos.z,
 					orphan->o_Position.x, orphan->o_Position.y, orphan->o_Position.z);
 				orphan->o_Position = saved_pos;
+			}
+
+			// MP fork (§14 step 7 phase 4 D2, run 2): HAND OVER A LIVE BODY. The packets below
+			// ship the CSE's health as well as its position, and a save-restored body's CSE is
+			// overwritten by the server's own unplaced object while it waits for its owner —
+			// leg 2 measured hp 0.00 alongside the -0.1,0.2,0.7 position. A client that receives
+			// a dead actor is not merely cosmetically wrong: `CActor::net_Relevant()` is
+			// `Local() & g_Alive()`, so it never exports an M_CL_UPDATE, so the server's CSE
+			// never follows the player, so the recovery sampler persists the garbage — a silent
+			// three-step failure downstream of one zero. Restore the recorded health for exactly
+			// the reason the position is restored: this CSE is not to be trusted (P2 §3b rule 2).
+			if (CSE_ALifeCreatureAbstract* body = smart_cast<CSE_ALifeCreatureAbstract*>(orphan))
+			{
+				const float cse_hp = body->get_health();
+				LPCSTR hp_source = "RECORD";
+				if (saved_health <= 0.f && cse_hp > 0.f)
+				{
+					saved_health = cse_hp;      // no record (v1/v2 sidecar): the CSE is all we have
+					hp_source = "CSE";
+				}
+				if (saved_health <= 0.f)
+				{
+					// Neither source can say. Handing back a corpse is the worst answer available:
+					// the player would be stuck dead with no death event to respawn them, which is
+					// not a state §9 has a path out of. A real death goes through the death path
+					// (P3 C3) and never arrives here.
+					saved_health = 1.f;
+					hp_source = "CLAMPED";
+				}
+				if (_abs(cse_hp - saved_health) > 0.01f)
+					Msg("%s COOP(bindings): restoring saved health for '%s': %.2f (%s) — the CSE "
+						"said %.2f", xr_strcmp(hp_source, "CLAMPED") ? "-" : "!",
+						client_name, saved_health, hp_source, cse_hp);
+				body->set_health(saved_health);
 			}
 
 			// Restore children ownership

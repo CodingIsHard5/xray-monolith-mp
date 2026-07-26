@@ -60,6 +60,13 @@ private:
 		// reclaim so a player always resumes where they logged off (§9.3).
 		Fvector     saved_pos;
 		bool        have_saved_pos;
+		// MP fork (§14 step 7 phase 4 D2, run 2): the SAME overwrite takes the health with it —
+		// a body waiting for its owner was measured at hp 0.00 as well as at -0.1,0.2,0.7, and
+		// the reclaim ships the CSE's health to the client, so the returning player was handed a
+		// CORPSE. Snapshot the health at the moment the body comes online (still correct then,
+		// same instant the position snapshot is taken) and restore it on reclaim.
+		float       saved_health;
+		bool        have_saved_health;
 		bool        frozen;      // ownership already detached (server no longer updates it)
 	};
 	xr_vector<coop_orphan> m_coop_orphans;
@@ -69,7 +76,8 @@ private:
 	void coop_cleanup_orphans();                  // expire stale orphans
 	void coop_freeze_restored_bodies();           // detach server ownership of restored bodies
 	// out_pos/out_have_pos (optional) report the .scop position of a RESTORED body.
-	CSE_Abstract* coop_find_orphan(LPCSTR name, Fvector* out_pos = NULL, bool* out_have_pos = NULL);
+	CSE_Abstract* coop_find_orphan(LPCSTR name, Fvector* out_pos = NULL, bool* out_have_pos = NULL,
+	                               float* out_health = NULL);
 
 	// MP fork (§9.4/9.5 co-op save/load — step 7 phase 1): the dedicated server owns the
 	// world and must snapshot it to disk on its own — no client, no console, no live actor.

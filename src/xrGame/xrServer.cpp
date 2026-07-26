@@ -49,6 +49,7 @@ void xrClientData::Clear()
 	m_ping_warn.m_maxPingWarnings = 0;
 	m_ping_warn.m_dwLastMaxPingWarningTime = 0;
 	m_admin_rights.m_has_admin_rights = FALSE;
+	m_coop_cl_update_count = 0;   // MP fork (§14 step 7 P4 D2): "has this client ever driven its body?"
 };
 
 
@@ -1132,6 +1133,10 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 					P.r_vec3(pos);
 					if (_valid(pos))
 						CL->owner->o_Position = pos;
+					// MP fork (§14 step 7 phase 4 D2, run 2): this client is DRIVING its body —
+					// the position above came from the player, not from the server's own copy.
+					// coop_sample_recoveries() refuses to persist a body that has never got here.
+					++CL->m_coop_cl_update_count;
 					P.r_seek(save_cursor);
 				}
 

@@ -37,6 +37,15 @@ public:
 	BOOL net_PassUpdates;
 	u32 net_LastMoveUpdateTime;
 
+	// MP fork (§14 step 7 phase 4 D2, run 2): stamped by the M_CL_UPDATE peek in
+	// xrServer::OnMessage — i.e. this client is really DRIVING its body, not merely connected.
+	// 0 means it never has. The co-op recovery sampler needs the distinction: a body whose
+	// hand-over failed keeps whatever the server's own unplaced object wrote into the CSE, and
+	// persisting that would destroy the very record a returning player depends on. Written by
+	// the ENet pump thread and read by the game thread (the D1 threading finding) — a lone u32
+	// word, used only as a "has it ever" test, so no ordering guarantee is required.
+	u32 m_coop_cl_update_count;
+
 	game_PlayerState* ps;
 
 	struct
