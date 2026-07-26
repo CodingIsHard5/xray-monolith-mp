@@ -912,7 +912,17 @@ void CActor::Die(CObject* who)
 			{
 				if (item_in_slot)
 				{
-					if (IsGameTypeSingle())
+					// MP fork (§9.1 death conservation): in co-op a death rewinds the PERSON to
+					// their checkpoint, and the rollback re-spawns the whole banked inventory. So
+					// dropping the item in hands here does not conserve anything — it duplicates
+					// it: measured as banked 9 / destroyed 8, with wpn_knife (the active slot)
+					// left lying at the death site while a fresh one came back on the body.
+					// Co-op keeps what you were holding; the checkpoint is the conservation rule.
+					if (xr_enet::enabled())
+					{
+						// nothing — the item stays on the body for the rollback to handle
+					}
+					else if (IsGameTypeSingle())
 					{
 						CGrenade* grenade = smart_cast<CGrenade*>(item_in_slot);
 						if (grenade)
