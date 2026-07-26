@@ -700,6 +700,22 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 			break;
 		}
 		const u16 eid = reader->r_u16();
+
+		// IReader::r_stringZ(shared_str&) constructs straight off the raw buffer with NO
+		// bounds check, so a truncated/corrupt sidecar whose last record has no terminator
+		// would read past the end of the file mapping (CodeRabbit). Confirm a NUL exists in
+		// the bytes that remain before handing the buffer to it.
+		{
+			const char* raw = (const char*)reader->pointer();
+			const int left = reader->elapsed();
+			int len = 0;
+			while (len < left && raw[len]) ++len;
+			if (len >= left)
+			{
+				Msg("! COOP(bindings): '%s' record %u has an unterminated name — rest ignored", fname, i);
+				break;
+			}
+		}
 		shared_str name;
 		reader->r_stringZ(name);
 		if (!name.size())
