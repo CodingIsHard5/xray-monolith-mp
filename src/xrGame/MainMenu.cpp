@@ -545,6 +545,15 @@ void CMainMenu::OnDeviceCreate()
 
 void CMainMenu::Screenshot(IRender_interface::ScreenshotMode mode, LPCSTR name)
 {
+	// MP fork (§14 renderless server): a save-game THUMBNAIL is a picture of a screen this
+	// process does not have. Arming it headless walks into the null-D3D9 stub's screenshot
+	// path (see r__screenshot.cpp) and, before the guard added there, took the whole server
+	// down mid-save. Skip it: the .scop is what a dedicated server owes its players, the
+	// .dds preview is a menu decoration. This also stops the server littering the save dir
+	// with 0-byte .dds files.
+	if (g_dedicated_server)
+		return;
+
 	if (mode != IRender_interface::SM_FOR_GAMESAVE)
 	{
 		::Render->Screenshot(mode, name);

@@ -249,9 +249,15 @@ void CRender::ScreenshotImpl(ScreenshotMode mode, LPCSTR name, CMemoryWriter* me
 	IDirect3DSurface9* pFB;
 	D3DLOCKED_RECT D;
 
+	pFB = nullptr;
 	HRESULT hr = HW.pDevice->CreateOffscreenPlainSurface(Device.dwWidth, Device.dwHeight, HW.DevPP.BackBufferFormat,
 	                                                     D3DPOOL_SYSTEMMEM, &pFB, nullptr);
-	if (FAILED(hr)) return;
+	// MP fork: check the SURFACE, not just the HRESULT. Our renderless dedicated server runs
+	// on the null-D3D9 stub (xrd3d9-null.dll), whose CreateOffscreenPlainSurface reports
+	// success and leaves pFB NULL — so the stock FAILED(hr) guard passes and the LockRect
+	// below dereferences null. That killed the co-op server outright (0xC0000005 accessing
+	// 0x0 here, symbolicated RVA 0xD2C91C) every time anything triggered a save thumbnail.
+	if (FAILED(hr) || !pFB) return;
 
 	hr = HW.pDevice->GetRenderTargetData(HW.pBaseRT, pFB);
 	if (FAILED(hr)) goto _end_;
