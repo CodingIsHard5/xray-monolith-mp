@@ -116,7 +116,19 @@ CSE_Abstract* xrServer::Process_spawn(NET_Packet& P, ClientID sender, BOOL bSpaw
 	}
 
 	// PROCESS NAME; Name this entity
-	if (CL && (E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER)))
+	// MP fork (§9.3 / §14 step 7 phase 2): an ORPHANED co-op body — a disconnected
+	// player's actor, or one restored from a save's ownership sidecar — has NO owner by
+	// definition, and it keeps M_SPAWN_OBJECT_ASPLAYER in its saved flags. When such a
+	// body switches online (A-Life switch pass, or the reclaim path forcing it online),
+	// the spawning client here is the dedicated server's own loopback client, whose owner
+	// must stay the fake host actor (id 0) — several co-op paths tell "self" from a real
+	// player by exactly that. So never let an orphan be claimed on spawn; the reconnection
+	// path in coop_poll_spawns is the only thing allowed to assign it an owner.
+	if (E->m_coop_orphaned)
+	{
+		E->owner = NULL;
+	}
+	else if (CL && (E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER)))
 	{
 		CL->owner = E;
 		//		E->set_name_replace	(CL->Name);
