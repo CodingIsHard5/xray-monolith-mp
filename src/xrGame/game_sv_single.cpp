@@ -506,16 +506,19 @@ void game_sv_Single::coop_autosave()
 	}
 	Msg("- COOP(autosave-diag): coop_actors=%u alife_reg=%u", coop_actors, alife_reg);
 
-	// Drive the atomic save via the public NET_Packet form — same entry the console/network
-	// `save` path uses, so prepare_objects_for_save() (private) runs internally: name, then
-	// update_name flag = 0 (leave the current save name untouched). No w_begin: the buffer is
-	// just the payload the server-side save reader expects (r_stringZ + r_u8), read from pos 0.
-	NET_Packet P;
-	P.B.count = 0;
-	P.w_stringZ(save_name);
-	P.w_u8(0); // update_name = false
-	P.read_start();
-	alife().save(P);
+	// Save the CSE/ALife world directly via the public save(name, update_name=false) form —
+	// deliberately NOT the NET_Packet form. The NET_Packet form runs prepare_objects_for_save()
+	// = Level().ClientSend()+ClientSave(); ClientSave() flushes every ONLINE object through
+	// Objects_net_Save -> CScriptBinder::save, which fires each object's Lua save-callback. On
+	// the flat co-op gamedata those callbacks hit undefined globals (e.g. hf_obj_manager ->
+	// game_objects_iter, an S3-class gamedata gap); the co-op "continue on Lua error" handler
+	// swallows the error mid-callback and corrupts the LuaJIT VM -> AV in lj_vm_return (crash
+	// symbolicated, build 30184076690). The direct form writes the authoritative CSE registry
+	// (header/time/spawns/objects/registry — entity positions, inventory, A-Life state) with NO
+	// per-object Lua save, so it is crash-safe and format-identical to a normal .scop (loads via
+	// dedicated.sh). Trade-off: online objects' live runtime state is not re-flushed to CSE at
+	// the save instant (as-of-last-sync); a Lua-free position flush is a later refinement.
+	alife().save(save_name, false);
 	Msg("- COOP(autosave): saved '%s'", save_name);
 }
 
