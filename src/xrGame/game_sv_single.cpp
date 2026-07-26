@@ -1213,14 +1213,30 @@ bool game_sv_Single::coop_checkpoint_respawn(u16 actor_id, xrClientData* CL, Fve
 	// Snapshot the child ids first: Perform_destroy mutates the children vector as it goes.
 	xr_vector<u16> current = actor->children;
 	u32 destroyed = 0;
+	u32 skipped = 0;
 	for (u16 child_id : current)
 	{
 		CSE_Abstract* child = m_server->ID_to_entity(child_id);
 		if (!child)
+		{
+			// C3 follow-up diagnostic: banking falls back to the A-Life registry for a child the
+			// server ID map misses, but destroying one that way is not safe from here — so say so
+			// out loud. A child that is banked and NOT destroyed comes back duplicated.
+			++skipped;
+			CSE_Abstract* al = ai().alife().objects().object(child_id, true);
+			Msg("! COOP(checkpoint): rollback child id=%u not in the server ID map (%s) — NOT destroyed",
+				child_id, al ? al->name_replace() : "and not in A-Life either");
 			continue;
+		}
 		m_server->Perform_destroy(child, net_flags(TRUE, TRUE));
 		++destroyed;
 	}
+	// The counts that matter for the duplication question: how many children the actor had at
+	// death vs how many the checkpoint banked. A shrunk child list means something detached the
+	// item between bank and death (client death handling); an equal list with skips means the
+	// bank/destroy asymmetry above.
+	Msg("- COOP(checkpoint): rollback children at death=%u (destroyed %u, skipped %u), banked=%u",
+		(u32)current.size(), destroyed, skipped, (u32)cp->items.size());
 
 	u32 restored = 0;
 	for (const coop_checkpoint_item& it : cp->items)
