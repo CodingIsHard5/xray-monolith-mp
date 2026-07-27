@@ -1062,6 +1062,28 @@ void game_sv_Single::coop_mark_dirty()
 		fname, out[2], (u32)COOP_DIRTY_VERSION, m_coop_dirty_streak);
 }
 
+// MP fork (§14 step 7 phase 4 D3.2 / doc §9.4): hand one player one line about their session.
+//
+// Sent to a single client (never broadcast — the fact is per-player), reliably and ordered on the
+// same channel as the body hand-over it follows, so a client cannot be told about a resume before
+// it has the body it resumed into. The client logs it unconditionally and passes it to gamedata
+// through the mp_api seam; nothing on either side DECIDES anything on it. That is the point: D3
+// is where the flag stops being a fact only the server log knows.
+void game_sv_Single::coop_send_notice(xrClientData* CL, u8 code, LPCSTR text)
+{
+	if (!m_server || !CL || !text || !xr_strlen(text))
+		return;
+
+	NET_Packet P;
+	P.w_begin(M_XRNET_COOP_NOTICE);
+	P.w_u8(code);
+	P.w_stringZ(text);
+	m_server->SendTo(CL->ID, P, net_flags(TRUE, TRUE));
+
+	LPCSTR nm = coop_player_name(CL);
+	Msg("- COOP(notice): -> '%s' [%u] %s", nm ? nm : "<unnamed>", u32(code), text);
+}
+
 // MP fork (§14 step 7 phase 4 D2): the world on disk is complete and this process is going away
 // on purpose. Called only from the clean-stop sequence, and only AFTER the final autosave.
 //
@@ -2046,6 +2068,16 @@ void game_sv_Single::coop_poll_spawns()
 					rec->persisted = false;
 				}
 			}
+			// MP fork (§14 step 7 phase 4 D3.2 / doc §9.4): does this player need to be TOLD?
+			// Both halves are load-bearing and neither is enough alone. RECOVERY says the last
+			// process ended while they were still connected — but so does a CLEAN stop with
+			// players online, which is not an interruption and not worth a word. The flag says
+			// the process died — but that says nothing about THIS player, who may have logged
+			// off politely an hour before it did and is being handed their logged-off position
+			// exactly as they would be after any other stop. The conjunction, and only the
+			// conjunction, means "your session was interrupted". This is the flag's whole job.
+			const bool notify_crash_resume = m_coop_prev_crash && !xr_strcmp(pos_source, "RECOVERY");
+
 			Msg("- COOP(resume): '%s' resumes at the %s position %.1f,%.1f,%.1f "
 				"(previous process ended %s, checkpoint NOT consulted)",
 				client_name, pos_source,
@@ -2225,6 +2257,13 @@ void game_sv_Single::coop_poll_spawns()
 				client_name, orphan->ID,
 				orphan->o_Position.x, orphan->o_Position.y, orphan->o_Position.z,
 				(int)orphan->children.size());
+
+			// D3.2: last, and only now — the body is on its way, so the notice cannot arrive
+			// describing a resume the client has not been given yet.
+			if (notify_crash_resume)
+				coop_send_notice(CL, COOP_NOTICE_CRASH_RESUME,
+					"The server's last session ended unexpectedly. You have been resumed where "
+					"you were, not at your last checkpoint.");
 		}
 		else
 		{

@@ -16,6 +16,7 @@
 #include "Artefact.h"
 #include "game_cl_base_weapon_usage_statistic.h"
 #include "ai_space.h"
+#include "script_engine.h"                    // MP fork (§14 step 7 P4 D3.2): mp_coop_on_notice
 #include "saved_game_wrapper.h"
 #include "level_graph.h"
 #include "file_transfer.h"
@@ -170,6 +171,24 @@ void CLevel::ClientReceive()
 				CActor* const actor = controlled ? smart_cast<CActor*>(controlled) : NULL;
 				if (actor && controlled->ID() == actor_id)
 					actor->coop_set_respawn_position(pos, health);
+			}
+			break;
+		case M_XRNET_COOP_NOTICE:
+			{
+				// MP fork (§14 step 7 phase 4 D3.2 / doc §9.4): one line about the session we
+				// just resumed into, sent to THIS client only. Logged unconditionally — the
+				// point of the notice is that it is visible without -dbg, in a log a player
+				// can be asked for — and then handed to gamedata through the mp_api seam for
+				// actual display. No handler registered is not an error: the log line is the
+				// floor, gamedata's UI is the ceiling.
+				const u8 code = P->r_u8();
+				string512 text;
+				P->r_stringZ_s(text);
+				Msg("* COOP(notice)[%u]: %s", u32(code), text);
+
+				luabind::functor<void> f;
+				if (ai().script_engine().functor("_G.mp_coop_on_notice", f))
+					f(u32(code), text);
 			}
 			break;
 		case M_XRNET_OPEN_MENU:

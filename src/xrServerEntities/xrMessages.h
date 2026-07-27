@@ -119,6 +119,15 @@ enum
 	// timer expires stashes it; one that already respawned applies it immediately.
 	M_XRNET_COOP_RESPAWN,
 
+	// MP fork (§14 step 7 phase 4 D3.2 / doc §9.4): server -> ONE client. One line about the
+	// session this player just resumed into. Payload: u8 code, stringZ text.
+	// The server is the only side that knows how the last process ended (the dirty flag), and a
+	// player who cannot tell a crash-resume from an ordinary one cannot tell a WRONG resume from
+	// a right one either — which makes this the cheapest bug report the field can produce. The
+	// engine logs it and hands it to gamedata (_G.mp_coop_on_notice) for display; the code exists
+	// so gamedata can localise without parsing the text.
+	M_XRNET_COOP_NOTICE,
+
 	MSG_FORCEDWORD = u32(-1)
 };
 

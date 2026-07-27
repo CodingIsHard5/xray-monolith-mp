@@ -173,6 +173,13 @@ private:
 	void coop_clear_dirty();         // clean stop: the world on disk is complete
 	void coop_check_stop_request();  // poll the stop file (the only clean stop this server has)
 	void coop_clean_shutdown(LPCSTR reason);
+	// MP fork (§14 step 7 phase 4 D3.2 / doc §9.4): tell ONE player something about their
+	// session. The server holds the only copy of "how the last process ended"; a returning
+	// player currently learns nothing at all, which means a resume at the WRONG position looks
+	// exactly like a resume at the right one from where they are standing.
+	void coop_send_notice(xrClientData* CL, u8 code, LPCSTR text);
+	// The notice codes are a wire contract with gamedata (_G.mp_coop_on_notice) — append only.
+	static const u8 COOP_NOTICE_CRASH_RESUME = 1;
 	static const u32 COOP_DIRTY_MAGIC = 0x54524944;   // 'DIRT' (LE)
 	// MP fork (§14 step 7 phase 4 D3.4): v2 appends `consecutive_dirty`. v1 (4 words: magic,
 	// version, pid, unix time) is still READ — a flag left by a D2-era process simply carries no
