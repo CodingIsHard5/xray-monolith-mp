@@ -40,13 +40,25 @@ void xrServer::Process_update(NET_Packet& P, ClientID sender)
 		// are still consumed, exactly as for an unknown id — and the CSE keeps the position and
 		// health the save (or the reclaim) put there. Claimed bodies are untouched: those are
 		// maintained by their owner's M_CL_UPDATE, which is the co-op authority for a player.
-		if (E && xr_enet::enabled() && E->m_coop_orphaned)
+		// …and a CLAIMED body is its PLAYER's, which is the same rule from the other end. D2 run 7
+		// measured the two writers fighting over one field: three recovery samples read the server
+		// object's stale -220.6 and one caught the player's real -205.6, so the position that
+		// reached the logged-off binding record was where the body was HANDED OVER, not where its
+		// owner walked to. The player's M_CL_UPDATE is the co-op authority for their own body
+		// (§15) — the server's own copy of it must not compete. Same principle as keeping player
+		// actors out of the outgoing update stream, applied to the incoming writeback.
+		const bool coop_player_body = E && xr_enet::enabled()
+			&& (E->m_coop_orphaned
+				|| (smart_cast<CSE_ALifeCreatureActor*>(E) && E->owner && E->owner != GetServerClient()));
+		if (coop_player_body)
 		{
 			E->net_Ready = TRUE;   // still "seen"; only the state write is refused
 			static u32 s_skipped = 0;
 			if ((++s_skipped % 600) == 1)
-				Msg("- COOP(bindings): refusing the server's own update for reserved body id %u "
-					"(%u so far) — an unclaimed body is a record, not a simulation", E->ID, s_skipped);
+				Msg("- COOP(bindings): refusing the server's own update for body id %u (%u so far) "
+					"— %s", E->ID, s_skipped, E->m_coop_orphaned
+						? "an unclaimed body is a record, not a simulation"
+						: "a claimed body belongs to its player, not to the server's copy");
 			P.r_advance(size);
 			continue;
 		}
