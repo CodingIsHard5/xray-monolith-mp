@@ -94,11 +94,18 @@ void CLevel::cl_Process_Spawn(NET_Packet& P)
 		// matching pre-send line. Run 4 had the server logging a restore to 1.00 and the client
 		// reading 0.00 after the spawn; only these two lines can say which side wrote the zero.
 		CSE_ALifeCreatureAbstract* cre = smart_cast<CSE_ALifeCreatureAbstract*>(E);
+		// …and where the reader ended up. `Spawn_Read` finishes with STATE_Read(P, size) and does
+		// NOT reposition to the end of the STATE block, so any byte-count disagreement between
+		// STATE_Write and STATE_Read silently misaligns the UPDATE block that follows — and reads
+		// past the end come back as zeros, which is precisely what a reclaimed body arrives with.
+		// If rtell > pkt, the packet is fine and the PARSE is wrong; if rtell <= pkt, the bytes
+		// really were zero and the writer is at fault. One number decides it.
 		Msg("- XRNET(diag): ACTOR SPAWN received on co-op client (flags=0x%x id=%u asplayer=%d "
-			"wire_hp=%.2f killer=%u pos=%.1f,%.1f,%.1f)",
+			"wire_hp=%.2f killer=%u pos=%.1f,%.1f,%.1f | pkt=%u rtell=%u)",
 			E->s_flags.flags, E->ID, E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER) ? 1 : 0,
 			cre ? cre->get_health() : -1.f, cre ? cre->get_killer_id() : u16(-1),
-			E->o_Position.x, E->o_Position.y, E->o_Position.z);
+			E->o_Position.x, E->o_Position.y, E->o_Position.z,
+			P.B.count, P.r_tell());
 		FlushLog();
 		CALifeSimulator::set_client_actor(E);
 	}
