@@ -89,8 +89,16 @@ void CLevel::cl_Process_Spawn(NET_Packet& P)
 	// (Control/g_actor/Local are gated on ASPLAYER separately, so peers stay remote.)
 	if (xr_enet::enabled() && !ai().get_alife() && smart_cast<CSE_ALifeCreatureActor*>(E))
 	{
-		Msg("- XRNET(diag): ACTOR SPAWN received on co-op client (flags=0x%x id=%u asplayer=%d)",
-			E->s_flags.flags, E->ID, E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER) ? 1 : 0);
+		// D2 run 4: print the health AS IT CAME OFF THE WIRE — this point is after Spawn_Read
+		// and UPDATE_Read but before g_sv_Spawn, so it brackets the packet against the server's
+		// matching pre-send line. Run 4 had the server logging a restore to 1.00 and the client
+		// reading 0.00 after the spawn; only these two lines can say which side wrote the zero.
+		CSE_ALifeCreatureAbstract* cre = smart_cast<CSE_ALifeCreatureAbstract*>(E);
+		Msg("- XRNET(diag): ACTOR SPAWN received on co-op client (flags=0x%x id=%u asplayer=%d "
+			"wire_hp=%.2f killer=%u pos=%.1f,%.1f,%.1f)",
+			E->s_flags.flags, E->ID, E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER) ? 1 : 0,
+			cre ? cre->get_health() : -1.f, cre ? cre->get_killer_id() : u16(-1),
+			E->o_Position.x, E->o_Position.y, E->o_Position.z);
 		FlushLog();
 		CALifeSimulator::set_client_actor(E);
 	}

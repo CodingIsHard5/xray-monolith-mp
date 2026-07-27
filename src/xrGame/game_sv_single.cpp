@@ -2058,6 +2058,17 @@ void game_sv_Single::coop_poll_spawns()
 					Msg("%s COOP(bindings): restoring saved health for '%s': %.2f (%s) — the CSE "
 						"said %.2f", xr_strcmp(hp_source, "CLAMPED") ? "-" : "!",
 						client_name, saved_health, hp_source, cse_hp);
+				// The killer has to go with the zero. A body being handed back to a living player
+				// is not a corpse, and `set_health` itself asserts the pair is impossible
+				// (`VERIFY(!(killer != -1 && health > 0))`) — leaving a killer id on a revived
+				// body means every death-state test downstream can still read it as dead, on both
+				// sides of the wire. Clear it BEFORE the health, so the two are never inconsistent.
+				if (saved_health > 0.f && body->get_killer_id() != u16(-1))
+				{
+					Msg("- COOP(bindings): clearing killer id %u on '%s' body — it is being handed "
+						"back alive", body->get_killer_id(), client_name);
+					body->set_killer_id(ALife::_OBJECT_ID(-1));
+				}
 				body->set_health(saved_health);
 			}
 
@@ -2088,6 +2099,16 @@ void game_sv_Single::coop_poll_spawns()
 			// which is inert unless -coop_cull_radius is set — would need the same treatment.
 			{
 				// Send the actor as LOCAL+ASPLAYER
+				// D2 run 4: the server said it restored hp 1.00 and the client read 0.00 off the
+				// spawn. Log what the CSE holds at the instant the packet is written — with the
+				// client's matching wire_hp line this brackets the wire and names the side that
+				// wrote the zero, instead of another round of reasoning about who could have.
+				if (CSE_ALifeCreatureAbstract* snd = smart_cast<CSE_ALifeCreatureAbstract*>(orphan))
+					Msg("- COOP(bindings): sending body id %u to '%s' — CSE hp %.2f killer %u pos "
+						"%.1f,%.1f,%.1f", orphan->ID, client_name, snd->get_health(),
+						snd->get_killer_id(), orphan->o_Position.x, orphan->o_Position.y,
+						orphan->o_Position.z);
+
 				NET_Packet P2;
 				Flags16 save = orphan->s_flags;
 				orphan->s_flags.set(M_SPAWN_UPDATE, TRUE);
