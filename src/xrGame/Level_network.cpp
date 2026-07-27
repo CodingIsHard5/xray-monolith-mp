@@ -10,6 +10,7 @@
 #include "space_restriction_manager.h"
 #include "ai_space.h"
 #include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
+#include "Actor.h"                                 // MP fork (§14 step 7 P4 D2): ctrl-entity diag
 #include "script_engine.h"
 #include "stalker_animation_data_storage.h"
 #include "client_spawn_manager.h"
@@ -226,7 +227,16 @@ void CLevel::ClientSend()
 			}
 			else if (xr_enet::enabled() && (Device.dwFrame % 120 == 0))
 			{
-				Msg("- XRNET(diag): ClientSend: ctrl-entity not net_Relevant/destroyed — NOT sent");
+				// MP fork (§14 step 7 P4 D2, run 3): this line used to say only THAT the client
+				// is not exporting, which is the symptom every failed body hand-over shares. Say
+				// WHICH object and WHICH half of `CActor::net_Relevant()` (`Local() & g_Alive()`)
+				// is false — a reclaimed body that never became the control entity and one that
+				// arrived dead are different bugs with identical silence.
+				CActor* pA = smart_cast<CActor*>(pObj);
+				Msg("- XRNET(diag): ClientSend: ctrl-entity id=%u local=%d alive=%d destroy=%d "
+					"health=%.2f — NOT sent", pObj->ID(), pObj->Local() ? 1 : 0,
+					pA ? (pA->g_Alive() ? 1 : 0) : -1, pObj->getDestroy() ? 1 : 0,
+					pA ? pA->GetfHealth() : -1.f);
 				FlushLog();
 			}
 		}

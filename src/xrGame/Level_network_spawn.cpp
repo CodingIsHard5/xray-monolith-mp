@@ -11,6 +11,7 @@
 #include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
 #include "../xrEngine/xr_object.h"
 #include "../xrEngine/IGame_Persistent.h"
+#include "entity_alive.h"                          // MP fork (§14 step 7 P4 D2): actor-spawn diag
 
 void CLevel::cl_Process_Spawn(NET_Packet& P)
 {
@@ -224,6 +225,23 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
 				SetControlEntity(O);
 				SetEntity(O); //do not switch !!!
 			}
+		}
+
+		// MP fork (§14 step 7 P4 D2, run 3): a reclaimed body that never becomes the control
+		// entity and one that arrives dead fail identically — the client simply stops exporting.
+		// Say which happened, once per actor spawn, right where the decision is made.
+		if (xr_enet::enabled() && !ai().get_alife() && smart_cast<CSE_ALifeCreatureActor*>(E))
+		{
+			CObject* ctrl = CurrentControlEntity();
+			CEntityAlive* alive = smart_cast<CEntityAlive*>(O);
+			Msg("- XRNET(diag): co-op actor spawn id=%u local=%d asplayer=%d cse_hp=%.2f "
+				"obj_hp=%.2f -> control entity is now id=%u (%s)",
+				E->ID, E->s_flags.is(M_SPAWN_OBJECT_LOCAL) ? 1 : 0,
+				E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER) ? 1 : 0,
+				smart_cast<CSE_ALifeCreatureAbstract*>(E) ? smart_cast<CSE_ALifeCreatureAbstract*>(E)->get_health() : -1.f,
+				alive ? alive->GetfHealth() : -1.f,
+				ctrl ? ctrl->ID() : u16(-1), (ctrl == O) ? "THIS BODY" : "someone else's");
+			FlushLog();
 		}
 
 		if (0xffff != E->ID_Parent)
