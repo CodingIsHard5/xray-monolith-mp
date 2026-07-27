@@ -241,6 +241,12 @@ private:
 	bool m_coop_test_rpg_init;
 	bool m_coop_test_rpg_done;
 	bool m_coop_test_rpg_verify_only;
+	// One-shot boot check of the world tier's reserved registry key: nothing may hold it in the
+	// object registry. Also records what the first phase-1 run measured — that graph().actor()
+	// FOLLOWS the last spawned player — so every log carries the reason the key is reserved
+	// rather than borrowed from an entity.
+	void coop_check_world_key();
+	bool m_coop_world_key_checked;
 	// Runs the probe sequence; false = no player with an actor yet, try again later.
 	bool coop_test_rpg_probe();
 	// One call into gamedata's _G.mp_coop_rpg_probe(phase, world_id, player_id).

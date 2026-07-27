@@ -11,14 +11,32 @@
 // to name either tier. This module answers exactly that, and nothing else:
 // no policy, no classification, no storage.
 //
-//  world_actor()  = ai().alife().graph().actor() — the level's OWN actor
-//                   entity. It already exists in every save with a stable id,
-//                   it is the clone TEMPLATE for player actors
-//                   (game_sv_Single::coop_spawn_actor_for) so it is never
-//                   owned by a person, and it is already the de-facto subject
-//                   of autonomous world simulation. Doc §6.4 forbids spawning
-//                   a fake entity to hold collective state; this reuses one
-//                   A-Life requires anyway.
+//  world_actor()  = a RESERVED REGISTRY KEY, not an entity.
+//
+//                   The first attempt used ai().alife().graph().actor() — the
+//                   level's own actor entity — and the phase-1 harness killed
+//                   it on its first run: it measured world=22678 player=22678,
+//                   the same entity. CALifeGraphRegistry::update() re-points
+//                   m_actor to ANY object spawned with M_SPAWN_OBJECT_ASPLAYER
+//                   (alife_graph_registry.cpp:54-58), and every co-op player
+//                   actor carries that flag — so graph().actor() does not mean
+//                   "the level's actor", it means "whoever spawned last". It
+//                   also moves again on a reload, so it cannot be a stable key
+//                   across a restart either.
+//
+//                   The registry this tier lives in is keyed by u16 and asks
+//                   nothing of the key but uniqueness: CInfoPortionRegistry is
+//                   an xr_map<u16, KNOWN_INFO_VECTOR> saved and loaded whole.
+//                   So the world tier does not need an entity, and doc §6.4 is
+//                   explicit that collective state should NOT get one ("an
+//                   X-Ray actor is a heavy object with position and inventory;
+//                   faction state is just data"). A reserved key is stable by
+//                   construction — across spawns, reloads and level changes —
+//                   and persists for free with the registry.
+//
+//                   Collision is the one risk, and it is checked rather than
+//                   assumed: the server verifies at boot that no live entity
+//                   holds the key and says so loudly if one ever does.
 //
 //  acting_actor() = the player actor on whose behalf the server is currently
 //                   executing script, or none when the server is running
@@ -38,7 +56,12 @@ namespace mp_coop_owner
 	// entity 0 indistinguishable.
 	static const u16 none = u16(-1);
 
-	u16 world_actor();                  // none if there is no A-Life / no base actor
+	// The world tier's registry key. One below the invalid-id sentinel, so it sits at the far
+	// end of the id space from anything PerformIDgen hands out in practice. Not an entity —
+	// nothing may look it up in the object registry.
+	static const u16 world_key = u16(-2);
+
+	u16 world_actor();                  // world_key, or none where there is no A-Life (a client)
 	u16 acting_actor();                 // none outside a player-initiated action
 
 	// Scoped setter. Every future call site (trade, use, hit) must set the

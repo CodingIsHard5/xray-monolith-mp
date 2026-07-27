@@ -72,8 +72,7 @@ namespace mp_coop_owner
 		if (!ai().get_alife())
 			return none;                       // a client has no A-Life: there is no world tier here
 
-		CSE_ALifeCreatureActor* const base = ai().alife().graph().actor();
-		return base ? base->ID : none;
+		return world_key;
 	}
 
 	u16 acting_actor() { return s_acting_actor; }
@@ -102,6 +101,7 @@ game_sv_Single::game_sv_Single()
 	m_coop_test_rpg_init = false;
 	m_coop_test_rpg_done = false;
 	m_coop_test_rpg_verify_only = false;
+	m_coop_world_key_checked = false;
 	m_coop_prev_crash = false;
 	m_coop_dirty_checked = false;
 	m_coop_dirty_streak = 0;
@@ -2465,6 +2465,35 @@ void game_sv_Single::coop_update_anchors()
 	m_server->ForEachClientDo(f);
 }
 
+// MP fork (§14 step 8 phase 1 / doc §6): one-shot boot check of the world tier's key.
+//
+// The key is reserved rather than borrowed from an entity because the first phase-1 run
+// measured what borrowing costs: with the world tier read off ai().alife().graph().actor(),
+// the harness reported world=22678 player=22678 — one entity wearing both hats. m_actor is
+// re-pointed to ANY object spawned with M_SPAWN_OBJECT_ASPLAYER, and every co-op player actor
+// carries that flag, so "the level's actor" silently becomes "the last player to spawn".
+//
+// A reserved key has exactly one failure mode — something else claiming it — so check for that
+// instead of assuming it. Logged either way: a run that never prints this line did not check.
+void game_sv_Single::coop_check_world_key()
+{
+	if (m_coop_world_key_checked)
+		return;
+	m_coop_world_key_checked = true;
+
+	CSE_ALifeDynamicObject* const squatter =
+		ai().alife().objects().object(mp_coop_owner::world_key, true);
+	CSE_ALifeCreatureActor* const graph_actor = ai().alife().graph().actor();
+
+	if (squatter)
+		Msg("! COOP(rpg): world key %u is held by a live entity ('%s') — the world tier and that "
+			"entity now share a registry row", u32(mp_coop_owner::world_key), squatter->name_replace());
+	else
+		Msg("- COOP(rpg): world tier = reserved registry key %u (free); graph actor is entity %u, "
+			"and it follows the last spawned player — which is why the key is not read off it",
+			u32(mp_coop_owner::world_key), graph_actor ? u32(graph_actor->ID) : 0xffffu);
+}
+
 // MP fork (§14 step 8 phase 1, harness): one call into gamedata's probe. Gamedata does the
 // reading and writing because gamedata is where the 557 real call sites are — the point of the
 // probe is to exercise the SAME routed primitives (has_alife_info / give_info / disable_info),
@@ -2519,10 +2548,12 @@ bool game_sv_Single::coop_test_rpg_probe()
 	if (fd.player_id == mp_coop_owner::none)
 		return false;   // nobody has an actor yet — retry
 
-	// The tiers being DISTINCT is the first assertion, not a formality: if the world actor were
-	// the same entity as a player's actor, everything below would pass while proving nothing.
-	Msg("- COOP(rpg): tiers world=%u player=%u distinct=%u", u32(world_id), u32(fd.player_id),
-		u32(world_id != fd.player_id ? 1 : 0));
+	// The tiers being DISTINCT is the first assertion, not a formality: if the world tier shared
+	// a key with a player's actor, everything below would pass while proving nothing. `graph=` is
+	// reported alongside because that is the value this assertion caught on its first run.
+	CSE_ALifeCreatureActor* const graph_actor = ai().alife().graph().actor();
+	Msg("- COOP(rpg): tiers world=%u player=%u distinct=%u graph=%u", u32(world_id), u32(fd.player_id),
+		u32(world_id != fd.player_id ? 1 : 0), graph_actor ? u32(graph_actor->ID) : 0xffffu);
 
 	if (!m_coop_test_rpg_verify_only)
 	{
@@ -2640,6 +2671,7 @@ void game_sv_Single::Update()
 	// leg that boots from the save and must not re-write what it is checking survived.
 	if (xr_enet::enabled() && ai().get_alife())
 	{
+		coop_check_world_key();   // one-shot; nothing may squat the world tier's key
 		if (!m_coop_test_rpg_init)
 		{
 			m_coop_test_rpg_init = true;
