@@ -21,6 +21,7 @@
 #include "ui/UIMapWnd.h"
 #include "..\..\xrEngine\x_ray.h"
 #include "string_table.h"
+#include "mp_coop_owner.h"                          // MP fork (§14 step 8 P1): acting_actor()
 
 #pragma warning(push)
 #pragma warning(disable:4995)
@@ -43,9 +44,10 @@
 // nothing regresses below the previous shared behaviour.
 // ============================================================================
 
-// Set by xrServer::coop_run_dialog_action around a dialogue action, so a task
-// given while a player is talking is tagged to THAT player. 0 = no context.
-u16 g_coop_dialog_actor = 0;   // MP fork (§19 co-op): player currently running a dialogue action
+// The "player currently running a dialogue action" context this file used to own
+// (g_coop_dialog_actor) is now mp_coop_owner::acting_actor() — doc §6.1's "check the
+// interacting player", generalised in §14 step 8 phase 1 so the flag layer can ask the
+// same question. Task ownership reads it below; nothing else changed.
 
 namespace
 {
@@ -216,12 +218,13 @@ CGameTask* CGameTaskManager::GiveGameTaskToActor(CGameTask* t, u32 timeToComplet
 	m_flags.set(eChanged, TRUE);
 
 	// MP fork (§19 co-op): tag ownership. If this task is being given while a player is in a
-	// dialogue (xrServer::coop_run_dialog_action set g_coop_dialog_actor), it belongs to THAT
-	// player. Given outside dialogue (smart terrains, timers, level scripts) it stays owner 0
-	// = global, which routes to everyone - the safe default until faction flagging lands.
-	extern u16 g_coop_dialog_actor;
-	if (xr_enet::enabled() && ai().get_alife() && g_coop_dialog_actor != 0)
-		s_task_owner[t->m_ID] = g_coop_dialog_actor;
+	// dialogue (xrServer::coop_run_dialog_action opened an mp_coop_owner::acting_scope), it
+	// belongs to THAT player. Given outside dialogue (smart terrains, timers, level scripts) it
+	// is left UNTAGGED, and an absent key routes to everyone - the safe default until faction
+	// flagging lands.
+	const u16 coop_acting = mp_coop_owner::acting_actor();
+	if (xr_enet::enabled() && ai().get_alife() && coop_acting != mp_coop_owner::none)
+		s_task_owner[t->m_ID] = coop_acting;
 
 	GetGameTasks().push_back(SGameTaskKey(t->m_ID));
 	GetGameTasks().back().game_task = t;

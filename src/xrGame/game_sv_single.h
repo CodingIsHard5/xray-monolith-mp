@@ -227,6 +227,24 @@ private:
 	u32  m_coop_test_checkpoint_retry;   // last attempt, so retries are 5s apart not per-frame
 	bool m_coop_test_checkpoint_init;
 	bool m_coop_test_checkpoint_done;
+
+	// MP fork (§14 step 8 phase 1, harness): -coop_test_rpg [<seconds>] / -coop_test_rpg_verify.
+	// Drives the ownership-tier probe. The acting-player context is set ONLY by the engine (a
+	// scoped setter around a player-initiated action), so a Lua-side harness could not forge it
+	// and a test that forged it would be testing the harness. This runs gamedata's probe three
+	// times against the REAL primitive — outside a scope, inside one, and after it closed — so
+	// the routing and the RAII restore are both measured. `_verify` re-reads only: leg 2 boots
+	// from the save and must not re-write what it is checking survived.
+	u32  m_coop_test_rpg_ms;             // 0 = disabled
+	u32  m_coop_test_rpg_armed;          // delay measured from the parse, not from engine start
+	u32  m_coop_test_rpg_retry;          // retries 5s apart until a player has an actor
+	bool m_coop_test_rpg_init;
+	bool m_coop_test_rpg_done;
+	bool m_coop_test_rpg_verify_only;
+	// Runs the probe sequence; false = no player with an actor yet, try again later.
+	bool coop_test_rpg_probe();
+	// One call into gamedata's _G.mp_coop_rpg_probe(phase, world_id, player_id).
+	void coop_rpg_probe_call(LPCSTR phase, u16 world_id, u16 player_id);
 public:
 	// Server-side bank path. Exposed so gamedata can trigger it at a campfire/base via the
 	// `game.mp_set_checkpoint(name)` luabind export; the engine does not care what triggered it.

@@ -24,6 +24,7 @@
 #include "PhraseDialog.h"                         // MP fork (§19 co-op): server-run dialog actions
 #include "Phrase.h"
 #include "PhraseScript.h"
+#include "mp_coop_owner.h"                        // MP fork (§14 step 8 P1): the acting-player context
 #include <functional>
 
 #pragma warning(push)
@@ -1036,16 +1037,17 @@ void xrServer::coop_run_dialog_action(NET_Packet& P)
 		return;
 	}
 
-	// MP fork (§19 co-op): mark which player is talking, so any task GIVEN by this action is
-	// tagged to them (CGameTaskManager::GiveGameTaskToActor reads it). Cleared right after -
-	// tasks given outside a dialogue must stay owner 0 (global).
-	extern u16 g_coop_dialog_actor;
-	g_coop_dialog_actor = speaker_id;
+	// MP fork (§19 co-op; §14 step 8 phase 1): mark which player is talking. Doc §6.1's
+	// "check the interacting player" — every per-player fact this action touches resolves
+	// against it: the task it may give (CGameTaskManager::GiveGameTaskToActor) and, since
+	// step 8 phase 1, any info portion the script layer reads or writes. The scope restores
+	// the previous value on EVERY exit path, including the script throwing: a context left
+	// set would silently attribute the server's next autonomous world read to whichever
+	// player last talked to someone.
+	mp_coop_owner::acting_scope coop_acting(speaker_id);
 
 	// Same call the single-player path makes, just with the server's own objects.
 	phrase->GetScriptHelper()->Action(speaker, partner, dialog_id, phrase_id);
-
-	g_coop_dialog_actor = 0;
 }
 
 u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadcasting with "flags" as returned

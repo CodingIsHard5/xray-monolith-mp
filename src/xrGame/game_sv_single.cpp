@@ -18,6 +18,7 @@
 #include "script_engine.h"                         // MP fork: server-side Lua init hook
 #include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
 #include "mp_anchors.h"                            // MP fork: A-Life attention anchors
+#include "mp_coop_owner.h"                         // MP fork (§14 step 8 P1 / §6): the two ownership tiers
 #include "../xrEngine/x_ray.h"
 #include "../xrEngine/dedicated_server_only.h"
 #include "../xrEngine/no_single.h"
@@ -57,6 +58,30 @@ static bool coop_plausible_pos(const Fvector& p)
 	return !!_valid(p) && _abs(p.x) < LIMIT && _abs(p.y) < LIMIT && _abs(p.z) < LIMIT;
 }
 
+// MP fork (§14 step 8 phase 1 / doc §6): the two ownership tiers. See mp_coop_owner.h for why
+// the world tier is the base actor entity rather than a spawned stand-in.
+namespace mp_coop_owner
+{
+	// Not a member of game_sv_Single: the READERS live on both sides of the server/client
+	// split (GametaskManager, the Lua export), and a client legitimately has no server game.
+	// A file-scope value that reads `none` everywhere but the co-op server is the honest shape.
+	static u16 s_acting_actor = mp_coop_owner::none;
+
+	u16 world_actor()
+	{
+		if (!ai().get_alife())
+			return none;                       // a client has no A-Life: there is no world tier here
+
+		CSE_ALifeCreatureActor* const base = ai().alife().graph().actor();
+		return base ? base->ID : none;
+	}
+
+	u16 acting_actor() { return s_acting_actor; }
+
+	acting_scope::acting_scope(u16 actor_id) : m_prev(s_acting_actor) { s_acting_actor = actor_id; }
+	acting_scope::~acting_scope() { s_acting_actor = m_prev; }
+}
+
 game_sv_Single::game_sv_Single()
 {
 	m_alife_simulator = NULL;
@@ -71,6 +96,12 @@ game_sv_Single::game_sv_Single()
 	m_coop_test_checkpoint_retry = 0;
 	m_coop_test_checkpoint_init = false;
 	m_coop_test_checkpoint_done = false;
+	m_coop_test_rpg_ms = 0;
+	m_coop_test_rpg_armed = 0;
+	m_coop_test_rpg_retry = 0;
+	m_coop_test_rpg_init = false;
+	m_coop_test_rpg_done = false;
+	m_coop_test_rpg_verify_only = false;
 	m_coop_prev_crash = false;
 	m_coop_dirty_checked = false;
 	m_coop_dirty_streak = 0;
@@ -2434,6 +2465,78 @@ void game_sv_Single::coop_update_anchors()
 	m_server->ForEachClientDo(f);
 }
 
+// MP fork (§14 step 8 phase 1, harness): one call into gamedata's probe. Gamedata does the
+// reading and writing because gamedata is where the 557 real call sites are — the point of the
+// probe is to exercise the SAME routed primitives (has_alife_info / give_info / disable_info),
+// not a private engine path that happens to agree with them.
+void game_sv_Single::coop_rpg_probe_call(LPCSTR phase, u16 world_id, u16 player_id)
+{
+	luabind::functor<void> f;
+	if (!ai().script_engine().functor("_G.mp_coop_rpg_probe", f))
+	{
+		Msg("! COOP(rpg): gamedata probe _G.mp_coop_rpg_probe not registered (phase '%s')", phase);
+		return;
+	}
+	f(phase, u32(world_id), u32(player_id));
+}
+
+// MP fork (§14 step 8 phase 1 / doc §6): drive the ownership-tier probe.
+//
+// The sequence is the test. The acting-player context is engine-owned and scoped, so the three
+// calls measure three different things with one primitive:
+//   autonomous -> no scope open: this is world simulation, and the write must land on the WORLD;
+//   acting     -> inside a scope for a real connected player: the write must land on THAT player;
+//   after      -> the scope has closed: it must read as world again. A context that leaked would
+//                 pass the first two legs and quietly attribute every later world read to the
+//                 last player who interacted with anything.
+// Returns false while no connected client has an actor yet, so the caller retries.
+bool game_sv_Single::coop_test_rpg_probe()
+{
+	const u16 world_id = mp_coop_owner::world_actor();
+	if (world_id == mp_coop_owner::none)
+	{
+		Msg("! COOP(rpg): no world actor — A-Life has no base actor entity");
+		return false;
+	}
+
+	struct finder
+	{
+		game_sv_Single* self;
+		u16 player_id;
+		void operator()(IClient* client)
+		{
+			if (player_id != mp_coop_owner::none) return;   // first one is enough
+			xrClientData* cd = static_cast<xrClientData*>(client);
+			if (cd == self->m_server->GetServerClient()) return;  // the loopback self-client is not a player
+			if (!cd->owner) return;                                // connected, no actor yet
+			player_id = cd->owner->ID;
+		}
+	};
+	finder fd;
+	fd.self = this;
+	fd.player_id = mp_coop_owner::none;
+	m_server->ForEachClientDo(fd);
+	if (fd.player_id == mp_coop_owner::none)
+		return false;   // nobody has an actor yet — retry
+
+	// The tiers being DISTINCT is the first assertion, not a formality: if the world actor were
+	// the same entity as a player's actor, everything below would pass while proving nothing.
+	Msg("- COOP(rpg): tiers world=%u player=%u distinct=%u", u32(world_id), u32(fd.player_id),
+		u32(world_id != fd.player_id ? 1 : 0));
+
+	if (!m_coop_test_rpg_verify_only)
+	{
+		coop_rpg_probe_call("autonomous", world_id, fd.player_id);
+		{
+			mp_coop_owner::acting_scope scope(fd.player_id);
+			coop_rpg_probe_call("acting", world_id, fd.player_id);
+		}
+		coop_rpg_probe_call("after", world_id, fd.player_id);
+	}
+	coop_rpg_probe_call("verify", world_id, fd.player_id);
+	return true;
+}
+
 void game_sv_Single::Update()
 {
 	inherited::Update();
@@ -2529,6 +2632,46 @@ void game_sv_Single::Update()
 				Msg("- COOP(checkpoint): test auto-bank done (%u player(s))", b.banked);
 				coop_test_drop_world_item();          // harness: §9.2 negative case (see header)
 			}
+		}
+	}
+
+	// MP fork (§14 step 8 phase 1, harness): -coop_test_rpg [<seconds>] runs the ownership-tier
+	// probe once a player has an actor; -coop_test_rpg_verify runs the read-only half, for the
+	// leg that boots from the save and must not re-write what it is checking survived.
+	if (xr_enet::enabled() && ai().get_alife())
+	{
+		if (!m_coop_test_rpg_init)
+		{
+			m_coop_test_rpg_init = true;
+			// Check the LONGER flag first: strstr("-coop_test_rpg") also matches inside
+			// "-coop_test_rpg_verify", so the write-mode test would claim the verify run.
+			LPCSTR p = strstr(Core.Params, "-coop_test_rpg_verify");
+			if (p)
+			{
+				m_coop_test_rpg_verify_only = true;
+				p += sizeof("-coop_test_rpg_verify") - 1;
+			}
+			else if ((p = strstr(Core.Params, "-coop_test_rpg")) != nullptr)
+				p += sizeof("-coop_test_rpg") - 1;
+
+			if (p)
+			{
+				while (*p == ' ') ++p;
+				const float secs = (float)atof(p);
+				// NaN/inf fail every compare, so >0 also rejects non-finite input
+				m_coop_test_rpg_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 30000u;
+				m_coop_test_rpg_armed = Device.dwTimeGlobal;   // delay runs from HERE, not engine start
+				Msg("- COOP(rpg): tier probe armed (%s), firing in %ums",
+					m_coop_test_rpg_verify_only ? "verify-only" : "write+verify", m_coop_test_rpg_ms);
+			}
+		}
+		if (m_coop_test_rpg_ms && !m_coop_test_rpg_done &&
+		    Device.dwTimeGlobal - m_coop_test_rpg_armed >= m_coop_test_rpg_ms &&
+		    Device.dwTimeGlobal - m_coop_test_rpg_retry >= 5000)
+		{
+			m_coop_test_rpg_retry = Device.dwTimeGlobal;   // retry 5s apart, not every frame
+			if (coop_test_rpg_probe())
+				m_coop_test_rpg_done = true;
 		}
 	}
 

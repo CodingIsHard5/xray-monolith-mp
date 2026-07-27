@@ -1894,6 +1894,7 @@ const float get_env_rads()
 // MP fork (§5.1): attention anchors for A-Life switching on the
 // headless server — lets a script move anchors before netcode exists
 #include "mp_anchors.h"
+#include "mp_coop_owner.h"      // MP fork (§14 step 8 P1): the two ownership tiers
 void mp_anchor_set(u32 idx, const Fvector& pos) { mp_anchors::set(idx, pos); }
 void mp_anchor_clear(u32 idx) { mp_anchors::clear(idx); }
 void mp_anchor_clear_all() { mp_anchors::clear_all(); }
@@ -1973,6 +1974,32 @@ bool mp_set_checkpoint(LPCSTR player_name)
 		return false;
 	}
 	return tpGame->coop_bank_checkpoint(player_name);
+}
+
+// MP fork (§14 step 8 phase 1 / doc §6): the two ownership tiers, exposed to gamedata.
+//
+// Why gamedata needs them at all: the flag GLOBALS in the script layer (has_alife_info /
+// give_info / disable_info — 557 / 82 / 27 call sites in the deployed gamedata, counted
+// 2026-07-27) resolve through `db.actor`, and db.actor is NIL on the co-op server. So today
+// every world-gate read on the server answers "no" forever and the world cannot progress.
+// These two functions give the script layer the subject it lost: the interacting player for a
+// per-player fact (§6.1), the world actor for a world fact (§6.2). (The METHOD form —
+// db.actor:give_info_portion, 155 sites, and npc:give_info_portion, 39 — already names its
+// own subject and is a separate phase-2 decision; see dev/RPG_LAYER_PLAN.md.)
+//
+// Both return -1 when there is no such actor, which is the whole point of the pair being
+// separate calls: "no acting actor" is not an error, it is the signal that this read is
+// autonomous world simulation and belongs to the world tier.
+int mp_coop_world_actor()
+{
+	const u16 id = mp_coop_owner::world_actor();
+	return (id == mp_coop_owner::none) ? -1 : int(id);
+}
+
+int mp_coop_acting_actor()
+{
+	const u16 id = mp_coop_owner::acting_actor();
+	return (id == mp_coop_owner::none) ? -1 : int(id);
 }
 
 //ability to update level netpacket
@@ -2907,6 +2934,10 @@ void CLevel::script_register(lua_State* L)
         def("mp_broadcast_decision", &mp_broadcast_decision),
 
         // MP fork (§14 step 7 phase 3 / §9.1): server gamedata banks a player checkpoint
-        def("mp_set_checkpoint", &mp_set_checkpoint)
+        def("mp_set_checkpoint", &mp_set_checkpoint),
+
+        // MP fork (§14 step 8 phase 1 / §6): the two ownership tiers. -1 = no such actor.
+        def("mp_coop_world_actor", &mp_coop_world_actor),
+        def("mp_coop_acting_actor", &mp_coop_acting_actor)
 	];
 }

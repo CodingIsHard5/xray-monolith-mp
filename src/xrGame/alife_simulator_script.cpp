@@ -384,9 +384,23 @@ bool dont_has_info(const CALifeSimulator* self, const ALife::_OBJECT_ID& id, LPC
 
 void AlifeGiveInfo(const CALifeSimulator *alife, const ALife::_OBJECT_ID &id, LPCSTR info_id)
 {
-	KNOWN_INFO_VECTOR *known_info = alife->registry().get<CInfoPortionRegistry>().object(id, true);
+	// MP fork (§14 step 8 phase 1): CALifeAbstractRegistry::object() NEVER creates — it returns
+	// NULL for an id that has no entry yet — so the original early-return made this function a
+	// SILENT NO-OP for the first info portion ever given to an entity. The object-side path does
+	// not behave that way: CALifeRegistryWrapper::objects() adds a fresh entry on demand
+	// (alife_registry_wrapper.h:79-85), which is why db.actor:give_info_portion always worked and
+	// alife():give_info only appeared to. Bring the two into agreement rather than leaving a write
+	// API that drops writes and reports nothing. Reachable in stock SP too, not only under co-op.
+	CInfoPortionRegistry& info_registry = alife->registry().get<CInfoPortionRegistry>();
+	KNOWN_INFO_VECTOR *known_info = info_registry.object(id, true);
 	if (!known_info)
-		return;
+	{
+		KNOWN_INFO_VECTOR empty;
+		info_registry.add(id, empty, false);
+		known_info = info_registry.object(id, true);
+		if (!known_info)
+			return;
+	}
 
 	if (std::find_if(known_info->begin(), known_info->end(), CFindByIDPred(info_id)) == known_info->end())
 	{
@@ -401,7 +415,13 @@ void AlifeRemoveInfo(const CALifeSimulator *alife, const ALife::_OBJECT_ID &id, 
 	KNOWN_INFO_VECTOR	*known_info = alife->registry().get<CInfoPortionRegistry>().object(id, true);
 	if (!known_info)
 		return;
-	known_info->erase(std::find_if(known_info->begin(), known_info->end(), CFindByIDPred(info_id)),known_info->end());
+	// MP fork (§14 step 8 phase 1): the original erased the RANGE [match, end) — removing the
+	// named portion AND every portion stored after it. A no-match erases nothing (find_if returns
+	// end()), which is why the bug only shows on a hit, and only as facts quietly disappearing.
+	// Erase the one element, the way CInventoryOwner::OnDisableInfo does.
+	KNOWN_INFO_VECTOR_IT it = std::find_if(known_info->begin(), known_info->end(), CFindByIDPred(info_id));
+	if (it != known_info->end())
+		known_info->erase(it);
 }
 
 //Alundaio: teleport object
