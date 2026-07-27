@@ -50,6 +50,8 @@ void xrClientData::Clear()
 	m_ping_warn.m_dwLastMaxPingWarningTime = 0;
 	m_admin_rights.m_has_admin_rights = FALSE;
 	m_coop_cl_update_count = 0;   // MP fork (§14 step 7 P4 D2): "has this client ever driven its body?"
+	m_coop_last_health = -1.f;    // MP fork (§14 step 7 P4 D3.3): no health seen yet
+	m_coop_last_damage_time = 0;  // MP fork (§14 step 7 P4 D3.3): never seen it drop
 };
 
 
@@ -1141,7 +1143,7 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 					P.r_seek(cl_update_body);
 					P.r_u16();               // entity id
 					P.r_u32();               // ping (reserved)
-					P.r_float();             // health
+					const float hp = P.r_float();
 					P.r_u32();               // timestamp
 					P.r_u8();                // flags
 					Fvector pos;
@@ -1164,6 +1166,18 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 					// the position above came from the player, not from the server's own copy.
 					// coop_sample_recoveries() refuses to persist a body that has never got here.
 					++CL->m_coop_cl_update_count;
+
+					// MP fork (§14 step 7 phase 4 D3.3 / doc §9.4): remember when this player's
+					// health last FELL. The first update only establishes the baseline — a client
+					// that connects already wounded has not just been hurt. Only a decrease is a
+					// damage event; regeneration and healing walk it back up and are not.
+					// Read by the disconnect path, which stamps the age into the orphan record.
+					if (_valid(hp))
+					{
+						if (CL->m_coop_last_health >= 0.f && hp < CL->m_coop_last_health - 0.001f)
+							CL->m_coop_last_damage_time = Device.dwTimeGlobal;
+						CL->m_coop_last_health = hp;
+					}
 					P.r_seek(save_cursor);
 				}
 

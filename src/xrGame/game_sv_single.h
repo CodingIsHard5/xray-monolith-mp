@@ -68,7 +68,19 @@ private:
 		float       saved_health;
 		bool        have_saved_health;
 		bool        frozen;      // ownership already detached (server no longer updates it)
+		// MP fork (§14 step 7 phase 4 D3.3 / doc §9.4): how long before this disconnect the
+		// player's health last went down, or COOP_NO_DAMAGE if it never did within this process.
+		// Stamped at the disconnect (from the M_CL_UPDATE peek) because that is the only moment
+		// both facts are still in hand. Deliberately NOT persisted to the sidecar: D3.4 is the
+		// only D3 item allowed to touch a format, and the question this answers — did someone
+		// pull the plug in a losing fight and come straight back — is about a live reconnect
+		// inside one process anyway. A server restart resets it, and that is the honest answer.
+		u32         damage_age_ms;
 	};
+	static const u32 COOP_NO_DAMAGE = u32(-1);
+	// The window that makes a disconnect worth a log line. Not a rule, not a timer, not tunable
+	// on purpose: it is the bucket real data gets collected into before anyone writes a rule.
+	static const u32 COOP_POLICY_DAMAGE_WINDOW_MS = 30 * 1000;
 	xr_vector<coop_orphan> m_coop_orphans;
 	static const u32 RECONNECT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -76,8 +88,10 @@ private:
 	void coop_cleanup_orphans();                  // expire stale orphans
 	void coop_freeze_restored_bodies();           // detach server ownership of restored bodies
 	// out_pos/out_have_pos (optional) report the .scop position of a RESTORED body.
+	// out_damage_age_ms (optional, D3.3) reports the record's damage_age_ms — the matching
+	// record is ERASED by this call, so anything the reclaim wants from it must leave here.
 	CSE_Abstract* coop_find_orphan(LPCSTR name, Fvector* out_pos = NULL, bool* out_have_pos = NULL,
-	                               float* out_health = NULL);
+	                               float* out_health = NULL, u32* out_damage_age_ms = NULL);
 
 	// MP fork (§9.4/9.5 co-op save/load — step 7 phase 1): the dedicated server owns the
 	// world and must snapshot it to disk on its own — no client, no console, no live actor.

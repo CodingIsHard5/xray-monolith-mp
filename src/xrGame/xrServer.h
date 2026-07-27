@@ -46,6 +46,17 @@ public:
 	// word, used only as a "has it ever" test, so no ordering guarantee is required.
 	u32 m_coop_cl_update_count;
 
+	// MP fork (§14 step 7 phase 4 D3.3 / doc §9.4): the health this client last reported, and
+	// when it last went DOWN. The M_CL_UPDATE peek already reads the health field and threw it
+	// away; keeping it is what lets the server answer "was this player being hurt when they
+	// vanished?" — the one anti-abuse shape §9.4 names (pull-the-plug mid-fight). It is
+	// MEASUREMENT: nothing decides on it, and no timer or penalty is built on a hypothesis.
+	// Written by the ENet pump thread and read by the game thread, exactly like the position
+	// peek beside it (the D1 threading finding) — two independent words used for one log line,
+	// so a torn read costs a wrong number in a diagnostic and nothing else.
+	float m_coop_last_health;
+	u32   m_coop_last_damage_time;
+
 	game_PlayerState* ps;
 
 	struct

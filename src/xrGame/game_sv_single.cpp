@@ -485,6 +485,13 @@ void game_sv_Single::coop_orphan_actor(xrClientData* CL)
 		orphan.have_saved_health = orphan.saved_health > 0.f;
 	}
 	orphan.frozen = true;          // ownership is detached below — nothing will overwrite it
+	// MP fork (§14 step 7 phase 4 D3.3 / doc §9.4): how long ago this player was last hurt, as
+	// of right now. Stamped here because this is the last moment both halves exist together: the
+	// client data goes away with the connection, and the body that stays behind cannot say when
+	// it was damaged. See coop_orphan::damage_age_ms for why it goes no further than memory.
+	orphan.damage_age_ms = CL->m_coop_last_damage_time
+		? (Device.dwTimeGlobal - CL->m_coop_last_damage_time)
+		: COOP_NO_DAMAGE;
 
 	// Mark the entity as orphaned so Perform_connect_spawn won't claim it for other
 	// connecting clients. Detach ownership so the update loop skips it (frozen body).
@@ -551,12 +558,14 @@ bool game_sv_Single::coop_is_own_orphan(CSE_Abstract* E, xrClientData* CL)
 }
 
 CSE_Abstract* game_sv_Single::coop_find_orphan(LPCSTR name, Fvector* out_pos, bool* out_have_pos,
-                                               float* out_health)
+                                               float* out_health, u32* out_damage_age_ms)
 {
 	if (out_have_pos)
 		*out_have_pos = false;
 	if (out_health)
 		*out_health = -1.f;   // "no recorded health"; the caller falls through to its next source
+	if (out_damage_age_ms)
+		*out_damage_age_ms = COOP_NO_DAMAGE;
 
 	// An unnamed client must never match an (equally unnamed) orphan — that would hand
 	// it whichever body happens to sit first in the list, quite possibly someone else's.
@@ -578,6 +587,8 @@ CSE_Abstract* game_sv_Single::coop_find_orphan(LPCSTR name, Fvector* out_pos, bo
 			}
 			if (out_health && it->have_saved_health)
 				*out_health = it->saved_health;
+			if (out_damage_age_ms)
+				*out_damage_age_ms = it->damage_age_ms;
 			m_coop_orphans.erase(it);
 			CSE_Abstract* entity = m_server->ID_to_entity(eid);
 			if (entity)
@@ -1457,6 +1468,10 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 			o.have_saved_health = o.saved_health > 0.f;
 		}
 		o.frozen = false;             // becomes true once it is online and detached
+		// D3.3: a body restored from a save carries no damage history — the process that could
+		// have observed it is gone, and the sidecar deliberately does not record it. "Unknown"
+		// is the truthful value, and it reads the same as "was never hurt": no log line.
+		o.damage_age_ms = COOP_NO_DAMAGE;
 		m_coop_orphans.push_back(o);
 		++restored;
 
@@ -2037,9 +2052,26 @@ void game_sv_Single::coop_poll_spawns()
 		// (preserving position, health, and inventory) instead of spawning fresh.
 		LPCSTR client_name = coop_player_name(CL);   // ps account name is empty on thin clients
 		Fvector saved_pos; bool have_saved_pos = false; float saved_health = -1.f;
-		CSE_Abstract* orphan = coop_find_orphan(client_name, &saved_pos, &have_saved_pos, &saved_health);
+		u32 damage_age_ms = COOP_NO_DAMAGE;
+		CSE_Abstract* orphan = coop_find_orphan(client_name, &saved_pos, &have_saved_pos,
+		                                        &saved_health, &damage_age_ms);
 		if (orphan)
 		{
+			// MP fork (§14 step 7 phase 4 D3.3 / doc §9.4) — MEASUREMENT, NOT A RULE. The one
+			// abuse shape §9.4 names is pulling the plug in a losing fight, and the honest
+			// reading today is that it gains nothing: a disconnect orphans the body IN THE WORLD
+			// for the reconnect window (§9.3), the damage already landed, and a resume returns
+			// the player exactly as hurt as they were. So this logs the shape and does nothing
+			// about it. A punitive timer written on a hypothesis would be a real regression
+			// (every dropped connection is indistinguishable from every rage-quit) — the rule,
+			// if one is ever wanted, gets written on top of these lines and not before them.
+			if (damage_age_ms <= COOP_POLICY_DAMAGE_WINDOW_MS)
+				Msg("! COOP(policy): '%s' reconnected to a body that was taking damage %.1fs "
+					"before the disconnect (window %us). Logged for §9.4 data only — no rule "
+					"fires on this and the player is handed back exactly what they left.",
+					client_name, float(damage_age_ms) / 1000.f,
+					COOP_POLICY_DAMAGE_WINDOW_MS / 1000);
+
 			// MP fork (§14 step 7 phase 4 D2 / doc §9.4) — THE BOOT DECISION. Two candidate
 			// positions reach this point and exactly one is right:
 			//   * a PERSISTED recovery record, which exists only for a player who was still
@@ -2051,6 +2083,15 @@ void game_sv_Single::coop_poll_spawns()
 			//     a live reconnect within one process, where the body was frozen.
 			// The dirty flag agrees with this by construction and is not consulted either — see
 			// coop_drop_recovery() for the four-case argument.
+			// MP fork (§14 step 7 phase 4 D3.1 / doc §9.4) — NO EXPIRY, and that is a decision,
+			// not an omission. A record is used however old it is: a server that crashed, sat
+			// dead for a week and came back still hands the player back exactly where they were.
+			// The alternative is to silently demote them to an older position, which is the very
+			// class of surprise D2's negative gate exists to forbid, and the argument for it
+			// ("the world has moved on") does not survive contact with the facts — the `.scop`
+			// loaded beside this record is from the SAME instant, so the world and the player
+			// are consistent with each other however long the gap was. If a bound is ever
+			// wanted it belongs on REPORTING (D3.2's notice), never on placement.
 			LPCSTR pos_source = have_saved_pos ? "LOGGED-OFF" : "none";
 			if (coop_recovery* rec = coop_find_recovery(client_name))
 			{
