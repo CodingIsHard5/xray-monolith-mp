@@ -45,6 +45,29 @@ static bool coop_file_on_disk(LPCSTR full_path)
 	return GetFileAttributesA(full_path) != INVALID_FILE_ATTRIBUTES;
 }
 
+// MP fork (§14 step 8 phase 2): a command-line flag lookup that will not match a LONGER flag.
+// The codebase's usual `strstr(Core.Params, "-coop_x")` matches a PREFIX, so "-coop_test_rpg"
+// also matches inside "-coop_test_rpg2" and "-coop_test_rpg_verify" — passing only the phase-2
+// flag would silently arm the phase-1 probe as well, with "2" parsed as its interval. Require a
+// delimiter after the flag, and keep scanning so a genuine later occurrence still wins.
+// Returns the first argument character (past any spaces), or NULL if the flag is absent.
+static LPCSTR coop_param(LPCSTR flag)
+{
+	const size_t n = xr_strlen(flag);
+	LPCSTR p = Core.Params;
+	while ((p = strstr(p, flag)) != NULL)
+	{
+		LPCSTR after = p + n;
+		if (!*after || *after == ' ' || *after == '\t')
+		{
+			while (*after == ' ' || *after == '\t') ++after;
+			return after;
+		}
+		p += n;
+	}
+	return NULL;
+}
+
 // MP fork (§14 step 7 phase 4 D2): is this a position a player could actually be standing at?
 // `_valid()` only rejects NaN/inf, and the corruption this codebase keeps meeting is not NaN — it
 // is uninitialized memory that happens to be finite. Measured values from the two occurrences:
@@ -102,6 +125,14 @@ game_sv_Single::game_sv_Single()
 	m_coop_test_rpg_done = false;
 	m_coop_test_rpg_verify_only = false;
 	m_coop_world_key_checked = false;
+	m_coop_census_ms = 0;
+	m_coop_census_last = 0;
+	m_coop_census_init = false;
+	m_coop_test_rpg2_ms = 0;
+	m_coop_test_rpg2_armed = 0;
+	m_coop_test_rpg2_retry = 0;
+	m_coop_test_rpg2_init = false;
+	m_coop_test_rpg2_done = false;
 	m_coop_prev_crash = false;
 	m_coop_dirty_checked = false;
 	m_coop_dirty_streak = 0;
@@ -2498,15 +2529,40 @@ void game_sv_Single::coop_check_world_key()
 // reading and writing because gamedata is where the 557 real call sites are — the point of the
 // probe is to exercise the SAME routed primitives (has_alife_info / give_info / disable_info),
 // not a private engine path that happens to agree with them.
-void game_sv_Single::coop_rpg_probe_call(LPCSTR phase, u16 world_id, u16 player_id)
+void game_sv_Single::coop_rpg_probe_call(LPCSTR fn, LPCSTR phase, u16 world_id, u16 player_id)
 {
 	luabind::functor<void> f;
-	if (!ai().script_engine().functor("_G.mp_coop_rpg_probe", f))
+	if (!ai().script_engine().functor(fn, f))
 	{
-		Msg("! COOP(rpg): gamedata probe _G.mp_coop_rpg_probe not registered (phase '%s')", phase);
+		Msg("! COOP(rpg): gamedata probe %s not registered (phase '%s')", fn, phase);
 		return;
 	}
 	f(phase, u32(world_id), u32(player_id));
+}
+
+// MP fork (§14 step 8, harness): the entity id of the first connected client that has an actor.
+// The server's own loopback self-client is not a player and a client that has connected but has
+// not been given a body yet is not one either, so both are skipped and the caller retries.
+u16 game_sv_Single::coop_first_player_actor()
+{
+	struct finder
+	{
+		game_sv_Single* self;
+		u16 player_id;
+		void operator()(IClient* client)
+		{
+			if (player_id != mp_coop_owner::none) return;   // first one is enough
+			xrClientData* cd = static_cast<xrClientData*>(client);
+			if (cd == self->m_server->GetServerClient()) return;
+			if (!cd->owner) return;
+			player_id = cd->owner->ID;
+		}
+	};
+	finder fd;
+	fd.self = this;
+	fd.player_id = mp_coop_owner::none;
+	m_server->ForEachClientDo(fd);
+	return fd.player_id;
 }
 
 // MP fork (§14 step 8 phase 1 / doc §6): drive the ownership-tier probe.
@@ -2528,43 +2584,59 @@ bool game_sv_Single::coop_test_rpg_probe()
 		return false;
 	}
 
-	struct finder
-	{
-		game_sv_Single* self;
-		u16 player_id;
-		void operator()(IClient* client)
-		{
-			if (player_id != mp_coop_owner::none) return;   // first one is enough
-			xrClientData* cd = static_cast<xrClientData*>(client);
-			if (cd == self->m_server->GetServerClient()) return;  // the loopback self-client is not a player
-			if (!cd->owner) return;                                // connected, no actor yet
-			player_id = cd->owner->ID;
-		}
-	};
-	finder fd;
-	fd.self = this;
-	fd.player_id = mp_coop_owner::none;
-	m_server->ForEachClientDo(fd);
-	if (fd.player_id == mp_coop_owner::none)
+	const u16 player_id = coop_first_player_actor();
+	if (player_id == mp_coop_owner::none)
 		return false;   // nobody has an actor yet — retry
 
 	// The tiers being DISTINCT is the first assertion, not a formality: if the world tier shared
 	// a key with a player's actor, everything below would pass while proving nothing. `graph=` is
 	// reported alongside because that is the value this assertion caught on its first run.
 	CSE_ALifeCreatureActor* const graph_actor = ai().alife().graph().actor();
-	Msg("- COOP(rpg): tiers world=%u player=%u distinct=%u graph=%u", u32(world_id), u32(fd.player_id),
-		u32(world_id != fd.player_id ? 1 : 0), graph_actor ? u32(graph_actor->ID) : 0xffffu);
+	Msg("- COOP(rpg): tiers world=%u player=%u distinct=%u graph=%u", u32(world_id), u32(player_id),
+		u32(world_id != player_id ? 1 : 0), graph_actor ? u32(graph_actor->ID) : 0xffffu);
 
 	if (!m_coop_test_rpg_verify_only)
 	{
-		coop_rpg_probe_call("autonomous", world_id, fd.player_id);
+		coop_rpg_probe_call("_G.mp_coop_rpg_probe", "autonomous", world_id, player_id);
 		{
-			mp_coop_owner::acting_scope scope(fd.player_id);
-			coop_rpg_probe_call("acting", world_id, fd.player_id);
+			mp_coop_owner::acting_scope scope(player_id);
+			coop_rpg_probe_call("_G.mp_coop_rpg_probe", "acting", world_id, player_id);
 		}
-		coop_rpg_probe_call("after", world_id, fd.player_id);
+		coop_rpg_probe_call("_G.mp_coop_rpg_probe", "after", world_id, player_id);
 	}
-	coop_rpg_probe_call("verify", world_id, fd.player_id);
+	coop_rpg_probe_call("_G.mp_coop_rpg_probe", "verify", world_id, player_id);
+	return true;
+}
+
+// MP fork (§14 step 8 phase 2 / doc §6.3): drive the bridge case and the "any player" default.
+//
+// Three facts are written inside ONE acting scope and differ only in their classification, so
+// the scope cannot be what decides where they land — the classification has to be. Then the gate
+// is read the way the world actually asks it: with no acting player, through the same global a
+// smart terrain calls. A bridge wired to the TIER instead of the CLASSIFICATION promotes all
+// three and passes every positive assertion in the run.
+bool game_sv_Single::coop_test_rpg2_probe()
+{
+	const u16 world_id = mp_coop_owner::world_actor();
+	if (world_id == mp_coop_owner::none)
+	{
+		Msg("! COOP(rpg2): no world tier");
+		return false;
+	}
+	const u16 player_id = coop_first_player_actor();
+	if (player_id == mp_coop_owner::none)
+		return false;   // nobody has an actor yet — retry
+
+	Msg("- COOP(rpg2): tiers world=%u player=%u distinct=%u", u32(world_id), u32(player_id),
+		u32(world_id != player_id ? 1 : 0));
+
+	coop_rpg_probe_call("_G.mp_coop_rpg_probe2", "setup", world_id, player_id);
+	{
+		mp_coop_owner::acting_scope scope(player_id);
+		coop_rpg_probe_call("_G.mp_coop_rpg_probe2", "bridge", world_id, player_id);
+	}
+	coop_rpg_probe_call("_G.mp_coop_rpg_probe2", "anyplayer", world_id, player_id);
+	coop_rpg_probe_call("_G.mp_coop_rpg_probe2", "verify", world_id, player_id);
 	return true;
 }
 
@@ -2675,20 +2747,16 @@ void game_sv_Single::Update()
 		if (!m_coop_test_rpg_init)
 		{
 			m_coop_test_rpg_init = true;
-			// Check the LONGER flag first: strstr("-coop_test_rpg") also matches inside
-			// "-coop_test_rpg_verify", so the write-mode test would claim the verify run.
-			LPCSTR p = strstr(Core.Params, "-coop_test_rpg_verify");
+			// coop_param refuses a prefix match, so "-coop_test_rpg" no longer claims
+			// "-coop_test_rpg_verify" or "-coop_test_rpg2" (see the helper).
+			LPCSTR p = coop_param("-coop_test_rpg_verify");
 			if (p)
-			{
 				m_coop_test_rpg_verify_only = true;
-				p += sizeof("-coop_test_rpg_verify") - 1;
-			}
-			else if ((p = strstr(Core.Params, "-coop_test_rpg")) != nullptr)
-				p += sizeof("-coop_test_rpg") - 1;
+			else
+				p = coop_param("-coop_test_rpg");
 
 			if (p)
 			{
-				while (*p == ' ') ++p;
 				const float secs = (float)atof(p);
 				// NaN/inf fail every compare, so >0 also rejects non-finite input
 				m_coop_test_rpg_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 30000u;
@@ -2704,6 +2772,55 @@ void game_sv_Single::Update()
 			m_coop_test_rpg_retry = Device.dwTimeGlobal;   // retry 5s apart, not every frame
 			if (coop_test_rpg_probe())
 				m_coop_test_rpg_done = true;
+		}
+
+		// MP fork (§14 step 8 phase 2, harness): -coop_test_rpg2 <seconds>, §6.3's bridge case.
+		if (!m_coop_test_rpg2_init)
+		{
+			m_coop_test_rpg2_init = true;
+			LPCSTR p = coop_param("-coop_test_rpg2");
+			if (p)
+			{
+				const float secs = (float)atof(p);
+				m_coop_test_rpg2_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 30000u;
+				m_coop_test_rpg2_armed = Device.dwTimeGlobal;
+				Msg("- COOP(rpg2): bridge probe armed, firing in %ums", m_coop_test_rpg2_ms);
+			}
+		}
+		if (m_coop_test_rpg2_ms && !m_coop_test_rpg2_done &&
+		    Device.dwTimeGlobal - m_coop_test_rpg2_armed >= m_coop_test_rpg2_ms &&
+		    Device.dwTimeGlobal - m_coop_test_rpg2_retry >= 5000)
+		{
+			m_coop_test_rpg2_retry = Device.dwTimeGlobal;
+			if (coop_test_rpg2_probe())
+				m_coop_test_rpg2_done = true;
+		}
+
+		// MP fork (§14 step 8 phase 2 / doc §6.2): the flag census on a timer. This is how the
+		// world-fact classification is DERIVED rather than authored — gamedata logs every info
+		// id it has seen and which tier read or wrote it, and "read with no acting player" IS
+		// §6.2's definition of a world-read flag. Periodic and delta-only, because a census is
+		// only as complete as the paths that have run by the time you look at it.
+		if (!m_coop_census_init)
+		{
+			m_coop_census_init = true;
+			LPCSTR p = coop_param("-coop_rpg_census");
+			if (p)
+			{
+				const float secs = (float)atof(p);
+				m_coop_census_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 300000u;
+				m_coop_census_last = Device.dwTimeGlobal;
+				Msg("- COOP(rpg-census): enabled, every %ums", m_coop_census_ms);
+			}
+		}
+		if (m_coop_census_ms && Device.dwTimeGlobal - m_coop_census_last >= m_coop_census_ms)
+		{
+			m_coop_census_last = Device.dwTimeGlobal;
+			luabind::functor<void> f;
+			if (ai().script_engine().functor("_G.mp_coop_rpg_census", f))
+				f("timer");
+			else
+				Msg("! COOP(rpg-census): _G.mp_coop_rpg_census not registered");
 		}
 	}
 

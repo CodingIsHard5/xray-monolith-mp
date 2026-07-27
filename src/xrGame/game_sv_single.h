@@ -249,8 +249,29 @@ private:
 	bool m_coop_world_key_checked;
 	// Runs the probe sequence; false = no player with an actor yet, try again later.
 	bool coop_test_rpg_probe();
-	// One call into gamedata's _G.mp_coop_rpg_probe(phase, world_id, player_id).
-	void coop_rpg_probe_call(LPCSTR phase, u16 world_id, u16 player_id);
+	// One call into a gamedata probe: fn(phase, world_id, player_id).
+	void coop_rpg_probe_call(LPCSTR fn, LPCSTR phase, u16 world_id, u16 player_id);
+	// The entity id of the first connected client that has an actor, or none.
+	u16  coop_first_player_actor();
+
+	// MP fork (§14 step 8 phase 2): -coop_rpg_census <seconds> asks gamedata to log the flag
+	// census on a timer. §6.2's discriminator is mechanical, so the classification is DERIVED
+	// from what the server actually reads with no acting player rather than authored by hand —
+	// but only over the paths that ran, which is why the dump is periodic and its provenance is
+	// part of the write-up.
+	u32  m_coop_census_ms;               // 0 = disabled
+	u32  m_coop_census_last;
+	bool m_coop_census_init;
+
+	// MP fork (§14 step 8 phase 2, harness): -coop_test_rpg2 <seconds> drives §6.3's bridge
+	// case and the "any player" default. Separate flag from -coop_test_rpg so phase 1's
+	// harness stays runnable unchanged on the same binary.
+	u32  m_coop_test_rpg2_ms;
+	u32  m_coop_test_rpg2_armed;
+	u32  m_coop_test_rpg2_retry;
+	bool m_coop_test_rpg2_init;
+	bool m_coop_test_rpg2_done;
+	bool coop_test_rpg2_probe();
 public:
 	// Server-side bank path. Exposed so gamedata can trigger it at a campfire/base via the
 	// `game.mp_set_checkpoint(name)` luabind export; the engine does not care what triggered it.
