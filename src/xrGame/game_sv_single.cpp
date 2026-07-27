@@ -73,6 +73,7 @@ game_sv_Single::game_sv_Single()
 	m_coop_test_checkpoint_done = false;
 	m_coop_prev_crash = false;
 	m_coop_dirty_checked = false;
+	m_coop_dirty_streak = 0;
 	m_coop_stop_poll_last = 0;
 };
 
@@ -976,37 +977,79 @@ void game_sv_Single::coop_mark_dirty()
 	FS.update_path(path, "$game_saves$", fname);
 
 	m_coop_prev_crash = coop_file_on_disk(path);
+	m_coop_dirty_streak = 0;         // a clean predecessor deleted the flag: the count starts over
 	if (m_coop_prev_crash)
 	{
 		// Plain stdio, not FS.r_open: this file is written by one process and read by the NEXT
 		// one, and FS's reader only serves files that are in its registry. Reading it the same
 		// way coop_file_on_disk() tests for it keeps the two answers from ever disagreeing.
-		u32 hdr[4] = {0, 0, 0, 0};
+		u32 hdr[COOP_DIRTY_WORDS] = {0};
+		size_t got = 0;
 		if (FILE* f = fopen(path, "rb"))
 		{
-			if (fread(hdr, sizeof(u32), 4, f) != 4)
-				hdr[0] = 0;
+			got = fread(hdr, sizeof(u32), COOP_DIRTY_WORDS, f);
 			fclose(f);
 		}
-		const u32 magic = hdr[0], version = hdr[1], pid = hdr[2], stamp = hdr[3];
-		if (magic == COOP_DIRTY_MAGIC)
+		// A file too short even for the v1 header tells us nothing but its own existence.
+		const bool have_hdr = (got >= 4);
+		const u32 magic   = have_hdr ? hdr[0] : 0;
+		const u32 version = have_hdr ? hdr[1] : 0;
+		const u32 pid     = have_hdr ? hdr[2] : 0;
+		const u32 stamp   = have_hdr ? hdr[3] : 0;
+
+		// MP fork (§14 step 7 phase 4 D3.4): how many dirty boots in a row, INCLUDING this one.
+		// Only a version this build understands may have its payload read: v1 carried no counter
+		// (so the predecessor's streak is genuinely 0 and this boot is the first counted one),
+		// v2 carries it. Anything else — a newer build's flag, or a v2 file truncated below its
+		// own field — is dirty (the magic still says a process died here) with the count
+		// RESTARTED, because guessing at a layout we do not know is how a diagnostic becomes a
+		// lie. The `else` on this chain is the unknown-VERSION handling D2 did not have.
+		u32  prev_streak = 0;
+		bool streak_known = false;
+		if (magic == COOP_DIRTY_MAGIC && version == 1)
+			streak_known = true;                       // v1: no field, and none is missing
+		else if (magic == COOP_DIRTY_MAGIC && version == COOP_DIRTY_VERSION && got >= COOP_DIRTY_WORDS)
+		{
+			prev_streak  = hdr[4];
+			streak_known = true;
+		}
+		m_coop_dirty_streak = streak_known ? prev_streak + 1 : 1;
+
+		if (magic != COOP_DIRTY_MAGIC)
+			Msg("! COOP(shutdown): previous process ended DIRTY — '%s' is present but unreadable "
+				"(magic 0x%08x); treating it as a crash, which is the safe reading.", fname, magic);
+		else if (!streak_known)
+			Msg("! COOP(shutdown): previous process ended DIRTY — '%s' is version %u and this "
+				"build writes v%u (%u words read). Treating it as a crash and RESTARTING the "
+				"consecutive-crash count: a flag written by another build must not have its "
+				"fields parsed as if they were ours.",
+				fname, version, (u32)COOP_DIRTY_VERSION, (u32)got);
+		else
 			Msg("! COOP(shutdown): previous process ended DIRTY — '%s' left behind by pid %u "
 				"(v%u, unix time %u). Players who were still CONNECTED resume at their recovery "
 				"position; anyone who had logged off resumes where they logged off.",
 				fname, pid, version, stamp);
-		else
-			Msg("! COOP(shutdown): previous process ended DIRTY — '%s' is present but unreadable "
-				"(magic 0x%08x); treating it as a crash, which is the safe reading.", fname, magic);
+
+		Msg("%s COOP(shutdown): consecutive dirty boots: %u",
+			m_coop_dirty_streak >= COOP_DIRTY_LOOP_WARN ? "!" : "-", m_coop_dirty_streak);
+		if (m_coop_dirty_streak >= COOP_DIRTY_LOOP_WARN)
+			Msg("! COOP(shutdown): CRASH LOOP — %u consecutive dirty boots with no clean stop in "
+				"between. This server is either dying on this world every session or failing "
+				"during boot; a single crash and a loop look identical in every other log line "
+				"we keep. Diagnostic only — nothing here changes what any player is handed. The "
+				"count resets when a stop completes cleanly (the flag is deleted).",
+				m_coop_dirty_streak);
 	}
 	else
 	{
 		Msg("- COOP(shutdown): previous process ended CLEAN — no '%s'", fname);
 	}
 
-	const u32 out[4] = {(u32)COOP_DIRTY_MAGIC, (u32)COOP_DIRTY_VERSION,
-	                    (u32)GetCurrentProcessId(), (u32)time(NULL)};
+	const u32 out[COOP_DIRTY_WORDS] = {(u32)COOP_DIRTY_MAGIC, (u32)COOP_DIRTY_VERSION,
+	                                   (u32)GetCurrentProcessId(), (u32)time(NULL),
+	                                   m_coop_dirty_streak};
 	FILE* w = fopen(path, "wb");
-	if (!w || fwrite(out, sizeof(u32), 4, w) != 4)
+	if (!w || fwrite(out, sizeof(u32), COOP_DIRTY_WORDS, w) != COOP_DIRTY_WORDS)
 	{
 		// Not fatal: the flag is diagnostic. Say so loudly rather than let a later boot read
 		// "clean" off a flag we simply failed to write.
@@ -1015,11 +1058,15 @@ void game_sv_Single::coop_mark_dirty()
 		return;
 	}
 	fclose(w);   // flushed and closed NOW: the next thing this flag has to survive is a kill -9
-	Msg("- COOP(shutdown): dirty flag '%s' claimed by pid %u", fname, out[2]);
+	Msg("- COOP(shutdown): dirty flag '%s' claimed by pid %u (v%u, consecutive dirty boots %u)",
+		fname, out[2], (u32)COOP_DIRTY_VERSION, m_coop_dirty_streak);
 }
 
 // MP fork (§14 step 7 phase 4 D2): the world on disk is complete and this process is going away
 // on purpose. Called only from the clean-stop sequence, and only AFTER the final autosave.
+//
+// D3.4: this deletion is also the consecutive-crash counter's ONLY reset. Nothing zeroes the
+// field in place — the next boot finds no flag, reports CLEAN, and starts its own count at 0.
 void game_sv_Single::coop_clear_dirty()
 {
 	string_path fname, path;

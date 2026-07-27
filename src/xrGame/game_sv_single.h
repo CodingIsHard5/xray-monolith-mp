@@ -174,9 +174,22 @@ private:
 	void coop_check_stop_request();  // poll the stop file (the only clean stop this server has)
 	void coop_clean_shutdown(LPCSTR reason);
 	static const u32 COOP_DIRTY_MAGIC = 0x54524944;   // 'DIRT' (LE)
-	static const u32 COOP_DIRTY_VERSION = 1;
+	// MP fork (§14 step 7 phase 4 D3.4): v2 appends `consecutive_dirty`. v1 (4 words: magic,
+	// version, pid, unix time) is still READ — a flag left by a D2-era process simply carries no
+	// count, which is the truthful answer, not a load failure. An UNKNOWN version is the case D2
+	// never handled: the magic already made an unreadable flag read as dirty (the safe reading),
+	// but a v3 file from a future build would have had its fields parsed as if they were ours.
+	static const u32 COOP_DIRTY_VERSION = 2;
+	static const u32 COOP_DIRTY_WORDS   = 5;   // magic, version, pid, unix time, consecutive_dirty
+	static const u32 COOP_DIRTY_LOOP_WARN = 3; // consecutive dirty boots that earn a loud line
 	bool m_coop_prev_crash;          // a dirty flag was present at boot => the last process died
 	bool m_coop_dirty_checked;       // one-shot: the flag is claimed once per process
+	// MP fork (§14 step 7 phase 4 D3.4): consecutive dirty boots INCLUDING this one — 0 when the
+	// last process stopped cleanly. Carried in the flag so it survives the process that would
+	// otherwise have to remember it, which is precisely the process that keeps dying. A clean stop
+	// deletes the flag, and that deletion IS the reset: a counter that only ever climbs is
+	// indistinguishable from a broken one. Diagnostics, not policy — nothing decides on it.
+	u32  m_coop_dirty_streak;
 	u32  m_coop_stop_poll_last;      // Device.dwTimeGlobal of the last stop-file probe
 	bool coop_spawn_checkpoint_item(CSE_Abstract* owner, xrClientData* CL,
 	                                const coop_checkpoint_item& rec);
