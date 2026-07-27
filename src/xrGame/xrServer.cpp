@@ -557,6 +557,21 @@ void xrServer::MakeUpdatePackets(xrClientData* target_client)
 		if (!Test.net_Ready) continue;
 		if (Test.s_flags.is(M_SPAWN_OBJECT_PHANTOM)) continue; // Surely: phantom
 
+		// MP fork (§14 step 7 P4 D2, run 3): a PLAYER's body never belongs in the generic entity
+		// update. Two authorities were fighting over it and the server's copy always won: the
+		// server streams this CSE at psNET_ServerUpdate Hz, and `CActor::net_Import_Base` applies
+		// `SetfHealth(health)` on any client — there is NO Local() guard on that path (there is
+		// one on the M_CL_UPDATE relay, which is why this went unnoticed). So a save-restored
+		// body, whose CSE the server's own unplaced object rots to hp 0.00 (P2 §3b), was killing
+		// the returning player's actor ten times a second: dead => `net_Relevant()` false =>
+		// no M_CL_UPDATE => the CSE never gets corrected => dead again. The reclaim's health
+		// restore could not win against a broadcast that reinstates the zero every tick.
+		// Player bodies are already replicated by the §19 M_CL_UPDATE relay — position AND
+		// health, same net_Export format — so this stream is pure redundancy for them, and
+		// removing it leaves exactly one authority over a player's body: that player.
+		if (xr_enet::enabled() && smart_cast<CSE_ALifeCreatureActor*>(&Test))
+			continue;
+
 		// MP fork (§19 co-op): among creatures, stock X-Ray declares ONLY the actor
 		// net-relevant (CSE_ALifeCreatureActor::Net_Relevant is the single override) —
 		// vanilla MP has no A-Life, so NPCs and mutants never needed replicating and
