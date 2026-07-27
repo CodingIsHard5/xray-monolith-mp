@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "xrServer.h"
 #include "xrServer_Objects.h"
+#include "xrServer_Objects_ALife_Monsters.h"    // MP fork (§14 step 7 P4 D2): CSE_ALifeCreatureActor
 #include "../xrNetServer/xr_enet_transport.h"   // MP fork (§14 step 7 P4 D2): xr_enet::enabled()
 
 int g_Dump_Update_Read = 0;
