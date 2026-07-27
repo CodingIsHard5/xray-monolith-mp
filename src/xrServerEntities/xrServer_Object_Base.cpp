@@ -365,11 +365,36 @@ BOOL CSE_Abstract::Spawn_Read(NET_Packet& tNetPacket)
 	}
 
 	u16 size;
+	const u32 state_begin = tNetPacket.r_tell();   // MP fork: at the size field itself
 	tNetPacket.r_u16(size); // size
 	bool b1 = (m_tClassID == CLSID_SPECTATOR);
 	bool b2 = (size > sizeof(size)) || (tNetPacket.inistream != NULL);
 	R_ASSERT3((b1 || b2), "cannot read object, which is not successfully saved :(", name_replace());
 	STATE_Read(tNetPacket, size);
+
+	// MP fork (§14 step 7 P4 D2, measured 2026-07-26): the size prefix is AUTHORITATIVE, and
+	// nothing here used to enforce it. `Spawn_Write` records exactly how many bytes STATE_Write
+	// produced; if STATE_Read consumes a different number, every byte after this block is read
+	// from the wrong offset — and for a spawn carrying M_SPAWN_UPDATE the very next block is the
+	// update, where fHealth and o_Position are read LAST and so overwrite the correct values that
+	// came out of the header. Measured on a save-restored co-op body: the server wrote a 341-byte
+	// packet with hp 1.00 at -220.6,27.9,253.9 (verified in the CSE after the write), the client
+	// finished the parse at rtell=338 and produced hp 0.00 at 0,-7.9e33,0 — a corpse at nowhere.
+	// That is why reclaiming a save-restored body has never worked on the client: it is not a
+	// co-op bug at all, it is a three-byte parse debt, and any entity whose STATE_Read disagrees
+	// with its STATE_Write pays it (a freshly cloned actor happened not to: pkt=332 rtell=332).
+	// Snap to the recorded end and say so loudly — the mismatch is a real defect in whichever
+	// class reports it, and silently recovering without naming it would just hide the next one.
+	const u32 state_end = state_begin + size;
+	const u32 consumed = tNetPacket.r_tell();
+	if (consumed != state_end)
+	{
+		Msg("! CSE(state): '%s' id %u read %d byte(s) %s than its STATE block declares (%u vs %u) "
+			"— snapping to the recorded end; anything after this block would have been misparsed",
+			s_name.c_str(), ID, (int)(consumed > state_end ? consumed - state_end : state_end - consumed),
+			consumed > state_end ? "MORE" : "fewer", consumed - state_begin, (u32)size);
+		tNetPacket.r_seek(state_end);
+	}
 	return TRUE;
 }
 
