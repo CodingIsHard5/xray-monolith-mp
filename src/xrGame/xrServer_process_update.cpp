@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "xrServer.h"
 #include "xrServer_Objects.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§14 step 7 P4 D2): xr_enet::enabled()
 
 int g_Dump_Update_Read = 0;
 
@@ -25,6 +26,30 @@ void xrServer::Process_update(NET_Packet& P, ClientID sender)
 		P.r_u8(size);
 		u32 _pos = P.r_tell();
 		CSE_Abstract* E = ID_to_entity(ID);
+
+		// MP fork (§14 step 7 P4 D2, run 4): THIS is where a reserved body rots. The dedicated
+		// server's own loopback client exports every online object it simulates and the server
+		// writes that straight onto the CSE — so an UNCLAIMED player body, whose server-side
+		// actor object nobody placed and nobody drives, overwrites its own record with where
+		// that object ended up: caught mid-fall at Y=-1.02e8 (run 3) and parked dead at the
+		// world origin with hp 0.00 (runs 2 and 4). P2 §3b called this "uninitialized memory";
+		// it is not, it is a real object being simulated with no driver, and the record it
+		// destroys is the one a returning player is restored from.
+		//
+		// A reserved body is a RECORD, not a simulation. Skip the writeback for it — the bytes
+		// are still consumed, exactly as for an unknown id — and the CSE keeps the position and
+		// health the save (or the reclaim) put there. Claimed bodies are untouched: those are
+		// maintained by their owner's M_CL_UPDATE, which is the co-op authority for a player.
+		if (E && xr_enet::enabled() && E->m_coop_orphaned)
+		{
+			E->net_Ready = TRUE;   // still "seen"; only the state write is refused
+			static u32 s_skipped = 0;
+			if ((++s_skipped % 600) == 1)
+				Msg("- COOP(bindings): refusing the server's own update for reserved body id %u "
+					"(%u so far) — an unclaimed body is a record, not a simulation", E->ID, s_skipped);
+			P.r_advance(size);
+			continue;
+		}
 
 		if (E)
 		{
