@@ -1146,8 +1146,20 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 					P.r_u8();                // flags
 					Fvector pos;
 					P.r_vec3(pos);
+					// D2 run 5: name this write. It runs on the ENet PUMP THREAD and assigns straight
+					// into a CSE the game thread may be serialising at that very instant, and a
+					// client that has not yet been given a body sends zeros — which is exactly the
+					// `pos 0,0,0 / hp 0.00` a reclaimed body arrived with. Log the first writes for
+					// each client (cheap, then silent) so the sequence is visible against the
+					// reclaim's own before/after lines.
 					if (_valid(pos))
+					{
+						if (CL->m_coop_cl_update_count < 3)
+							Msg("- XRNET(diag): pump-thread peek writes id %u <- %.1f,%.1f,%.1f "
+								"(client 0x%08x, update #%u)", CL->owner->ID, pos.x, pos.y, pos.z,
+								sender.value(), CL->m_coop_cl_update_count + 1);
 						CL->owner->o_Position = pos;
+					}
 					// MP fork (§14 step 7 phase 4 D2, run 2): this client is DRIVING its body —
 					// the position above came from the player, not from the server's own copy.
 					// coop_sample_recoveries() refuses to persist a body that has never got here.

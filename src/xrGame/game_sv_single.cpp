@@ -2116,6 +2116,22 @@ void game_sv_Single::coop_poll_spawns()
 				orphan->Spawn_Write(P2, TRUE); // TRUE = LOCAL
 				orphan->UPDATE_Write(P2);
 				orphan->s_flags = save;
+
+				// D2 run 5: the bracket says the packet left with hp 0.00 AND pos 0,0,0, while the
+				// id and flags — read AFTER the position out of the same header — parsed perfectly.
+				// So those bytes really were zero when Spawn_Write ran, microseconds after this same
+				// field logged -220.6,27.9,253.9. Nothing on this thread runs in between, which
+				// leaves the ENet PUMP THREAD: `CL->owner` was pointed at this body a few lines
+				// above, and the M_CL_UPDATE peek assigns `CL->owner->o_Position` from whatever a
+				// client packet carries (xrServer.cpp, §15 — the D1 threading finding, one field
+				// further on). Re-read the CSE after the write: if it disagrees with the pre-write
+				// line, the race is proven and the packet must be built from a local copy.
+				if (CSE_ALifeCreatureAbstract* aft = smart_cast<CSE_ALifeCreatureAbstract*>(orphan))
+					Msg("- COOP(bindings): body id %u AFTER the write — CSE hp %.2f pos %.1f,%.1f,%.1f"
+						" (packet %u bytes)", orphan->ID, aft->get_health(),
+						orphan->o_Position.x, orphan->o_Position.y, orphan->o_Position.z,
+						P2.B.count);
+
 				m_server->SendTo(CL->ID, P2, net_flags(TRUE, TRUE));
 
 				// Children (inventory items) as LOCAL — same story as the actor above: they were
