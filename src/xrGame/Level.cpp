@@ -1134,6 +1134,54 @@ void CLevel::coop_dispatch_due_decisions()
 	}
 }
 
+// MP fork (§3c REPRODUCTION, dev/INSTABILITY_PLAN.md §3d/§4): enter the Lua VM on demand, from
+// whichever thread the caller happens to be, and count how many times we managed it.
+//
+// The +seh trace says the headless server dies because `xrServer::OnMessage` runs on the ENet
+// PUMP thread and `M_XRNET_DIALOG_ACTION` walks from there straight into the (single-threaded)
+// Lua VM while the game thread is in it too. That is a claim about a MECHANISM, and a trace of
+// one failure is not enough to believe one: the failure is stochastic at roughly two runs in
+// three, so any fix would be indistinguishable from a run that simply did not crash. This is the
+// thing that makes the difference — a switch that summons the failure on command.
+//
+// It is deliberately the same API surface the dialogue path uses (resolve a functor, call it),
+// not a hand-rolled lua_* poke, so that reproducing it says something about the real path. And it
+// comes in a matched PAIR: the same bait driven from the GAME thread is the control. Without the
+// control a crash would only show "this Lua function is unsafe"; with it, the two runs differ in
+// the thread and in nothing else, which is the only way the THREAD gets to be the finding.
+//
+// Off unless -coop_repro_pumplua / -coop_repro_gamelua is passed. Nothing else can reach it.
+void coop_repro_bait(LPCSTR who)
+{
+	if (!g_pGameLevel)
+		return;
+
+	// One counter per caller site, so the two runs can be compared on calls-into-the-VM rather
+	// than on wall-clock — a control that survives because it was called ten times would prove
+	// nothing at all, and this is what makes that visible instead of assumed.
+	static u32 s_pump_calls = 0;
+	static u32 s_game_calls = 0;
+	const bool is_pump = (who && who[0] == 'p');
+	u32& calls = is_pump ? s_pump_calls : s_game_calls;
+	++calls;
+
+	luabind::functor<void> fn;
+	if (!ai().script_engine().functor("_G.mp_coop_racebait", fn))
+	{
+		// Said once per site: a bait that never resolved and a bait that ran clean look identical
+		// in a log that ends in a crash, and only one of them is evidence.
+		if (calls == 1)
+			Msg("! COOP(repro): -coop_repro_%slua is armed but _G.mp_coop_racebait did not resolve"
+				" — this run baits NOTHING", is_pump ? "pump" : "game");
+		return;
+	}
+	if (calls == 1)
+		Msg("~ COOP(repro): baiting the Lua VM from the %s thread", is_pump ? "PUMP" : "GAME");
+	if ((calls % 500) == 0)
+		Msg("~ COOP(repro): %s-thread VM entries: %u", is_pump ? "pump" : "game", calls);
+	fn(who);
+}
+
 // MP fork (§4): server-side gamedata decision-origination tick. Runs only on the host/server
 // (Server != nullptr) with enet co-op enabled, and only under -coop_server_tick so stock MP is
 // untouched. Hands gamedata the shared-clock time and the first real remote client's actor id
@@ -1144,6 +1192,12 @@ void CLevel::coop_server_decision_tick()
 {
 	if (!xr_enet::enabled() || !Server)
 		return;
+
+	// The game-thread half of the §3c reproduction. Deliberately ABOVE the -coop_server_tick
+	// gate: the control must not be able to fail quietly because a different flag was missing.
+	if (strstr(Core.Params, "-coop_repro_gamelua"))
+		coop_repro_bait("game");
+
 	if (!strstr(Core.Params, "-coop_server_tick"))
 		return;
 

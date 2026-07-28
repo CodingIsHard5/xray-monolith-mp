@@ -1067,8 +1067,20 @@ void xrServer::coop_run_dialog_phrase(u16 acting_id, u16 speaker_id, u16 partner
 	phrase->GetScriptHelper()->Action(speaker, partner, dialog_id, phrase_id);
 }
 
+// MP fork (§3c reproduction): defined in Level.cpp next to the game-thread half, so the two
+// halves of the matched pair sit together and neither can drift from the other.
+extern void coop_repro_bait(LPCSTR who);
+
 u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadcasting with "flags" as returned
 {
+	// MP fork (§3c REPRODUCTION): this function runs on the ENet PUMP thread — see the
+	// pump-thread peek's own comment further down this file — and M_XRNET_DIALOG_ACTION already
+	// walks from here into the Lua VM. Bait it here rather than at the dialogue case, so the
+	// reproduction is about WHERE the VM is entered and not about anything the dialogue does.
+	// Off unless -coop_repro_pumplua is passed.
+	if (strstr(Core.Params, "-coop_repro_pumplua"))
+		coop_repro_bait("pump");
+
 	u16 type;
 	P.r_begin(type);
 #ifdef DEBUG
