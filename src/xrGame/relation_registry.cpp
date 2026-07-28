@@ -230,6 +230,34 @@ void RELATION_REGISTRY::SetCommunityGoodwill(CHARACTER_COMMUNITY_INDEX from_comm
 {
 	static Ivector2 gw_limits = pSettings->r_ivector2(ACTIONS_POINTS_SECT, "community_goodwill_limits");
 	clamp(goodwill, gw_limits.x, gw_limits.y);
+
+	// MP fork (§14 step 8 P4 R3.1 run 1): NAME THE WRITER.
+	//
+	// R3.0 measured a kill moving the killer's community-goodwill row by -140 and R3.1 was built
+	// on the assumption that RELATION_REGISTRY::Action wrote it. It cannot have: that write is
+	// `Sympathy() * community_member_kill_goodwill`, Sympathy comes from [communities_sympathy],
+	// and in this GAMMA config EVERY community's sympathy is 0.0 — so the stock write is
+	// multiplied to zero and guarded out by `if (community_goodwill)`. R3.1 run 1 measured the
+	// consequence directly: the value reaching the propagation was 0 while the row still moved
+	// -140. Something else writes this row, and every write to it lands HERE, so this is where
+	// the question gets answered rather than argued.
+	//
+	// Rate-limited and co-op only, like the Action tracer beside it: this is on the path of every
+	// goodwill change in the game.
+	if (xr_enet::enabled())
+	{
+		static u32 s_gw_lines = 0;
+		if (s_gw_lines < 40)
+		{
+			++s_gw_lines;
+			const shared_str cname = (from_community >= 0)
+				? CHARACTER_COMMUNITY::IndexToId(from_community, NULL, true) : shared_str("<none>");
+			Msg("~ COOP(rep3w): SetCommunityGoodwill community=%s(%d) character=%u <- %d  frame=%u%s",
+				cname.c_str() ? cname.c_str() : "<none>", int(from_community), u32(to_character),
+				int(goodwill), Device.dwFrame,
+				(s_gw_lines == 40) ? "   [further goodwill writes suppressed]" : "");
+		}
+	}
 	RELATION_DATA& relation_data = relation_registry().registry().objects(to_character);
 
 	relation_data.communities[from_community].SetGoodwill(goodwill);

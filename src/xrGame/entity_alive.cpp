@@ -10,6 +10,7 @@
 #include "level.h"
 #include "../Include/xrRender/Kinematics.h"
 #include "relation_registry.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§14 step 8 P4 R3.1 run 1): co-op-only death tracing
 #include "monster_community.h"
 #include "entitycondition.h"
 #include "script_game_object.h"
@@ -318,14 +319,36 @@ void CEntityAlive::OnEvent(NET_Packet& P, u16 type)
 	inherited::OnEvent(P, type);
 }
 
+// MP fork (§14 step 8 P4 R3.1 run 1): bracket the death path, so the goodwill write R3.1 run 1
+// could not account for can be placed in TIME. The row moved -140 while the value stock's Action
+// computed was 0 (sympathy is 0.0 for every community in this config), so the writer is somewhere
+// else on this path — and "before Action", "inside Action", "in the Lua eDeath callback" and
+// "after Die returns" are four different answers with four different consequences for where the
+// bystander term should get its magnitude. Co-op only and capped: Die runs for every corpse.
+static void coop_rep_die_trace(LPCSTR where, u16 victim, u16 killer)
+{
+	if (!xr_enet::enabled())
+		return;
+	static u32 s_lines = 0;
+	if (s_lines >= 60)
+		return;
+	++s_lines;
+	Msg("~ COOP(rep3d): Die %s victim=%u killer=%u frame=%u", where, u32(victim), u32(killer),
+		Device.dwFrame);
+}
+
 void CEntityAlive::Die(CObject* who)
 {
+	coop_rep_die_trace("ENTER", ID(), who ? who->ID() : u16(-1));
 	if (IsGameTypeSingle())
 		RELATION_REGISTRY().Action(smart_cast<CEntityAlive*>(who), this, RELATION_REGISTRY::KILL);
+	coop_rep_die_trace("after Action", ID(), who ? who->ID() : u16(-1));
 	inherited::Die(who);
+	coop_rep_die_trace("after inherited::Die", ID(), who ? who->ID() : u16(-1));
 
 	const CGameObject* who_object = smart_cast<const CGameObject*>(who);
 	callback(GameObject::eDeath)(lua_game_object(), who_object ? who_object->lua_game_object() : 0);
+	coop_rep_die_trace("after Lua eDeath callback", ID(), who ? who->ID() : u16(-1));
 
 	if (!getDestroy() && (GameID() == eGameIDSingle))
 	{
@@ -340,6 +363,7 @@ void CEntityAlive::Die(CObject* who)
 	if (self) self->spatial.type &= ~STYPE_REACTTOSOUND;
 	if (character_physics_support())
 		character_physics_support()->in_Die();
+	coop_rep_die_trace("LEAVE", ID(), who ? who->ID() : u16(-1));
 }
 
 //вывзывает при подсчете хита
