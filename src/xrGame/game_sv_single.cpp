@@ -4151,6 +4151,7 @@ void game_sv_Single::Update()
 		static float s_r31_realb_dist = -1.f;
 		static int  s_r31_f_actor_before = 0, s_r31_f_chosen_before = 0;
 		static u32  s_r31_bys_moved_before = 0, s_r31_fac_moved_before = 0, s_r31_fac_ref_before = 0;
+		static bool s_r31_shooter_logged = false;         // the shooter choice is logged once, not per tick
 
 		// A stand-in id, not an entity — the same construction R3.0 used, kept at the same value
 		// so the two runs' bystander rows are directly comparable.
@@ -4179,7 +4180,58 @@ void game_sv_Single::Update()
 
 		if ((s_r31_stage == 0 || s_r31_stage == 2) && (Device.dwTimeGlobal - s_r31_armed) >= s_r31_ms)
 		{
-			const u16 player_id = coop_first_player_actor();
+			// THE SHOOTER IS NOT "WHOEVER CONNECTED FIRST" ANY MORE, and run 6 is why.
+			//
+			// The stock kill penalty this whole increment scales is applied by the GAMMA addon
+			// `grok_killing_friends_reduces_goodwill.script`, whose first gate is
+			// `killer:id() == db.actor:id()`. `db.actor` is a SINGLE-ACTOR global, so with two
+			// clients connected it names exactly one of them. Run 6 measured that gate at the gate,
+			// on both of the probe's own kills:
+			//
+			//   ~ COOP(rep3a): npc_death victim=22645 killer=21681 db.actor=26268 killer_is_db_actor=no
+			//
+			// The probe was shooting with `coop_first_player_actor()` — the first-connected client —
+			// which is not the actor `db.actor` names, so the tier was silent and three runs
+			// measured a blast radius of zero times a falloff. The gate is not wrong; the probe was
+			// shooting with the wrong player. So pick the shooter the world will actually attribute
+			// the kill to, and let the OTHER player be the bystander.
+			//
+			// `g_actor` is the engine-side "most recently spawned actor" (Actor_Network.cpp), which
+			// is BELIEVED to track the same object gamedata's `db.actor` does — believed, not
+			// assumed: the COOP(rep3a) Lua hook logs `db.actor`'s id at every death, this logs
+			// `g_actor`'s id from C++, and a run in which they disagree says so in its own log
+			// instead of quietly measuring the wrong player again.
+			// g_actor is declared in Actor.h, already included above.
+			const u16 world_actor_id = g_actor ? g_actor->ID() : u16(mp_coop_owner::none);
+			const u16 first_player   = coop_first_player_actor();
+
+			u16 player_id = first_player;
+			LPCSTR shooter_why = "first-connected (g_actor is not a connected player)";
+			if (world_actor_id != mp_coop_owner::none)
+			{
+				// Only if that actor is genuinely a CONNECTED player: g_actor could name something
+				// that is not one of our clients, and shooting with a non-player would measure a
+				// different thing entirely while looking like a fix.
+				xr_vector<u16> shooter_cands;
+				coop_all_player_actors(shooter_cands);
+				for (u32 si = 0; si < shooter_cands.size(); ++si)
+					if (shooter_cands[si] == world_actor_id)
+					{
+						player_id = world_actor_id;
+						shooter_why = "g_actor (the actor db.actor names)";
+						break;
+					}
+			}
+			if (!s_r31_shooter_logged && player_id != mp_coop_owner::none)
+			{
+				s_r31_shooter_logged = true;
+				Msg("- COOP(rep31): shooter=%u chosen by %s  [g_actor=%u first_connected=%u] — the "
+					"stock tier's gate is killer==db.actor, so shooting with the wrong player "
+					"measures zero and reports it as a blast radius",
+					u32(player_id), shooter_why, u32(world_actor_id), u32(first_player));
+				FlushLog();
+			}
+
 			CObject* const pobj = (player_id != mp_coop_owner::none)
 			                      ? Level().Objects.net_Find(player_id) : NULL;
 			CInventoryOwner* const pio = pobj ? smart_cast<CInventoryOwner*>(pobj) : NULL;
