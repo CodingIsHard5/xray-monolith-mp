@@ -3414,19 +3414,26 @@ void game_sv_Single::Update()
 		{
 			s_q5_retry = Device.dwTimeGlobal;
 			const u16 player_id = coop_first_player_actor();
+			// The player's community, read off the live object — the same call the task layer
+			// makes, so the two cannot disagree about what a member is. It is read BEFORE the
+			// probe commits, because CharacterInfo() is not populated the instant the actor
+			// appears: about one boot in three it answered -1, and a community of "none" means
+			// "anyone may finish it", which would quietly turn both §7.4 gates into gates that
+			// cannot fail. Waiting is free — the probe already retries for the actor itself.
+			u16 pcomm = u16(-1);
 			if (player_id != mp_coop_owner::none)
+				if (CObject* const po = Level().Objects.net_Find(player_id))
+					if (CInventoryOwner* const pio = smart_cast<CInventoryOwner*>(po))
+						pcomm = u16(pio->CharacterInfo().Community().index());
+			if (player_id != mp_coop_owner::none && pcomm == u16(-1))
+				Msg("- COOP(quest5): player %u has no community yet — waiting rather than measuring "
+					"a faction gate that cannot fail", u32(player_id));
+			if (player_id != mp_coop_owner::none && pcomm != u16(-1))
 			{
 				s_q5_done   = true;
 				s_q5_player = player_id;
 				const shared_str item(s_q5_item);
 				const u16 synth = u16(0xF005);
-
-				// The player's community, read off the live object — the same call the task layer
-				// makes, so the two cannot disagree about what a member is.
-				u16 pcomm = u16(-1);
-				if (CObject* const po = Level().Objects.net_Find(player_id))
-					if (CInventoryOwner* const pio = smart_cast<CInventoryOwner*>(po))
-						pcomm = u16(pio->CharacterInfo().Community().index());
 				// A community the player is demonstrably NOT in. Picked by construction rather
 				// than by finding some other faction, because "some other faction" is exactly the
 				// kind of environmental assumption that makes a negative gate vacuous when the
@@ -3560,8 +3567,15 @@ void game_sv_Single::Update()
 				(fstate == int(eTaskStateCompleted)) &&
 				(wstate == int(eTaskStateInProgress)) && (wrem == 1) &&
 				(rstate == int(eTaskStateInProgress)) && (rrem == 1) &&
-				(carried == 0) && (with_npc == 4) &&
+				(carried == 0) &&
 				(!ghost_after_bogus) && ghost_after_real && delivered_info;
+			// with_npc is REPORTED and never gated. With no named recipient the goods go to
+			// whoever the player is talking to, and the client picks that NPC out of its own
+			// object list — so the one this probe picked out of the SERVER's is a bystander who
+			// was handed nothing, and a run where everything worked reads 0 here. The real
+			// reading is taken by the dialogue itself, which is the only place that knows the
+			// recipient (mp_coop_dialogs.script logs "NPC <id> now holds N").
+
 			Msg("- COOP(quest5v): verify downer=%u dstate=%d drem=%u bowner=%u bstate=%d "
 				"pstate=%d prem=%u fstate=%d wstate=%d wrem=%u rstate=%d rrem=%u "
 				"carried=%u with_npc=%u ghost_bogus=%d ghost_real=%d delivered_info=%d pass=%d",
