@@ -1105,11 +1105,28 @@ bool CScriptStorage::namespace_loaded(LPCSTR N, bool remove_from_stack)
 		}
 		else if (!lua_istable(lua(), -1))
 		{
+			// §3c INSTRUMENT: the stock message names the failure CLASS and nothing else, which
+			// is why a headless co-op server that dies here leaves a log with no lead in it —
+			// one of these killed a Q4 leg-1 run and was read as "the log just stops". The three
+			// facts that identify it are all on hand at this instant and none of them survive
+			// the pop, so capture them first: which COMPONENT is in the way, the full dotted
+			// name being resolved, and WHAT the offender actually is.
+			LPCSTR const l_type = lua_typename(lua(), lua_type(lua(), -1));
+			string256 l_component;
+			xr_strcpy(l_component, S);
+			// Msg before FATAL on purpose: the fatal handler dumps console variables and has
+			// itself faulted mid-dump on this server, so a line that is already flushed is the
+			// only one guaranteed to be readable afterwards.
+			Msg("! [script] namespace '%s' is a %s, not a table — cannot load it as a script "
+			    "module (resolving '%s')", l_component, l_type, N);
 			//				lua_settop	(lua(),0);
 			VERIFY(lua_gettop(lua()) >= 1);
 			lua_pop(lua(), 1);
 			VERIFY(start == lua_gettop(lua()));
-			FATAL(" Error : the namespace name is already being used by the non-table object!\n");
+			Debug.fatal(DEBUG_INFO,
+			            " Error : the namespace name is already being used by the non-table "
+			            "object!\n         namespace '%s' is a %s (resolving '%s')",
+			            l_component, l_type, N);
 			return (false);
 		}
 		lua_remove(lua(), -2);
