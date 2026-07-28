@@ -874,9 +874,12 @@ void coop_rep_propagate_kill(u16 killer_id, CHARACTER_COMMUNITY_INDEX killer_com
 		const bool same_faction = (b.comm >= 0) && (b.comm == killer_comm);
 		// Rounded AWAY from zero, so a bystander inside the radius never quietly rounds to a
 		// no-op: the only zero this tier produces should be the one the radius test produced.
+		// Done on the MAGNITUDE and re-signed, because the obvious one-liner is not symmetric —
+		// `iFloor(raw + 0.5f)` on an exact -70.0 gives -71, which is how an off-by-one hides
+		// inside a line everyone reads as "rounding".
 		const float raw = float(shooter_community_delta) * scale;
-		const s32 delta = (scale > 0.f && same_faction)
-			? s32(raw < 0.f ? floorf(raw - 0.5f) : floorf(raw + 0.5f)) : 0;
+		const s32 mag = iFloor(_abs(raw) + 0.5f);
+		const s32 delta = (scale > 0.f && same_faction) ? ((raw < 0.f) ? -mag : mag) : 0;
 
 		const shared_str b_comm_name = coop_rep_comm_name(b.comm);
 		const shared_str k_comm_name = coop_rep_comm_name(killer_comm);
