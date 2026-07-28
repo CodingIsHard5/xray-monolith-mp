@@ -1230,9 +1230,23 @@ void CLevel::coop_server_decision_tick()
 		fn(timeServer(), probe.real_count, u32(probe.actor_id));
 }
 
+// MP fork (§3c): which thread is THE game thread. Stamped here and nowhere else.
+//
+// It was first stamped in xrServer::Update, and the run that verified the §3c fix is what showed
+// why that was wrong: one dialogue phrase reported thread 356 where every other reported 276, and
+// BOTH columns moved together — because xrServer::Update has four call sites and a second thread
+// called it once. So the gate read "the same thread that last ran Update", which is not the claim
+// anyone wanted to make. CLevel::OnFrame IS the game loop; there is no second answer here.
+u32 g_coop_game_thread_id = 0;
+
 void CLevel::OnFrame()
 {
 	PROF_EVENT("CLevel::OnFrame()");
+
+	// Every frame rather than once: a cached answer cannot go stale, but it also cannot notice
+	// if the loop is ever re-hosted, and a gate that silently compares a thread to itself is
+	// worse than no gate.
+	g_coop_game_thread_id = GetCurrentThreadId();
 
 #ifdef DEBUG_MEMORY_MANAGER
     debug_memory_guard __guard__;

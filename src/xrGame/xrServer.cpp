@@ -218,22 +218,16 @@ int g_Dump_Update_Write = 0;
 INT g_sv_SendUpdate = 0;
 #endif
 
-// MP fork (§3c): which thread is the game thread, recorded where there is no doubt about it.
-// The §3c fix is a claim about WHICH THREAD runs a dialogue action, and that claim deserves a
-// deterministic gate rather than a stochastic one: "the server did not crash this time" is worth
-// almost nothing against a failure that spares one run in three, whereas "the action ran on the
-// game thread" is either true or false in every single run. Read by coop_run_dialog_phrase.
-u32 g_coop_game_thread_id = 0;
+// MP fork (§3c): stamped by CLevel::OnFrame, which IS the game loop. It used to be stamped here,
+// in xrServer::Update, and that was wrong in a way only the verifying run caught — Update has
+// four call sites and one of them ran on a second thread, so the gate was comparing a thread to
+// whichever thread had most recently run Update rather than to the game thread.
+extern u32 g_coop_game_thread_id;
 
 void xrServer::Update()
 {
 	if (Level().IsDemoPlayStarted() || Level().IsDemoPlayFinished())
 		return; //diabling server when demo is playing
-
-	// Set every frame rather than once: cheap, and it cannot go stale if the game loop is ever
-	// re-hosted on a different thread — a cached wrong answer here would silently turn the gate
-	// below into a rubber stamp.
-	g_coop_game_thread_id = GetCurrentThreadId();
 
 	NET_Packet Packet;
 #ifdef DEBUG
@@ -1050,9 +1044,14 @@ void xrServer::coop_run_dialog_phrase(u16 acting_id, u16 speaker_id, u16 partner
 	// harness asserts on instead of asserting on the absence of a crash.
 	{
 		const u32 tid = GetCurrentThreadId();
-		Msg("- COOP(dlg-thread): phrase '%s/%s' runs on thread %u, game thread is %u, same=%s",
-			dialog_id, phrase_id, tid, g_coop_game_thread_id,
-			(g_coop_game_thread_id && tid == g_coop_game_thread_id) ? "YES" : "NO");
+		const bool same = (g_coop_game_thread_id != 0) && (tid == g_coop_game_thread_id);
+		// A mismatch is a '!' line, not a quieter shade of the same line: this is the exact
+		// defect §3c spent a session finding, and if it ever comes back it should be greppable
+		// as an error rather than as a field on a routine one.
+		Msg("%s COOP(dlg-thread): phrase '%s/%s' runs on thread %u, game thread is %u, same=%s%s",
+			same ? "-" : "!", dialog_id, phrase_id, tid, g_coop_game_thread_id,
+			same ? "YES" : "NO",
+			same ? "" : " — THE DIALOGUE ACTION IS OFF THE GAME THREAD (§3c has regressed)");
 	}
 
 	CGameObject* const speaker = smart_cast<CGameObject*>(Level().Objects.net_Find(speaker_id));
@@ -1804,6 +1803,24 @@ void xrServer::create_direct_client()
 
 void xrServer::ProceedDelayedPackets()
 {
+	// MP fork (§3c): the §3c fix defers the dialogue action into this queue precisely so it runs
+	// on the game thread, which makes "who drains the queue" a load-bearing fact rather than an
+	// implementation detail. xrServer::Update has four call sites, so assert nothing and MEASURE
+	// it: say so, once, if a drain ever happens anywhere else. Said once because a per-frame line
+	// would be noise, and said at all because the alternative is finding out from a crash.
+	{
+		extern u32 g_coop_game_thread_id;
+		static bool s_warned = false;
+		const u32 tid = GetCurrentThreadId();
+		if (!s_warned && g_coop_game_thread_id != 0 && tid != g_coop_game_thread_id)
+		{
+			s_warned = true;
+			Msg("! COOP(delayed): the delayed-packet queue is being drained on thread %u, but the "
+				"game thread is %u — anything queued here that touches Lua is back in the §3c race",
+				tid, g_coop_game_thread_id);
+		}
+	}
+
 	DelayedPackestCS.Enter();
 	while (!m_aDelayedPackets.empty())
 	{
