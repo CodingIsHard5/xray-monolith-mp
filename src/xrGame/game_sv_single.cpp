@@ -3752,12 +3752,24 @@ void game_sv_Single::Update()
 			{
 				// Retry rather than fail: a probe that fired before the client connected would
 				// report "no player" as if that were the measurement.
-				if ((s_r1_retry++ % 100) == 0)
-					Msg("- COOP(rep1): waiting for a connected player (retry %u)", s_r1_retry);
-				if (s_r1_retry > 3000)
+				//
+				// The budget is WALL CLOCK, not a frame count. Run 1 of R1 counted frames and gave
+				// up in under a minute — while the client was still booting — and then reported
+				// "no player ever connected" about a client that connected fine and was sending
+				// M_CL_UPDATE for entity 22677 a moment later. A frame budget is a duration whose
+				// length depends on the server's frame rate, which is exactly the thing that
+				// varies between a quiet server and a loaded one.
+				if ((Device.dwTimeGlobal - s_r1_retry) >= 5000u)
+				{
+					s_r1_retry = Device.dwTimeGlobal;
+					Msg("- COOP(rep1): waiting for a connected player (%u s so far)",
+						(Device.dwTimeGlobal - s_r1_armed - s_r1_ms) / 1000u);
+				}
+				if ((Device.dwTimeGlobal - s_r1_armed) > (s_r1_ms + 240000u))
 				{
 					s_r1_done = true;
-					Msg("! COOP(rep1): no player ever connected — this run measured NOTHING");
+					Msg("! COOP(rep1): no player connected within 240 s of arming — this run "
+						"measured NOTHING (and that is a harness failure, not a result)");
 					FlushLog();
 				}
 			}
