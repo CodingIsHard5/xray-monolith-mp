@@ -22,6 +22,7 @@
 #include "..\..\xrEngine\x_ray.h"
 #include "string_table.h"
 #include "mp_coop_owner.h"                          // MP fork (§14 step 8 P1): acting_actor()
+#include "alife_space.h"                            // MP fork (§14 step 8 P3 Q2): COOP_QUEST_CHUNK_DATA
 
 #pragma warning(push)
 #pragma warning(disable:4995)
@@ -74,6 +75,12 @@ namespace
 	xr_map<shared_str, coop_offer>   s_task_pool;       // UNCLAIMED offers only; a claim removes
 	xr_map<shared_str, u16>          s_task_community;  // faction task id -> community it belongs to
 
+	// MP fork (§14 step 8 phase 3 Q2 / doc §7.3): task id -> the entity whose death completes it.
+	// Kept OUT of coop_offer on purpose: the pool entry dies with the claim, and this binding has
+	// to outlive it — it is what a death is looked up by. Erased when it fires, which is also how
+	// "exactly once" is enforced with no second flag to keep in step.
+	xr_map<shared_str, u16>          s_task_target;
+
 	u16 coop_community_of(u16 actor_id)
 	{
 		CObject* const o = Level().Objects.net_Find(actor_id);
@@ -123,7 +130,8 @@ void coop_dump_squads()
 
 // --- §14 step 8 phase 3 Q1: the offer pool and the claim transaction (doc §7.2) ------------
 
-void coop_task_offer(const shared_str& task_id, u16 offer_id, bool faction, bool world_state)
+void coop_task_offer(const shared_str& task_id, u16 offer_id, bool faction, bool world_state,
+                     u16 target_id)
 {
 	if (!task_id.size())
 		return;
@@ -140,9 +148,13 @@ void coop_task_offer(const shared_str& task_id, u16 offer_id, bool faction, bool
 	o.community   = offer_id ? coop_community_of(offer_id) : u16(-1);
 	s_task_pool[task_id] = o;
 
-	Msg("- COOP(quest): OFFER '%s' by %u faction=%d world_state=%d community=%d pool=%u",
+	// §7.3: the world-state change that completes it, recorded separately so it survives the claim.
+	if (target_id != u16(-1))
+		s_task_target[task_id] = target_id;
+
+	Msg("- COOP(quest): OFFER '%s' by %u faction=%d world_state=%d community=%d target=%u pool=%u",
 		task_id.c_str(), u32(offer_id), o.faction ? 1 : 0, o.world_state ? 1 : 0,
-		int(short(o.community)), u32(s_task_pool.size()));
+		int(short(o.community)), u32(target_id), u32(s_task_pool.size()));
 }
 
 coop_claim_result coop_task_claim(const shared_str& task_id, u16 player_id)
@@ -202,12 +214,283 @@ u16 coop_task_owner_of(const shared_str& task_id)
 
 u32 coop_task_pool_size() { return u32(s_task_pool.size()); }
 
+u16 coop_task_target_of(const shared_str& task_id)
+{
+	xr_map<shared_str, u16>::iterator it = s_task_target.find(task_id);
+	return (it != s_task_target.end()) ? it->second : mp_coop_owner::none;
+}
+
 void coop_dump_task_pool()
 {
 	Msg("- COOP(quest): pool=%u unclaimed offer(s)", u32(s_task_pool.size()));
 	for (xr_map<shared_str, coop_offer>::iterator it = s_task_pool.begin(); it != s_task_pool.end(); ++it)
 		Msg("    offer '%s' by %u faction=%d world_state=%d", it->first.c_str(),
 			u32(it->second.offer_id), it->second.faction ? 1 : 0, it->second.world_state ? 1 : 0);
+	FlushLog();
+}
+
+// --- §14 step 8 phase 3 Q2: completion on a world-state change (doc §7.3) ------------------
+//
+// §7.3 splits completion into the half the server can already observe and the half that needs new
+// bookkeeping. This is the first half: a death is server-authoritative here — it arrives as GE_DIE
+// and lands in game_sv_Single::on_death — so a task bound to an entity completes when that entity
+// dies. §7.2's conservation is the point: the entity dies ONCE in the ONE world, so the task
+// completes once, for its holder, and the binding is spent.
+u32 coop_task_on_world_death(u16 dead_id, u16 killer_id)
+{
+	if (!xr_enet::enabled() || !ai().get_alife() || s_task_target.empty())
+		return 0;
+
+	// Collect first: completing mutates s_task_target (and can broadcast), and iterating a map
+	// while erasing out from under the iterator is how this would work in testing and crash later.
+	xr_vector<shared_str> bound;
+	for (xr_map<shared_str, u16>::iterator it = s_task_target.begin(); it != s_task_target.end(); ++it)
+		if (it->second == dead_id)
+			bound.push_back(it->first);
+	if (bound.empty())
+		return 0;
+
+	u32 completed = 0;
+	for (u32 i = 0; i < bound.size(); ++i)
+	{
+		const shared_str& id = bound[i];
+		s_task_target.erase(id);       // spent — exactly once, with no second flag to keep in step
+
+		CGameTask* const t = Level().GameTaskManager().HasGameTask(id, true);
+		if (!t)
+		{
+			// Bound but not in progress: still on the shelf, or already finished. Either way the
+			// world-state change has now happened, so an unclaimed offer must LEAVE the pool
+			// rather than stay claimable for a kill nobody can repeat — that is the same
+			// conservation §7.2 asks for, applied to an offer instead of a claim.
+			const bool was_offered = (s_task_pool.erase(id) != 0);
+			Msg("- COOP(quest): world death %u -> '%s' not in progress (was_offered=%d) — binding spent",
+				u32(dead_id), id.c_str(), was_offered ? 1 : 0);
+			continue;
+		}
+
+		const u16 owner = coop_task_owner_of(id);
+		Level().GameTaskManager().SetTaskState(t, eTaskStateCompleted);
+		++completed;
+		// killer_id is logged and NOT tested. See the header: a faction quest's owner is
+		// world_key, which is not an entity and can never be the killer, so crediting only the
+		// owner would make every faction quest uncompletable.
+		Msg("- COOP(quest): COMPLETE '%s' owner=%u killer=%u member_agnostic=%d (world death %u)",
+			id.c_str(), u32(owner), u32(killer_id),
+			(owner == mp_coop_owner::world_key) ? 1 : 0, u32(dead_id));
+	}
+
+	if (completed)
+		Level().GameTaskManager().coop_broadcast_tasks();
+	FlushLog();
+	return completed;
+}
+
+// --- §14 step 8 phase 3 Q2: the co-op quest state rides the .scop (doc §7.2) ----------------
+namespace
+{
+	// Bumped whenever the layout below changes. An UNKNOWN version is refused rather than parsed
+	// (see the loader) — the same discipline the step-7 D3 dirty flag settled on, for the same
+	// reason: refusing loses the pool, guessing corrupts ownership.
+	const u16 coop_quest_state_version = 1;
+
+	void coop_write_str_u16_map(IWriter& stream, xr_map<shared_str, u16>& m)
+	{
+		stream.w_u32(u32(m.size()));
+		for (xr_map<shared_str, u16>::iterator it = m.begin(); it != m.end(); ++it)
+		{
+			stream.w_stringZ(it->first);
+			stream.w_u16(it->second);
+		}
+	}
+
+	// Reading our own file, but reading it DEFENSIVELY. A count field is the one value that turns
+	// a truncated or half-written chunk into an unbounded loop, and IReader::r_stringZ(shared_str&)
+	// is unbounded by construction — it walks to the next NUL wherever that is, off the end of the
+	// buffer included. So every read is checked against the bytes actually left in OUR chunk, and
+	// a failure abandons the whole record set rather than keeping the prefix: half a pool is not a
+	// safer pool, it is a pool that disagrees with the ownership map beside it.
+	struct coop_quest_reader
+	{
+		IReader& s;
+		int      end;      // one past the last byte of our chunk
+		bool     ok;
+
+		coop_quest_reader(IReader& _s, int _end): s(_s), end(_end), ok(true) {}
+
+		bool room(int need)
+		{
+			if (ok && s.tell() + need > end)
+				ok = false;
+			return ok;
+		}
+
+		u32 count(u32 min_bytes_each)
+		{
+			if (!room(4))
+				return 0;
+			const u32 n = s.r_u32();
+			if (u64(n) * u64(min_bytes_each) > u64(end - s.tell()))
+			{
+				ok = false;
+				return 0;
+			}
+			return n;
+		}
+
+		bool str(shared_str& out)
+		{
+			if (!ok)
+				return false;
+			const char* const base = (const char*)s.pointer();
+			const int avail = end - s.tell();
+			int n = 0;
+			while (n < avail && base[n])
+				++n;
+			if (n >= avail)            // no terminator inside the chunk -> refuse
+			{
+				ok = false;
+				return false;
+			}
+			s.r_stringZ(out);
+			return true;
+		}
+
+		u16 u16v() { return room(2) ? s.r_u16() : u16(0); }
+		u8  u8v()  { return room(1) ? s.r_u8()  : u8(0); }
+	};
+
+	void coop_read_str_u16_map(coop_quest_reader& r, xr_map<shared_str, u16>& m)
+	{
+		const u32 n = r.count(/*min bytes per entry: NUL + u16*/ 3);
+		for (u32 i = 0; i < n && r.ok; ++i)
+		{
+			shared_str id;
+			if (!r.str(id))
+				break;
+			const u16 v = r.u16v();
+			if (r.ok && id.size())
+				m[id] = v;
+		}
+	}
+}
+
+void coop_task_state_save(IWriter& stream)
+{
+	stream.open_chunk(COOP_QUEST_CHUNK_DATA);
+	stream.w_u16(coop_quest_state_version);
+
+	stream.w_u32(u32(s_task_pool.size()));
+	for (xr_map<shared_str, coop_offer>::iterator it = s_task_pool.begin(); it != s_task_pool.end(); ++it)
+	{
+		stream.w_stringZ(it->first);
+		stream.w_u16(it->second.offer_id);
+		stream.w_u16(it->second.community);
+		stream.w_u8(u8((it->second.faction ? 1 : 0) | (it->second.world_state ? 2 : 0)));
+	}
+
+	coop_write_str_u16_map(stream, s_task_owner);
+
+	stream.w_u32(u32(s_faction_task.size()));
+	for (xr_set<shared_str>::const_iterator it = s_faction_task.begin(); it != s_faction_task.end(); ++it)
+		stream.w_stringZ(*it);
+
+	coop_write_str_u16_map(stream, s_task_community);
+	coop_write_str_u16_map(stream, s_task_target);
+
+	stream.close_chunk();
+
+	Msg("- COOP(quest): state saved  pool=%u owners=%u faction=%u community=%u targets=%u (v%u)",
+		u32(s_task_pool.size()), u32(s_task_owner.size()), u32(s_faction_task.size()),
+		u32(s_task_community.size()), u32(s_task_target.size()), u32(coop_quest_state_version));
+}
+
+void coop_task_state_load(IReader& stream)
+{
+	// Clear FIRST and unconditionally. These maps are file-static and outlive a
+	// restart_simulator, so a load that found nothing must leave the server holding nothing —
+	// otherwise loading an older world would silently inherit the previous world's ownership.
+	s_task_pool.clear();
+	s_task_owner.clear();
+	s_faction_task.clear();
+	s_task_community.clear();
+	s_task_target.clear();
+
+	// find_chunk REWINDS and scans, so remember where the caller was and put the cursor back:
+	// the registry read that precedes us must not be able to notice that we ran.
+	const int caller_pos = stream.tell();
+
+	const u32 chunk_size = stream.find_chunk(COOP_QUEST_CHUNK_DATA);
+	if (!chunk_size)
+	{
+		stream.seek(caller_pos);
+		Msg("- COOP(quest): no state chunk in this save (stock .scop, or written before Q2) — starting empty");
+		return;
+	}
+
+	coop_quest_reader r(stream, stream.tell() + int(chunk_size));
+
+	const u16 ver = r.u16v();
+	if (!r.ok || ver != coop_quest_state_version)
+	{
+		stream.seek(caller_pos);
+		Msg("! COOP(quest): state version %u is not %u — REFUSING to parse it; pool and ownership start empty",
+			u32(ver), u32(coop_quest_state_version));
+		return;
+	}
+
+	const u32 pool_n = r.count(/*min bytes per offer: NUL + u16 + u16 + u8*/ 6);
+	for (u32 i = 0; i < pool_n && r.ok; ++i)
+	{
+		shared_str id;
+		if (!r.str(id))
+			break;
+		coop_offer o;
+		o.offer_id    = r.u16v();
+		o.community   = r.u16v();
+		const u8 fl   = r.u8v();
+		o.faction     = (fl & 1) != 0;
+		o.world_state = (fl & 2) != 0;
+		if (r.ok && id.size())
+			s_task_pool[id] = o;
+	}
+
+	coop_read_str_u16_map(r, s_task_owner);
+
+	const u32 fac_n = r.count(/*min bytes per id: NUL*/ 1);
+	for (u32 i = 0; i < fac_n && r.ok; ++i)
+	{
+		shared_str id;
+		if (!r.str(id))
+			break;
+		if (id.size())
+			s_faction_task.insert(id);
+	}
+
+	coop_read_str_u16_map(r, s_task_community);
+	coop_read_str_u16_map(r, s_task_target);
+
+	stream.seek(caller_pos);
+
+	if (!r.ok)
+	{
+		// Ran out of chunk mid-record. Keeping what was read would leave the pool and the
+		// ownership map describing different worlds, so drop the lot and say so — loudly, because
+		// the alternative is a server that quietly hands out a task somebody already owns.
+		s_task_pool.clear();
+		s_task_owner.clear();
+		s_faction_task.clear();
+		s_task_community.clear();
+		s_task_target.clear();
+		Msg("! COOP(quest): state chunk is truncated or malformed (%u bytes) — DISCARDED, pool and ownership start empty",
+			chunk_size);
+		FlushLog();
+		return;
+	}
+
+	Msg("- COOP(quest): state loaded pool=%u owners=%u faction=%u community=%u targets=%u (v%u)",
+		u32(s_task_pool.size()), u32(s_task_owner.size()), u32(s_faction_task.size()),
+		u32(s_task_community.size()), u32(s_task_target.size()), u32(ver));
 	FlushLog();
 }
 

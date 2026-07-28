@@ -22,6 +22,9 @@
 #include "string_table.h"
 #include "../xrEngine/igame_persistent.h"
 #include "autosave_manager.h"
+// MP fork (§14 step 8 phase 3 Q2 / doc §7.2): coop_task_state_save/load — the offer pool and the
+// ownership tags ride the .scop, in the same write as the task list they annotate.
+#include "GametaskManager.h"
 //Alundaio
 #ifdef ENGINE_LUA_ALIFE_STORAGE_MANAGER_CALLBACKS
 #include "pch_script.h"
@@ -87,6 +90,10 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
 		spawns().save(stream);
 		objects().save(stream);
 		registry().save(stream);
+		// MP fork (§14 step 8 phase 3 Q2): the co-op quest layer's annotations to the task list
+		// registry().save just wrote — same stream, same compressed payload, so a claim and the
+		// record of who claimed it can never be half-written relative to each other.
+		coop_task_state_save(stream);
 
 		source_count = stream.tell();
 		void* source_data = stream.pointer();
@@ -154,6 +161,10 @@ void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR fil
 	}
 
 	registry().load(source);
+	// MP fork (§14 step 8 phase 3 Q2): read the co-op quest annotations back. Always called, even
+	// for a save that has no such chunk — the loader CLEARS the maps first, so booting an older
+	// world cannot leave the previous world's ownership standing in these file-static maps.
+	coop_task_state_load(source);
 
 	can_register_objects(true);
 

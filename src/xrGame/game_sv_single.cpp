@@ -2873,6 +2873,14 @@ void game_sv_Single::Update()
 		static u32  s_q3_armed = 0;
 		static u32  s_q3_ms    = 0;
 		static u32  s_q3_retry = 0;
+		// §7.3 exactly-once (Q2): the entity the world-state bindings were made against, and when
+		// to replay its death. Remembered here rather than re-read later on purpose — a replay
+		// that asked coop_first_player_actor() again would be measuring whatever id the player
+		// holds AFTER the death, and would then return 0 for the wrong reason.
+		static u16  s_q3_target     = mp_coop_owner::none;
+		static u32  s_q3_fired      = 0;
+		static u32  s_q3_replay_ms  = 0;
+		static bool s_q3_replayed   = false;
 		if (!s_q3_init)
 		{
 			s_q3_init = true;
@@ -2880,7 +2888,11 @@ void game_sv_Single::Update()
 			const float secs = p ? (float)atof(p) : 0.f;
 			s_q3_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 30000u;
 			s_q3_armed = Device.dwTimeGlobal;
-			Msg("- COOP(quest3): claim probe armed, firing in %ums", s_q3_ms);
+			LPCSTR r = coop_param("-coop_test_quest3_replay");
+			const float rsecs = r ? (float)atof(r) : 0.f;
+			s_q3_replay_ms = (rsecs > 0.f && rsecs <= 86400.f) ? (u32)(rsecs * 1000.f) : 0u;
+			Msg("- COOP(quest3): claim probe armed, firing in %ums (death replay %s)",
+				s_q3_ms, s_q3_replay_ms ? "armed" : "off");
 		}
 		if (!s_q3_done && Device.dwTimeGlobal - s_q3_armed >= s_q3_ms &&
 		    Device.dwTimeGlobal - s_q3_retry >= 5000)
@@ -2903,6 +2915,18 @@ void game_sv_Single::Update()
 				coop_task_offer("coop_q3_f", 0, /*faction*/ true,  true);
 				coop_task_offer("coop_q3_u", 0, false, true);   // never claimed — stays in the pool
 
+				// §7.3 (Q2): two more offers, each bound to a WORLD-STATE change — the death of
+				// an entity. The entity is the test player's own actor, and that is a NAMED LIMIT
+				// rather than a convenience: it is the only death this headless harness can cause
+				// on demand (-coop_test_kill on the client), and the completion path never asks
+				// what kind of entity died. What the choice does buy is the discriminating case:
+				// coop_q3_v is a FACTION offer, so once claimed its owner is world_key — a key no
+				// entity holds and which therefore can never be the killer. A completion rule that
+				// credited only the owner would leave every faction quest permanently
+				// uncompletable, and this is the only leg that would notice.
+				coop_task_offer("coop_q3_k", 0, /*faction*/ false, /*world_state*/ true, player_id);
+				coop_task_offer("coop_q3_v", 0, /*faction*/ true,  /*world_state*/ true, player_id);
+
 				// Leg A: the real player wins, the synthetic one arrives late.
 				const int a1 = int(coop_task_claim("coop_q3_a", player_id));
 				const int a2 = int(coop_task_claim("coop_q3_a", synth));
@@ -2912,17 +2936,124 @@ void game_sv_Single::Update()
 				const int b2 = int(coop_task_claim("coop_q3_b", player_id));
 				// §7.4: a faction quest ends up owned by the world tier, not by whoever claimed it.
 				const int f1 = int(coop_task_claim("coop_q3_f", player_id));
+				// §7.3 (Q2): the two world-state-bound offers, claimed by the real player. 'v' is
+				// the faction one, so its owner must come out as the world tier, not the claimant.
+				const int k1 = int(coop_task_claim("coop_q3_k", player_id));
+				const int v1 = int(coop_task_claim("coop_q3_v", player_id));
 				const u16 fowner = coop_task_owner_of("coop_q3_f");
 				const u16 aowner = coop_task_owner_of("coop_q3_a");
+				const u16 kowner = coop_task_owner_of("coop_q3_k");
+				const u16 vowner = coop_task_owner_of("coop_q3_v");
+				const u16 ktarget = coop_task_target_of("coop_q3_k");
+				const u16 vtarget = coop_task_target_of("coop_q3_v");
 
 				const u32 pool = coop_task_pool_size();
 				const bool pass = (a1 == coop_claim_ok)    && (a2 == coop_claim_taken) &&
 				                  (b1 == coop_claim_ok)    && (b2 == coop_claim_taken) &&
 				                  (f1 == coop_claim_ok)    &&
+				                  (k1 == coop_claim_ok)    && (v1 == coop_claim_ok) &&
 				                  (fowner == mp_coop_owner::world_key) &&
-				                  (aowner == player_id)    && (pool == 1);
-				Msg("- COOP(quest3): claims a1=%d a2=%d b1=%d b2=%d f1=%d aowner=%u fowner=%u pool=%u pass=%d",
-					a1, a2, b1, b2, f1, u32(aowner), u32(fowner), pool, pass ? 1 : 0);
+				                  (vowner == mp_coop_owner::world_key) &&
+				                  (aowner == player_id)    && (kowner == player_id) &&
+				                  (ktarget == player_id)   && (vtarget == player_id) &&
+				                  (pool == 1);
+				Msg("- COOP(quest3): claims a1=%d a2=%d b1=%d b2=%d f1=%d k1=%d v1=%d "
+					"aowner=%u fowner=%u kowner=%u vowner=%u ktarget=%u vtarget=%u pool=%u pass=%d",
+					a1, a2, b1, b2, f1, k1, v1, u32(aowner), u32(fowner), u32(kowner),
+					u32(vowner), u32(ktarget), u32(vtarget), pool, pass ? 1 : 0);
+				coop_dump_task_pool();
+				Level().GameTaskManager().coop_broadcast_tasks();
+				s_q3_target = player_id;
+				s_q3_fired  = Device.dwTimeGlobal;
+			}
+		}
+
+		// §7.3 exactly-once (Q2): -coop_test_quest3_replay <seconds after the claims fired> replays
+		// the SAME world death and asserts nothing completes a second time.
+		//
+		// This is the assertion the single self-kill the harness can produce cannot make on its
+		// own: one death proves a task completes, it does not prove the binding was SPENT, and a
+		// completion that re-fires is how one dead mutant pays two rewards. It is also
+		// self-checking in the other direction — if the real death never happened, this replay
+		// completes both tasks and reports 2, so a missed kill cannot read as a clean second pass.
+		if (s_q3_done && s_q3_replay_ms && !s_q3_replayed &&
+		    Device.dwTimeGlobal - s_q3_fired >= s_q3_replay_ms)
+		{
+			s_q3_replayed = true;
+			const u16 kt = coop_task_target_of("coop_q3_k");
+			const u16 vt = coop_task_target_of("coop_q3_v");
+			const u32 again = coop_task_on_world_death(s_q3_target, s_q3_target);
+			const bool pass = (again == 0) && (kt == mp_coop_owner::none) && (vt == mp_coop_owner::none);
+			Msg("- COOP(quest3r): replayed world death of %u -> completed_again=%u ktarget=%u vtarget=%u pass=%d",
+				u32(s_q3_target), again, u32(kt), u32(vt), pass ? 1 : 0);
+			FlushLog();
+		}
+	}
+
+	// MP fork (§14 step 8 phase 3 Q2, harness): -coop_test_quest3_verify <seconds> — the READ-ONLY
+	// half. It boots from the .scop a -coop_test_quest3 run wrote and asserts what came back out.
+	//
+	// It offers nothing and claims nothing, and that is the whole design of the leg: a verify pass
+	// that re-offered would rebuild the very state it is supposed to be measuring and would pass
+	// with the persistence ripped out. Everything it reports therefore came from the file or from
+	// nowhere. (coop_param refuses a prefix match, so this flag does not also arm the write leg.)
+	if (xr_enet::enabled() && ai().get_alife() && coop_param("-coop_test_quest3_verify"))
+	{
+		static bool s_q3v_init  = false;
+		static bool s_q3v_done  = false;
+		static u32  s_q3v_armed = 0;
+		static u32  s_q3v_ms    = 0;
+		static u32  s_q3v_retry = 0;
+		if (!s_q3v_init)
+		{
+			s_q3v_init = true;
+			LPCSTR p = coop_param("-coop_test_quest3_verify");
+			const float secs = p ? (float)atof(p) : 0.f;
+			s_q3v_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 30000u;
+			s_q3v_armed = Device.dwTimeGlobal;
+			Msg("- COOP(quest3v): survival probe armed, firing in %ums", s_q3v_ms);
+		}
+		if (!s_q3v_done && Device.dwTimeGlobal - s_q3v_armed >= s_q3v_ms &&
+		    Device.dwTimeGlobal - s_q3v_retry >= 5000)
+		{
+			s_q3v_retry = Device.dwTimeGlobal;
+			const u16 player_id = coop_first_player_actor();
+			if (player_id != mp_coop_owner::none)
+			{
+				s_q3v_done = true;
+				const u16 synth   = u16(0xF000);
+				const u16 aowner  = coop_task_owner_of("coop_q3_a");
+				const u16 bowner  = coop_task_owner_of("coop_q3_b");
+				const u16 fowner  = coop_task_owner_of("coop_q3_f");
+				const u16 kowner  = coop_task_owner_of("coop_q3_k");
+				const u16 vowner  = coop_task_owner_of("coop_q3_v");
+				const u16 ktarget = coop_task_target_of("coop_q3_k");
+				const u32 pool    = coop_task_pool_size();
+
+				// aowner == player_id is TWO claims at once and worth reading as such: the owner
+				// tag came back out of the file AND the reconnecting player got the same entity
+				// id back (step-7 P2's reclaim). Either half failing breaks it, which is right —
+				// an ownership tag that survives while the body it names does not is worthless.
+				const bool pass = (pool == 1) &&
+				                  (aowner == player_id) && (bowner == synth) &&
+				                  (fowner == mp_coop_owner::world_key) &&
+				                  (kowner == player_id) &&
+				                  (vowner == mp_coop_owner::world_key) &&
+				                  (ktarget == player_id);
+
+				vGameTasks& tl = Level().GameTaskManager().GetGameTasks();
+				Msg("- COOP(quest3v): survived player=%u aowner=%u bowner=%u fowner=%u kowner=%u "
+					"vowner=%u ktarget=%u pool=%u tasks=%u pass=%d",
+					u32(player_id), u32(aowner), u32(bowner), u32(fowner), u32(kowner),
+					u32(vowner), u32(ktarget), pool, u32(tl.size()), pass ? 1 : 0);
+				// The task list itself is reported separately from the annotations, because the
+				// two can fail independently: registry().save carries the tasks, our own chunk
+				// carries who owns them, and a run where only one of the two came back must not
+				// look like a run where neither did.
+				for (u32 i = 0; i < tl.size(); ++i)
+					Msg("    task '%s' state=%d owner=%u", tl[i].task_id.c_str(),
+						tl[i].game_task ? int(tl[i].game_task->GetTaskState()) : -1,
+						u32(coop_task_owner_of(tl[i].task_id)));
 				coop_dump_task_pool();
 				Level().GameTaskManager().coop_broadcast_tasks();
 			}
@@ -3124,6 +3255,18 @@ void game_sv_Single::on_death(CSE_Abstract* e_dest, CSE_Abstract* e_src)
 		return;
 
 	alife().on_death(e_dest, e_src);
+
+	// MP fork (§14 step 8 phase 3 Q2 / doc §7.3): this is THE world-state change the server
+	// already tracks. A death reaches here as GE_DIE through xrServer::Process_event, i.e. it is
+	// server-authoritative by construction — no new bookkeeping, no client is trusted for it — so
+	// a task bound to an entity completes exactly when that entity dies, and exactly once (§7.2:
+	// the entity dies once in the ONE world, so the reward is paid once).
+	//
+	// Placed AFTER alife().on_death so the A-Life side of the death has already been applied when
+	// the completion broadcast goes out; a task that says "completed" before the world agrees is
+	// the same lie as a task that never completes.
+	if (xr_enet::enabled() && e_dest)
+		coop_task_on_world_death(e_dest->ID, e_src ? e_src->ID : mp_coop_owner::none);
 }
 
 void game_sv_Single::restart_simulator(LPCSTR saved_game_name)

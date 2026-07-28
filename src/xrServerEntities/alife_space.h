@@ -17,6 +17,14 @@
 #define OBJECT_CHUNK_DATA			0x0002
 #define GAME_TIME_CHUNK_DATA		0x0005
 #define REGISTRY_CHUNK_DATA			0x0009
+// MP fork (§14 step 8 phase 3 Q2 / doc §7.2): the co-op quest layer's own top-level chunk —
+// the offer pool, the ownership tags and the world-state bindings that ANNOTATE the task list
+// CGameTaskRegistry already writes into REGISTRY_CHUNK_DATA. Its own chunk, and appended after
+// the registry, so that a save WITHOUT it (every stock .scop, and every co-op save written
+// before Q2) reads back as "no co-op quest state" instead of desynchronising anything: IReader
+// find_chunk rewinds and scans, and returns 0 for a chunk that is not there. Listed here rather
+// than hidden in GametaskManager.cpp so the next chunk id added cannot silently collide with it.
+#define COOP_QUEST_CHUNK_DATA		0x00C0
 #define SECTION_HEADER				"location_"
 #define SAVE_EXTENSION				".scop"
 #define SPAWN_NAME					"game.spawn"

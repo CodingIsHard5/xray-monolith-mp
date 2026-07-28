@@ -83,8 +83,13 @@ enum coop_claim_result
 // taken on behalf of the community and ends up owned by the WORLD tier, member-agnostic; a
 // personal errand ends up owned by the claimant. `world_state` is §7.3's category (kill / fetch /
 // clear / defend complete on a world-state change the server already tracks — do these first).
+// `target_id` is the entity whose DEATH is that world-state change (u16(-1) = none): §7.3's
+// "kill" shape, the half the server can already observe without new bookkeeping. The binding
+// outlives the claim — it is what completion is looked up by — so it is kept apart from the
+// pool entry, which is destroyed by the claim.
 // Idempotent: re-offering an id already in the pool changes nothing.
-void coop_task_offer(const shared_str& task_id, u16 offer_id, bool faction, bool world_state);
+void coop_task_offer(const shared_str& task_id, u16 offer_id, bool faction, bool world_state,
+                     u16 target_id = u16(-1));
 
 // First claim wins. On success the offer LEAVES the pool — §7.2's "others see it's gone" is a
 // removal, not a lock — and the task is given inside an acting_scope for `player_id` so the
@@ -96,3 +101,33 @@ coop_claim_result coop_task_claim(const shared_str& task_id, u16 player_id);
 u16  coop_task_owner_of(const shared_str& task_id);
 u32  coop_task_pool_size();     // unclaimed offers
 void coop_dump_task_pool();
+
+// MP fork (§14 step 8 phase 3 Q2 / doc §7.3): completion driven by a world-state change.
+//
+// The entity whose death completes `task_id`, or mp_coop_owner::none if the task is not bound to
+// one. A completed task's binding is DROPPED, so this also answers "has this already fired?".
+u16  coop_task_target_of(const shared_str& task_id);
+
+// Called from game_sv_Single::on_death — the server-authoritative death hook — for every entity
+// that dies. Completes every task bound to `dead_id`, exactly once, and returns how many.
+//
+// It never consults `killer_id` except to log it, and that is §7.4's member-agnostic completion
+// rather than an omission: a faction quest is owned by mp_coop_owner::world_key, which is not an
+// entity and can therefore never be the killer, so a rule that credited only the owner would make
+// every faction quest uncompletable. The doc is explicit that "a faction-level fact correctly does
+// not care which member".
+u32  coop_task_on_world_death(u16 dead_id, u16 killer_id);
+
+// MP fork (§14 step 8 phase 3 Q2 / doc §7.2): the co-op quest state rides the .scop.
+//
+// Q1 left the pool, the ownership tags and the faction/community tags as file-static maps, so a
+// restart forgot who owned what and put every claimed offer back on the shelf — which is exactly
+// the state §7.2 says a shared world must not have, since two players could each claim "the same"
+// task across a reboot while the mutants only die once.
+//
+// These go into the .scop and NOT into the <save>.coop sidecar, deliberately: what is stored here
+// ANNOTATES the task list, and the task list is CGameTaskRegistry riding registry().save into the
+// .scop. Split across two files, a crash between the two writes leaves tasks whose owner is
+// unknown — a corruption with no repair. In one file it is atomic by construction.
+void coop_task_state_save(IWriter& stream);
+void coop_task_state_load(IReader& stream);
