@@ -218,10 +218,22 @@ int g_Dump_Update_Write = 0;
 INT g_sv_SendUpdate = 0;
 #endif
 
+// MP fork (§3c): which thread is the game thread, recorded where there is no doubt about it.
+// The §3c fix is a claim about WHICH THREAD runs a dialogue action, and that claim deserves a
+// deterministic gate rather than a stochastic one: "the server did not crash this time" is worth
+// almost nothing against a failure that spares one run in three, whereas "the action ran on the
+// game thread" is either true or false in every single run. Read by coop_run_dialog_phrase.
+u32 g_coop_game_thread_id = 0;
+
 void xrServer::Update()
 {
 	if (Level().IsDemoPlayStarted() || Level().IsDemoPlayFinished())
 		return; //diabling server when demo is playing
+
+	// Set every frame rather than once: cheap, and it cannot go stale if the game loop is ever
+	// re-hosted on a different thread — a cached wrong answer here would silently turn the gate
+	// below into a rubber stamp.
+	g_coop_game_thread_id = GetCurrentThreadId();
 
 	NET_Packet Packet;
 #ifdef DEBUG
@@ -1030,6 +1042,18 @@ void xrServer::coop_run_dialog_phrase(u16 acting_id, u16 speaker_id, u16 partner
 {
 	if (!g_pGameLevel || !dialog_id || !phrase_id || !dialog_id[0] || !phrase_id[0])
 		return;
+
+	// MP fork (§3c FIX, the gate). Everything below enters the Lua VM, and LuaJIT is
+	// single-threaded, so the one thing that must be true here is that we are the game thread.
+	// Printed on EVERY phrase, pass or fail, because a gate that only speaks when it is unhappy
+	// is indistinguishable from a gate that was never reached — and this line is what the
+	// harness asserts on instead of asserting on the absence of a crash.
+	{
+		const u32 tid = GetCurrentThreadId();
+		Msg("- COOP(dlg-thread): phrase '%s/%s' runs on thread %u, game thread is %u, same=%s",
+			dialog_id, phrase_id, tid, g_coop_game_thread_id,
+			(g_coop_game_thread_id && tid == g_coop_game_thread_id) ? "YES" : "NO");
+	}
 
 	CGameObject* const speaker = smart_cast<CGameObject*>(Level().Objects.net_Find(speaker_id));
 	CGameObject* const partner = smart_cast<CGameObject*>(Level().Objects.net_Find(partner_id));
