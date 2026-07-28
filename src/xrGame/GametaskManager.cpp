@@ -59,6 +59,21 @@ namespace
 	xr_map<u32, xr_vector<u16> >     s_squad_npcs;      // squad id  -> npc ids
 	xr_map<u32, bool>                s_squad_share;     // squad id  -> quest sharing on?
 
+	// MP fork (§14 step 8 phase 3 Q1 / doc §7.2): the OFFER POOL — tasks that exist but are not
+	// yet anybody's. This is the representation the engine was missing: before it, a task came
+	// into existence at GiveGameTaskToActor and there was no such state as "offered".
+	struct coop_offer
+	{
+		u16  offer_id;      // the NPC/trader offering it; 0 = ambient
+		u16  community;     // the offerer's community, captured AT OFFER TIME — see below
+		bool faction;       // §7.4: taken on behalf of the faction (world tier) vs a personal errand
+		bool world_state;   // §7.3: completes on a world-state change the server already tracks
+
+		coop_offer(): offer_id(0), community(u16(-1)), faction(false), world_state(false) {}
+	};
+	xr_map<shared_str, coop_offer>   s_task_pool;       // UNCLAIMED offers only; a claim removes
+	xr_map<shared_str, u16>          s_task_community;  // faction task id -> community it belongs to
+
 	u16 coop_community_of(u16 actor_id)
 	{
 		CObject* const o = Level().Objects.net_Find(actor_id);
@@ -106,11 +121,113 @@ void coop_dump_squads()
 	FlushLog();
 }
 
+// --- §14 step 8 phase 3 Q1: the offer pool and the claim transaction (doc §7.2) ------------
+
+void coop_task_offer(const shared_str& task_id, u16 offer_id, bool faction, bool world_state)
+{
+	if (!task_id.size())
+		return;
+	if (s_task_pool.find(task_id) != s_task_pool.end())
+		return;                                  // idempotent: already offered
+
+	coop_offer o;
+	o.offer_id    = offer_id;
+	o.faction     = faction;
+	o.world_state = world_state;
+	// Captured NOW, while the offerer is a live object. It cannot be looked up later: once a
+	// faction quest is claimed its owner is the world tier, which is a reserved registry key and
+	// NOT an entity, so coop_community_of(owner) would resolve nothing (see mp_coop_owner.h).
+	o.community   = offer_id ? coop_community_of(offer_id) : u16(-1);
+	s_task_pool[task_id] = o;
+
+	Msg("- COOP(quest): OFFER '%s' by %u faction=%d world_state=%d community=%d pool=%u",
+		task_id.c_str(), u32(offer_id), o.faction ? 1 : 0, o.world_state ? 1 : 0,
+		int(short(o.community)), u32(s_task_pool.size()));
+}
+
+coop_claim_result coop_task_claim(const shared_str& task_id, u16 player_id)
+{
+	xr_map<shared_str, coop_offer>::iterator it = s_task_pool.find(task_id);
+	if (it == s_task_pool.end())
+	{
+		// Absent covers both "never offered" and "somebody already took it". §7.2 wants the
+		// second claimant to see it GONE rather than to be refused by a lock, so the pool entry
+		// is removed on claim and this is the answer a loser gets. The distinction between the
+		// two only matters to a log line, so make the log line carry it.
+		const bool given = (Level().GameTaskManager().HasGameTask(task_id, false) != NULL);
+		Msg("- COOP(quest): CLAIM '%s' by %u -> %s", task_id.c_str(), u32(player_id),
+			given ? "TAKEN (already claimed)" : "ABSENT (never offered)");
+		return given ? coop_claim_taken : coop_claim_absent;
+	}
+
+	const coop_offer o = it->second;
+	s_task_pool.erase(it);                       // §7.2: one claimant, and it leaves the pool
+
+	// Give it inside an acting scope for the claimant, so the ownership tagging in
+	// GiveGameTaskToActor does the routing rather than a second, divergent code path.
+	CGameTask* task = xr_new<CGameTask>();
+	task->m_ID = task_id;
+	task->m_Title = task_id;
+	task->SetTaskState(eTaskStateInProgress);
+	task->m_ReceiveTime = Level().GetGameTime();
+	{
+		mp_coop_owner::acting_scope scope(player_id);
+		Level().GameTaskManager().GiveGameTaskToActor(task, 0, false, 0);
+	}
+
+	// §7.4. A personal errand tracks the claimant. A FACTION quest was taken on behalf of the
+	// community, so it lives on the world tier and its completion is member-agnostic — the doc is
+	// explicit that this is a feature and not the single-actor bug coming back ("a faction-level
+	// fact correctly does not care which member").
+	if (o.faction)
+	{
+		s_task_owner[task_id]     = mp_coop_owner::world_key;
+		s_task_community[task_id] = o.community;
+		s_faction_task.insert(task_id);
+	}
+
+	Msg("- COOP(quest): CLAIM '%s' by %u -> OK owner=%u faction=%d pool=%u",
+		task_id.c_str(), u32(player_id), u32(coop_task_owner_of(task_id)),
+		o.faction ? 1 : 0, u32(s_task_pool.size()));
+
+	Level().GameTaskManager().coop_broadcast_tasks();
+	return coop_claim_ok;
+}
+
+u16 coop_task_owner_of(const shared_str& task_id)
+{
+	xr_map<shared_str, u16>::iterator it = s_task_owner.find(task_id);
+	return (it != s_task_owner.end()) ? it->second : mp_coop_owner::none;
+}
+
+u32 coop_task_pool_size() { return u32(s_task_pool.size()); }
+
+void coop_dump_task_pool()
+{
+	Msg("- COOP(quest): pool=%u unclaimed offer(s)", u32(s_task_pool.size()));
+	for (xr_map<shared_str, coop_offer>::iterator it = s_task_pool.begin(); it != s_task_pool.end(); ++it)
+		Msg("    offer '%s' by %u faction=%d world_state=%d", it->first.c_str(),
+			u32(it->second.offer_id), it->second.faction ? 1 : 0, it->second.world_state ? 1 : 0);
+	FlushLog();
+}
+
 // Does player `who` receive task `task_id` (owned by `owner`)?
 static bool coop_task_goes_to(const shared_str& task_id, u16 owner, u16 who)
 {
 	if (owner == 0)          return true;    // unowned/global -> everyone (safe default)
 	if (who == owner)        return true;    // the owner always sees their own
+
+	// §7.4 (step 8 phase 3): a task owned by the WORLD tier belongs to a faction, not a person.
+	// The owner is a reserved registry key here, so there is no object to read a community off —
+	// the community was captured at offer time. With no community recorded it is a plain world
+	// task and goes to everyone, which is what member-agnostic means with no members named.
+	if (owner == mp_coop_owner::world_key)
+	{
+		xr_map<shared_str, u16>::iterator c = s_task_community.find(task_id);
+		if (c == s_task_community.end() || c->second == u16(-1))
+			return true;
+		return coop_community_of(who) == c->second;
+	}
 
 	// faction-wide task: any player of the owner's community
 	if (s_faction_task.find(task_id) != s_faction_task.end())
@@ -405,6 +522,25 @@ void CGameTaskManager::coop_apply_tasks(NET_Packet& packet)
 		tasks.push_back(key);
 	}
 
+	// MP fork (§14 step 8 phase 3 Q1 / doc §7.2): the shared offer pool. Behind r_eof() so a
+	// server that does not send the section cannot make this read run off the end of the packet.
+	// The pool is logged unconditionally, not under -dbg: this is the client's only evidence that
+	// a claim it lost actually removed the offer, and the harness reads it on the CLIENT side.
+	if (!packet.r_eof())
+	{
+		const u16 offers = packet.r_u16();
+		Msg("* COOP_POOL_CL: pool=%u offer(s)", u32(offers));
+		for (u16 p = 0; p < offers; ++p)
+		{
+			shared_str oid;
+			packet.r_stringZ(oid);
+			const u16 by = packet.r_u16();
+			const u8  fl = packet.r_u8();
+			Msg("* COOP_POOL_CL:   offer '%s' by %u faction=%d world_state=%d",
+				oid.c_str(), u32(by), (fl & 1) ? 1 : 0, (fl & 2) ? 1 : 0);
+		}
+	}
+
 	// MP fork (C2/quest E2E): log task adoption for test harness
 	if (strstr(Core.Params, "-dbg"))
 	{
@@ -476,6 +612,20 @@ namespace
 				packet.w_u16(u16(blob->size()));
 				if (blob->size())
 					packet.w(blob->pointer(), blob->size());
+			}
+
+			// MP fork (§14 step 8 phase 3 Q1 / doc §7.2): the unclaimed OFFER POOL, appended as a
+			// trailing section. Unfiltered on purpose — every player sees the same pool, because
+			// "one player claims it and others see it's gone" only means anything if they were
+			// looking at the same shelf. The reader takes this behind r_eof(), so a packet
+			// without the section still parses.
+			packet.w_u16(u16(s_task_pool.size()));
+			for (xr_map<shared_str, coop_offer>::iterator po = s_task_pool.begin();
+			     po != s_task_pool.end(); ++po)
+			{
+				packet.w_stringZ(po->first);
+				packet.w_u16(po->second.offer_id);
+				packet.w_u8(u8((po->second.faction ? 1 : 0) | (po->second.world_state ? 2 : 0)));
 			}
 
 			server->SendTo(cl->ID, packet, net_flags(TRUE, TRUE));

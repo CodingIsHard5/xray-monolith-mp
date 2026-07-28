@@ -2834,7 +2834,11 @@ void game_sv_Single::Update()
 		if (!s_test_init)
 		{
 			s_test_init = true;
-			if (strstr(Core.Params, "-coop_test_quest"))
+			// coop_param, not strstr: a prefix match would arm this synthetic-task probe from
+			// "-coop_test_quest3" as well, and a phase-3 run would then be measuring a pool that
+			// an unrelated harness had also been writing into. Same class of collision the P2
+			// commit fixed for -coop_test_rpg.
+			if (coop_param("-coop_test_quest"))
 				s_test_start = Device.dwTimeGlobal;
 		}
 		if (s_test_start && !s_test_done && Device.dwTimeGlobal - s_test_start > 10000)
@@ -2849,6 +2853,79 @@ void game_sv_Single::Update()
 			// Force immediate broadcast — don't rely on UpdateTasks eChanged path
 			Level().GameTaskManager().coop_broadcast_tasks();
 			Msg("- COOP_TEST_QUEST: synthetic task 'coop_test_quest_e2e' created, broadcast forced");
+		}
+	}
+
+	// MP fork (§14 step 8 phase 3 Q1, harness): -coop_test_quest3 <seconds> — tasks as a finite
+	// shared resource (doc §7.2), the claim transaction, and §7.4's tiering.
+	//
+	// THE SECOND CLAIMANT IS SYNTHETIC and that is named rather than hidden: two headless clients
+	// cannot share one wine prefix, so there is no second real player to race. The design answer
+	// is to make the synthetic half the ATTACKER and the real client the VICTIM — leg B claims
+	// first with the synthetic id and then with the real player, so the assertion that carries
+	// the result ("the refused player never receives the task") is still measured on a real
+	// client's own log. A test where the synthetic id only ever LOSES would prove nothing except
+	// that a function returned false.
+	if (xr_enet::enabled() && ai().get_alife() && coop_param("-coop_test_quest3"))
+	{
+		static bool s_q3_init  = false;
+		static bool s_q3_done  = false;
+		static u32  s_q3_armed = 0;
+		static u32  s_q3_ms    = 0;
+		static u32  s_q3_retry = 0;
+		if (!s_q3_init)
+		{
+			s_q3_init = true;
+			LPCSTR p = coop_param("-coop_test_quest3");
+			const float secs = p ? (float)atof(p) : 0.f;
+			s_q3_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 30000u;
+			s_q3_armed = Device.dwTimeGlobal;
+			Msg("- COOP(quest3): claim probe armed, firing in %ums", s_q3_ms);
+		}
+		if (!s_q3_done && Device.dwTimeGlobal - s_q3_armed >= s_q3_ms &&
+		    Device.dwTimeGlobal - s_q3_retry >= 5000)
+		{
+			s_q3_retry = Device.dwTimeGlobal;
+			const u16 player_id = coop_first_player_actor();
+			if (player_id != mp_coop_owner::none)
+			{
+				s_q3_done = true;
+				// An id no client owns. It is only ever a map key here — nothing looks it up in
+				// the object registry — but it must not collide with the real player or with the
+				// world tier, so it is asserted distinct rather than assumed.
+				const u16 synth = u16(0xF000);
+				Msg("- COOP(quest3): player=%u synthetic=%u world=%u distinct=%u",
+					u32(player_id), u32(synth), u32(mp_coop_owner::world_key),
+					u32((synth != player_id && synth != mp_coop_owner::world_key) ? 1 : 0));
+
+				coop_task_offer("coop_q3_a", 0, /*faction*/ false, /*world_state*/ true);
+				coop_task_offer("coop_q3_b", 0, false, true);
+				coop_task_offer("coop_q3_f", 0, /*faction*/ true,  true);
+				coop_task_offer("coop_q3_u", 0, false, true);   // never claimed — stays in the pool
+
+				// Leg A: the real player wins, the synthetic one arrives late.
+				const int a1 = int(coop_task_claim("coop_q3_a", player_id));
+				const int a2 = int(coop_task_claim("coop_q3_a", synth));
+				// Leg B: the synthetic one wins and the REAL player is refused. This is the leg
+				// that matters — the client must not end up holding coop_q3_b.
+				const int b1 = int(coop_task_claim("coop_q3_b", synth));
+				const int b2 = int(coop_task_claim("coop_q3_b", player_id));
+				// §7.4: a faction quest ends up owned by the world tier, not by whoever claimed it.
+				const int f1 = int(coop_task_claim("coop_q3_f", player_id));
+				const u16 fowner = coop_task_owner_of("coop_q3_f");
+				const u16 aowner = coop_task_owner_of("coop_q3_a");
+
+				const u32 pool = coop_task_pool_size();
+				const bool pass = (a1 == coop_claim_ok)    && (a2 == coop_claim_taken) &&
+				                  (b1 == coop_claim_ok)    && (b2 == coop_claim_taken) &&
+				                  (f1 == coop_claim_ok)    &&
+				                  (fowner == mp_coop_owner::world_key) &&
+				                  (aowner == player_id)    && (pool == 1);
+				Msg("- COOP(quest3): claims a1=%d a2=%d b1=%d b2=%d f1=%d aowner=%u fowner=%u pool=%u pass=%d",
+					a1, a2, b1, b2, f1, u32(aowner), u32(fowner), pool, pass ? 1 : 0);
+				coop_dump_task_pool();
+				Level().GameTaskManager().coop_broadcast_tasks();
+			}
 		}
 	}
 
