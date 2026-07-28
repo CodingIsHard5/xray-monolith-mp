@@ -26,6 +26,11 @@
 #include "Level.h"
 #include "xrServer.h"
 
+// MP fork (§14 step 8 phase 4 R3.2): decay runs on ABSOLUTE GAME time, u64 — Q3 measured it at
+// 63676055474670 ms, four orders past what u32 holds.
+#include "alife_simulator.h"
+#include "alife_time_manager.h"
+
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -316,7 +321,10 @@ namespace
 	u32 s_rep_refused = 0;
 	u32 s_rep_refuse_logged = 0;
 
-	const u16 coop_rep_state_version = 1;
+	// v1 = R2's overlay only. v2 adds R3.2's pressure accumulator and the overlay decay clock.
+	// A v1 save is a valid OLDER save, not a corruption, so the loader accepts it and starts the
+	// new state empty — refusing it would throw away a working faction overlay to gain nothing.
+	const u16 coop_rep_state_version = 2;
 
 	// WHAT THE SAVE SAID THE WORLD MOVED, kept after it has been applied.
 	//
@@ -524,7 +532,30 @@ void coop_rep_state_save(IWriter& stream)
 		}
 	}
 
+	// ---- R3.2 (v2): the pressure accumulator and the overlay's decay clock -------------------
+	//
+	// Written AFTER the v1 records, so the v1 reader's own loop stops exactly where it always did.
+	// Timestamps are u64 GAME time: a fresh decay timer and a correctly resumed one are
+	// indistinguishable from the VALUE alone, which is why the stamp is stored rather than
+	// recomputed on load.
+	stream.w_u32(u32(s_rep_pressure.size()));
+	for (size_t pi = 0; pi < s_rep_pressure.size(); ++pi)
+	{
+		stream.w_stringZ(s_rep_pressure[pi].from);
+		stream.w_stringZ(s_rep_pressure[pi].to);
+		stream.w_u32(u32(s_rep_pressure[pi].value));
+		stream.w_u64(s_rep_pressure[pi].stamp);
+	}
+	stream.w_u64(s_rep_overlay_stamp);
+
 	stream.close_chunk();
+
+	Msg("- COOP(rep32): pressure state saved  cells=%u overlay_stamp=%I64u game_now=%I64u",
+		u32(s_rep_pressure.size()), s_rep_overlay_stamp, coop_rep_game_time_ms());
+	for (size_t pi = 0; pi < s_rep_pressure.size(); ++pi)
+		Msg("- COOP(rep32):   saved pressure %s -> %s = %+d stamp=%I64u",
+			s_rep_pressure[pi].from.c_str(), s_rep_pressure[pi].to.c_str(),
+			s_rep_pressure[pi].value, s_rep_pressure[pi].stamp);
 
 	Msg("- COOP(rep): faction state saved  moved=%u of %dx%d (v%u)%s", moved, n, n,
 		u32(bad_version ? 0xFFFF : coop_rep_state_version),
@@ -540,6 +571,11 @@ void coop_rep_state_load(IReader& stream)
 	// overlay left standing would keep re-imposing world A's war on world B forever.
 	// (This is also what makes "no chunk" a correct, complete outcome.)
 	s_rep_overlay.clear();
+	// R3.2 state is static and outlives restart_simulator exactly as the overlay does, so it gets
+	// the same unconditional clear for the same reason: a load that finds nothing must leave the
+	// server holding no grudges from the previous world.
+	s_rep_pressure.clear();
+	s_rep_overlay_stamp = 0;
 	CHARACTER_COMMUNITY::coop_reset_relations();
 
 	// find_chunk REWINDS and scans, so put the cursor back: the reads that precede us must not
@@ -558,11 +594,15 @@ void coop_rep_state_load(IReader& stream)
 	coop_chunk_reader r(stream, stream.tell() + int(chunk_size));
 
 	const u16 ver = r.u16v();
-	if (!r.ok || ver != coop_rep_state_version)
+	// A version we WROTE (1 or 2) is readable; anything else is refused as before. v1 is an older
+	// save of ours, not a corruption — accepting it keeps a working faction overlay and simply
+	// starts R3.2's state empty, which is the correct state for a world that never had any.
+	if (!r.ok || (ver != 1 && ver != coop_rep_state_version))
 	{
 		stream.seek(caller_pos);
-		Msg("! COOP(rep): faction state version %u is not %u — REFUSING to parse it; faction "
-			"relations start at their config baseline", u32(ver), u32(coop_rep_state_version));
+		Msg("! COOP(rep): faction state version %u is neither 1 nor %u — REFUSING to parse it; "
+			"faction relations start at their config baseline",
+			u32(ver), u32(coop_rep_state_version));
 		FlushLog();
 		return;
 	}
@@ -608,14 +648,76 @@ void coop_rep_state_load(IReader& stream)
 		pending.push_back(c);
 	}
 
+	// ---- R3.2 (v2): pressure cells and the overlay decay clock -------------------------------
+	//
+	// Read into staging too, and ONLY for v2 — a v1 chunk simply has nothing here and must not be
+	// read past its end. A truncated v2 tail discards the pressure state without taking the
+	// overlay down with it: a lost grudge is a bar that has to be re-earned, which is safe, while
+	// a lost overlay would silently end a war the players fought for.
+	xr_vector<rep_pressure_cell> pending_pressure;
+	u64 pending_stamp = 0;
+	bool pressure_ok  = true;
+	if (r.ok && ver >= 2)
+	{
+		const u32 pcells = r.count(/*min bytes: NUL + NUL + s32 + u64*/ 14);
+		for (u32 i = 0; i < pcells && r.ok; ++i)
+		{
+			rep_pressure_cell c;
+			if (!r.str(c.from) || !r.str(c.to))
+				break;
+			c.value = r.s32v();
+			c.stamp = r.u64v();
+			if (!r.ok)
+				break;
+			if (CHARACTER_COMMUNITY::IdToIndex(c.from, CHARACTER_COMMUNITY_INDEX(-1), true) < 0 ||
+			    CHARACTER_COMMUNITY::IdToIndex(c.to,   CHARACTER_COMMUNITY_INDEX(-1), true) < 0)
+				continue;                       // a faction the config no longer has
+			if (!c.value)
+				continue;                       // a zero grudge is the absence of one
+			pending_pressure.push_back(c);
+		}
+		pending_stamp = r.u64v();
+		pressure_ok   = r.ok;
+	}
+
 	stream.seek(caller_pos);
 
-	if (!r.ok)
+	if (!r.ok && (ver < 2 || pressure_ok))
 	{
 		Msg("! COOP(rep): faction state chunk is truncated or malformed (%u bytes) — DISCARDED "
 			"WHOLE, faction relations start at their config baseline", chunk_size);
 		FlushLog();
 		return;
+	}
+
+	if (ver >= 2 && !pressure_ok)
+	{
+		Msg("! COOP(rep32): the pressure tail is truncated — pressure DISCARDED (the bar has to be "
+			"re-earned), but the faction overlay from the same chunk is kept: a lost grudge is "
+			"safe, a lost war is not.");
+		pending_pressure.clear();
+		pending_stamp = 0;
+	}
+
+	s_rep_pressure.swap(pending_pressure);
+	s_rep_overlay_stamp = pending_stamp;
+
+	// THE RESTART IS A MEASUREMENT, NOT AN ASSUMPTION (doc §8.3 guard rail 3). A fresh decay timer
+	// and a correctly-resumed one are indistinguishable from the VALUE alone, so the stored stamp
+	// and the current game time are both printed here and at save, and the harness compares them
+	// across a restart rather than trusting that the number looks plausible.
+	{
+		const u64 game_now = coop_rep_game_time_ms();
+		Msg("- COOP(rep32): pressure state loaded  cells=%u overlay_stamp=%I64u game_now=%I64u "
+			"elapsed_since_stamp=%I64u (v%u)",
+			u32(s_rep_pressure.size()), s_rep_overlay_stamp, game_now,
+			(game_now > s_rep_overlay_stamp && s_rep_overlay_stamp) ? (game_now - s_rep_overlay_stamp) : 0ull,
+			u32(ver));
+		for (size_t pi = 0; pi < s_rep_pressure.size(); ++pi)
+			Msg("- COOP(rep32):   loaded pressure %s -> %s = %+d stamp=%I64u elapsed=%I64u",
+				s_rep_pressure[pi].from.c_str(), s_rep_pressure[pi].to.c_str(),
+				s_rep_pressure[pi].value, s_rep_pressure[pi].stamp,
+				(game_now > s_rep_pressure[pi].stamp) ? (game_now - s_rep_pressure[pi].stamp) : 0ull);
 	}
 
 	s_rep_overlay.swap(pending);
@@ -658,6 +760,66 @@ namespace
 	// is the correct answer rather than a saturating counter nobody can read.
 	const s32 COOP_REP_RELATION_FLOOR = -2000;
 	const s32 COOP_REP_RELATION_CEIL  =  2000;
+
+	// ================== §14 step 8 P4 R3.2 — THE GUARD RAILS (doc §8.3) ==================
+	//
+	// One member killing one enemy is a personal incident, not a casus belli. R3.1 wrote the
+	// collective hit straight into the relation, so N kills moved it N times and a griefer only
+	// needed patience. R3.2 puts a BAR in front of that write: kills accumulate PRESSURE, and only
+	// a threshold crossing moves the relation at all.
+	//
+	// WHY THIS IS NOT R2's REFUSAL WEARING A DIFFERENT HAT, written here because the resemblance is
+	// the trap. R2 refuses a subjectless personal write: that is a TYPE failure, decidable from the
+	// call alone, which is why `coop_rep_subject` is a pure function of its arguments. This refusal
+	// is a POLICY failure — the write is perfectly meaningful, and the question is whether one
+	// individual's action is sufficient GROUNDS for a collective consequence. That is not decidable
+	// from the call alone; it requires history. A pure function of the call would refuse every
+	// faction write or none, so this is a stateful accumulator and shares NO code with R2's
+	// resolver.
+	//
+	// The bar, in units of the collective hit: with the measured -140 the collective is -7 per
+	// kill, so 8 kills of the same faction inside the decay window are needed before the relation
+	// moves at all. Chosen against the MEASURED magnitude rather than picked — but the magnitude is
+	// a world property that has already moved once (see the -140's history), so the bar is stated
+	// in absolute units and the run reports how many kills it actually took.
+	const s32 COOP_REP_PRESSURE_BAR = 50;
+
+	// Decay is on GAME time, u64. Q3 measured why: absolute game time read 63676055474670 ms, four
+	// orders of magnitude past what u32 holds, so every timestamp and every difference here is u64
+	// and the harness prints them.
+	const u64 COOP_REP_MS_PER_GAME_HOUR = 3600ull * 1000ull;
+
+	// Pressure half-life: how long a grudge takes to be half-forgotten. Short relative to the
+	// overlay's, because "he has been killing us all afternoon" should expire faster than "we are
+	// at war with them".
+	const u64 COOP_REP_PRESSURE_HALFLIFE_MS = 6ull * COOP_REP_MS_PER_GAME_HOUR;
+
+	// Overlay half-life: the R2 overlay IS the decayable quantity — R3.2 adds no second
+	// representation of a faction relation, it shrinks the one that already exists back toward its
+	// config baseline. A cell that reaches baseline is dropped by coop_rep_faction_move, so "the
+	// war is over" stays a real state rather than a stored zero difference.
+	const u64 COOP_REP_OVERLAY_HALFLIFE_MS = 48ull * COOP_REP_MS_PER_GAME_HOUR;
+
+	// How often to bother decaying the overlay. Game time can run at a large multiplier, so this is
+	// a game-time interval, not a frame count.
+	const u64 COOP_REP_DECAY_TICK_MS = 30ull * 60ull * 1000ull;   // half a game-hour
+
+	struct rep_pressure_cell
+	{
+		shared_str from;      // the WRONGED faction
+		shared_str to;        // the faction held responsible
+		s32        value;     // accumulated, signed like the hits that made it
+		u64        stamp;     // GAME time this cell was last touched — its own decay clock
+	};
+	xr_vector<rep_pressure_cell> s_rep_pressure;
+
+	// The overlay's decay clock. Stored and restored, because a fresh timer and a correctly
+	// resumed one are indistinguishable from the VALUE alone — which is the whole point of R3.2's
+	// third guard rail.
+	u64 s_rep_overlay_stamp = 0;
+
+	u32 s_pressure_crossed  = 0;   // bars crossed (a relation actually moved)
+	u32 s_pressure_held     = 0;   // kills absorbed by the bar (the griefer-loop counter)
 
 	u32 s_bystanders_considered = 0;
 	u32 s_bystanders_moved      = 0;
@@ -795,6 +957,211 @@ void coop_rep_test_set_bystander(bool armed, u16 id, const Fvector& pos,
 	s_test_bys_id    = id;
 	s_test_bys_pos   = pos;
 	s_test_bys_comm  = comm;
+}
+
+// ================== §14 step 8 P4 R3.2 — game time, decay, and the bar ==================
+
+// Defined below: the ONE write path for a faction relation. The bar and the decay both go through
+// it rather than touching the table, so the overlay bookkeeping cannot drift out of step with it.
+bool coop_rep_faction_move(CHARACTER_COMMUNITY_INDEX from, CHARACTER_COMMUNITY_INDEX to,
+                           s32 delta, LPCSTR why);
+
+// ABSOLUTE game time in ms, u64. Zero means "no A-Life yet", and every caller treats a zero as
+// "the clock is not running" rather than as an epoch — a decay computed against 0 would age every
+// stored cell by 63 billion ms on the first tick after a load.
+u64 coop_rep_game_time_ms()
+{
+	if (ai().get_alife() && ai().alife().initialized())
+		return u64(ai().alife().time_manager().game_time());
+	return 0ull;
+}
+
+// Half-life decay toward zero, integer-safe and GUARANTEED to terminate.
+//
+// The obvious `v * pow(0.5, dt/halflife)` never reaches zero: it asymptotes, so a faction war
+// would decay to 1 and sit there forever, and "the war is over" would never be a state the overlay
+// could drop. So once a full half-life has elapsed the result is forced strictly closer to zero.
+s32 coop_rep_decay_toward_zero(s32 v, u64 elapsed_ms, u64 halflife_ms)
+{
+	if (!v || !elapsed_ms || !halflife_ms)
+		return v;
+	const double f   = pow(0.5, double(elapsed_ms) / double(halflife_ms));
+	const s32    mag = _abs(v);
+	s32          out = s32(double(mag) * f);          // truncates toward zero, which is the intent
+	if (out >= mag && elapsed_ms >= halflife_ms)
+		out = mag - 1;                                // never stall: one half-life must cost something
+	if (out < 0)
+		out = 0;
+	return (v < 0) ? -out : out;
+}
+
+u32 coop_rep_pressure_cells()  { return u32(s_rep_pressure.size()); }
+u32 coop_rep_pressure_crossed(){ return s_pressure_crossed; }
+u32 coop_rep_pressure_held()   { return s_pressure_held; }
+s32 coop_rep_pressure_bar()    { return COOP_REP_PRESSURE_BAR; }
+
+s32 coop_rep_pressure_of(CHARACTER_COMMUNITY_INDEX from, CHARACTER_COMMUNITY_INDEX to)
+{
+	if (from < 0 || to < 0)
+		return 0;
+	const shared_str fn = CHARACTER_COMMUNITY::IndexToId(from, NULL, true);
+	const shared_str tn = CHARACTER_COMMUNITY::IndexToId(to,   NULL, true);
+	for (size_t i = 0; i < s_rep_pressure.size(); ++i)
+		if (s_rep_pressure[i].from == fn && s_rep_pressure[i].to == tn)
+			return s_rep_pressure[i].value;
+	return 0;
+}
+
+u64 coop_rep_overlay_stamp() { return s_rep_overlay_stamp; }
+
+// The decay tick for BOTH quantities. Called from the propagate tick, so it runs on the same
+// cadence as everything else in this file rather than needing its own hook.
+void coop_rep_decay_tick()
+{
+	const u64 now = coop_rep_game_time_ms();
+	if (!now)
+		return;                                     // no A-Life clock yet: not an epoch, just absent
+
+	// ---- pressure: per-cell clocks, because cells are created at different times -------------
+	for (size_t i = 0; i < s_rep_pressure.size(); )
+	{
+		rep_pressure_cell& c = s_rep_pressure[i];
+		if (now <= c.stamp)                          // clock went backwards (load of an older world)
+		{
+			c.stamp = now;
+			++i;
+			continue;
+		}
+		const u64 dt = now - c.stamp;
+		if (dt < COOP_REP_DECAY_TICK_MS)
+		{
+			++i;
+			continue;
+		}
+		const s32 before = c.value;
+		c.value = coop_rep_decay_toward_zero(c.value, dt, COOP_REP_PRESSURE_HALFLIFE_MS);
+		c.stamp = now;
+		if (!c.value)
+		{
+			Msg("- COOP(rep32): pressure %s -> %s decayed to ZERO (was %+d over %I64u ms of game "
+				"time) — the grudge expired before it reached the bar",
+				c.from.c_str(), c.to.c_str(), before, dt);
+			s_rep_pressure.erase(s_rep_pressure.begin() + i);
+			continue;
+		}
+		if (before != c.value)
+			Msg("- COOP(rep32): pressure %s -> %s decayed %+d -> %+d over %I64u ms game time "
+				"(bar %d)", c.from.c_str(), c.to.c_str(), before, c.value,
+				dt, COOP_REP_PRESSURE_BAR);
+		++i;
+	}
+
+	// ---- the overlay: R2's storage, shrinking back toward the CONFIG baseline ---------------
+	if (!s_rep_overlay_stamp || now < s_rep_overlay_stamp)
+	{
+		s_rep_overlay_stamp = now;
+		return;
+	}
+	const u64 dt = now - s_rep_overlay_stamp;
+	if (dt < COOP_REP_DECAY_TICK_MS)
+		return;
+	s_rep_overlay_stamp = now;
+
+	rep_baseline& b = baseline();
+	if (!b.ok)
+		return;
+
+	// Walk a COPY of the cell list: coop_rep_faction_move mutates s_rep_overlay (it erases cells
+	// that reach baseline), so iterating the live vector while calling it is a use-after-erase.
+	xr_vector<rep_cell> snapshot = s_rep_overlay;
+	for (size_t i = 0; i < snapshot.size(); ++i)
+	{
+		const CHARACTER_COMMUNITY_INDEX from =
+			CHARACTER_COMMUNITY::IdToIndex(snapshot[i].from, CHARACTER_COMMUNITY_INDEX(-1), true);
+		const CHARACTER_COMMUNITY_INDEX to =
+			CHARACTER_COMMUNITY::IdToIndex(snapshot[i].to, CHARACTER_COMMUNITY_INDEX(-1), true);
+		if (from < 0 || to < 0 || from >= s32(b.t.size()) || to >= s32(b.t.size()))
+			continue;
+
+		const s32 base = b.t[from][to];
+		const s32 live = s32(CHARACTER_COMMUNITY::relation(from, to));
+		const s32 diff = live - base;
+		if (!diff)
+			continue;
+
+		const s32 shrunk = coop_rep_decay_toward_zero(diff, dt, COOP_REP_OVERLAY_HALFLIFE_MS);
+		if (shrunk == diff)
+			continue;
+		// Expressed as a MOVE through the one write path, so the overlay bookkeeping, the floor
+		// and ceiling, and the drop-at-baseline rule all apply to decay exactly as they do to a
+		// kill. Decay is not a second way to write a relation.
+		coop_rep_faction_move(from, to, shrunk - diff, "decay");
+	}
+}
+
+// THE BAR. Returns true only if the relation actually moved.
+//
+// This is R3.2's refusal, and it is stateful by necessity: the same call that must be refused on
+// kill 1 must be honoured on kill 8, and nothing in the call distinguishes them.
+bool coop_rep_pressure_add(CHARACTER_COMMUNITY_INDEX from, CHARACTER_COMMUNITY_INDEX to,
+                           s32 delta, LPCSTR why)
+{
+	if (!delta || from < 0 || to < 0)
+		return false;
+
+	const u64 now = coop_rep_game_time_ms();
+	const shared_str fn = CHARACTER_COMMUNITY::IndexToId(from, NULL, true);
+	const shared_str tn = CHARACTER_COMMUNITY::IndexToId(to,   NULL, true);
+
+	size_t i = 0;
+	for (; i < s_rep_pressure.size(); ++i)
+		if (s_rep_pressure[i].from == fn && s_rep_pressure[i].to == tn)
+			break;
+
+	s32 before = 0, aged = 0;
+	if (i < s_rep_pressure.size())
+	{
+		before = s_rep_pressure[i].value;
+		// Age it to NOW before adding, or a slow griefer would accumulate at full weight no matter
+		// how far apart the kills were — which is the exact loop this bar exists to stop.
+		const u64 dt = (now > s_rep_pressure[i].stamp) ? (now - s_rep_pressure[i].stamp) : 0ull;
+		aged = coop_rep_decay_toward_zero(before, dt, COOP_REP_PRESSURE_HALFLIFE_MS);
+		s_rep_pressure[i].value = aged + delta;
+		s_rep_pressure[i].stamp = now;
+	}
+	else
+	{
+		rep_pressure_cell c;
+		c.from  = fn;
+		c.to    = tn;
+		c.value = delta;
+		c.stamp = now;
+		s_rep_pressure.push_back(c);
+		i = s_rep_pressure.size() - 1;
+	}
+
+	const s32 now_val = s_rep_pressure[i].value;
+	if (_abs(now_val) < COOP_REP_PRESSURE_BAR)
+	{
+		++s_pressure_held;
+		Msg("- COOP(rep32): pressure %s -> %s  %+d (aged %+d) %+d = %+d of bar %d — HELD, the "
+			"relation does NOT move (%s); held=%u stamp=%I64u",
+			fn.c_str(), tn.c_str(), before, aged, delta, now_val, COOP_REP_PRESSURE_BAR,
+			why, s_pressure_held, now);
+		return false;
+	}
+
+	// Crossed. The relation moves by the WHOLE accumulated pressure, and the accumulator is spent —
+	// otherwise the next kill would cross again immediately and the bar would be a one-time delay
+	// rather than a rate limit.
+	const s32 spend = now_val;
+	s_rep_pressure.erase(s_rep_pressure.begin() + i);
+	++s_pressure_crossed;
+	Msg("- COOP(rep32): pressure %s -> %s reached %+d (bar %d) — CROSSED, spending it as one move "
+		"and resetting to 0; crossed=%u held=%u stamp=%I64u",
+		fn.c_str(), tn.c_str(), spend, COOP_REP_PRESSURE_BAR, s_pressure_crossed,
+		s_pressure_held, now);
+	return coop_rep_faction_move(from, to, spend, why);
 }
 
 bool coop_rep_faction_move(CHARACTER_COMMUNITY_INDEX from, CHARACTER_COMMUNITY_INDEX to,
@@ -938,6 +1305,11 @@ void coop_rep_propagate_kill(u16 killer_id, CHARACTER_COMMUNITY_INDEX killer_com
 
 void coop_rep_propagate_tick()
 {
+	// R3.2: decay runs whether or not a kill is pending — a world where nobody is shooting is
+	// exactly the world in which a faction war is supposed to cool off, so this must NOT sit
+	// behind the early-out below.
+	coop_rep_decay_tick();
+
 	if (s_pending.empty())
 		return;
 
@@ -1034,7 +1406,9 @@ void coop_rep_propagate_tick()
 					"rounds to nothing. Nothing is written; a faction war is not started by a "
 					"rounding error.", shooter_delta, shooter_delta, COOP_REP_COLLECTIVE_DIVISOR);
 			else
-				coop_rep_faction_move(pk.victim_comm, pk.killer_comm, collective, "kill");
+				// R3.2: through the BAR, not straight at the relation. One kill is a personal
+				// incident; only accumulated pressure crossing a threshold moves a faction.
+				coop_rep_pressure_add(pk.victim_comm, pk.killer_comm, collective, "kill");
 		}
 
 		s_pending.erase(s_pending.begin() + k);

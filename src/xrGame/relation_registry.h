@@ -258,12 +258,44 @@ void coop_rep_set_bystander_radius(float r);
 bool coop_rep_faction_move(CHARACTER_COMMUNITY_INDEX from, CHARACTER_COMMUNITY_INDEX to,
                            s32 delta, LPCSTR why);
 
+// §14 step 8 P4 R3.2 (doc §8.3) — THE BAR in front of coop_rep_faction_move.
+//
+// One member killing one enemy is a personal incident, so individual kills accumulate PRESSURE per
+// (wronged faction -> blamed faction) and only a threshold crossing moves the relation. Returns
+// true only if the relation actually moved; a `false` here is the common, correct case.
+//
+// This deliberately shares NO code with R2's `coop_rep_subject`, and the resemblance is the trap it
+// is avoiding: R2 refuses a TYPE failure (a personal write with no subject is meaningless, and that
+// is decidable from the call alone, which is why that resolver is pure). This refuses a POLICY
+// failure — the write is meaningful, and the question is whether one act is sufficient GROUNDS for
+// a collective consequence. A pure function of the call cannot know what came before it, so it
+// would refuse every faction write or none.
+bool coop_rep_pressure_add(CHARACTER_COMMUNITY_INDEX from, CHARACTER_COMMUNITY_INDEX to,
+                           s32 delta, LPCSTR why);
+
+// Decay for BOTH quantities, on ABSOLUTE GAME time (u64 — Q3 measured 63676055474670 ms). Pressure
+// decays so a slow griefer never accumulates; the R2 overlay decays toward its config baseline so a
+// war cools off. The overlay is the ONLY representation of a faction relation — decay shrinks it
+// through coop_rep_faction_move rather than writing the table a second way.
+void coop_rep_decay_tick();
+u64  coop_rep_game_time_ms();
+
 // Counters for the harness. A tier that never ran and a tier that ran correctly are
 // indistinguishable from the relation values alone.
 u32 coop_rep_bystanders_considered();
 u32 coop_rep_bystanders_moved();
 u32 coop_rep_faction_moved_count();
 u32 coop_rep_faction_refused_count();
+
+// R3.2 state, for the harness: the griefer-loop counter (`held`), the crossings, the live pressure
+// on a pair, and the stored decay clock — the last so a restart can be MEASURED rather than
+// assumed, because a fresh timer and a correctly-resumed one look identical from the value alone.
+u32 coop_rep_pressure_cells();
+u32 coop_rep_pressure_crossed();
+u32 coop_rep_pressure_held();
+s32 coop_rep_pressure_bar();
+s32 coop_rep_pressure_of(CHARACTER_COMMUNITY_INDEX from, CHARACTER_COMMUNITY_INDEX to);
+u64 coop_rep_overlay_stamp();
 
 // HARNESS ONLY, and it is a CONSTRUCTION rather than an observation: two headless clients cannot
 // share a wine prefix ([[xray-two-headless-clients]]), so there is no second live player to stand
