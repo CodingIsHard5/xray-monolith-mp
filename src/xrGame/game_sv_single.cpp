@@ -4196,39 +4196,62 @@ void game_sv_Single::Update()
 			// shooting with the wrong player. So pick the shooter the world will actually attribute
 			// the kill to, and let the OTHER player be the bystander.
 			//
-			// `g_actor` is the engine-side "most recently spawned actor" (Actor_Network.cpp), which
-			// is BELIEVED to track the same object gamedata's `db.actor` does — believed, not
-			// assumed: the COOP(rep3a) Lua hook logs `db.actor`'s id at every death, this logs
-			// `g_actor`'s id from C++, and a run in which they disagree says so in its own log
-			// instead of quietly measuring the wrong player again.
+			// WHICH PLAYER IS `db.actor`? Run 7 answered it by falsifying the first guess.
+			//
+			// The first attempt used `g_actor` (Actor_Network.cpp's "most recently spawned actor")
+			// on the belief that it tracks the same object gamedata's `db.actor` does. It does not:
+			//
+			//   shooter=21284 chosen by first-connected (g_actor is not a connected player)
+			//                 [g_actor=0 first_connected=21284]
+			//   ~ COOP(rep3a): npc_death victim=22645 killer=21284 db.actor=26475 killer_is_db_actor=no
+			//
+			// `g_actor` names an actor with id 0 — the single-player actor slot, not a connected
+			// client — so the guard refused it and fell back, which is the only reason this cost one
+			// run instead of becoming a fourth silent zero.
+			//
+			// What the same line measured is the answer: `db.actor` was **26475, the second-connected
+			// client** — and in run 6 it was 26268, also the second-connected. Two runs, and the
+			// mechanism agrees: `db.actor` is assigned in the actor binder's `net_spawn`, so the LAST
+			// actor to spawn wins. So the shooter is the last-connected player, and the bystander
+			// becomes the first-connected one (the selection loop skips the shooter either way).
+			//
+			// Still not asserted blind: COOP(rep3a) logs `db.actor` from Lua at every death and this
+			// logs the choice with every candidate beside it, so a run where they disagree says so.
 			// g_actor is declared in Actor.h, already included above.
 			const u16 world_actor_id = g_actor ? g_actor->ID() : u16(mp_coop_owner::none);
 			const u16 first_player   = coop_first_player_actor();
 
+			xr_vector<u16> shooter_cands;
+			coop_all_player_actors(shooter_cands);
+
 			u16 player_id = first_player;
-			LPCSTR shooter_why = "first-connected (g_actor is not a connected player)";
-			if (world_actor_id != mp_coop_owner::none)
+			LPCSTR shooter_why = "first-connected (only one player)";
+			bool g_actor_is_player = false;
+			for (u32 si = 0; si < shooter_cands.size(); ++si)
+				if (shooter_cands[si] == world_actor_id && world_actor_id != mp_coop_owner::none)
+					g_actor_is_player = true;
+
+			if (g_actor_is_player)
 			{
-				// Only if that actor is genuinely a CONNECTED player: g_actor could name something
-				// that is not one of our clients, and shooting with a non-player would measure a
-				// different thing entirely while looking like a fix.
-				xr_vector<u16> shooter_cands;
-				coop_all_player_actors(shooter_cands);
-				for (u32 si = 0; si < shooter_cands.size(); ++si)
-					if (shooter_cands[si] == world_actor_id)
-					{
-						player_id = world_actor_id;
-						shooter_why = "g_actor (the actor db.actor names)";
-						break;
-					}
+				// Kept as the preferred path: if a build ever makes g_actor name a real client, that
+				// is a direct answer rather than an ordering argument, and it should win.
+				player_id = world_actor_id;
+				shooter_why = "g_actor (it IS a connected player on this build)";
+			}
+			else if (shooter_cands.size() >= 2)
+			{
+				player_id = shooter_cands.back();
+				shooter_why = "last-connected (measured: db.actor is the second client, runs 6 and 7)";
 			}
 			if (!s_r31_shooter_logged && player_id != mp_coop_owner::none)
 			{
 				s_r31_shooter_logged = true;
-				Msg("- COOP(rep31): shooter=%u chosen by %s  [g_actor=%u first_connected=%u] — the "
-					"stock tier's gate is killer==db.actor, so shooting with the wrong player "
-					"measures zero and reports it as a blast radius",
-					u32(player_id), shooter_why, u32(world_actor_id), u32(first_player));
+				Msg("- COOP(rep31): shooter=%u chosen by %s  [g_actor=%u first_connected=%u "
+					"players=%u] — the stock tier's gate is killer==db.actor, so shooting with the "
+					"wrong player measures zero and reports it as a blast radius. Cross-check this "
+					"against COOP(rep3a)'s db.actor= on the kill.",
+					u32(player_id), shooter_why, u32(world_actor_id), u32(first_player),
+					u32(shooter_cands.size()));
 				FlushLog();
 			}
 
