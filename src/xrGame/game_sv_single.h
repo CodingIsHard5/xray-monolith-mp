@@ -254,6 +254,13 @@ private:
 	// The entity id of the first connected client that has an actor, or none.
 	u16  coop_first_player_actor();
 
+	// MP fork (§14 step 8 P4 R3.1 run 3): every connected player's actor id, in connection
+	// order. The blast radius needs a SECOND player, and until run 3 there was no way to ask
+	// for one — the two-client blocker this project treated as settled turned out to rest on a
+	// single experiment against an engine with a since-fixed crash, and re-running it as-is
+	// passed: both clients connect and replicate on one wine prefix.
+	void coop_all_player_actors(xr_vector<u16>& out);
+
 	// MP fork (§14 step 8 phase 2): -coop_rpg_census <seconds> asks gamedata to log the flag
 	// census on a timer. §6.2's discriminator is mechanical, so the classification is DERIVED
 	// from what the server actually reads with no acting player rather than authored by hand —

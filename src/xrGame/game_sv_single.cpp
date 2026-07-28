@@ -2775,6 +2775,26 @@ u16 game_sv_Single::coop_first_player_actor()
 	return fd.player_id;
 }
 
+void game_sv_Single::coop_all_player_actors(xr_vector<u16>& out)
+{
+	struct collector
+	{
+		game_sv_Single* self;
+		xr_vector<u16>* out;
+		void operator()(IClient* client)
+		{
+			xrClientData* cd = static_cast<xrClientData*>(client);
+			if (!cd || !cd->owner) return;
+			if (cd == self->m_server->GetServerClient()) return;
+			out->push_back(cd->owner->ID);
+		}
+	};
+	collector c;
+	c.self = this;
+	c.out = &out;
+	m_server->ForEachClientDo(c);
+}
+
 // MP fork (§14 step 8 phase 1 / doc §6): drive the ownership-tier probe.
 //
 // The sequence is the test. The acting-player context is engine-owned and scoped, so the three
@@ -4125,6 +4145,9 @@ void game_sv_Single::Update()
 		static int  s_r31_vcomm = -1, s_r31_kcomm = -1;
 		static int  s_r31_actor_idx = -1, s_r31_faction_idx = -1;
 		static int  s_r31_p_before = 0, s_r31_b_before = 0;
+		static u16  s_r31_bys = mp_coop_owner::none;      // the REAL second player
+		static int  s_r31_realb_before = 0;
+		static float s_r31_realb_dist = -1.f;
 		static int  s_r31_f_actor_before = 0, s_r31_f_chosen_before = 0;
 		static u32  s_r31_bys_moved_before = 0, s_r31_fac_moved_before = 0, s_r31_fac_ref_before = 0;
 
@@ -4160,9 +4183,39 @@ void game_sv_Single::Update()
 			                      ? Level().Objects.net_Find(player_id) : NULL;
 			CInventoryOwner* const pio = pobj ? smart_cast<CInventoryOwner*>(pobj) : NULL;
 
-			// Leg 2's victim must share leg 1's community or the -140 regression gate compares
-			// two different numbers and proves nothing.
+			// THE SECOND PLAYER, and run 3 is the first run that could have one. The plan
+			// carried "no second live client" as settled fact; re-running the two-client test
+			// as-is on the current engine PASSED (both clients connect and replicate on one
+			// wine prefix), so the blast radius can now be OBSERVED on a real player instead of
+			// constructed. The synthetic candidate stays anyway — it is what pins the exact
+			// boundary at r and r+1, which a real player parked wherever it spawned cannot.
+			xr_vector<u16> players;
+			coop_all_player_actors(players);
+			u16 bys_id = mp_coop_owner::none;
+			Fvector bys_pos;
+			bys_pos.set(0.f, 0.f, 0.f);
+			for (u32 pi = 0; pi < players.size(); ++pi)
+			{
+				if (players[pi] == player_id)
+					continue;
+				CSE_Abstract* const e = ai().alife().objects().object(players[pi], true);
+				if (!e || !_valid(e->o_Position))
+					continue;
+				bys_id = players[pi];
+				bys_pos = e->o_Position;       // the CSE: the pump thread keeps it live, the object does not
+				break;
+			}
+
+			// VICTIM SELECTION IS THE EXPERIMENT. Leg 1 picks the stalker NEAREST the second
+			// player, so the kill lands inside the radius and the scaled hit is observable; leg 2
+			// picks one BEYOND the radius, where the correct answer is exactly zero. Choosing the
+			// distance by choosing the victim needs no client movement — the two clients spawn
+			// co-located, so moving one would be a whole subsystem to get a number this gets for
+			// free. Leg 2's victim must also share leg 1's community, or the -140 regression gate
+			// compares two different numbers.
+			const float radius = coop_rep_bystander_radius();
 			u16 victim_id = mp_coop_owner::none;
+			float victim_score = -1.f, victim_dist = -1.f;
 			u32 stalkers = 0;
 			if (pio)
 			{
@@ -4171,6 +4224,8 @@ void game_sv_Single::Update()
 					CObject* const o = Level().Objects.o_get_by_iterator(i);
 					if (!o || o->getDestroy() || o->ID() == player_id || o->ID() == s_r31_victim)
 						continue;
+					if (bys_id != mp_coop_owner::none && o->ID() == bys_id)
+						continue;
 					CEntityAlive* const alive = smart_cast<CEntityAlive*>(o);
 					if (!alive || !alive->g_Alive() || !smart_cast<CAI_Stalker*>(o))
 						continue;
@@ -4178,12 +4233,32 @@ void game_sv_Single::Update()
 					if (!cio)
 						continue;
 					if (s_r31_vcomm >= 0 && int(cio->Community()) != s_r31_vcomm)
-						continue;                   // leg 2: same community as leg 1, or nothing
+						continue;
 					++stalkers;
-					if (victim_id == mp_coop_owner::none)
+
+					const float d = (bys_id != mp_coop_owner::none)
+					                ? o->Position().distance_to(bys_pos) : 0.f;
+					// leg 1 wants the smallest distance, leg 2 the largest. Same loop, one sign.
+					const float score = (s_r31_leg == 0) ? -d : d;
+					if (victim_id == mp_coop_owner::none || score > victim_score)
+					{
 						victim_id = o->ID();
+						victim_score = score;
+						victim_dist = d;
+					}
 				}
 			}
+			// Leg 2 only means something if its victim is genuinely OUTSIDE the radius. Say so
+			// rather than silently reporting a zero that the distance did not earn.
+			if (s_r31_leg == 1 && bys_id != mp_coop_owner::none && victim_dist >= 0.f
+			    && victim_dist <= radius)
+			{
+				Msg("! COOP(rep31): leg2's farthest available stalker is only %.1f m from the "
+					"second player (radius %.0f) — its zero would NOT be attributable to the "
+					"radius. Reported, not hidden.", victim_dist, radius);
+			}
+			s_r31_bys = bys_id;
+			s_r31_realb_dist = victim_dist;
 
 			if (!pio || victim_id == mp_coop_owner::none)
 			{
@@ -4253,7 +4328,20 @@ void game_sv_Single::Update()
 					coop_rep_test_set_bystander(true, R31_BYSTANDER, bpos,
 					                            CHARACTER_COMMUNITY_INDEX(s_r31_kcomm));
 
+					// The second player joins the killer's faction too, so leg 2's zero is
+					// attributable to the RADIUS and to nothing else — §8.2's same-faction test
+					// would otherwise supply a second, indistinguishable reason for it.
+					if (s_r31_leg == 1 && s_r31_bys != mp_coop_owner::none && s_r31_faction_idx >= 0)
+					{
+						CObject* const bo = Level().Objects.net_Find(s_r31_bys);
+						CInventoryOwner* const bio = bo ? smart_cast<CInventoryOwner*>(bo) : NULL;
+						if (bio)
+							bio->SetCommunity(CHARACTER_COMMUNITY_INDEX(s_r31_faction_idx));
+					}
+
 					RELATION_REGISTRY().SetCommunityGoodwill(s_r31_vcomm, R31_BYSTANDER, R31_BYSTANDER_SEED);
+					s_r31_realb_before = (s_r31_bys != mp_coop_owner::none)
+						? RELATION_REGISTRY().GetCommunityGoodwill(s_r31_vcomm, s_r31_bys) : 0;
 					s_r31_p_before        = RELATION_REGISTRY().GetCommunityGoodwill(s_r31_vcomm, player_id);
 					s_r31_b_before        = RELATION_REGISTRY().GetCommunityGoodwill(s_r31_vcomm, R31_BYSTANDER);
 					s_r31_f_actor_before  = (s_r31_actor_idx >= 0)
@@ -4266,10 +4354,12 @@ void game_sv_Single::Update()
 
 					Msg("- COOP(rep31): leg%d BEFORE player=%u victim=%u victim_comm=%d killer_comm=%d "
 						"personal=%d bystander_seeded=%d faction_to_actor=%d faction_to_chosen=%d "
-						"synthetic_at=%.1f m (radius %.1f, %s)",
+						"synthetic_at=%.1f m (radius %.1f, %s) "
+						"LIVE_bystander=%u at %.1f m row=%d",
 						s_r31_leg + 1, u32(player_id), u32(victim_id), s_r31_vcomm, s_r31_kcomm,
 						s_r31_p_before, s_r31_b_before, s_r31_f_actor_before, s_r31_f_chosen_before,
-						offset, r, (s_r31_leg == 0) ? "INSIDE" : "OUTSIDE");
+						offset, r, (s_r31_leg == 0) ? "INSIDE" : "OUTSIDE",
+						u32(s_r31_bys), s_r31_realb_dist, s_r31_realb_before);
 					FlushLog();
 
 					ventity->KillEntity(player_id);
@@ -4297,6 +4387,17 @@ void game_sv_Single::Update()
 			// `faction_to_actor` is printed as a DELTA as well as a value because zero is the
 			// answer here and an absolute zero is also what an unwritten cell reads: the delta
 			// says the cell was watched across a kill, not merely found empty afterwards.
+			const int realb_after = (s_r31_bys != mp_coop_owner::none)
+				? RELATION_REGISTRY().GetCommunityGoodwill(s_r31_vcomm, s_r31_bys) : 0;
+
+			// The LIVE bystander is an OBSERVATION and is labelled as one, beside the synthetic
+			// that is not. Both are printed on the same line so neither can be quoted without
+			// the other's status.
+			Msg("- COOP(rep31): leg%d LIVE_bystander[OBSERVED, real second client] id=%u "
+				"at %.1f m (radius %.0f) %d -> %d (delta %+d)",
+				s_r31_leg + 1, u32(s_r31_bys), s_r31_realb_dist, coop_rep_bystander_radius(),
+				s_r31_realb_before, realb_after, realb_after - s_r31_realb_before);
+
 			Msg("- COOP(rep31): leg%d AFTER died=%d personal %d -> %d (delta %+d) "
 				"bystander[SYNTHETIC, no second live client] %d -> %d (delta %+d) "
 				"faction_to_actor %d -> %d (delta %+d) faction_to_chosen %d -> %d (delta %+d) "
