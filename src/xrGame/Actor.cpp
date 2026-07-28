@@ -1299,6 +1299,7 @@ void CActor::UpdateCL()
 		static float s_dlg_accum = 0.f;
 		static u32   s_dlg_phase = 0;
 		static u16   s_dlg_npc   = u16(-1);
+		static bool  s_dlg_have_dialog = false;
 		if (!s_dlg_init)
 		{
 			s_dlg_init = true;
@@ -1373,8 +1374,9 @@ void CActor::UpdateCL()
 					// Loud and separate from any result: "we could not find anybody to talk to" is
 					// not the same finding as "the dialogue did the wrong thing", and a harness
 					// that let the first read as the second would be measuring nothing.
-					Msg("- COOP(dialog-test): partner search: %u live NPC(s) here, chose %u",
-						seen, u32(s_dlg_npc));
+					s_dlg_have_dialog = !!CPhraseDialog::GetById("coop_q5_dialog", true);
+					Msg("- COOP(dialog-test): partner search: %u live NPC(s) here, chose %u; "
+						"dialog present=%d", seen, u32(s_dlg_npc), s_dlg_have_dialog ? 1 : 0);
 				}
 				if (s_dlg_npc == u16(-1))
 				{
@@ -1390,10 +1392,13 @@ void CActor::UpdateCL()
 						Msg("! COOP(dialog-test): partner %u vanished — phrase '%s' NOT sent",
 							u32(s_dlg_npc), phrases[phase]);
 					}
-					else if (!CPhraseDialog::GetById("coop_q5_dialog", true))
+					// Asked ONCE. A miss makes GetById dump every dialog id it does know, which is
+					// 1175 lines in this gamedata — ten copies of that would bury the very log a
+					// failing run has to be read out of.
+					else if (!s_dlg_have_dialog)
 					{
 						Msg("! COOP(dialog-test): dialog 'coop_q5_dialog' is not in this gamedata "
-							"— nothing to say");
+							"— nothing to say (phrase '%s' NOT sent)", phrases[phase]);
 					}
 					else
 					{
