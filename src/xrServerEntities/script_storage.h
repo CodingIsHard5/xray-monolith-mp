@@ -40,6 +40,20 @@ class CScriptThread;
 
 using namespace ScriptStorage;
 
+// MP fork (§3c audit, dev/INSTABILITY_PLAN.md §4.4.ii): WHO touches the Lua VM, and from which
+// thread. §3c found ONE pump-thread entry into the VM (the dialogue action) because that is the
+// one the harness could see; the audit question is whether it is the only one, and reading
+// xrServer::OnMessage's fifty cases by eye answers that with an opinion. This answers it with a
+// measurement — every path is instrumented at the one place they all pass through.
+//
+// Off unless -coop_vm_audit is passed: when the flag is clear this is a load of a global and a
+// predicted branch, so a normal run pays nothing measurable. Armed, it calls out of line on
+// every VM touch — that cost is accepted deliberately, because an audit run exists to be read,
+// not to be fast.
+extern u32  g_coop_vm_audit;                   // 0 = off, 1 = armed (set once at boot)
+extern u32  g_coop_game_thread_id;             // stamped every frame in CLevel::OnFrame
+void        coop_vm_touch_offthread();         // out of line; decides and reports
+
 class CScriptStorage
 {
 private:

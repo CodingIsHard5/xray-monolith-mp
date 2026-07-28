@@ -321,6 +321,130 @@ extern int luaopen_lua_extensions(lua_State* L, bool IsDebug = false);
 extern lua_CFunction luaopen_socket_core_init();
 extern void pdebug_init_init(lua_State* L);
 
+// ---------------------------------------------------------------------------------------------
+// MP fork (§3c audit, dev/INSTABILITY_PLAN.md §4.4.ii) — every entry into the Lua VM that is NOT
+// on the game thread, named at the site that made it.
+//
+// §3d proved the mechanism on one path (M_XRNET_DIALOG_ACTION) and §3f fixed that path. The open
+// half of the item is the general one: xrServer::OnMessage has ~50 cases and the connection and
+// disconnection paths run on the same pump thread, so "the dialogue action was the only one" is a
+// claim about code nobody has executed with the question in hand. Reading them is an opinion;
+// this is the measurement.
+//
+// What it prints, and why each part is there:
+//   * the thread, and the game thread beside it — the whole point, and useless alone
+//   * the pump MESSAGE being processed when the touch happened, which is the answer to
+//     "which OnMessage case?" in the form the audit actually wants. 'none' means the touch was
+//     off the pump's message dispatch entirely (a connect/disconnect path, or another thread)
+//   * a call stack, as absolute addresses with the module base printed once, because the whole
+//     project already symbolicates addresses this way (R1-Symbolicate) and a stack answers
+//     "which path" where a single return address only answers "which call"
+// Each distinct site is announced ONCE — a per-touch line would bury the second site under the
+// first — with a running total so a site that fires constantly is distinguishable from one that
+// fired once. Sites are capped; the cap being hit is itself printed, because a silently truncated
+// audit reads exactly like a complete one.
+u32 g_coop_vm_audit_touches = 0;
+
+// Provided by xrServer.cpp. Returns the M_* type currently being dispatched on THIS thread, or
+// coop_pump_msg_none when this thread is not inside xrServer::OnMessage.
+extern u32 coop_current_pump_message();
+extern LPCSTR coop_pump_message_name(u32 type);
+
+void coop_vm_touch_offthread()
+{
+	// Before the first frame there is no game thread to compare against, and everything that
+	// happens then (script engine init, the first loads) is by definition not a race with a loop
+	// that has not started. Refuse to guess rather than report every boot-time touch as a defect.
+	if (!g_coop_game_thread_id)
+		return;
+
+	const u32 tid = GetCurrentThreadId();
+	if (tid == g_coop_game_thread_id)
+		return;
+
+	enum { MAX_SITES = 48, MAX_FRAMES = 12, SKIP_FRAMES = 1 };
+	struct site { void* key; u32 count; };
+	static site     s_sites[MAX_SITES];
+	static u32      s_site_count = 0;
+	static bool     s_capped = false;
+	static void*    s_module_base = NULL;
+	static xrCriticalSection s_lock
+#ifdef PROFILE_CRITICAL_SECTIONS
+		(MUTEX_PROFILE_ID(coop_vm_audit))
+#endif
+		;
+
+	void* frames[MAX_FRAMES] = {0};
+	const u16 got = RtlCaptureStackBackTrace(SKIP_FRAMES, MAX_FRAMES, frames, NULL);
+	void* const key = got ? frames[0] : NULL;
+
+	s_lock.Enter();
+	++g_coop_vm_audit_touches;
+
+	u32 i = 0;
+	for (; i < s_site_count; ++i)
+		if (s_sites[i].key == key)
+			break;
+
+	if (i < s_site_count)
+	{
+		++s_sites[i].count;
+		// Only the site's first touch is announced, but a running total every so often keeps a
+		// hot site from looking like a one-off in the log.
+		const u32 c = s_sites[i].count;
+		s_lock.Leave();
+		if ((c % 1000) == 0)
+			Msg("! COOP(vm-audit): site #%u has now touched the VM off the game thread %u times "
+				"(%u touches in total)", i, c, g_coop_vm_audit_touches);
+		return;
+	}
+
+	if (s_site_count >= MAX_SITES)
+	{
+		const bool say = !s_capped;
+		s_capped = true;
+		s_lock.Leave();
+		if (say)
+			Msg("! COOP(vm-audit): more than %u distinct off-thread sites — the rest are NOT being "
+				"reported, so read this run as incomplete rather than as a full list", u32(MAX_SITES));
+		return;
+	}
+
+	const u32 idx = s_site_count++;
+	s_sites[idx].key = key;
+	s_sites[idx].count = 1;
+
+	if (!s_module_base)
+	{
+		HMODULE h = NULL;
+		// ...ExA explicitly: with UNICODE defined the unsuffixed name is the W form, and the cast
+		// below would then be handing a char* to a function expecting wchar_t*.
+		if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+		                       (LPCSTR)&coop_vm_touch_offthread, &h))
+			s_module_base = (void*)h;
+	}
+	void* const base = s_module_base;
+	const u32 msg = coop_current_pump_message();
+	s_lock.Leave();
+
+	string4096 trace;
+	trace[0] = 0;
+	for (u16 f = 0; f < got; ++f)
+	{
+		string64 one;
+		xr_sprintf(one, " 0x%p", frames[f]);
+		xr_strcat(trace, one);
+	}
+
+	Msg("! COOP(vm-audit): site #%u — the Lua VM was touched from thread %u, and the game thread "
+	    "is %u. pump message: %s (0x%X). This is the §3c defect class: LuaJIT is single-threaded.",
+	    idx, tid, g_coop_game_thread_id, coop_pump_message_name(msg), msg);
+	Msg("! COOP(vm-audit): site #%u module base 0x%p, stack (absolute, subtract the base for an "
+	    "RVA to symbolicate):%s", idx, base, trace);
+	FlushLog();
+}
+// ---------------------------------------------------------------------------------------------
+
 void disable_os_funcs(lua_State* L)
 {
 	lua_getglobal(L, "os");

@@ -1104,6 +1104,63 @@ void xrServer::coop_run_dialog_phrase(u16 acting_id, u16 speaker_id, u16 partner
 // halves of the matched pair sit together and neither can drift from the other.
 extern void coop_repro_bait(LPCSTR who);
 
+// MP fork (§3c audit, dev/INSTABILITY_PLAN.md §4.4.ii): which network message this thread is
+// dispatching, for the VM-touch audit in script_storage.cpp to name. Thread-local because that is
+// exactly the question — "the pump thread was in M_EVENT when it entered the VM" — and a shared
+// global would answer with whatever the OTHER thread was doing.
+//
+// 0xFFFFFFFF rather than 0: M_UPDATE is a real message type with a small value, so a sentinel of
+// zero would report "no message" and "message 0" identically.
+static const u32 coop_pump_msg_none = 0xFFFFFFFF;
+static thread_local u32 t_coop_pump_msg = coop_pump_msg_none;
+
+u32 coop_current_pump_message()
+{
+	return t_coop_pump_msg;
+}
+
+LPCSTR coop_pump_message_name(u32 type)
+{
+	// Only the cases that can plausibly reach script: the audit's reader wants to recognise the
+	// path, not to decode the whole protocol, and an unnamed type still prints its number.
+	switch (type)
+	{
+	case coop_pump_msg_none:      return "none (not in OnMessage)";
+	case M_UPDATE:                return "M_UPDATE";
+	case M_SPAWN:                 return "M_SPAWN";
+	case M_EVENT:                 return "M_EVENT";
+	case M_EVENT_PACK:            return "M_EVENT_PACK";
+	case M_CL_UPDATE:             return "M_CL_UPDATE";
+	case M_CLIENTREADY:           return "M_CLIENTREADY";
+	case M_CHANGE_LEVEL:          return "M_CHANGE_LEVEL";
+	case M_SAVE_GAME:             return "M_SAVE_GAME";
+	case M_LOAD_GAME:             return "M_LOAD_GAME";
+	case M_SAVE_PACKET:           return "M_SAVE_PACKET";
+	case M_CHAT_MESSAGE:          return "M_CHAT_MESSAGE";
+	case M_GAMEMESSAGE:           return "M_GAMEMESSAGE";
+	case M_SWITCH_DISTANCE:       return "M_SWITCH_DISTANCE";
+	case M_CL_AUTH:               return "M_CL_AUTH";
+	case M_CREATE_PLAYER_STATE:   return "M_CREATE_PLAYER_STATE";
+	case M_PLAYER_FIRE:           return "M_PLAYER_FIRE";
+	case M_REMOTE_CONTROL_CMD:    return "M_REMOTE_CONTROL_CMD";
+	case M_XRNET_DIALOG_ACTION:   return "M_XRNET_DIALOG_ACTION (§3c: should be QUEUED, not here)";
+	default:                      return "<other>";
+	}
+}
+
+// Restores rather than clears on the way out, because OnMessage RECURSES: M_EVENT_PACK unpacks
+// and re-dispatches each inner message through this same function, and a scope that reset to
+// 'none' would make every event after the first inner one report the wrong context.
+namespace
+{
+struct coop_pump_msg_scope
+{
+	u32 prev;
+	coop_pump_msg_scope(u32 type) : prev(t_coop_pump_msg) { t_coop_pump_msg = type; }
+	~coop_pump_msg_scope() { t_coop_pump_msg = prev; }
+};
+}
+
 u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadcasting with "flags" as returned
 {
 	// MP fork (§3c REPRODUCTION): this function runs on the ENet PUMP thread — see the
@@ -1116,6 +1173,7 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 
 	u16 type;
 	P.r_begin(type);
+	const coop_pump_msg_scope coop_msg_ctx(u32(type));
 #ifdef DEBUG
 	VERIFY(verify_entities());
 #endif

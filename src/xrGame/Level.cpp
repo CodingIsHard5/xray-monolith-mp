@@ -1239,6 +1239,11 @@ void CLevel::coop_server_decision_tick()
 // anyone wanted to make. CLevel::OnFrame IS the game loop; there is no second answer here.
 u32 g_coop_game_thread_id = 0;
 
+// MP fork (§3c audit, dev/INSTABILITY_PLAN.md §4.4.ii): armed by -coop_vm_audit, read on every
+// touch of the Lua VM (CScriptStorage::lua). Lives here rather than in the script engine because
+// it is meaningless without the thread id above, and the two should not be able to drift apart.
+u32 g_coop_vm_audit = 0;
+
 void CLevel::OnFrame()
 {
 	PROF_EVENT("CLevel::OnFrame()");
@@ -1247,6 +1252,25 @@ void CLevel::OnFrame()
 	// if the loop is ever re-hosted, and a gate that silently compares a thread to itself is
 	// worse than no gate.
 	g_coop_game_thread_id = GetCurrentThreadId();
+
+	// Armed here, on the first frame, and announced: an instrument whose arming is silent is one
+	// whose SILENCE cannot be read. A run that reports no off-thread touches and a run where the
+	// flag was never passed produce the same empty log otherwise, and §3a already lost a run to
+	// exactly that (the vmwatch that took zero samples, and the -dbg-less run that reported zero
+	// script errors).
+	{
+		static bool s_audit_announced = false;
+		if (!s_audit_announced)
+		{
+			s_audit_announced = true;
+			g_coop_vm_audit = strstr(Core.Params, "-coop_vm_audit") ? 1 : 0;
+			Msg("~ COOP(vm-audit): %s (game thread %u)",
+				g_coop_vm_audit
+					? "ARMED — every off-game-thread touch of the Lua VM will be reported once per site"
+					: "off (-coop_vm_audit not passed; this run measures NOTHING about VM threading)",
+				g_coop_game_thread_id);
+		}
+	}
 
 #ifdef DEBUG_MEMORY_MANAGER
     debug_memory_guard __guard__;

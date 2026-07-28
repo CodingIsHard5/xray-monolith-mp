@@ -30,6 +30,13 @@
 #include <luabind/error.hpp>
 #include <luabind/detail/stack_utils.hpp>
 
+// MP fork (§3c audit): declared here rather than by including an engine header, because this is
+// third-party code and should not start depending on xrCore. `unsigned int` is spelled out for
+// the same reason — it is what u32 is, and a mismatch would fail to LINK rather than silently
+// read a different variable.
+extern unsigned int g_coop_vm_audit;
+void coop_vm_touch_offthread();
+
 namespace luabind
 {
 	namespace detail
@@ -411,8 +418,19 @@ namespace luabind
 		}
 
 		bool is_valid() const { return ref_.is_valid(); }
-	
-		lua_State* lua_state() const { return L_; }
+
+		// MP fork (§3c audit, dev/INSTABILITY_PLAN.md §4.4.ii): a functor RESOLVED once and called
+		// many times never asks CScriptStorage::lua() again — it holds its own lua_State* and
+		// hands it out here, and every proxy caller in this header goes through this accessor to
+		// make the call. Instrumenting only the script engine's accessor would therefore have a
+		// blind spot shaped exactly like "a cached callback fired from the wrong thread", which
+		// is the failure mode being hunted. Off unless -coop_vm_audit is armed.
+		lua_State* lua_state() const
+		{
+			if (g_coop_vm_audit)
+				coop_vm_touch_offthread();
+			return L_;
+		}
 		void pushvalue() const { ref_.get(L_); }
 
 		void reset()
