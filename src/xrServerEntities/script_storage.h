@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <intrin.h>   // MP fork (§3c audit): __readgsdword for the hot-path thread check
 #include "script_storage_space.h"
 #include "script_space_forward.h"
 
@@ -46,13 +47,31 @@ using namespace ScriptStorage;
 // xrServer::OnMessage's fifty cases by eye answers that with an opinion. This answers it with a
 // measurement — every path is instrumented at the one place they all pass through.
 //
-// Off unless -coop_vm_audit is passed: when the flag is clear this is a load of a global and a
-// predicted branch, so a normal run pays nothing measurable. Armed, it calls out of line on
-// every VM touch — that cost is accepted deliberately, because an audit run exists to be read,
-// not to be fast.
+// Off unless -coop_vm_audit is passed. The fast path is a load, a TEB read and a branch — no
+// call — because the first version called out of line on EVERY touch and that cost the run: the
+// server took 480 s without finishing its going-online sweep, so the audit measured the boot and
+// never reached the dialogue it was taken for. A call in luabind's per-argument inner loops is
+// not free, and "an audit run exists to be read, not to be fast" was the wrong trade.
+//
+// The thread id is read straight out of the TEB (gs:[0x48] = ClientId.UniqueThread on x64),
+// which is one instruction instead of a cross-DLL GetCurrentThreadId. That constant is VERIFIED
+// against GetCurrentThreadId at arm time and the audit REFUSES TO ARM if they disagree — a
+// filter that silently under-triggers would report an empty site list, which reads exactly like
+// a clean result.
 extern u32  g_coop_vm_audit;                   // 0 = off, 1 = armed (set once at boot)
 extern u32  g_coop_game_thread_id;             // stamped every frame in CLevel::OnFrame
-void        coop_vm_touch_offthread();         // out of line; decides and reports
+void        coop_vm_touch_offthread();         // out of line; confirms the thread and reports
+
+IC u32 coop_thread_id_fast()
+{
+	return __readgsdword(0x48);
+}
+
+IC void coop_vm_touch_check()
+{
+	if (g_coop_vm_audit && coop_thread_id_fast() != g_coop_game_thread_id)
+		coop_vm_touch_offthread();
+}
 
 class CScriptStorage
 {

@@ -29,13 +29,25 @@
 #include <luabind/detail/pcall.hpp>
 #include <luabind/error.hpp>
 #include <luabind/detail/stack_utils.hpp>
+#include <intrin.h>
 
 // MP fork (§3c audit): declared here rather than by including an engine header, because this is
 // third-party code and should not start depending on xrCore. `unsigned int` is spelled out for
 // the same reason — it is what u32 is, and a mismatch would fail to LINK rather than silently
 // read a different variable.
 extern unsigned int g_coop_vm_audit;
+extern unsigned int g_coop_game_thread_id;
 void coop_vm_touch_offthread();
+
+// gs:[0x48] is ClientId.UniqueThread in the x64 TEB — one instruction where GetCurrentThreadId is
+// a call. Spelled out here rather than including the engine header, for the same reason as above;
+// the constant is verified against GetCurrentThreadId at arm time, and the audit refuses to arm
+// if they disagree.
+inline void coop_vm_touch_check_luabind()
+{
+	if (g_coop_vm_audit && __readgsdword(0x48) != g_coop_game_thread_id)
+		coop_vm_touch_offthread();
+}
 
 namespace luabind
 {
@@ -427,8 +439,7 @@ namespace luabind
 		// is the failure mode being hunted. Off unless -coop_vm_audit is armed.
 		lua_State* lua_state() const
 		{
-			if (g_coop_vm_audit)
-				coop_vm_touch_offthread();
+			coop_vm_touch_check_luabind();
 			return L_;
 		}
 		void pushvalue() const { ref_.get(L_); }

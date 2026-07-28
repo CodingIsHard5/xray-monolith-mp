@@ -14,8 +14,7 @@ IC lua_State* CScriptStorage::lua()
 	// this is the one chokepoint that sees paths nobody thought to read. The thread comparison
 	// itself is out of line (it needs GetCurrentThreadId, which this header should not drag in);
 	// the fast path when the audit is not armed is the load and branch below and nothing else.
-	if (g_coop_vm_audit)
-		coop_vm_touch_offthread();
+	coop_vm_touch_check();
 	return (m_virtual_machine);
 }
 

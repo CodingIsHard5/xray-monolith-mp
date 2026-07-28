@@ -1264,11 +1264,28 @@ void CLevel::OnFrame()
 		{
 			s_audit_announced = true;
 			g_coop_vm_audit = strstr(Core.Params, "-coop_vm_audit") ? 1 : 0;
-			Msg("~ COOP(vm-audit): %s (game thread %u)",
-				g_coop_vm_audit
-					? "ARMED — every off-game-thread touch of the Lua VM will be reported once per site"
-					: "off (-coop_vm_audit not passed; this run measures NOTHING about VM threading)",
-				g_coop_game_thread_id);
+
+			// The audit's hot path reads the thread id out of the TEB rather than calling
+			// GetCurrentThreadId, because a call there cost a whole run. That is a hard-coded
+			// offset, so CHECK it once against the API instead of trusting it: a filter that
+			// under-triggers reports an empty site list, and an empty site list is exactly what
+			// "no other path enters the VM off the game thread" looks like.
+			const u32 teb_tid = coop_thread_id_fast();
+			if (g_coop_vm_audit && teb_tid != g_coop_game_thread_id)
+			{
+				g_coop_vm_audit = 0;
+				Msg("! COOP(vm-audit): REFUSING TO ARM — the TEB thread id (%u) disagrees with "
+					"GetCurrentThreadId (%u) on this platform, so the fast filter cannot be "
+					"trusted and an empty result would be meaningless", teb_tid, g_coop_game_thread_id);
+			}
+			else
+			{
+				Msg("~ COOP(vm-audit): %s (game thread %u, TEB agrees)",
+					g_coop_vm_audit
+						? "ARMED — every off-game-thread touch of the Lua VM will be reported once per site"
+						: "off (-coop_vm_audit not passed; this run measures NOTHING about VM threading)",
+					g_coop_game_thread_id);
+			}
 		}
 	}
 
