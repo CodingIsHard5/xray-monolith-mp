@@ -25,6 +25,14 @@
 // find_chunk rewinds and scans, and returns 0 for a chunk that is not there. Listed here rather
 // than hidden in GametaskManager.cpp so the next chunk id added cannot silently collide with it.
 #define COOP_QUEST_CHUNK_DATA		0x00C0
+// MP fork (§14 step 8 phase 4 R2 / doc §8.1): the FACTION tier of reputation. Unlike personal
+// standing — which is CRelationRegistry, already inside alife_registry_container and already
+// riding REGISTRY_CHUNK_DATA — faction<->faction relations live in a static table loaded from
+// ltx (CHARACTER_COMMUNITY::m_relation_table), so nothing persisted them at all. R1 measured
+// that rather than assuming it: a relation moved to -63 came back as its -2000 config value.
+// Its own chunk for the same reason as the quest one: a save without it must read back as "no
+// co-op faction state" instead of desynchronising the chunks behind it.
+#define COOP_REP_CHUNK_DATA			0x00C1
 #define SECTION_HEADER				"location_"
 #define SAVE_EXTENSION				".scop"
 #define SPAWN_NAME					"game.spawn"

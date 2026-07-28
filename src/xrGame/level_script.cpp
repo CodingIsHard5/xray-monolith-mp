@@ -1048,27 +1048,50 @@ void set_pp_effector_factor2(int id, float f)
 }
 
 #include "relation_registry.h"
+#include "mp_coop_owner.h"                          // MP fork (§14 step 8 P4 R2): the refusal sentinel
 
+// MP fork (§14 step 8 phase 4 R2 / doc §8.1): the three PERSONAL-standing bindings now resolve
+// their subject through coop_rep_subject. A caller that names an entity id keeps it exactly as
+// before — an NPC is a legitimate subject and hijacking it would be worse than the bug this
+// fixes. A caller that passes COOP_REP_ACTING (-1) is saying "the player this action is being
+// run for", which is what every stock site meant when it wrote db.actor:id() and what none of
+// them can express on a server where db.actor is nil.
+//
+// With no acting player the call is REFUSED, and that refusal is the design: personal standing
+// has no subject during autonomous world simulation, and redirecting it to the world tier would
+// turn one player's reputation into everyone's — §8.3's named worst outcome.
 int g_community_goodwill(LPCSTR _community, int _entity_id)
 {
+	const u16 id = coop_rep_subject(_entity_id, false);
+	if (id == mp_coop_owner::none)
+		return NEUTRAL_GOODWILL;
+
 	CHARACTER_COMMUNITY c;
 	c.set(_community);
 
-	return RELATION_REGISTRY().GetCommunityGoodwill(c.index(), u16(_entity_id));
+	return RELATION_REGISTRY().GetCommunityGoodwill(c.index(), id);
 }
 
 void g_set_community_goodwill(LPCSTR _community, int _entity_id, int val)
 {
+	const u16 id = coop_rep_subject(_entity_id, true);
+	if (id == mp_coop_owner::none)
+		return;
+
 	CHARACTER_COMMUNITY c;
 	c.set(_community);
-	RELATION_REGISTRY().SetCommunityGoodwill(c.index(), u16(_entity_id), val);
+	RELATION_REGISTRY().SetCommunityGoodwill(c.index(), id, val);
 }
 
 void g_change_community_goodwill(LPCSTR _community, int _entity_id, int val)
 {
+	const u16 id = coop_rep_subject(_entity_id, true);
+	if (id == mp_coop_owner::none)
+		return;
+
 	CHARACTER_COMMUNITY c;
 	c.set(_community);
-	RELATION_REGISTRY().ChangeCommunityGoodwill(c.index(), u16(_entity_id), val);
+	RELATION_REGISTRY().ChangeCommunityGoodwill(c.index(), id, val);
 }
 
 int g_get_community_relation(LPCSTR comm_from, LPCSTR comm_to)
@@ -1081,6 +1104,11 @@ int g_get_community_relation(LPCSTR comm_from, LPCSTR comm_to)
 	return RELATION_REGISTRY().GetCommunityRelation(community_from.index(), community_to.index());
 }
 
+// The FACTION tier. No subject to resolve — a faction<->faction relation is collective state by
+// construction, which is exactly why it is the one half of reputation that needed storage rather
+// than routing (R1). §8.3's higher bar for faction-scale moves and the decay toward baseline are
+// R3 and belong HERE, at this call, not in the persistence: this is the only place a faction
+// relation changes, so a guard rail anywhere else would be one a caller could walk around.
 void g_set_community_relation(LPCSTR comm_from, LPCSTR comm_to, int value)
 {
 	CHARACTER_COMMUNITY community_from;
@@ -1090,6 +1118,14 @@ void g_set_community_relation(LPCSTR comm_from, LPCSTR comm_to, int value)
 
 	RELATION_REGISTRY().SetCommunityRelation(community_from.index(), community_to.index(), value);
 }
+
+// MP fork (§14 step 8 phase 4 R2): the sentinel and the seam's counters, exported so the script
+// layer sources them from the engine instead of hard-coding a -1 that could drift, and so a
+// harness can tell a seam that WORKS from a seam that was never exercised — which read the same
+// way until these existed.
+int g_coop_rep_acting_subject() { return COOP_REP_ACTING; }
+int g_coop_rep_routed_count()   { return int(coop_rep_routed_count()); }
+int g_coop_rep_refused_count()  { return int(coop_rep_refused_count()); }
 
 int g_get_general_goodwill_between(u16 from, u16 to)
 {
@@ -2948,7 +2984,12 @@ void CLevel::script_register(lua_State* L)
 
 		def("community_relation", &g_get_community_relation),
 		def("set_community_relation", &g_set_community_relation),
-		def("get_general_goodwill_between", &g_get_general_goodwill_between)
+		def("get_general_goodwill_between", &g_get_general_goodwill_between),
+
+		// MP fork (§14 step 8 phase 4 R2): the co-op routing seam, doc §8.1.
+		def("coop_acting_subject", &g_coop_rep_acting_subject),
+		def("coop_routed_count", &g_coop_rep_routed_count),
+		def("coop_refused_count", &g_coop_rep_refused_count)
 	];
 	module(L, "game")
 	[

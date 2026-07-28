@@ -23,6 +23,7 @@
 #include "string_table.h"
 #include "mp_coop_owner.h"                          // MP fork (§14 step 8 P1): acting_actor()
 #include "alife_space.h"                            // MP fork (§14 step 8 P3 Q2): COOP_QUEST_CHUNK_DATA
+#include "mp_coop_chunk_reader.h"                    // MP fork (§14 step 8 P3 Q2): bounded chunk reads
 
 #pragma warning(push)
 #pragma warning(disable:4995)
@@ -685,65 +686,13 @@ namespace
 		}
 	}
 
-	// Reading our own file, but reading it DEFENSIVELY. A count field is the one value that turns
-	// a truncated or half-written chunk into an unbounded loop, and IReader::r_stringZ(shared_str&)
-	// is unbounded by construction — it walks to the next NUL wherever that is, off the end of the
-	// buffer included. So every read is checked against the bytes actually left in OUR chunk, and
-	// a failure abandons the whole record set rather than keeping the prefix: half a pool is not a
-	// safer pool, it is a pool that disagrees with the ownership map beside it.
-	struct coop_quest_reader
-	{
-		IReader& s;
-		int      end;      // one past the last byte of our chunk
-		bool     ok;
+	// The bounded reader is shared with the other co-op chunks — mp_coop_chunk_reader.h. It
+	// lived here, file-static, until phase 4's reputation chunk needed exactly the same rules;
+	// two subtly different defensive readers is the shape that rots, so there is one. The
+	// contract is unchanged: any short read sets ok=false for good and the caller discards the
+	// whole record set rather than keeping the prefix.
 
-		coop_quest_reader(IReader& _s, int _end): s(_s), end(_end), ok(true) {}
-
-		bool room(int need)
-		{
-			if (ok && s.tell() + need > end)
-				ok = false;
-			return ok;
-		}
-
-		u32 count(u32 min_bytes_each)
-		{
-			if (!room(4))
-				return 0;
-			const u32 n = s.r_u32();
-			if (u64(n) * u64(min_bytes_each) > u64(end - s.tell()))
-			{
-				ok = false;
-				return 0;
-			}
-			return n;
-		}
-
-		bool str(shared_str& out)
-		{
-			if (!ok)
-				return false;
-			const char* const base = (const char*)s.pointer();
-			const int avail = end - s.tell();
-			int n = 0;
-			while (n < avail && base[n])
-				++n;
-			if (n >= avail)            // no terminator inside the chunk -> refuse
-			{
-				ok = false;
-				return false;
-			}
-			s.r_stringZ(out);
-			return true;
-		}
-
-		u64 u64v() { return room(8) ? s.r_u64() : u64(0); }
-		u32 u32v() { return room(4) ? s.r_u32() : 0u; }
-		u16 u16v() { return room(2) ? s.r_u16() : u16(0); }
-		u8  u8v()  { return room(1) ? s.r_u8()  : u8(0); }
-	};
-
-	void coop_read_str_u16_map(coop_quest_reader& r, xr_map<shared_str, u16>& m)
+	void coop_read_str_u16_map(coop_chunk_reader& r, xr_map<shared_str, u16>& m)
 	{
 		const u32 n = r.count(/*min bytes per entry: NUL + u16*/ 3);
 		for (u32 i = 0; i < n && r.ok; ++i)
@@ -833,7 +782,7 @@ void coop_task_state_load(IReader& stream)
 		return;
 	}
 
-	coop_quest_reader r(stream, stream.tell() + int(chunk_size));
+	coop_chunk_reader r(stream, stream.tell() + int(chunk_size));
 
 	const u16 ver = r.u16v();
 	// v1, v2 and v3 differ ONLY in the trailing block, and everything before it is byte-identical,

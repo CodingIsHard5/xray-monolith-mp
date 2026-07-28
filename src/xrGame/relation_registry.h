@@ -134,4 +134,44 @@ private:
 	static CRelationRegistryWrapper* m_relation_registry;
 };
 
+////////////////////////////////////////////////////////////////////////////
+// MP fork (§14 step 8 phase 4 R2 / doc §8.1): reputation's two tiers on a
+// server where db.actor is nil.
+//
+// R1 measured the split rather than trusting the recon, because the two tiers
+// fail identically to a reader: personal standing rides the .scop inside
+// alife_registry_container (77 came back on the same entity id), and the
+// faction<->faction table does NOT (a relation moved to -63 came back at its
+// -2000 config value). So this half of the layer owns two things and neither
+// is storage for the personal tier:
+//
+//   * coop_rep_state_save/load — the faction tier's own .scop chunk, under the
+//     Q2 rules (versioned, an unknown version REFUSED rather than parsed as if
+//     the fields were ours, a truncated chunk discarded whole, clear first).
+//   * coop_rep_subject         — the routing seam. A script call site that
+//     cannot name a subject (every stock one names db.actor:id(), which is nil
+//     here) passes COOP_REP_ACTING and gets the acting player. When there is no
+//     acting player the call is REFUSED — deliberately NOT redirected to the
+//     world tier, because personal standing on the world tier is one player's
+//     reputation silently becoming everybody's.
+////////////////////////////////////////////////////////////////////////////
+
+// The sentinel a caller passes for "the player this action is being run for,
+// whoever that is". It is an int because that is what the script bindings take;
+// -1 mirrors mp_coop_owner::none.
+#define COOP_REP_ACTING				(-1)
+
+// Returns the entity id to act on, or u16(-1) (mp_coop_owner::none) when the
+// call must be refused. `is_write` only affects the diagnostics.
+u16 coop_rep_subject(int passed_id, bool is_write);
+
+// Counters for the harness: routed = calls that resolved through the acting
+// player, refused = calls that had no subject and were dropped. A seam that is
+// never exercised and a seam that works are indistinguishable without these.
+u32 coop_rep_routed_count();
+u32 coop_rep_refused_count();
+
+void coop_rep_state_save(IWriter& stream);
+void coop_rep_state_load(IReader& stream);
+
 #include "relation_registry_inline.h"

@@ -64,6 +64,13 @@ public:
 		m_sympathy_table.clear();
 	}
 
+	// MP fork (§14 step 8 phase 4 R2 / doc §8.1): drop the faction<->faction table so the next
+	// read rebuilds it from ltx. This is the co-op loader's "clear first, unconditionally" step,
+	// and it is not a formality: the table is STATIC and outlives restart_simulator, so without
+	// it, loading world B after world A would leave A's faction war standing in B — with nothing
+	// in B's save to say so. Only the goodwill table; sympathy is pure config and never moves.
+	static void coop_reset_relations() { m_relation_table.clear(); }
+
 private:
 	typedef CIni_Table<CHARACTER_GOODWILL, CHARACTER_COMMUNITY> GOODWILL_TABLE;
 	friend GOODWILL_TABLE;

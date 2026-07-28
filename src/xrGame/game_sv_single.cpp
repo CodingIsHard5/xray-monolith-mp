@@ -3814,6 +3814,99 @@ void game_sv_Single::Update()
 			}
 		}
 	}
+	// ---------------------------------------------------------------------------------------
+	// MP fork (§14 step 8 PHASE 4 increment R2, dev/RPG_LAYER_PLAN.md, doc §8.1): the seam.
+	//
+	//   -coop_test_rep2 <seconds>          write pass, then a read-only report of both tiers.
+	//   -coop_test_rep2_verify <seconds>   read-only pass, for the boot after the restart.
+	//   -coop_test_rep2_badver             (consumed by the SAVE, in relation_registry.cpp)
+	//                                      stamps a version this build cannot know, so the
+	//                                      refusal path is measured rather than argued.
+	//
+	// THE SEQUENCE IS THE TEST, and its order is not the phase-1 order. R2 writes the acting
+	// pass FIRST and attempts the autonomous one SECOND, because a personal write that wrongly
+	// landed on the player during autonomous simulation would be INVISIBLE if the acting write
+	// came after it — overwritten by the value the test expects to find. Taken in this order,
+	// one read of the player's row proves three things at once: the acting write landed, the
+	// acting scope did not leak past its closing brace, and the seam did not quietly fall back
+	// to a subject when it had none.
+	//
+	// The writes go through the LUA bindings, not through RELATION_REGISTRY directly, because
+	// the Lua bindings ARE the seam — R1 wrote in C++ and that was right for a storage question,
+	// but a routing question asked in C++ would be testing the harness.
+	if (xr_enet::enabled() && ai().get_alife() &&
+	    (coop_param("-coop_test_rep2") || coop_param("-coop_test_rep2_verify")))
+	{
+		static bool s_r2_init  = false;
+		static bool s_r2_done  = false;
+		static u32  s_r2_armed = 0;
+		static u32  s_r2_ms    = 0;
+		static u32  s_r2_retry = 0;
+		if (!s_r2_init)
+		{
+			s_r2_init = true;
+			LPCSTR p = coop_param("-coop_test_rep2");
+			if (!p) p = coop_param("-coop_test_rep2_verify");
+			const float secs = p ? (float)atof(p) : 0.f;
+			s_r2_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 25000u;
+			s_r2_armed = Device.dwTimeGlobal;
+		}
+
+		if (!s_r2_done && (Device.dwTimeGlobal - s_r2_armed) >= s_r2_ms)
+		{
+			const u16 world_id  = mp_coop_owner::world_actor();
+			const u16 player_id = coop_first_player_actor();
+			if (world_id == mp_coop_owner::none || player_id == mp_coop_owner::none)
+			{
+				// Wall clock, not frames — R1 run 1 spent a whole run learning that a frame
+				// budget is a duration whose length depends on the frame rate.
+				if ((Device.dwTimeGlobal - s_r2_retry) >= 5000u)
+				{
+					s_r2_retry = Device.dwTimeGlobal;
+					Msg("- COOP(rep2): waiting for a connected player (%u s so far)",
+						(Device.dwTimeGlobal - s_r2_armed - s_r2_ms) / 1000u);
+				}
+				if ((Device.dwTimeGlobal - s_r2_armed) > (s_r2_ms + 240000u))
+				{
+					s_r2_done = true;
+					Msg("! COOP(rep2): no player connected within 240 s of arming — this run "
+						"measured NOTHING (and that is a harness failure, not a result)");
+					FlushLog();
+				}
+			}
+			else
+			{
+				s_r2_done = true;
+				// The tiers being DISTINCT is the first assertion, exactly as in phase 1: if the
+				// world tier shared a key with the player's actor, every negative below would be
+				// unfalsifiable and the run would pass while proving nothing.
+				Msg("- COOP(rep2): tiers world=%u player=%u distinct=%u", u32(world_id),
+					u32(player_id), u32(world_id != player_id ? 1 : 0));
+
+				const u32 routed_before  = coop_rep_routed_count();
+				const u32 refused_before = coop_rep_refused_count();
+
+				if (!coop_param("-coop_test_rep2_verify"))
+				{
+					{
+						mp_coop_owner::acting_scope scope(player_id);
+						coop_rpg_probe_call("_G.mp_coop_rep_probe", "acting", world_id, player_id);
+					}
+					coop_rpg_probe_call("_G.mp_coop_rep_probe", "autonomous", world_id, player_id);
+				}
+				coop_rpg_probe_call("_G.mp_coop_rep_probe", "verify", world_id, player_id);
+
+				// The seam's own counters. A seam that works and a seam that was never reached
+				// read identically off the values alone: routed=0 with every value correct means
+				// the probe named its subject itself and the routing was never exercised.
+				Msg("- COOP(rep2): seam routed=%u refused=%u (this pass: routed=%u refused=%u)",
+					coop_rep_routed_count(), coop_rep_refused_count(),
+					coop_rep_routed_count() - routed_before,
+					coop_rep_refused_count() - refused_before);
+				FlushLog();
+			}
+		}
+	}
 
 	/*	switch(phase) 	{
 			case GAME_PHASE_PENDING : {

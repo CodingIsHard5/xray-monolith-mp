@@ -25,6 +25,9 @@
 // MP fork (§14 step 8 phase 3 Q2 / doc §7.2): coop_task_state_save/load — the offer pool and the
 // ownership tags ride the .scop, in the same write as the task list they annotate.
 #include "GametaskManager.h"
+// MP fork (§14 step 8 phase 4 R2 / doc §8.1): coop_rep_state_save/load — the FACTION tier of
+// reputation, which R1 measured as the one part of this layer that nothing persisted.
+#include "relation_registry.h"
 //Alundaio
 #ifdef ENGINE_LUA_ALIFE_STORAGE_MANAGER_CALLBACKS
 #include "pch_script.h"
@@ -94,6 +97,10 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
 		// registry().save just wrote — same stream, same compressed payload, so a claim and the
 		// record of who claimed it can never be half-written relative to each other.
 		coop_task_state_save(stream);
+		// MP fork (§14 step 8 phase 4 R2): and the faction tier of reputation, for the same
+		// reason and in the same write — a faction war that moved during play is world state,
+		// and until this chunk existed the next restart put every point back.
+		coop_rep_state_save(stream);
 
 		source_count = stream.tell();
 		void* source_data = stream.pointer();
@@ -165,6 +172,10 @@ void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR fil
 	// for a save that has no such chunk — the loader CLEARS the maps first, so booting an older
 	// world cannot leave the previous world's ownership standing in these file-static maps.
 	coop_task_state_load(source);
+	// MP fork (§14 step 8 phase 4 R2): the faction tier. Always called, even for a save that has
+	// no such chunk — the loader RESETS the static relation table to its config baseline before
+	// it looks, so booting an older world cannot leave the previous world's faction war standing.
+	coop_rep_state_load(source);
 
 	can_register_objects(true);
 

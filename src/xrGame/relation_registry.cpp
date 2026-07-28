@@ -11,6 +11,10 @@
 #include "character_reputation.h"
 #include "character_rank.h"
 
+// MP fork (§14 step 8 phase 4 R2): the routing seam + the faction tier's .scop chunk.
+#include "mp_coop_owner.h"
+#include "mp_coop_chunk_reader.h"
+#include "alife_space.h"                    // COOP_REP_CHUNK_DATA
 #include "alife_object_registry.h"
 #include "xrServer_Objects_ALife_Monsters.h"
 #include "script_engine.h"
@@ -262,4 +266,250 @@ void RELATION_REGISTRY::SetCommunityRelation(CHARACTER_COMMUNITY_INDEX index1, C
                                              CHARACTER_GOODWILL goodwill)
 {
 	CHARACTER_COMMUNITY::set_relation(index1, index2, goodwill);
+}
+
+//////////////////////////////////////////////////////////////////////////
+// MP fork (§14 step 8 phase 4 R2 / doc §8.1): the routing seam and the faction
+// tier's persistence. See relation_registry.h for why these two live together
+// and why the personal tier needs neither.
+//////////////////////////////////////////////////////////////////////////
+
+namespace
+{
+	u32 s_rep_routed  = 0;
+	u32 s_rep_refused = 0;
+	u32 s_rep_refuse_logged = 0;
+
+	const u16 coop_rep_state_version = 1;
+
+	// The ltx baseline, read straight out of pSettings rather than off the live table — which is
+	// the whole point: by the time a save is taken the live table may have MOVED, and the file
+	// is meant to record exactly that difference. Built once; config does not change under us.
+	//
+	// Storing the delta rather than the whole table is a decision, not an optimisation: a
+	// relation nobody touched keeps taking its value from config, so a later config patch still
+	// reaches it, while a relation the world moved stays moved. A full-table dump would freeze
+	// every faction pair at whatever the config said the day the save was written.
+	struct rep_baseline
+	{
+		xr_vector<xr_vector<int> > t;
+		bool built;
+		bool ok;
+
+		rep_baseline(): built(false), ok(false) {}
+	};
+
+	rep_baseline& baseline()
+	{
+		static rep_baseline b;
+		if (b.built)
+			return b;
+		b.built = true;
+
+		const int n = int(CHARACTER_COMMUNITY::GetMaxIndex()) + 1;
+		if (n <= 0 || !pSettings->section_exist("communities_relations"))
+		{
+			Msg("! COOP(rep): no [communities_relations] baseline (%d communities) — faction "
+				"persistence is OFF for this session; a saved table could not be told from config",
+				n);
+			return b;
+		}
+
+		b.t.resize(n);
+		for (int i = 0; i < n; ++i)
+			b.t[i].assign(size_t(n), 0);
+
+		CInifile::Sect& sect = pSettings->r_section("communities_relations");
+		u32 rows = 0;
+		for (CInifile::SectCIt i = sect.Data.begin(); sect.Data.end() != i; ++i)
+		{
+			const CHARACTER_COMMUNITY_INDEX from =
+				CHARACTER_COMMUNITY::IdToIndex((*i).first, CHARACTER_COMMUNITY_INDEX(-1), true);
+			if (from < 0 || from >= n)
+				continue;                       // a row naming a community that is not in the list
+			string64 buffer;
+			for (int j = 0; j < n; ++j)
+				b.t[from][j] = atoi(_GetItem(*(*i).second, j, buffer));
+			++rows;
+		}
+		b.ok = (rows > 0);
+		if (!b.ok)
+			Msg("! COOP(rep): [communities_relations] resolved 0 usable rows — faction persistence OFF");
+		return b;
+	}
+}
+
+u32 coop_rep_routed_count()  { return s_rep_routed; }
+u32 coop_rep_refused_count() { return s_rep_refused; }
+
+u16 coop_rep_subject(int passed_id, bool is_write)
+{
+	// A caller that NAMED a subject keeps it. An NPC's id is a perfectly good subject and
+	// hijacking it would be a far worse bug than the one this seam fixes — the routing exists
+	// only for the call sites that had no subject to name.
+	if (passed_id != COOP_REP_ACTING)
+	{
+		if (passed_id < 0 || passed_id > int(u16(-1)))
+			return mp_coop_owner::none;
+		return u16(passed_id);
+	}
+
+	const u16 acting = mp_coop_owner::acting_actor();
+	if (acting != mp_coop_owner::none)
+	{
+		++s_rep_routed;
+		return acting;
+	}
+
+	// No acting player. This is autonomous world simulation, and personal standing has no
+	// subject here — so the call is dropped. It is NOT redirected to the world tier: doc §8.3's
+	// worst outcome is one player's actions landing on everyone, and a world-tier row read back
+	// through GetCommunityGoodwill would do exactly that, silently and forever.
+	++s_rep_refused;
+	if (s_rep_refuse_logged < 8)
+	{
+		++s_rep_refuse_logged;
+		Msg("~ COOP(rep): %s with no acting player and no named subject — REFUSED (not routed to "
+			"the world tier). refusals so far=%u%s", is_write ? "goodwill write" : "goodwill read",
+			s_rep_refused, (s_rep_refuse_logged == 8) ? "  [further refusals not logged]" : "");
+	}
+	return mp_coop_owner::none;
+}
+
+void coop_rep_state_save(IWriter& stream)
+{
+	stream.open_chunk(COOP_REP_CHUNK_DATA);
+
+	// The harness needs the "version we do not know" path MEASURED rather than argued: Q2 and Q3
+	// both shipped that refusal reasoned-about only. -coop_test_rep2_badver writes a version from
+	// the future so the next boot has to refuse it.
+	const bool bad_version = (strstr(Core.Params, "-coop_test_rep2_badver") != NULL);
+	stream.w_u16(bad_version ? u16(0xFFFF) : coop_rep_state_version);
+
+	rep_baseline& b = baseline();
+	const int n = b.ok ? int(b.t.size()) : 0;
+
+	// Two passes: the count has to precede the records, and only the cells that MOVED are cells.
+	u32 moved = 0;
+	int from, to;
+	for (from = 0; from < n; ++from)
+		for (to = 0; to < n; ++to)
+			if (CHARACTER_COMMUNITY::relation(from, to) != b.t[from][to])
+				++moved;
+
+	stream.w_u32(moved);
+	for (from = 0; from < n; ++from)
+	{
+		for (to = 0; to < n; ++to)
+		{
+			const CHARACTER_GOODWILL live = CHARACTER_COMMUNITY::relation(from, to);
+			if (live == b.t[from][to])
+				continue;
+			// Names, not indices. An index is a position in a config line, so a community added
+			// to or removed from [game_relations] communities would silently re-point every
+			// stored cell at a different faction — the one corruption in this chunk that would
+			// look like a plausible world rather than a broken file.
+			stream.w_stringZ(CHARACTER_COMMUNITY::IndexToId(from, NULL, true));
+			stream.w_stringZ(CHARACTER_COMMUNITY::IndexToId(to, NULL, true));
+			stream.w_u32(u32(live));
+		}
+	}
+
+	stream.close_chunk();
+
+	Msg("- COOP(rep): faction state saved  moved=%u of %dx%d (v%u)%s", moved, n, n,
+		u32(bad_version ? 0xFFFF : coop_rep_state_version),
+		bad_version ? "   !! -coop_test_rep2_badver: version deliberately unreadable" : "");
+}
+
+void coop_rep_state_load(IReader& stream)
+{
+	// Clear FIRST and unconditionally — the table is static and outlives restart_simulator, so a
+	// load that finds nothing must leave the server holding the CONFIG baseline and not the last
+	// world's faction war. (This is also what makes "no chunk" a correct, complete outcome.)
+	CHARACTER_COMMUNITY::coop_reset_relations();
+
+	// find_chunk REWINDS and scans, so put the cursor back: the reads that precede us must not
+	// be able to notice that we ran.
+	const int caller_pos = stream.tell();
+
+	const u32 chunk_size = stream.find_chunk(COOP_REP_CHUNK_DATA);
+	if (!chunk_size)
+	{
+		stream.seek(caller_pos);
+		Msg("- COOP(rep): no faction chunk in this save (stock .scop, or written before R2) — "
+			"faction relations start at their config baseline");
+		return;
+	}
+
+	coop_chunk_reader r(stream, stream.tell() + int(chunk_size));
+
+	const u16 ver = r.u16v();
+	if (!r.ok || ver != coop_rep_state_version)
+	{
+		stream.seek(caller_pos);
+		Msg("! COOP(rep): faction state version %u is not %u — REFUSING to parse it; faction "
+			"relations start at their config baseline", u32(ver), u32(coop_rep_state_version));
+		FlushLog();
+		return;
+	}
+
+	// Applied into a staging list first: a truncated chunk must not leave half a faction war
+	// standing, and the table cannot be rolled back once written.
+	struct pending_cell { CHARACTER_COMMUNITY_INDEX from, to; CHARACTER_GOODWILL goodwill; };
+	xr_vector<pending_cell> pending;
+
+	u32 unknown = 0;
+	const u32 cells = r.count(/*min bytes per cell: NUL + NUL + s32*/ 6);
+	for (u32 i = 0; i < cells && r.ok; ++i)
+	{
+		shared_str from_name, to_name;
+		if (!r.str(from_name) || !r.str(to_name))
+			break;
+		const s32 goodwill = r.s32v();
+		if (!r.ok)
+			break;
+
+		const CHARACTER_COMMUNITY_INDEX from =
+			CHARACTER_COMMUNITY::IdToIndex(from_name, CHARACTER_COMMUNITY_INDEX(-1), true);
+		const CHARACTER_COMMUNITY_INDEX to =
+			CHARACTER_COMMUNITY::IdToIndex(to_name, CHARACTER_COMMUNITY_INDEX(-1), true);
+		if (from < 0 || to < 0)
+		{
+			// A faction the config no longer has. Not a corruption — a content change — so it is
+			// dropped and COUNTED, never dropped quietly.
+			++unknown;
+			continue;
+		}
+		if (goodwill == NO_GOODWILL)
+		{
+			// The one value the table treats as "unset". It cannot be produced by a legitimate
+			// write (set_relation asserts against it), so a chunk carrying one is not a chunk we
+			// wrote — count it with the other unusable cells rather than pushing it through.
+			++unknown;
+			continue;
+		}
+		pending_cell c;
+		c.from = from;
+		c.to = to;
+		c.goodwill = CHARACTER_GOODWILL(goodwill);
+		pending.push_back(c);
+	}
+
+	stream.seek(caller_pos);
+
+	if (!r.ok)
+	{
+		Msg("! COOP(rep): faction state chunk is truncated or malformed (%u bytes) — DISCARDED "
+			"WHOLE, faction relations start at their config baseline", chunk_size);
+		FlushLog();
+		return;
+	}
+
+	for (size_t i = 0; i < pending.size(); ++i)
+		CHARACTER_COMMUNITY::set_relation(pending[i].from, pending[i].to, pending[i].goodwill);
+
+	Msg("- COOP(rep): faction state loaded moved=%u applied=%u unknown_community=%u (v%u)",
+		cells, u32(pending.size()), unknown, u32(ver));
+	FlushLog();
 }
