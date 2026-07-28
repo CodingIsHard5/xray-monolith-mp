@@ -189,8 +189,33 @@ bool CLevel::net_start_client4()
 		// *note: release version always has "mt_*" enabled
 		Device.seqFrameMT.Remove(g_pNetProcessor);
 		Device.seqFrame.Remove(g_pNetProcessor);
-		if (psDeviceFlags.test(mtNetwork)) Device.seqFrameMT.Add(g_pNetProcessor,REG_PRIORITY_HIGH + 2);
-		else Device.seqFrame.Add(g_pNetProcessor,REG_PRIORITY_LOW - 2);
+		// MP fork (§3c, dev/INSTABILITY_PLAN.md §4c): co-op puts the net processor on the GAME
+		// thread, always. `mtNetwork` is on by default (defines.cpp), which registers
+		// CLevel::net_Update — and therefore xrServer::Update -> ProceedDelayedPackets -> the
+		// queued dialogue action -> Lua — into seqFrameMT, run by the device's SECONDARY thread.
+		// The §3c fix moved that action off the ENet pump thread and into this queue; it did not
+		// promise which thread drains the queue, and the strengthened gate caught the difference
+		// in its first run (1 phrase of 12 on thread 364 with the game thread at 284).
+		//
+		// The secondary thread is ping-ponged against the main thread by mt_csEnter/mt_csLeave,
+		// so this is NOT the same unsynchronised race as the pump thread, and it is not being
+		// reported as one. It is moved anyway, because the whole standard this axis is being held
+		// to is "nothing enters the Lua VM off the game thread" — a rule that admits an exception
+		// whose safety rests on a mutex invariant nobody has verified is not a rule. On the
+		// dedicated server the overlap it gives up is with rendering that does not happen.
+		if (psDeviceFlags.test(mtNetwork) && !xr_enet::enabled())
+		{
+			Device.seqFrameMT.Add(g_pNetProcessor,REG_PRIORITY_HIGH + 2);
+			Msg("- COOP(net-thread): net processor on seqFrameMT (SECONDARY thread) — stock path");
+		}
+		else
+		{
+			Device.seqFrame.Add(g_pNetProcessor,REG_PRIORITY_LOW - 2);
+			// Said out loud: the phrase gate reads 'same=YES' both when this worked and when the
+			// registration never happened at all, so the log has to carry which list it went on.
+			Msg("- COOP(net-thread): net processor on seqFrame (the GAME thread)%s",
+				xr_enet::enabled() ? " — co-op forces this (§3c)" : " — mt_network is off");
+		}
 
 		if (!psNET_direct_connect)
 		{
