@@ -344,6 +344,13 @@ extern void pdebug_init_init(lua_State* L);
 // fired once. Sites are capped; the cap being hit is itself printed, because a silently truncated
 // audit reads exactly like a complete one.
 u32 g_coop_vm_audit_touches = 0;
+u32 g_coop_vm_audit_outside = 0;
+
+// Provided by xrEngine's device.cpp: 1 while the secondary thread is permitted to run. See §4d —
+// a non-game-thread touch with this DOWN is outside the frame interlock, which is the actual
+// §3c defect class; with it UP the touch is what this engine has always done (A-Life, bullets,
+// the parallel GC) and is serialised against the game thread.
+extern u32 g_coop_mt_window;
 
 // Provided by xrServer.cpp. Returns the M_* type currently being dispatched on THIS thread, or
 // coop_pump_msg_none when this thread is not inside xrServer::OnMessage.
@@ -362,8 +369,13 @@ void coop_vm_touch_offthread()
 	if (tid == g_coop_game_thread_id)
 		return;
 
+	// Sampled BEFORE anything else: the reporting below is not instantaneous, and a window that
+	// closed while we were formatting a string would be recorded as the state the touch happened
+	// in. Reading it first is the difference between measuring the touch and measuring ourselves.
+	const bool interlocked = (g_coop_mt_window != 0);
+
 	enum { MAX_SITES = 48, MAX_FRAMES = 12, SKIP_FRAMES = 1 };
-	struct site { void* key; u32 count; };
+	struct site { void* key; u32 count; u32 outside; };
 	static site     s_sites[MAX_SITES];
 	static u32      s_site_count = 0;
 	static bool     s_capped = false;
@@ -380,6 +392,8 @@ void coop_vm_touch_offthread()
 
 	s_lock.Enter();
 	++g_coop_vm_audit_touches;
+	if (!interlocked)
+		++g_coop_vm_audit_outside;
 
 	u32 i = 0;
 	for (; i < s_site_count; ++i)
@@ -389,13 +403,22 @@ void coop_vm_touch_offthread()
 	if (i < s_site_count)
 	{
 		++s_sites[i].count;
-		// Only the site's first touch is announced, but a running total every so often keeps a
-		// hot site from looking like a one-off in the log.
+		if (!interlocked)
+			++s_sites[i].outside;
 		const u32 c = s_sites[i].count;
+		const u32 out = s_sites[i].outside;
+		// The FIRST un-interlocked touch of a site that had only interlocked ones is its own
+		// event, and a loud one: it is the §3c defect appearing on a path that looked ordinary.
+		// Announcing it only in the periodic summary would bury it under a million safe touches.
+		const bool first_outside = (!interlocked && out == 1);
 		s_lock.Leave();
+		if (first_outside)
+			Msg("! COOP(vm-audit): site #%u touched the VM OUTSIDE THE FRAME INTERLOCK — this is "
+				"the §3c defect class, not the engine's ordinary MT work (see INSTABILITY_PLAN §4d)", i);
 		if ((c % 1000) == 0)
-			Msg("! COOP(vm-audit): site #%u has now touched the VM off the game thread %u times "
-				"(%u touches in total)", i, c, g_coop_vm_audit_touches);
+			Msg("! COOP(vm-audit): site #%u has now touched the VM off the game thread %u times, "
+				"%u of them OUTSIDE the interlock (%u / %u outside, in total)",
+				i, c, out, g_coop_vm_audit_touches, g_coop_vm_audit_outside);
 		return;
 	}
 
@@ -413,6 +436,7 @@ void coop_vm_touch_offthread()
 	const u32 idx = s_site_count++;
 	s_sites[idx].key = key;
 	s_sites[idx].count = 1;
+	s_sites[idx].outside = interlocked ? 0 : 1;
 
 	if (!s_module_base)
 	{
@@ -437,8 +461,11 @@ void coop_vm_touch_offthread()
 	}
 
 	Msg("! COOP(vm-audit): site #%u — the Lua VM was touched from thread %u, and the game thread "
-	    "is %u. pump message: %s (0x%X). This is the §3c defect class: LuaJIT is single-threaded.",
-	    idx, tid, g_coop_game_thread_id, coop_pump_message_name(msg), msg);
+	    "is %u. pump message: %s (0x%X). frame interlock: %s",
+	    idx, tid, g_coop_game_thread_id, coop_pump_message_name(msg), msg,
+	    interlocked
+	        ? "INSIDE (serialised against the game thread — the engine's ordinary MT work)"
+	        : "OUTSIDE — THIS IS THE §3c DEFECT CLASS");
 	Msg("! COOP(vm-audit): site #%u module base 0x%p, stack (absolute, subtract the base for an "
 	    "RVA to symbolicate):%s", idx, base, trace);
 	FlushLog();

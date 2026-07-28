@@ -45,6 +45,12 @@ BOOL g_bLoaded = FALSE;
 ref_light precache_light = 0;
 
 BOOL psLua_ParallelGC = TRUE;
+
+// MP fork (§3c §4d): 1 while the device's secondary thread is permitted to run (see the resume /
+// suspend pair in on_frame). Read by the -coop_vm_audit reporter to tell an INTERLOCKED touch of
+// the Lua VM from an un-interlocked one — the difference between what this engine has always done
+// and the ENet-pump defect §3c chased for two sessions.
+u32 g_coop_mt_window = 0;
 BOOL psLua_ParallelGC_debug = FALSE;
 int psLua_ParallelGC_CallAmount = 25;
 
@@ -499,6 +505,15 @@ void CRenderDevice::on_idle()
 	// Release start point - allow thread to run
 	START_PROFILE("Resume threads");
 	mt_csLeave.Enter();
+	// MP fork (§3c, dev/INSTABILITY_PLAN.md §4d): the interlock, made observable. The secondary
+	// thread can only run between here and the matching Enter() below, and the §4b audit measured
+	// that virtually all of this engine's Lua — A-Life, the bullet manager, the parallel GC — runs
+	// on that thread. So the invariant §3c actually depends on is not "only the game thread
+	// touches the VM" but "only code inside THIS WINDOW touches it", and until now that was read
+	// out of this file rather than measured. Raised BEFORE the secondary thread is released and
+	// lowered AFTER it has finished its cycle, so the window is a superset of its real work: a
+	// non-game-thread touch seen with the window DOWN is definitively outside the interlock.
+	g_coop_mt_window = 1;
 	mt_csEnter.Leave();
 	STOP_PROFILE;
 
@@ -556,6 +571,7 @@ void CRenderDevice::on_idle()
 	// Release end point - allow thread to wait for startup point
 	START_PROFILE("Suspend threads");
 	mt_csEnter.Enter();
+	g_coop_mt_window = 0;   // after Enter(): the secondary thread has finished its cycle
 	mt_csLeave.Leave();
 	STOP_PROFILE;
 
