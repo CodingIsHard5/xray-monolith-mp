@@ -211,14 +211,30 @@ void coop_rep_state_load(IReader& stream);
 // nothing anybody did, continuously, and is not this increment's to decide.
 ////////////////////////////////////////////////////////////////////////////
 
-// The two tiers stock does not have, applied together. One function, so there is one path to
-// get wrong rather than three. `shooter_community_delta` is the value stock JUST applied to the
-// killer (the -140), passed in rather than recomputed: the bystander term is scaled against the
-// stock magnitude instead of invented beside it, and it cannot drift if config changes.
+// The two tiers stock does not have. TWO SAMPLING POINTS, for two reasons, which is what run 1
+// forced and is the real content of this design:
+//
+//   * POSITIONS are sampled HERE, at the kill, synchronously on the death path. A player's CSE
+//     `o_Position` is written by the ENet pump thread, so any later sampling point scores the
+//     bystander wherever they had walked to by then — the D1/E defect exactly. Reading at the
+//     kill bounds the error to one client-update interval.
+//   * THE MAGNITUDE cannot be sampled here, and run 1 measured why. R3.0 concluded stock's
+//     `Action` applied the -140; it does not — `Sympathy()` is 0.0 for every community in this
+//     config, so that write is multiplied to zero and guarded out, and the -140 that really
+//     lands arrives AFTER `Action` returns, from a writer this code does not own. So the
+//     propagation stops trying to be told the magnitude and MEASURES it: it records the
+//     killer's row at the kill, and `coop_rep_propagate_tick` re-reads it once the shooter hit
+//     has landed and scales the bystander term against the difference.
+//
+// That is strictly better than being passed a number, and not only here: the bystander term is
+// now a scaled copy of what the shooter ACTUALLY took, whoever applied it and whatever config
+// says, so it cannot drift away from the shooter tier the way a second formula would.
 void coop_rep_propagate_kill(u16 killer_id, CHARACTER_COMMUNITY_INDEX killer_comm,
                              u16 victim_id, CHARACTER_COMMUNITY_INDEX victim_comm,
-                             const Fvector& kill_pos,
-                             CHARACTER_GOODWILL shooter_community_delta);
+                             const Fvector& kill_pos);
+
+// Drive the deferred half. Called every server tick; does nothing when nothing is pending.
+void coop_rep_propagate_tick();
 
 // The distance falloff and its radius, exposed so the harness can measure the CURVE at chosen
 // distances instead of inferring it from one write. Exactly 0 at and beyond the radius — the

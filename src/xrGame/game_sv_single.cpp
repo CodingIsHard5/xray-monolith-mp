@@ -4108,6 +4108,12 @@ void game_sv_Single::Update()
 	//     Leg 1 places it INSIDE the radius (a scaled hit) and leg 2 OUTSIDE it (exactly zero),
 	//     because a bystander term that is merely "small" passes any test that only checks the
 	//     shooter. Every line about it carries [SYNTHETIC, no second live client] on the line.
+	// MP fork (§14 step 8 P4 R3.1): drive the deferred half of the blast radius. The positions
+	// were sampled at the kill; the shooter's magnitude only exists after it, so the apply waits
+	// here. Cheap and silent when nothing is pending.
+	if (xr_enet::enabled())
+		coop_rep_propagate_tick();
+
 	if (xr_enet::enabled() && ai().get_alife() && coop_param("-coop_test_rep31"))
 	{
 		static bool s_r31_init  = false;

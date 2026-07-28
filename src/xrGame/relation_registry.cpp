@@ -698,6 +698,7 @@ namespace
 	{
 		u16                       id;
 		Fvector                   pos;
+		float                     dist;   // resolved AT the kill; see coop_rep_propagate_kill
 		CHARACTER_COMMUNITY_INDEX comm;
 		bool                      synthetic;
 	};
@@ -743,6 +744,7 @@ namespace
 			coop_rep_bystander b;
 			b.id        = cd->owner->ID;
 			b.pos       = cd->owner->o_Position;
+			b.dist      = 0.f;
 			b.comm      = CHARACTER_COMMUNITY_INDEX(-1);
 			b.synthetic = false;
 
@@ -846,10 +848,31 @@ bool coop_rep_faction_move(CHARACTER_COMMUNITY_INDEX from, CHARACTER_COMMUNITY_I
 	return true;
 }
 
+// The pending half of a kill: everything sampled AT the kill, waiting for the magnitude that
+// only exists after it. See the header for why the two sampling points differ.
+namespace
+{
+	struct coop_rep_pending_kill
+	{
+		u16                            killer_id;
+		CHARACTER_COMMUNITY_INDEX      killer_comm;
+		u16                            victim_id;
+		CHARACTER_COMMUNITY_INDEX      victim_comm;
+		s32                            shooter_row_at_kill;
+		u32                            due_ms;
+		xr_vector<coop_rep_bystander>  cands;
+	};
+	xr_vector<coop_rep_pending_kill> s_pending;
+
+	// How long to wait for the shooter hit to land. Run 2 measured it arriving in the SAME frame
+	// as the death, so this is slack rather than a guess — but it is slack on a quantity nobody
+	// owns, so it is generous and the actual wait is reported with the result.
+	const u32 COOP_REP_SETTLE_MS = 1000;
+}
+
 void coop_rep_propagate_kill(u16 killer_id, CHARACTER_COMMUNITY_INDEX killer_comm,
                              u16 victim_id, CHARACTER_COMMUNITY_INDEX victim_comm,
-                             const Fvector& kill_pos,
-                             CHARACTER_GOODWILL shooter_community_delta)
+                             const Fvector& kill_pos)
 {
 	if (!xr_enet::enabled() || !Level().Server)
 		return;
@@ -866,17 +889,6 @@ void coop_rep_propagate_kill(u16 killer_id, CHARACTER_COMMUNITY_INDEX killer_com
 	col.out = &cands;
 	Level().Server->ForEachClientDo(col);
 
-	if (s_test_bys_armed)
-	{
-		// The construction, injected into the real list so it goes through the real tests.
-		coop_rep_bystander b;
-		b.id        = s_test_bys_id;
-		b.pos       = s_test_bys_pos;
-		b.comm      = s_test_bys_comm;
-		b.synthetic = true;
-		cands.push_back(b);
-	}
-
 	if (!col.killer_is_player)
 	{
 		// A-Life killing its own is not a player's blast radius. Silent by design: this is the
@@ -884,74 +896,136 @@ void coop_rep_propagate_kill(u16 killer_id, CHARACTER_COMMUNITY_INDEX killer_com
 		return;
 	}
 
-	// ---- tier 2: the bystanders -------------------------------------------------------------
-	//
-	// The shooter is NOT here. Stock already moved their row (R3.0: -140) and this function is
-	// called from inside that same path, so re-applying it would land every kill twice.
+	if (s_test_bys_armed)
+	{
+		// The construction, injected into the real list so it goes through the real tests.
+		coop_rep_bystander b;
+		b.id        = s_test_bys_id;
+		b.pos       = s_test_bys_pos;
+		b.dist      = 0.f;
+		b.comm      = s_test_bys_comm;
+		b.synthetic = true;
+		cands.push_back(b);
+	}
+
+	// DISTANCE IS RESOLVED NOW, not later. This is the whole reason positions are sampled here:
+	// once the distance is a number, the pump thread can move every player as much as it likes
+	// and the blast radius still describes the moment of the kill.
 	for (size_t i = 0; i < cands.size(); ++i)
-	{
-		const coop_rep_bystander& b = cands[i];
-		++s_bystanders_considered;
+		cands[i].dist = kill_pos.distance_to(cands[i].pos);
 
-		const float dist = kill_pos.distance_to(b.pos);
-		const float scale = coop_rep_bystander_scale(dist);
-		// §8.2's "same-faction bystanders": the blast radius is guilt by association with the
-		// SHOOTER, so a player of another faction standing nearby is a witness, not an accomplice.
-		// On this build every player is the pseudo-community `actor`, so the test is presently
-		// vacuous — which is exactly why both communities are printed rather than a verdict.
-		const bool same_faction = (b.comm >= 0) && (b.comm == killer_comm);
-		// Rounded AWAY from zero, so a bystander inside the radius never quietly rounds to a
-		// no-op: the only zero this tier produces should be the one the radius test produced.
-		// Done on the MAGNITUDE and re-signed, because the obvious one-liner is not symmetric —
-		// `iFloor(raw + 0.5f)` on an exact -70.0 gives -71, which is how an off-by-one hides
-		// inside a line everyone reads as "rounding".
-		const float raw = float(shooter_community_delta) * scale;
-		const s32 mag = iFloor(_abs(raw) + 0.5f);
-		const s32 delta = (scale > 0.f && same_faction) ? ((raw < 0.f) ? -mag : mag) : 0;
+	coop_rep_pending_kill pk;
+	pk.killer_id           = killer_id;
+	pk.killer_comm         = killer_comm;
+	pk.victim_id           = victim_id;
+	pk.victim_comm         = victim_comm;
+	pk.shooter_row_at_kill = RELATION_REGISTRY().GetCommunityGoodwill(victim_comm, killer_id);
+	pk.due_ms              = Device.dwTimeGlobal + COOP_REP_SETTLE_MS;
+	pk.cands.swap(cands);
+	s_pending.push_back(pk);
+}
 
-		const shared_str b_comm_name = coop_rep_comm_name(b.comm);
-		const shared_str k_comm_name = coop_rep_comm_name(killer_comm);
-		Msg("- COOP(rep3): bystander%s id=%u at %.1f m (r=%.0f) scale=%.3f "
-			"comm=%s vs killer_comm=%s same_faction=%d -> delta %+d%s",
-			b.synthetic ? "[SYNTHETIC, no second live client]" : "", u32(b.id), dist,
-			COOP_REP_BYSTANDER_RADIUS_M, scale, b_comm_name.c_str(),
-			k_comm_name.c_str(), same_faction ? 1 : 0, delta,
-			(scale <= 0.f) ? "   [outside the radius: exactly zero]" : "");
-
-		if (!delta)
-			continue;
-		RELATION_REGISTRY().ChangeCommunityGoodwill(victim_comm, b.id, CHARACTER_GOODWILL(delta));
-		++s_bystanders_moved;
-	}
-
-	// ---- tier 3: the collective faction hit --------------------------------------------------
-	//
-	// R3.0's finding, enforced: the killer's community is `actor` for every player who has not
-	// chosen a faction, and `actor` is not a faction — so there is no faction<->faction pair to
-	// move and the write is REFUSED rather than aimed at the nearest available cell. A refusal
-	// here is not a failure; it is the only correct answer to "which faction did this on whose
-	// behalf" when the answer is "none".
-	if (!coop_rep_is_faction(killer_comm))
-	{
-		++s_faction_refused;
-		const shared_str k_name = coop_rep_comm_name(killer_comm);
-		const shared_str v_name = coop_rep_comm_name(victim_comm);
-		Msg("- COOP(rep3): collective hit REFUSED — killer's community '%s' is not a faction "
-			"(every player shares it, so this write would move %s -> %s and make one player's "
-			"kill hostile for everybody). victim=%u killer=%u; refusals=%u",
-			k_name.c_str(), v_name.c_str(), k_name.c_str(),
-			u32(victim_id), u32(killer_id), s_faction_refused);
+void coop_rep_propagate_tick()
+{
+	if (s_pending.empty())
 		return;
-	}
-	if (!coop_rep_is_faction(victim_comm) || killer_comm == victim_comm)
-	{
-		++s_faction_refused;
-		return;   // no pair, or a faction cannot go to war with itself
-	}
 
-	// The wronged faction's opinion of the killer's faction. One direction on purpose: killing a
-	// Duty man does not make Duty's enemies think better of anyone, and a symmetric write would
-	// quietly double the reach of every kill.
-	const s32 collective = s32(shooter_community_delta) / COOP_REP_COLLECTIVE_DIVISOR;
-	coop_rep_faction_move(victim_comm, killer_comm, collective, "kill");
+	for (size_t k = 0; k < s_pending.size(); )
+	{
+		coop_rep_pending_kill& pk = s_pending[k];
+		if (s32(Device.dwTimeGlobal - pk.due_ms) < 0)
+		{
+			++k;
+			continue;
+		}
+
+		// THE MAGNITUDE, MEASURED. Whatever moved the shooter's row — stock Action, a config the
+		// engine does not read, or a script — this is what it did, and the bystander term is a
+		// scaled copy of exactly that. A zero here is not a failure to propagate: it is the
+		// truthful statement that the shooter took nothing, and then neither does anyone else.
+		const s32 now = RELATION_REGISTRY().GetCommunityGoodwill(pk.victim_comm, pk.killer_id);
+		const s32 shooter_delta = now - pk.shooter_row_at_kill;
+
+		const shared_str k_comm_name = coop_rep_comm_name(pk.killer_comm);
+		const shared_str v_comm_name = coop_rep_comm_name(pk.victim_comm);
+		Msg("- COOP(rep3): kill blast radius: killer=%u(%s) victim=%u(%s) shooter row %d -> %d "
+			"(MEASURED delta %+d) candidates=%u",
+			u32(pk.killer_id), k_comm_name.c_str(), u32(pk.victim_id), v_comm_name.c_str(),
+			pk.shooter_row_at_kill, now, shooter_delta, u32(pk.cands.size()));
+
+		// ---- tier 2: the bystanders ---------------------------------------------------------
+		//
+		// The shooter is NOT here. Their row is what everything below is measured FROM, so
+		// touching it would both double the hit and corrupt the next kill's baseline.
+		for (size_t i = 0; i < pk.cands.size(); ++i)
+		{
+			const coop_rep_bystander& b = pk.cands[i];
+			++s_bystanders_considered;
+
+			const float scale = coop_rep_bystander_scale(b.dist);
+			// doc §8.2's "same-faction bystanders": the blast radius is guilt by association with
+			// the SHOOTER, so a player of another faction standing nearby is a witness, not an
+			// accomplice. On this build every player is the pseudo-community `actor`, so the test
+			// is presently vacuous — which is why both communities are printed, not a verdict.
+			const bool same_faction = (b.comm >= 0) && (b.comm == pk.killer_comm);
+			// Rounded AWAY from zero, so a bystander inside the radius never quietly rounds to a
+			// no-op: the only zero this tier produces should be the one the radius test produced.
+			// Done on the MAGNITUDE and re-signed, because the obvious one-liner is not symmetric
+			// — `iFloor(raw + 0.5f)` on an exact -70.0 gives -71, which is how an off-by-one
+			// hides inside a line everyone reads as "rounding".
+			const float raw = float(shooter_delta) * scale;
+			const s32 mag = iFloor(_abs(raw) + 0.5f);
+			const s32 delta = (scale > 0.f && same_faction) ? ((raw < 0.f) ? -mag : mag) : 0;
+
+			const shared_str b_comm_name = coop_rep_comm_name(b.comm);
+			Msg("- COOP(rep3): bystander%s id=%u at %.1f m (r=%.0f) scale=%.3f "
+				"comm=%s vs killer_comm=%s same_faction=%d shooter=%+d -> delta %+d%s",
+				b.synthetic ? "[SYNTHETIC, no second live client]" : "", u32(b.id), b.dist,
+				COOP_REP_BYSTANDER_RADIUS_M, scale, b_comm_name.c_str(),
+				k_comm_name.c_str(), same_faction ? 1 : 0, shooter_delta, delta,
+				(scale <= 0.f) ? "   [outside the radius: exactly zero]" : "");
+
+			if (!delta)
+				continue;
+			RELATION_REGISTRY().ChangeCommunityGoodwill(pk.victim_comm, b.id,
+			                                            CHARACTER_GOODWILL(delta));
+			++s_bystanders_moved;
+		}
+
+		// ---- tier 3: the collective faction hit ---------------------------------------------
+		//
+		// R3.0's finding, enforced: the killer's community is `actor` for every player who has
+		// not chosen a faction, and `actor` is not a faction — so there is no faction<->faction
+		// pair to move and the write is REFUSED rather than aimed at the nearest available cell.
+		// A refusal here is not a failure; it is the only correct answer to "which faction did
+		// this, on whose behalf" when the answer is "none".
+		if (!coop_rep_is_faction(pk.killer_comm))
+		{
+			++s_faction_refused;
+			Msg("- COOP(rep3): collective hit REFUSED — killer's community '%s' is not a faction "
+				"(every player shares it, so this write would move %s -> %s and make one player's "
+				"kill hostile for everybody). victim=%u killer=%u; refusals=%u",
+				k_comm_name.c_str(), v_comm_name.c_str(), k_comm_name.c_str(),
+				u32(pk.victim_id), u32(pk.killer_id), s_faction_refused);
+		}
+		else if (!coop_rep_is_faction(pk.victim_comm) || pk.killer_comm == pk.victim_comm)
+		{
+			++s_faction_refused;   // no pair, or a faction cannot go to war with itself
+		}
+		else
+		{
+			// The wronged faction's opinion of the killer's faction. One direction on purpose:
+			// killing a Duty man does not make Duty's enemies think better of anyone, and a
+			// symmetric write would quietly double the reach of every kill.
+			const s32 collective = shooter_delta / COOP_REP_COLLECTIVE_DIVISOR;
+			if (!collective)
+				Msg("- COOP(rep3): collective hit is ZERO — the shooter took %+d, and %+d/%d "
+					"rounds to nothing. Nothing is written; a faction war is not started by a "
+					"rounding error.", shooter_delta, shooter_delta, COOP_REP_COLLECTIVE_DIVISOR);
+			else
+				coop_rep_faction_move(pk.victim_comm, pk.killer_comm, collective, "kill");
+		}
+
+		s_pending.erase(s_pending.begin() + k);
+	}
 }
