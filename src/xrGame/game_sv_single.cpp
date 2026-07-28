@@ -23,6 +23,8 @@
 #include "character_info.h"                        // MP fork (§14 step 8 Q4): the player's community
 #include "Actor.h"                                 // MP fork (§14 step 8 Q4): tell a player actor apart
 #include "entity_alive.h"                          // MP fork (§14 step 8 Q4): only talk to the living
+#include "relation_registry.h"                    // MP fork (§14 step 8 P4 R1): goodwill storage
+#include "character_community.h"                  // MP fork (§14 step 8 P4 R1): faction indices
 #include "../xrEngine/x_ray.h"
 #include "../xrEngine/dedicated_server_only.h"
 #include "../xrEngine/no_single.h"
@@ -3699,6 +3701,108 @@ void game_sv_Single::Update()
 				s_dec_done = true;
 		}
 	}
+	// ---------------------------------------------------------------------------------------
+	// MP fork (§14 step 8 PHASE 4 increment R1, dev/RPG_LAYER_PLAN.md): measure the two storage
+	// claims before anything is built on either of them.
+	//
+	//   -coop_test_rep1 <seconds>   write pass: stamp a distinctive PERSONAL standing on the
+	//                               connected player's entity id, and move a FACTION<->FACTION
+	//                               relation by a distinctive amount. Then the harness restarts.
+	//   -coop_test_rep1_verify      read-only pass: report both, and nothing else.
+	//
+	// Why measure at all when the recon already read the source? Because the two tiers fail
+	// IDENTICALLY to a reader: `community_relation(a,b)` returning its ltx value after a restart
+	// looks the same whether the table was restored from the save or simply re-read from config,
+	// and only a value that no config file contains can tell those apart. So the write pass moves
+	// it to a number the ltx cannot produce, and the verify pass says which world it woke up in.
+	//
+	// The verify pass WRITES NOTHING, deliberately: a verify that re-stamped would rebuild the
+	// state it is measuring and would pass with the persistence ripped out — Q2's rule, and the
+	// reason its own verify probe is read-only.
+	if (xr_enet::enabled() && ai().get_alife() &&
+	    (coop_param("-coop_test_rep1") || coop_param("-coop_test_rep1_verify")))
+	{
+		static bool     s_r1_init   = false;
+		static bool     s_r1_done   = false;
+		static u32      s_r1_armed  = 0;
+		static u32      s_r1_ms     = 0;
+		static u32      s_r1_retry  = 0;
+		if (!s_r1_init)
+		{
+			s_r1_init = true;
+			LPCSTR p = coop_param("-coop_test_rep1");
+			const float secs = p ? (float)atof(p) : 0.f;
+			s_r1_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 25000u;
+			s_r1_armed = Device.dwTimeGlobal;
+		}
+
+		// The values are chosen to be unreachable by accident: personal standing is clamped into
+		// [community_goodwill_limits] so it must sit inside that band, and the faction delta is
+		// an odd number no communities_relations row uses.
+		const int  R1_PERSONAL = 77;
+		const int  R1_FACTION  = -63;
+		LPCSTR     R1_COMM     = "stalker";
+		LPCSTR     R1_FROM     = "stalker";
+		LPCSTR     R1_TO       = "bandit";
+
+		if (!s_r1_done && (Device.dwTimeGlobal - s_r1_armed) >= s_r1_ms)
+		{
+			const u16 player_id = coop_first_player_actor();
+			if (player_id == mp_coop_owner::none)
+			{
+				// Retry rather than fail: a probe that fired before the client connected would
+				// report "no player" as if that were the measurement.
+				if ((s_r1_retry++ % 100) == 0)
+					Msg("- COOP(rep1): waiting for a connected player (retry %u)", s_r1_retry);
+				if (s_r1_retry > 3000)
+				{
+					s_r1_done = true;
+					Msg("! COOP(rep1): no player ever connected — this run measured NOTHING");
+					FlushLog();
+				}
+			}
+			else
+			{
+				s_r1_done = true;
+				CHARACTER_COMMUNITY comm;  comm.set(R1_COMM);
+				CHARACTER_COMMUNITY from;  from.set(R1_FROM);
+				CHARACTER_COMMUNITY to;    to.set(R1_TO);
+
+				const int p_before = RELATION_REGISTRY().GetCommunityGoodwill(comm.index(), player_id);
+				const int f_before = RELATION_REGISTRY().GetCommunityRelation(from.index(), to.index());
+
+				if (coop_param("-coop_test_rep1_verify"))
+				{
+					// READ ONLY. The gate the harness takes is on these two numbers alone.
+					Msg("- COOP(rep1): VERIFY player=%u personal['%s']=%d (wrote %d) "
+						"faction['%s'->'%s']=%d (wrote %d) personal_kept=%d faction_kept=%d",
+						player_id, R1_COMM, p_before, R1_PERSONAL, R1_FROM, R1_TO, f_before,
+						R1_FACTION, (p_before == R1_PERSONAL) ? 1 : 0,
+						(f_before == R1_FACTION) ? 1 : 0);
+				}
+				else
+				{
+					RELATION_REGISTRY().SetCommunityGoodwill(comm.index(), player_id, R1_PERSONAL);
+					RELATION_REGISTRY().SetCommunityRelation(from.index(), to.index(), R1_FACTION);
+
+					const int p_after = RELATION_REGISTRY().GetCommunityGoodwill(comm.index(), player_id);
+					const int f_after = RELATION_REGISTRY().GetCommunityRelation(from.index(), to.index());
+
+					// before AND after, on one line: a write that was clamped or refused reads
+					// exactly like a write that never happened once the restart has been taken,
+					// and by then there is nothing left to tell them apart.
+					Msg("- COOP(rep1): WROTE player=%u personal['%s'] %d -> %d (want %d, took=%d) "
+						"faction['%s'->'%s'] %d -> %d (want %d, took=%d)",
+						player_id, R1_COMM, p_before, p_after, R1_PERSONAL,
+						(p_after == R1_PERSONAL) ? 1 : 0,
+						R1_FROM, R1_TO, f_before, f_after, R1_FACTION,
+						(f_after == R1_FACTION) ? 1 : 0);
+				}
+				FlushLog();
+			}
+		}
+	}
+
 	/*	switch(phase) 	{
 			case GAME_PHASE_PENDING : {
 				OnRoundStart();
