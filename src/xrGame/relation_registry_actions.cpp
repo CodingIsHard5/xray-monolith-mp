@@ -1,5 +1,6 @@
 #include "pch_script.h"
 #include "relation_registry.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§14 step 8 P4 R3.0): xr_enet::enabled()
 #include "alife_registry_wrappers.h"
 
 #include "actor.h"
@@ -59,8 +60,33 @@ void load_attack_goodwill()
 	gw_free.load("free_");
 }
 
+// MP fork (§14 step 8 phase 4 R3.0, dev/RPG_LAYER_PLAN.md): say whether this path was REACHED,
+// and where it stopped.
+//
+// R3's recon found that the whole of stock kill propagation runs through here, behind four gates
+// that all fail the same silent way: IsGameTypeSingle() at the caller, a victim that must cast to
+// CAI_Stalker (so killing a MONSTER moves nothing), a killer that must be an inventory owner and
+// not a base monster, and a group loop over the client-shaped seniority_holder. Every one of them
+// reads as "the feature did nothing" rather than as an error, and R3.1 must not be built on a
+// guess about which of them is true on a dedicated co-op server. So the path narrates itself:
+// entered, and if it returned early, why. Co-op only, and rate-limited — Action runs on every hit
+// in the game, and an instrument that floods the log is one that gets turned off.
+static void coop_rep_action_trace(LPCSTR what, CEntityAlive* from, CEntityAlive* to, int action)
+{
+	if (!xr_enet::enabled())
+		return;
+	static u32 s_lines = 0;
+	if (s_lines >= 40)
+		return;
+	++s_lines;
+	Msg("~ COOP(rep3): Action %s from=%u to=%u action=%d%s", what,
+		from ? u32(from->ID()) : 0xffffu, to ? u32(to->ID()) : 0xffffu, action,
+		(s_lines == 40) ? "   [further Action traces suppressed]" : "");
+}
+
 void RELATION_REGISTRY::Action(CEntityAlive* from, CEntityAlive* to, ERelationAction action)
 {
+	coop_rep_action_trace("ENTERED", from, to, int(action));
 	static CHARACTER_GOODWILL friend_kill_goodwill = pSettings->r_s32(ACTIONS_POINTS_SECT, "friend_kill_goodwill");
 	static CHARACTER_GOODWILL neutral_kill_goodwill = pSettings->r_s32(ACTIONS_POINTS_SECT, "neutral_kill_goodwill");
 	static CHARACTER_GOODWILL enemy_kill_goodwill = pSettings->r_s32(ACTIONS_POINTS_SECT, "enemy_kill_goodwill");
@@ -101,7 +127,19 @@ void RELATION_REGISTRY::Action(CEntityAlive* from, CEntityAlive* to, ERelationAc
 
 	//вычисление изменения репутации и рейтинга пока ведется 
 	//только для актера
-	if (!inv_owner_from || from->cast_base_monster()) return;
+	if (!inv_owner_from || from->cast_base_monster())
+	{
+		// Gate 3. A monster killer moves nothing, and neither does anything that is not an
+		// inventory owner — reported rather than inferred from an absence of movement.
+		coop_rep_action_trace(!inv_owner_from ? "LEFT: killer is not an inventory owner"
+		                                      : "LEFT: killer is a base monster", from, to, int(action));
+		return;
+	}
+	// Gate 2, and the one most likely to make a harness measure nothing: everything below is
+	// inside `if (stalker)`, so a victim that is not a CAI_Stalker leaves with no effect at all.
+	if (!stalker)
+		coop_rep_action_trace("victim is NOT a CAI_Stalker — this call will move nothing",
+		                      from, to, int(action));
 
 	ALife::ERelationType relation = ALife::eRelationTypeDummy;
 	if (stalker)

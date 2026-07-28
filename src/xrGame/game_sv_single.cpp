@@ -23,6 +23,7 @@
 #include "character_info.h"                        // MP fork (§14 step 8 Q4): the player's community
 #include "Actor.h"                                 // MP fork (§14 step 8 Q4): tell a player actor apart
 #include "entity_alive.h"                          // MP fork (§14 step 8 Q4): only talk to the living
+#include "ai/stalker/ai_stalker.h"                 // MP fork (§14 step 8 P4 R3.0): the stock KILL path needs a stalker victim
 #include "relation_registry.h"                    // MP fork (§14 step 8 P4 R1): goodwill storage
 #include "character_community.h"                  // MP fork (§14 step 8 P4 R1): faction indices
 #include "../xrEngine/x_ray.h"
@@ -3905,6 +3906,179 @@ void game_sv_Single::Update()
 					coop_rep_refused_count() - refused_before);
 				FlushLog();
 			}
+		}
+	}
+
+	// ---------------------------------------------------------------------------------------
+	// MP fork (§14 step 8 PHASE 4 increment R3.0, dev/RPG_LAYER_PLAN.md, doc §8.2/§8.3):
+	// MEASURE WHAT A KILL ALREADY DOES, before a line of propagation is written.
+	//
+	// The recon found that stock already propagates a kill — CEntityAlive::Die ->
+	// RELATION_REGISTRY::Action(killer, victim, KILL) — and that it moves the PERSONAL tier only:
+	// the victim community's goodwill toward the KILLER's entity id, plus reputation and rank.
+	// It also found that NOTHING in the engine writes faction<->faction (every SetCommunityRelation
+	// caller in src/ is the Lua binding or R1's probe). So the shooter tier of §8.2 may already be
+	// satisfied and the collective tier is built from nothing — and R3.1 must not double-apply the
+	// half that already works, nor assume the half that does not.
+	//
+	// This is R1's shape for a different question: both outcomes are informative, the probe says
+	// which world it woke up in, and the only real failure is a run that measured nothing.
+	//
+	// THE VICTIM MUST BE A CAI_Stalker. The whole effect in Action lives inside `if (stalker)`, so
+	// a monster kill moves nothing and a harness that killed the nearest thing would report "stock
+	// propagates nothing" about a path that was never going to run.
+	//
+	// THE BYSTANDER ROW IS SEEDED FIRST, with a value nothing else produces. Its gate is that it
+	// does NOT move, and an untouched row of a nonexistent subject reads 0 before and 0 after —
+	// unchanged for the boring reason. Seeding makes "unchanged" mean something. It stands in for
+	// a second player because two headless clients cannot share a wine prefix; that is a
+	// CONSTRUCTION, and the report says so on the line itself rather than in a comment nobody
+	// reads next to the number.
+	if (xr_enet::enabled() && ai().get_alife() && coop_param("-coop_test_rep3"))
+	{
+		static bool s_r3_init   = false;
+		static int  s_r3_stage  = 0;      // 0 = waiting, 1 = killed and settling, 2 = done
+		static u32  s_r3_armed  = 0;
+		static u32  s_r3_ms     = 0;
+		static u32  s_r3_retry  = 0;
+		static u32  s_r3_killed_at = 0;
+		static u16  s_r3_victim = mp_coop_owner::none;
+		static u16  s_r3_player = mp_coop_owner::none;
+		static int  s_r3_vcomm = -1, s_r3_kcomm = -1;
+		static int  s_r3_p_before = 0, s_r3_b_before = 0, s_r3_f_before = 0;
+		static int  s_r3_rep_before = 0, s_r3_rank_before = 0;
+
+		const u16 R3_BYSTANDER = u16(0xFFF0);   // a stand-in id, not an entity — see above
+		const int R3_BYSTANDER_SEED = 55;       // distinctive, so "did not move" is a measurement
+		const u32 R3_SETTLE_MS = 5000;          // the death is a NET event; let it land
+
+		if (!s_r3_init)
+		{
+			s_r3_init = true;
+			LPCSTR p = coop_param("-coop_test_rep3");
+			const float secs = p ? (float)atof(p) : 0.f;
+			s_r3_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 30000u;
+			s_r3_armed = Device.dwTimeGlobal;
+		}
+
+		if (s_r3_stage == 0 && (Device.dwTimeGlobal - s_r3_armed) >= s_r3_ms)
+		{
+			const u16 player_id = coop_first_player_actor();
+			CObject* const pobj = (player_id != mp_coop_owner::none)
+			                      ? Level().Objects.net_Find(player_id) : NULL;
+			CInventoryOwner* const pio = pobj ? smart_cast<CInventoryOwner*>(pobj) : NULL;
+
+			// A stalker victim, online and alive. Not the player, and not a monster.
+			u16 victim_id = mp_coop_owner::none;
+			u32 stalkers = 0, others = 0;
+			if (pio)
+			{
+				for (u32 i = 0; i < Level().Objects.o_count(); ++i)
+				{
+					CObject* const o = Level().Objects.o_get_by_iterator(i);
+					if (!o || o->getDestroy() || o->ID() == player_id)
+						continue;
+					CEntityAlive* const alive = smart_cast<CEntityAlive*>(o);
+					if (!alive || !alive->g_Alive())
+						continue;
+					if (!smart_cast<CAI_Stalker*>(o)) { ++others; continue; }
+					++stalkers;
+					if (victim_id == mp_coop_owner::none)
+						victim_id = o->ID();
+				}
+			}
+
+			if (!pio || victim_id == mp_coop_owner::none)
+			{
+				if ((Device.dwTimeGlobal - s_r3_retry) >= 5000u)
+				{
+					s_r3_retry = Device.dwTimeGlobal;
+					Msg("- COOP(rep3): waiting (%u s) player=%u live_stalkers=%u other_living=%u",
+						(Device.dwTimeGlobal - s_r3_armed - s_r3_ms) / 1000u, u32(player_id),
+						stalkers, others);
+				}
+				if ((Device.dwTimeGlobal - s_r3_armed) > (s_r3_ms + 300000u))
+				{
+					s_r3_stage = 2;
+					// "No stalker was online" and "stock propagation does nothing" are different
+					// results and only one of them is about the engine.
+					Msg("! COOP(rep3): no connected player with a LIVE STALKER to kill within 300 s "
+						"— this run measured NOTHING (a harness failure, not a result)");
+					FlushLog();
+				}
+			}
+			else
+			{
+				CObject* const vobj = Level().Objects.net_Find(victim_id);
+				CInventoryOwner* const vio = vobj ? smart_cast<CInventoryOwner*>(vobj) : NULL;
+				CEntity* const ventity = vobj ? smart_cast<CEntity*>(vobj) : NULL;
+				if (!vio || !ventity)
+				{
+					s_r3_stage = 2;
+					Msg("! COOP(rep3): victim %u is not an inventory owner/entity — measured NOTHING",
+						u32(victim_id));
+					FlushLog();
+				}
+				else
+				{
+					s_r3_player = player_id;
+					s_r3_victim = victim_id;
+					s_r3_vcomm  = vio->Community();
+					s_r3_kcomm  = pio->Community();
+
+					// Seed the stand-in row, then sample everything BEFORE.
+					RELATION_REGISTRY().SetCommunityGoodwill(s_r3_vcomm, R3_BYSTANDER, R3_BYSTANDER_SEED);
+					s_r3_p_before    = RELATION_REGISTRY().GetCommunityGoodwill(s_r3_vcomm, player_id);
+					s_r3_b_before    = RELATION_REGISTRY().GetCommunityGoodwill(s_r3_vcomm, R3_BYSTANDER);
+					s_r3_f_before    = RELATION_REGISTRY().GetCommunityRelation(s_r3_vcomm, s_r3_kcomm);
+					s_r3_rep_before  = pio->Reputation();
+					s_r3_rank_before = pio->Rank();
+
+					Msg("- COOP(rep3): BEFORE player=%u victim=%u victim_comm=%d killer_comm=%d "
+						"personal_killer=%d bystander_seeded=%d faction=%d reputation=%d rank=%d "
+						"(live_stalkers=%u)",
+						u32(player_id), u32(victim_id), s_r3_vcomm, s_r3_kcomm, s_r3_p_before,
+						s_r3_b_before, s_r3_f_before, s_r3_rep_before, s_r3_rank_before, stalkers);
+					FlushLog();
+
+					// A REAL death, attributed to the player: GE_DIE carries the killer id, and
+					// the server's own death path runs from there. Nothing here calls Action
+					// directly — a probe that did would measure itself rather than the engine.
+					ventity->KillEntity(player_id);
+					s_r3_killed_at = Device.dwTimeGlobal;
+					s_r3_stage = 1;
+					Msg("- COOP(rep3): killed victim=%u attributed to player=%u; sampling again in %u ms",
+						u32(victim_id), u32(player_id), R3_SETTLE_MS);
+					FlushLog();
+				}
+			}
+		}
+		else if (s_r3_stage == 1 && (Device.dwTimeGlobal - s_r3_killed_at) >= R3_SETTLE_MS)
+		{
+			s_r3_stage = 2;
+			CObject* const vobj = Level().Objects.net_Find(s_r3_victim);
+			CEntityAlive* const valive = vobj ? smart_cast<CEntityAlive*>(vobj) : NULL;
+			CObject* const pobj = Level().Objects.net_Find(s_r3_player);
+			CInventoryOwner* const pio = pobj ? smart_cast<CInventoryOwner*>(pobj) : NULL;
+
+			const int p_after    = RELATION_REGISTRY().GetCommunityGoodwill(s_r3_vcomm, s_r3_player);
+			const int b_after    = RELATION_REGISTRY().GetCommunityGoodwill(s_r3_vcomm, R3_BYSTANDER);
+			const int f_after    = RELATION_REGISTRY().GetCommunityRelation(s_r3_vcomm, s_r3_kcomm);
+			const int rep_after  = pio ? pio->Reputation() : s_r3_rep_before;
+			const int rank_after = pio ? pio->Rank() : s_r3_rank_before;
+
+			// died= is the gate before every other number: a victim still alive means the kill did
+			// not happen, and then "nothing moved" is about the harness, not about the engine.
+			Msg("- COOP(rep3): AFTER died=%d personal_killer %d -> %d (moved=%d) "
+				"bystander[SYNTHETIC, no second live client] %d -> %d (moved=%d) "
+				"faction %d -> %d (moved=%d) reputation %d -> %d (moved=%d) rank %d -> %d (moved=%d)",
+				(valive && valive->g_Alive()) ? 0 : 1,
+				s_r3_p_before, p_after, (p_after != s_r3_p_before) ? 1 : 0,
+				s_r3_b_before, b_after, (b_after != s_r3_b_before) ? 1 : 0,
+				s_r3_f_before, f_after, (f_after != s_r3_f_before) ? 1 : 0,
+				s_r3_rep_before, rep_after, (rep_after != s_r3_rep_before) ? 1 : 0,
+				s_r3_rank_before, rank_after, (rank_after != s_r3_rank_before) ? 1 : 0);
+			FlushLog();
 		}
 	}
 
