@@ -640,7 +640,12 @@ namespace
 	// The radius is a "you were standing right there" distance, not a line of sight: a witness
 	// model belongs to a later increment and would make the co-op feel-bad depend on whether the
 	// server happened to have the NPC's vision ready.
-	const float COOP_REP_BYSTANDER_RADIUS_M = 30.f;
+	// Not const: run 3 measured that the two co-op clients spawn where the nearest live stalker is
+	// ~105 m away, so a fixed 30 m radius makes every real bystander measurement a zero — the
+	// right answer, and a useless one. The radius was always a TUNABLE (doc Appendix B); the
+	// harness now sets it per leg from the distance it actually has, so the falloff is exercised
+	// at a known scale instead of waiting for the world to place an NPC conveniently.
+	float COOP_REP_BYSTANDER_RADIUS_M = 30.f;
 
 	// The collective hit is SMALL by construction rather than by taste: it is the shooter's own
 	// stock magnitude divided down, so it tracks config instead of sitting beside it. With the
@@ -758,6 +763,12 @@ namespace
 }
 
 float coop_rep_bystander_radius() { return COOP_REP_BYSTANDER_RADIUS_M; }
+
+void coop_rep_set_bystander_radius(float r)
+{
+	if (r > 0.f && _valid(r))
+		COOP_REP_BYSTANDER_RADIUS_M = r;
+}
 
 // Linear falloff: full weight at the muzzle, EXACTLY zero at and beyond the radius. The equality
 // matters — "outside the radius moves nothing" is this increment's negative gate, and a curve that

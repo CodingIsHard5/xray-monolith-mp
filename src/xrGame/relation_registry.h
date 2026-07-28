@@ -243,6 +243,13 @@ void coop_rep_propagate_tick();
 float coop_rep_bystander_scale(float dist_m);
 float coop_rep_bystander_radius();
 
+// The radius is a tunable (doc Appendix B), and the harness sets it per leg: run 3 measured the
+// two co-op clients spawning ~105 m from the nearest live stalker, so a fixed 30 m makes every
+// real bystander measurement a zero — correct, and useless. Setting it from the distance the run
+// actually has exercises the falloff at a KNOWN scale rather than waiting for the world to place
+// an NPC conveniently.
+void coop_rep_set_bystander_radius(float r);
+
 // Move a faction<->faction cell AND record it in the R2 overlay, which is the ONE representation
 // of "what the world moved". R2's storage is inherited deliberately: the overlay IS the
 // decayable quantity R3.2 shrinks, so a live faction write that only touched the relation table

@@ -4146,6 +4146,7 @@ void game_sv_Single::Update()
 		static int  s_r31_actor_idx = -1, s_r31_faction_idx = -1;
 		static int  s_r31_p_before = 0, s_r31_b_before = 0;
 		static u16  s_r31_bys = mp_coop_owner::none;      // the REAL second player
+		static int  s_r31_prefer_comm = -2;               // -2 = not resolved yet
 		static int  s_r31_realb_before = 0;
 		static float s_r31_realb_dist = -1.f;
 		static int  s_r31_f_actor_before = 0, s_r31_f_chosen_before = 0;
@@ -4189,6 +4190,10 @@ void game_sv_Single::Update()
 			// wine prefix), so the blast radius can now be OBSERVED on a real player instead of
 			// constructed. The synthetic candidate stays anyway — it is what pins the exact
 			// boundary at r and r+1, which a real player parked wherever it spawned cannot.
+			if (s_r31_prefer_comm == -2)
+				s_r31_prefer_comm = int(CHARACTER_COMMUNITY::IdToIndex(
+					"stalker", CHARACTER_COMMUNITY_INDEX(-1), true));
+
 			xr_vector<u16> players;
 			coop_all_player_actors(players);
 			u16 bys_id = mp_coop_owner::none;
@@ -4234,6 +4239,15 @@ void game_sv_Single::Update()
 						continue;
 					if (s_r31_vcomm >= 0 && int(cio->Community()) != s_r31_vcomm)
 						continue;
+					// Run 3 measured that the shooter tier does NOT move for every victim: a
+					// `zombied` victim gave `personal 0 -> 0` where a `stalker` victim gives -140,
+					// in four separate runs. Whatever writes it is community-specific, so leg 1
+					// PREFERS the community that has actually been observed to produce a hit —
+					// otherwise the run measures a blast radius of zero times a falloff and calls
+					// it a result. Resolved by NAME, and the fallback is reported, not silent.
+					if (s_r31_leg == 0 && s_r31_prefer_comm >= 0
+					    && int(cio->Community()) != s_r31_prefer_comm)
+						continue;
 					++stalkers;
 
 					const float d = (bys_id != mp_coop_owner::none)
@@ -4248,6 +4262,15 @@ void game_sv_Single::Update()
 					}
 				}
 			}
+			if (s_r31_leg == 0 && victim_id == mp_coop_owner::none && s_r31_prefer_comm >= 0)
+			{
+				Msg("- COOP(rep31): no live '%s' victim available — dropping the preference and "
+					"taking any stalker. The shooter tier may then measure 0, and that is a "
+					"property of the run, reported here rather than inferred from the result.",
+					"stalker");
+				s_r31_prefer_comm = -1;
+			}
+
 			// Leg 2 only means something if its victim is genuinely OUTSIDE the radius. Say so
 			// rather than silently reporting a zero that the distance did not earn.
 			if (s_r31_leg == 1 && bys_id != mp_coop_owner::none && victim_dist >= 0.f
@@ -4321,6 +4344,23 @@ void game_sv_Single::Update()
 					// The synthetic bystander: INSIDE the radius on leg 1, OUTSIDE it on leg 2.
 					// Its community is set to the killer's so the same-faction test passes and
 					// the leg-2 zero is attributable to the RADIUS and to nothing else.
+					// THE RADIUS IS SET FROM THE DISTANCE WE ACTUALLY HAVE. The two co-op
+					// clients spawn ~105 m from the nearest live stalker, so the 30 m default
+					// makes every real-bystander measurement a zero — the correct answer to a
+					// question worth nothing. Leg 1 sets r = 2 x d, so the live bystander sits at
+					// EXACTLY half the radius and its predicted hit is exactly half the shooter's;
+					// leg 2 sets r = d / 2, so it is unambiguously outside. The radius was always
+					// a tunable; this makes the run state which value it used instead of hoping
+					// the world placed an NPC conveniently.
+					if (s_r31_bys != mp_coop_owner::none && s_r31_realb_dist > 1.f)
+					{
+						const float want_r = (s_r31_leg == 0)
+							? (s_r31_realb_dist * 2.f) : (s_r31_realb_dist * 0.5f);
+						coop_rep_set_bystander_radius(want_r);
+						Msg("- COOP(rep31): leg%d radius set to %.1f m from the live bystander's "
+							"%.1f m (%s)", s_r31_leg + 1, want_r, s_r31_realb_dist,
+							(s_r31_leg == 0) ? "so it sits at exactly r/2" : "so it is outside r");
+					}
 					const float r = coop_rep_bystander_radius();
 					const float offset = (s_r31_leg == 0) ? (r * 0.5f) : (r + 10.f);
 					Fvector bpos = ventity->Position();
