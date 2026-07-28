@@ -4082,6 +4082,251 @@ void game_sv_Single::Update()
 		}
 	}
 
+	// ---------------------------------------------------------------------------------------
+	// MP fork (§14 step 8 PHASE 4 increment R3.1, dev/RPG_LAYER_PLAN.md, doc §8.2/§8.3):
+	// THE BLAST RADIUS — two kills, and the second one is a different question from the first.
+	//
+	// R3.0 left R3.1 two things to settle and one thing not to break, and this probe is shaped
+	// around all three:
+	//
+	//   * NOT TO BREAK: the shooter tier is already stock (-140 on the victim community's row
+	//     toward the killer). Each leg's personal delta must be EXACTLY that. Two kills give
+	//     the gate teeth a single kill cannot: a double-application shows up as -280 per kill,
+	//     and a propagation that accidentally re-entered would show up as drift between legs.
+	//   * TO SETTLE: `actor` is not a faction, and every player is `actor`. Leg 1 kills with the
+	//     player's booted community and the collective hit must be REFUSED; leg 2 gives the
+	//     player a real faction and it must LAND — on `stalker -> actor_stalker`, while
+	//     `stalker -> actor` stays at zero THROUGH BOTH LEGS. That last one is the discriminating
+	//     gate, and it is the §8.3 failure that would otherwise be invisible on one client:
+	//     a run where the collective hit lands on the shared pseudo-community looks exactly like
+	//     a run where it landed correctly, unless something watches the cell it must not touch.
+	//     The chosen community is RE-READ after it is set, because "I called the setter" and
+	//     "the player is in that faction" are different claims (R3.0's scope says so explicitly).
+	//   * TO CONSTRUCT HONESTLY: there is no second live client, so the bystander is synthetic —
+	//     but it is injected into the SAME enumeration real players go through, so the radius
+	//     test, the same-faction test, the falloff and the write are all the production path.
+	//     Leg 1 places it INSIDE the radius (a scaled hit) and leg 2 OUTSIDE it (exactly zero),
+	//     because a bystander term that is merely "small" passes any test that only checks the
+	//     shooter. Every line about it carries [SYNTHETIC, no second live client] on the line.
+	if (xr_enet::enabled() && ai().get_alife() && coop_param("-coop_test_rep31"))
+	{
+		static bool s_r31_init  = false;
+		static int  s_r31_stage = 0;   // 0 armed/leg1 setup, 1 leg1 settle, 2 leg2 setup, 3 leg2 settle, 4 done
+		static u32  s_r31_armed = 0, s_r31_ms = 0, s_r31_retry = 0, s_r31_killed_at = 0;
+		static int  s_r31_leg   = 0;
+		static u16  s_r31_player = mp_coop_owner::none;
+		static u16  s_r31_victim = mp_coop_owner::none;
+		static int  s_r31_vcomm = -1, s_r31_kcomm = -1;
+		static int  s_r31_actor_idx = -1, s_r31_faction_idx = -1;
+		static int  s_r31_p_before = 0, s_r31_b_before = 0;
+		static int  s_r31_f_actor_before = 0, s_r31_f_chosen_before = 0;
+		static u32  s_r31_bys_moved_before = 0, s_r31_fac_moved_before = 0, s_r31_fac_ref_before = 0;
+
+		// A stand-in id, not an entity — the same construction R3.0 used, kept at the same value
+		// so the two runs' bystander rows are directly comparable.
+		const u16 R31_BYSTANDER = u16(0xFFF0);
+		const int R31_BYSTANDER_SEED = 55;
+		const u32 R31_SETTLE_MS = 5000;
+
+		if (!s_r31_init)
+		{
+			s_r31_init = true;
+			LPCSTR p = coop_param("-coop_test_rep31");
+			const float secs = p ? (float)atof(p) : 0.f;
+			s_r31_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 30000u;
+			s_r31_armed = Device.dwTimeGlobal;
+
+			// The falloff CURVE, measured at chosen distances rather than inferred from one
+			// write. The last sample is the increment's negative gate and it must be exactly 0.
+			const float r = coop_rep_bystander_radius();
+			Msg("- COOP(rep31): falloff[SYNTHETIC, no second live client] radius=%.1f m  "
+				"scale(0)=%.3f scale(r/2)=%.3f scale(r-0.1)=%.3f scale(r)=%.3f scale(r+1)=%.3f",
+				r, coop_rep_bystander_scale(0.f), coop_rep_bystander_scale(r * 0.5f),
+				coop_rep_bystander_scale(r - 0.1f), coop_rep_bystander_scale(r),
+				coop_rep_bystander_scale(r + 1.f));
+			FlushLog();
+		}
+
+		if ((s_r31_stage == 0 || s_r31_stage == 2) && (Device.dwTimeGlobal - s_r31_armed) >= s_r31_ms)
+		{
+			const u16 player_id = coop_first_player_actor();
+			CObject* const pobj = (player_id != mp_coop_owner::none)
+			                      ? Level().Objects.net_Find(player_id) : NULL;
+			CInventoryOwner* const pio = pobj ? smart_cast<CInventoryOwner*>(pobj) : NULL;
+
+			// Leg 2's victim must share leg 1's community or the -140 regression gate compares
+			// two different numbers and proves nothing.
+			u16 victim_id = mp_coop_owner::none;
+			u32 stalkers = 0;
+			if (pio)
+			{
+				for (u32 i = 0; i < Level().Objects.o_count(); ++i)
+				{
+					CObject* const o = Level().Objects.o_get_by_iterator(i);
+					if (!o || o->getDestroy() || o->ID() == player_id || o->ID() == s_r31_victim)
+						continue;
+					CEntityAlive* const alive = smart_cast<CEntityAlive*>(o);
+					if (!alive || !alive->g_Alive() || !smart_cast<CAI_Stalker*>(o))
+						continue;
+					CInventoryOwner* const cio = smart_cast<CInventoryOwner*>(o);
+					if (!cio)
+						continue;
+					if (s_r31_vcomm >= 0 && int(cio->Community()) != s_r31_vcomm)
+						continue;                   // leg 2: same community as leg 1, or nothing
+					++stalkers;
+					if (victim_id == mp_coop_owner::none)
+						victim_id = o->ID();
+				}
+			}
+
+			if (!pio || victim_id == mp_coop_owner::none)
+			{
+				if ((Device.dwTimeGlobal - s_r31_retry) >= 5000u)
+				{
+					s_r31_retry = Device.dwTimeGlobal;
+					Msg("- COOP(rep31): leg %d waiting — player=%u live_stalkers%s=%u",
+						s_r31_leg + 1, u32(player_id),
+						(s_r31_vcomm >= 0) ? "(matching leg 1's community)" : "", stalkers);
+				}
+				if ((Device.dwTimeGlobal - s_r31_armed) > (s_r31_ms + 300000u))
+				{
+					s_r31_stage = 4;
+					Msg("! COOP(rep31): leg %d found no connected player with a LIVE STALKER%s "
+						"within 300 s — this run measured NOTHING (a harness failure, not a result)",
+						s_r31_leg + 1, (s_r31_vcomm >= 0) ? " of leg 1's community" : "");
+					FlushLog();
+				}
+			}
+			else
+			{
+				CObject* const vobj = Level().Objects.net_Find(victim_id);
+				CInventoryOwner* const vio = vobj ? smart_cast<CInventoryOwner*>(vobj) : NULL;
+				CEntity* const ventity = vobj ? smart_cast<CEntity*>(vobj) : NULL;
+				if (!vio || !ventity)
+				{
+					s_r31_stage = 4;
+					Msg("! COOP(rep31): victim %u is not an inventory owner/entity — measured NOTHING",
+						u32(victim_id));
+					FlushLog();
+				}
+				else
+				{
+					// LEG 2's whole question: give the player a REAL faction, then re-read it.
+					// "I called SetCommunity" and "the player is in that faction" are different
+					// claims, and only the second one licenses reading the leg-2 faction cell.
+					if (s_r31_leg == 1)
+					{
+						const CHARACTER_COMMUNITY_INDEX chosen =
+							CHARACTER_COMMUNITY::IdToIndex("actor_stalker", CHARACTER_COMMUNITY_INDEX(-1), true);
+						const int before_set = int(pio->Community());
+						if (chosen >= 0)
+							pio->SetCommunity(chosen);
+						s_r31_faction_idx = int(pio->Community());     // RE-READ, not assumed
+						Msg("- COOP(rep31): leg2 chose a faction: 'actor_stalker' index=%d; "
+							"player community %d -> %d (re-read) took=%d",
+							int(chosen), before_set, s_r31_faction_idx,
+							(chosen >= 0 && s_r31_faction_idx == int(chosen)) ? 1 : 0);
+						FlushLog();
+					}
+
+					s_r31_player = player_id;
+					s_r31_victim = victim_id;
+					s_r31_vcomm  = int(vio->Community());
+					s_r31_kcomm  = int(pio->Community());
+					if (s_r31_actor_idx < 0)
+						s_r31_actor_idx = int(CHARACTER_COMMUNITY::IdToIndex(
+							"actor", CHARACTER_COMMUNITY_INDEX(-1), true));
+
+					// The synthetic bystander: INSIDE the radius on leg 1, OUTSIDE it on leg 2.
+					// Its community is set to the killer's so the same-faction test passes and
+					// the leg-2 zero is attributable to the RADIUS and to nothing else.
+					const float r = coop_rep_bystander_radius();
+					const float offset = (s_r31_leg == 0) ? (r * 0.5f) : (r + 10.f);
+					Fvector bpos = ventity->Position();
+					bpos.x += offset;
+					coop_rep_test_set_bystander(true, R31_BYSTANDER, bpos,
+					                            CHARACTER_COMMUNITY_INDEX(s_r31_kcomm));
+
+					RELATION_REGISTRY().SetCommunityGoodwill(s_r31_vcomm, R31_BYSTANDER, R31_BYSTANDER_SEED);
+					s_r31_p_before        = RELATION_REGISTRY().GetCommunityGoodwill(s_r31_vcomm, player_id);
+					s_r31_b_before        = RELATION_REGISTRY().GetCommunityGoodwill(s_r31_vcomm, R31_BYSTANDER);
+					s_r31_f_actor_before  = (s_r31_actor_idx >= 0)
+						? RELATION_REGISTRY().GetCommunityRelation(s_r31_vcomm, s_r31_actor_idx) : 0;
+					s_r31_f_chosen_before = (s_r31_faction_idx >= 0)
+						? RELATION_REGISTRY().GetCommunityRelation(s_r31_vcomm, s_r31_faction_idx) : 0;
+					s_r31_bys_moved_before = coop_rep_bystanders_moved();
+					s_r31_fac_moved_before = coop_rep_faction_moved_count();
+					s_r31_fac_ref_before   = coop_rep_faction_refused_count();
+
+					Msg("- COOP(rep31): leg%d BEFORE player=%u victim=%u victim_comm=%d killer_comm=%d "
+						"personal=%d bystander_seeded=%d faction_to_actor=%d faction_to_chosen=%d "
+						"synthetic_at=%.1f m (radius %.1f, %s)",
+						s_r31_leg + 1, u32(player_id), u32(victim_id), s_r31_vcomm, s_r31_kcomm,
+						s_r31_p_before, s_r31_b_before, s_r31_f_actor_before, s_r31_f_chosen_before,
+						offset, r, (s_r31_leg == 0) ? "INSIDE" : "OUTSIDE");
+					FlushLog();
+
+					ventity->KillEntity(player_id);
+					s_r31_killed_at = Device.dwTimeGlobal;
+					s_r31_stage = (s_r31_leg == 0) ? 1 : 3;
+					Msg("- COOP(rep31): leg%d killed victim=%u attributed to player=%u",
+						s_r31_leg + 1, u32(victim_id), u32(player_id));
+					FlushLog();
+				}
+			}
+		}
+		else if ((s_r31_stage == 1 || s_r31_stage == 3)
+		         && (Device.dwTimeGlobal - s_r31_killed_at) >= R31_SETTLE_MS)
+		{
+			CObject* const vobj = Level().Objects.net_Find(s_r31_victim);
+			CEntityAlive* const valive = vobj ? smart_cast<CEntityAlive*>(vobj) : NULL;
+
+			const int p_after = RELATION_REGISTRY().GetCommunityGoodwill(s_r31_vcomm, s_r31_player);
+			const int b_after = RELATION_REGISTRY().GetCommunityGoodwill(s_r31_vcomm, R31_BYSTANDER);
+			const int f_actor_after = (s_r31_actor_idx >= 0)
+				? RELATION_REGISTRY().GetCommunityRelation(s_r31_vcomm, s_r31_actor_idx) : 0;
+			const int f_chosen_after = (s_r31_faction_idx >= 0)
+				? RELATION_REGISTRY().GetCommunityRelation(s_r31_vcomm, s_r31_faction_idx) : 0;
+
+			// `faction_to_actor` is printed as a DELTA as well as a value because zero is the
+			// answer here and an absolute zero is also what an unwritten cell reads: the delta
+			// says the cell was watched across a kill, not merely found empty afterwards.
+			Msg("- COOP(rep31): leg%d AFTER died=%d personal %d -> %d (delta %+d) "
+				"bystander[SYNTHETIC, no second live client] %d -> %d (delta %+d) "
+				"faction_to_actor %d -> %d (delta %+d) faction_to_chosen %d -> %d (delta %+d) "
+				"bystanders_moved=%u faction_moved=%u faction_refused=%u",
+				s_r31_leg + 1, (valive && valive->g_Alive()) ? 0 : 1,
+				s_r31_p_before, p_after, p_after - s_r31_p_before,
+				s_r31_b_before, b_after, b_after - s_r31_b_before,
+				s_r31_f_actor_before, f_actor_after, f_actor_after - s_r31_f_actor_before,
+				s_r31_f_chosen_before, f_chosen_after, f_chosen_after - s_r31_f_chosen_before,
+				coop_rep_bystanders_moved() - s_r31_bys_moved_before,
+				coop_rep_faction_moved_count() - s_r31_fac_moved_before,
+				coop_rep_faction_refused_count() - s_r31_fac_ref_before);
+			FlushLog();
+
+			if (s_r31_stage == 1)
+			{
+				// Leg 2 re-arms from now, so its own wait is bounded the same way leg 1's was.
+				s_r31_leg = 1;
+				s_r31_stage = 2;
+				s_r31_armed = Device.dwTimeGlobal;
+				s_r31_ms = 3000;
+			}
+			else
+			{
+				s_r31_stage = 4;
+				coop_rep_test_set_bystander(false, 0, Fvector().set(0.f, 0.f, 0.f),
+				                            CHARACTER_COMMUNITY_INDEX(-1));
+				Msg("- COOP(rep31): DONE  bystanders_considered=%u bystanders_moved=%u "
+					"faction_moved=%u faction_refused=%u",
+					coop_rep_bystanders_considered(), coop_rep_bystanders_moved(),
+					coop_rep_faction_moved_count(), coop_rep_faction_refused_count());
+				FlushLog();
+			}
+		}
+	}
+
 	/*	switch(phase) 	{
 			case GAME_PHASE_PENDING : {
 				OnRoundStart();

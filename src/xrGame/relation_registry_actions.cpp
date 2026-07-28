@@ -296,6 +296,13 @@ void RELATION_REGISTRY::Action(CEntityAlive* from, CEntityAlive* to, ERelationAc
 				//(считается, что такое нападение всегда случайно)
 				bool stalker_kills_team_mate = stalker_from && (stalker_from->Community() == stalker->Community());
 
+				// MP fork (§14 step 8 P4 R3.1): HOISTED out of the block below, unchanged in
+				// value — R3.1's bystander term is scaled against the magnitude stock just
+				// applied to the shooter (R3.0 measured it as -140) rather than against a
+				// number invented beside it. It stays 0 when the block does not run, which is
+				// the same "nothing propagates" stock already means.
+				CHARACTER_GOODWILL community_goodwill = 0;
+
 				if (delta_goodwill && !stalker_kills_team_mate)
 				{
 					//изменить отношение ко всем членам группы (если такая есть)
@@ -312,7 +319,7 @@ void RELATION_REGISTRY::Action(CEntityAlive* from, CEntityAlive* to, ERelationAc
 					}
 
 					//(CHARACTER_GOODWILL)( stalker->Sympathy() * (float)(delta_goodwill+community_member_kill_goodwill));
-					CHARACTER_GOODWILL community_goodwill = (CHARACTER_GOODWILL)(stalker->Sympathy() * (float)(
+					community_goodwill = (CHARACTER_GOODWILL)(stalker->Sympathy() * (float)(
 						community_member_kill_goodwill));
 					if (community_goodwill)
 					{
@@ -329,6 +336,26 @@ void RELATION_REGISTRY::Action(CEntityAlive* from, CEntityAlive* to, ERelationAc
 				delta_rank = CHARACTER_RANK::rank_kill_points(CHARACTER_RANK::ValueToIndex(stalker->Rank()));
 				if (delta_rank)
 					inv_owner_from->ChangeRank(delta_rank);
+
+				// MP fork (§14 step 8 PHASE 4 increment R3.1 / doc §8.2): the blast radius —
+				// the bystander and collective tiers, which stock does not have.
+				//
+				// PLACEMENT IS A DECISION, and it is this one for a reason that is measurable
+				// rather than stylistic. Everything above is the SHOOTER tier and R3.0 measured
+				// it as already stock, so not a line of it is touched; the new tiers are called
+				// from INSIDE the stock path instead of beside it, because there is exactly one
+				// Action(...,KILL) call site in the engine (CEntityAlive::Die) and R3.0's trace
+				// showed exactly one entry per kill. Hooking Die separately would have meant a
+				// second copy of four gates that can drift out of step with these ones, and
+				// "exactly one shooter hit per kill" would have become a hope. Here it is a
+				// gate the harness counts: the killer's personal row must move by the stock
+				// -140 and no more.
+				//
+				// The victim's position IS the kill position — it is an NPC the server itself
+				// simulates, so its transform is live and authoritative here, unlike a player's.
+				coop_rep_propagate_kill(from->ID(), CHARACTER_COMMUNITY_INDEX(inv_owner_from->Community()),
+				                        stalker->ID(), CHARACTER_COMMUNITY_INDEX(stalker->Community()),
+				                        stalker->Position(), community_goodwill);
 			}
 		}
 		break;

@@ -459,7 +459,11 @@ void CInventoryOwner::SetCommunity(CHARACTER_COMMUNITY_INDEX new_community)
 	//	EA->id_Team = CharacterInfo().Community().team();
 	trader->m_community_index = new_community;
 
-	if (EA->ID() == Actor()->ID())
+	// MP fork (§14 step 8 P4 R3.1): guarded, like its sibling SetRank four lines below already
+	// is. On a dedicated co-op server this runs for a PLAYER's actor object, which is not the
+	// local Actor() — and on a server booted without one, `Actor()->ID()` is a null dereference
+	// reached by nothing more exotic than a player joining a faction.
+	if (Actor() && EA->ID() == Actor()->ID())
 		Actor()->RPC_UpdateFaction();
 }
 

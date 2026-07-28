@@ -20,6 +20,12 @@
 #include "xrServer_Objects_ALife_Monsters.h"
 #include "script_engine.h"
 
+// MP fork (§14 step 8 phase 4 R3.1): the blast radius needs the connected players — who they
+// are, where they are, and which faction they picked. Level().Server is the only server-side
+// source for the first two, and a player's CSE is the only LIVE source for the position.
+#include "Level.h"
+#include "xrServer.h"
+
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -590,4 +596,331 @@ void coop_rep_state_load(IReader& stream)
 	Msg("- COOP(rep): faction state loaded moved=%u applied=%u unknown_community=%u (v%u)",
 		cells, applied, unknown, u32(ver));
 	FlushLog();
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+// MP fork (§14 step 8 PHASE 4 increment R3.1, dev/RPG_LAYER_PLAN.md, doc §8.2/§8.3):
+// THE BLAST RADIUS OF A KILL — the two tiers stock does not have.
+//
+// The header carries the design; this carries the decisions that only exist in code.
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+namespace
+{
+	// ---- R3.1 tunables (doc Appendix B) --------------------------------------------------
+	//
+	// The radius is a "you were standing right there" distance, not a line of sight: a witness
+	// model belongs to a later increment and would make the co-op feel-bad depend on whether the
+	// server happened to have the NPC's vision ready.
+	const float COOP_REP_BYSTANDER_RADIUS_M = 30.f;
+
+	// The collective hit is SMALL by construction rather than by taste: it is the shooter's own
+	// stock magnitude divided down, so it tracks config instead of sitting beside it. With the
+	// measured -140 that is -7 per kill against a table whose hostile pole is -2000 — i.e. a
+	// griefer needs a loop, which is exactly the loop §8.3's pressure bar (R3.2) has to stop.
+	const s32 COOP_REP_COLLECTIVE_DIVISOR = 20;
+
+	// The config's own extremes (`monolith -> monolith = 2000`, `-2000` for the hostile pole).
+	// Clamping there means a relation already at war absorbs further kills without moving, which
+	// is the correct answer rather than a saturating counter nobody can read.
+	const s32 COOP_REP_RELATION_FLOOR = -2000;
+	const s32 COOP_REP_RELATION_CEIL  =  2000;
+
+	u32 s_bystanders_considered = 0;
+	u32 s_bystanders_moved      = 0;
+	u32 s_faction_moved         = 0;
+	u32 s_faction_refused       = 0;
+
+	// The synthetic stand-in for a second player. See the header: it is injected into the SAME
+	// enumeration real players go through, so what it measures is the production path.
+	bool                      s_test_bys_armed = false;
+	u16                       s_test_bys_id    = u16(-1);
+	Fvector                   s_test_bys_pos   = { 0.f, 0.f, 0.f };
+	CHARACTER_COMMUNITY_INDEX s_test_bys_comm  = CHARACTER_COMMUNITY_INDEX(-1);
+
+	// `actor` is the pseudo-community EVERY player shares, so it is not a faction and must never
+	// be an endpoint of a faction<->faction move. Decided by NAME, like R2's chunk and for the
+	// same reason: an index is a position in a config line, and a community added to
+	// [game_relations] communities would silently re-point this test at a different faction.
+	bool coop_rep_is_faction(CHARACTER_COMMUNITY_INDEX c)
+	{
+		if (c < 0)
+			return false;
+		const shared_str name = CHARACTER_COMMUNITY::IndexToId(c, NULL, true);
+		if (!name.c_str() || !name.size())
+			return false;
+		return (xr_strcmp(name.c_str(), "actor") != 0);
+	}
+
+	// Returns by VALUE, and callers hold the result in a local before taking c_str(): IndexToId
+	// hands back a shared_str by value, so a `LPCSTR name = IndexToId(...)` would point into a
+	// temporary that is gone by the time Msg formats it.
+	shared_str coop_rep_comm_name(CHARACTER_COMMUNITY_INDEX c)
+	{
+		if (c < 0)
+			return shared_str("<none>");
+		const shared_str name = CHARACTER_COMMUNITY::IndexToId(c, NULL, true);
+		return (name.c_str() && name.size()) ? name : shared_str("<unknown>");
+	}
+
+	// One candidate for the bystander tier: WHO, WHERE, and WHICH FACTION. Collected in one pass
+	// over the connected clients, which is also the pass that answers "is the killer a player at
+	// all" — the gate on both new tiers.
+	struct coop_rep_bystander
+	{
+		u16                       id;
+		Fvector                   pos;
+		CHARACTER_COMMUNITY_INDEX comm;
+		bool                      synthetic;
+	};
+
+	struct coop_rep_bystander_collector
+	{
+		u16 killer_id;
+		bool killer_is_player;
+		u32 clients_seen;
+		xr_vector<coop_rep_bystander>* out;
+
+		void operator()(IClient* client)
+		{
+			xrClientData* const cd = static_cast<xrClientData*>(client);
+			if (!cd || !cd->owner)
+				return;
+			if (Level().Server && cd == Level().Server->GetServerClient())
+				return;   // the dedicated server's own loopback client is not a player
+			++clients_seen;
+
+			if (cd->owner->ID == killer_id)
+			{
+				killer_is_player = true;
+				return;       // the shooter is not their own bystander
+			}
+
+			// WHERE, and this is the P4 E hazard named where it bites. A player's CSE
+			// `o_Position` is written by the ENet PUMP THREAD peeking M_CL_UPDATE, not by the
+			// game loop — the server never decodes a player's movement and its own copy of the
+			// body is a record, not a simulation (D2 run 7), so the CSE is the only live source
+			// and the CObject transform would be stale by the whole length of a walk.
+			//
+			// SAMPLING POINT, chosen deliberately: HERE, synchronously, on the death path — i.e.
+			// at the kill. The alternative (sample on a later Update tick) is the D1/E defect
+			// exactly: it would score the bystander at wherever they had walked to by then, which
+			// is unbounded. Reading at the kill bounds the error to one client-update interval.
+			// The read is NOT atomic against the pump thread's three-float assign; `_valid()` is
+			// the cheap guard, and the sampled position is LOGGED, so a torn or absurd coordinate
+			// shows up as a nonsense distance in the record rather than as a silently wrong scale.
+			if (!_valid(cd->owner->o_Position))
+				return;
+
+			coop_rep_bystander b;
+			b.id        = cd->owner->ID;
+			b.pos       = cd->owner->o_Position;
+			b.comm      = CHARACTER_COMMUNITY_INDEX(-1);
+			b.synthetic = false;
+
+			CSE_ALifeTraderAbstract* const trader = smart_cast<CSE_ALifeTraderAbstract*>(cd->owner);
+			if (trader)
+				b.comm = CHARACTER_COMMUNITY_INDEX(trader->m_community_index);
+
+			out->push_back(b);
+		}
+	};
+}
+
+float coop_rep_bystander_radius() { return COOP_REP_BYSTANDER_RADIUS_M; }
+
+// Linear falloff: full weight at the muzzle, EXACTLY zero at and beyond the radius. The equality
+// matters — "outside the radius moves nothing" is this increment's negative gate, and a curve that
+// merely tends to zero (an inverse square, say) would leave a rounding-sized hit at every distance
+// and pass a test that only checked the shooter.
+float coop_rep_bystander_scale(float dist_m)
+{
+	if (!_valid(dist_m) || dist_m < 0.f)
+		return 0.f;
+	if (dist_m >= COOP_REP_BYSTANDER_RADIUS_M)
+		return 0.f;
+	return 1.f - (dist_m / COOP_REP_BYSTANDER_RADIUS_M);
+}
+
+u32 coop_rep_bystanders_considered()  { return s_bystanders_considered; }
+u32 coop_rep_bystanders_moved()       { return s_bystanders_moved; }
+u32 coop_rep_faction_moved_count()    { return s_faction_moved; }
+u32 coop_rep_faction_refused_count()  { return s_faction_refused; }
+
+void coop_rep_test_set_bystander(bool armed, u16 id, const Fvector& pos,
+                                 CHARACTER_COMMUNITY_INDEX comm)
+{
+	s_test_bys_armed = armed;
+	s_test_bys_id    = id;
+	s_test_bys_pos   = pos;
+	s_test_bys_comm  = comm;
+}
+
+bool coop_rep_faction_move(CHARACTER_COMMUNITY_INDEX from, CHARACTER_COMMUNITY_INDEX to,
+                           s32 delta, LPCSTR why)
+{
+	if (!delta || from < 0 || to < 0)
+		return false;
+
+	const s32 cur = s32(CHARACTER_COMMUNITY::relation(from, to));
+	s32 next = cur + delta;
+	if (next < COOP_REP_RELATION_FLOOR) next = COOP_REP_RELATION_FLOOR;
+	if (next > COOP_REP_RELATION_CEIL)  next = COOP_REP_RELATION_CEIL;
+	if (next == cur)
+		return false;                       // already at the pole: absorbed, not accumulated
+	if (next == NO_GOODWILL)
+		return false;                       // the table's "unset" sentinel is not a value
+
+	CHARACTER_COMMUNITY::set_relation(from, to, CHARACTER_GOODWILL(next));
+
+	// ...and into the OVERLAY, which is the same and only representation R2 persists and R3.2
+	// decays. Keeping it here rather than in a parallel accumulator is the whole reason R3
+	// inherits R2's storage: there is nothing to keep in step, and "decay toward baseline" is
+	// literally "shrink this number toward its config value".
+	const shared_str from_name = CHARACTER_COMMUNITY::IndexToId(from, NULL, true);
+	const shared_str to_name   = CHARACTER_COMMUNITY::IndexToId(to,   NULL, true);
+
+	// A cell that has come back to its config value is not an overlay cell — it is the absence of
+	// one. Dropping it keeps the overlay from growing forever and makes "the war is over" a real
+	// state rather than a stored zero difference.
+	rep_baseline& b = baseline();
+	const bool at_baseline = b.ok
+		&& from < s32(b.t.size()) && to < s32(b.t.size())
+		&& next == b.t[from][to];
+
+	size_t i = 0;
+	for (; i < s_rep_overlay.size(); ++i)
+		if (s_rep_overlay[i].from == from_name && s_rep_overlay[i].to == to_name)
+			break;
+
+	if (at_baseline)
+	{
+		if (i < s_rep_overlay.size())
+			s_rep_overlay.erase(s_rep_overlay.begin() + i);
+	}
+	else if (i < s_rep_overlay.size())
+	{
+		s_rep_overlay[i].goodwill = next;
+	}
+	else
+	{
+		rep_cell c;
+		c.from = from_name;
+		c.to = to_name;
+		c.goodwill = next;
+		s_rep_overlay.push_back(c);
+	}
+
+	++s_faction_moved;
+	Msg("- COOP(rep3): faction %s -> %s  %d -> %d (delta %+d, %s); overlay now %u cell(s)",
+		from_name.c_str(), to_name.c_str(), cur, next, delta, why,
+		u32(s_rep_overlay.size()));
+	return true;
+}
+
+void coop_rep_propagate_kill(u16 killer_id, CHARACTER_COMMUNITY_INDEX killer_comm,
+                             u16 victim_id, CHARACTER_COMMUNITY_INDEX victim_comm,
+                             const Fvector& kill_pos,
+                             CHARACTER_GOODWILL shooter_community_delta)
+{
+	if (!xr_enet::enabled() || !Level().Server)
+		return;
+	if (victim_comm < 0 || !_valid(kill_pos))
+		return;
+
+	// One pass over the connected clients: it collects the bystander candidates AND answers
+	// whether the killer is a player, which is the gate on both tiers below.
+	xr_vector<coop_rep_bystander> cands;
+	coop_rep_bystander_collector col;
+	col.killer_id = killer_id;
+	col.killer_is_player = false;
+	col.clients_seen = 0;
+	col.out = &cands;
+	Level().Server->ForEachClientDo(col);
+
+	if (s_test_bys_armed)
+	{
+		// The construction, injected into the real list so it goes through the real tests.
+		coop_rep_bystander b;
+		b.id        = s_test_bys_id;
+		b.pos       = s_test_bys_pos;
+		b.comm      = s_test_bys_comm;
+		b.synthetic = true;
+		cands.push_back(b);
+	}
+
+	if (!col.killer_is_player)
+	{
+		// A-Life killing its own is not a player's blast radius. Silent by design: this is the
+		// common case on a living server and a log line here would be the whole log.
+		return;
+	}
+
+	// ---- tier 2: the bystanders -------------------------------------------------------------
+	//
+	// The shooter is NOT here. Stock already moved their row (R3.0: -140) and this function is
+	// called from inside that same path, so re-applying it would land every kill twice.
+	for (size_t i = 0; i < cands.size(); ++i)
+	{
+		const coop_rep_bystander& b = cands[i];
+		++s_bystanders_considered;
+
+		const float dist = kill_pos.distance_to(b.pos);
+		const float scale = coop_rep_bystander_scale(dist);
+		// §8.2's "same-faction bystanders": the blast radius is guilt by association with the
+		// SHOOTER, so a player of another faction standing nearby is a witness, not an accomplice.
+		// On this build every player is the pseudo-community `actor`, so the test is presently
+		// vacuous — which is exactly why both communities are printed rather than a verdict.
+		const bool same_faction = (b.comm >= 0) && (b.comm == killer_comm);
+		// Rounded AWAY from zero, so a bystander inside the radius never quietly rounds to a
+		// no-op: the only zero this tier produces should be the one the radius test produced.
+		const float raw = float(shooter_community_delta) * scale;
+		const s32 delta = (scale > 0.f && same_faction)
+			? s32(raw < 0.f ? floorf(raw - 0.5f) : floorf(raw + 0.5f)) : 0;
+
+		const shared_str b_comm_name = coop_rep_comm_name(b.comm);
+		const shared_str k_comm_name = coop_rep_comm_name(killer_comm);
+		Msg("- COOP(rep3): bystander%s id=%u at %.1f m (r=%.0f) scale=%.3f "
+			"comm=%s vs killer_comm=%s same_faction=%d -> delta %+d%s",
+			b.synthetic ? "[SYNTHETIC, no second live client]" : "", u32(b.id), dist,
+			COOP_REP_BYSTANDER_RADIUS_M, scale, b_comm_name.c_str(),
+			k_comm_name.c_str(), same_faction ? 1 : 0, delta,
+			(scale <= 0.f) ? "   [outside the radius: exactly zero]" : "");
+
+		if (!delta)
+			continue;
+		RELATION_REGISTRY().ChangeCommunityGoodwill(victim_comm, b.id, CHARACTER_GOODWILL(delta));
+		++s_bystanders_moved;
+	}
+
+	// ---- tier 3: the collective faction hit --------------------------------------------------
+	//
+	// R3.0's finding, enforced: the killer's community is `actor` for every player who has not
+	// chosen a faction, and `actor` is not a faction — so there is no faction<->faction pair to
+	// move and the write is REFUSED rather than aimed at the nearest available cell. A refusal
+	// here is not a failure; it is the only correct answer to "which faction did this on whose
+	// behalf" when the answer is "none".
+	if (!coop_rep_is_faction(killer_comm))
+	{
+		++s_faction_refused;
+		const shared_str k_name = coop_rep_comm_name(killer_comm);
+		const shared_str v_name = coop_rep_comm_name(victim_comm);
+		Msg("- COOP(rep3): collective hit REFUSED — killer's community '%s' is not a faction "
+			"(every player shares it, so this write would move %s -> %s and make one player's "
+			"kill hostile for everybody). victim=%u killer=%u; refusals=%u",
+			k_name.c_str(), v_name.c_str(), k_name.c_str(),
+			u32(victim_id), u32(killer_id), s_faction_refused);
+		return;
+	}
+	if (!coop_rep_is_faction(victim_comm) || killer_comm == victim_comm)
+	{
+		++s_faction_refused;
+		return;   // no pair, or a faction cannot go to war with itself
+	}
+
+	// The wronged faction's opinion of the killer's faction. One direction on purpose: killing a
+	// Duty man does not make Duty's enemies think better of anyone, and a symmetric write would
+	// quietly double the reach of every kill.
+	const s32 collective = s32(shooter_community_delta) / COOP_REP_COLLECTIVE_DIVISOR;
+	coop_rep_faction_move(victim_comm, killer_comm, collective, "kill");
 }

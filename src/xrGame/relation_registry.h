@@ -180,4 +180,76 @@ u32 coop_rep_apply_overlay(LPCSTR why);
 void coop_rep_state_save(IWriter& stream);
 void coop_rep_state_load(IReader& stream);
 
+////////////////////////////////////////////////////////////////////////////
+// MP fork (§14 step 8 phase 4 R3.1 / doc §8.2): the BLAST RADIUS of a kill.
+//
+// R3.0 measured the ground this stands on rather than assuming it, and the
+// result removed a third of the work and changed the shape of the rest:
+//
+//   * THE SHOOTER TIER IS ALREADY STOCK. One kill moved the victim
+//     community's row toward the killer by -140, plus -375 reputation and
+//     +85 rank, through RELATION_REGISTRY::Action. So nothing below touches
+//     it. "Exactly one shooter hit per kill" is a GATE the harness counts,
+//     not a hope: there is exactly one Action(...,KILL) call site in the
+//     engine (CEntityAlive::Die), and this code is called from inside it
+//     rather than beside it, so the two cannot drift apart.
+//   * `actor` IS NOT A FACTION. The co-op player's community is the literal
+//     pseudo-community `actor` (index 0), not one of GAMMA's per-faction
+//     `actor_*` ones — and [communities_relations] holds the whole `actor`
+//     column flat at 0 for every faction, which is what a column that does
+//     not participate in the faction matrix looks like. EVERY player is
+//     `actor`, so a collective hit keyed on it would make one player's kill
+//     hostile for everybody, through the faction tier — doc §8.3's
+//     most-important-to-avoid failure arriving by a different door than the
+//     one R2 closed, and invisible on a single-client test. So the faction
+//     tier REFUSES a killer whose community is not a faction, and
+//     `stalker -> actor` staying at zero is the discriminating gate.
+//
+// Both new tiers fire only when the KILLER IS A CONNECTED PLAYER. §8.2 is
+// about the blast radius of a player's kill; letting A-Life's own NPC-on-NPC
+// kills move faction relations would rewrite the world's politics from
+// nothing anybody did, continuously, and is not this increment's to decide.
+////////////////////////////////////////////////////////////////////////////
+
+// The two tiers stock does not have, applied together. One function, so there is one path to
+// get wrong rather than three. `shooter_community_delta` is the value stock JUST applied to the
+// killer (the -140), passed in rather than recomputed: the bystander term is scaled against the
+// stock magnitude instead of invented beside it, and it cannot drift if config changes.
+void coop_rep_propagate_kill(u16 killer_id, CHARACTER_COMMUNITY_INDEX killer_comm,
+                             u16 victim_id, CHARACTER_COMMUNITY_INDEX victim_comm,
+                             const Fvector& kill_pos,
+                             CHARACTER_GOODWILL shooter_community_delta);
+
+// The distance falloff and its radius, exposed so the harness can measure the CURVE at chosen
+// distances instead of inferring it from one write. Exactly 0 at and beyond the radius — the
+// negative gate of this increment is a movement of exactly zero outside it, because a bystander
+// term that is merely "small" passes any test that only checks the shooter.
+float coop_rep_bystander_scale(float dist_m);
+float coop_rep_bystander_radius();
+
+// Move a faction<->faction cell AND record it in the R2 overlay, which is the ONE representation
+// of "what the world moved". R2's storage is inherited deliberately: the overlay IS the
+// decayable quantity R3.2 shrinks, so a live faction write that only touched the relation table
+// would be a second representation — and would be dropped by the level-load reset that R2 run 1
+// found. Returns true if the cell actually moved.
+bool coop_rep_faction_move(CHARACTER_COMMUNITY_INDEX from, CHARACTER_COMMUNITY_INDEX to,
+                           s32 delta, LPCSTR why);
+
+// Counters for the harness. A tier that never ran and a tier that ran correctly are
+// indistinguishable from the relation values alone.
+u32 coop_rep_bystanders_considered();
+u32 coop_rep_bystanders_moved();
+u32 coop_rep_faction_moved_count();
+u32 coop_rep_faction_refused_count();
+
+// HARNESS ONLY, and it is a CONSTRUCTION rather than an observation: two headless clients cannot
+// share a wine prefix ([[xray-two-headless-clients]]), so there is no second live player to stand
+// near a kill. This injects one synthetic candidate into the SAME enumeration the real players go
+// through — so the radius test, the same-faction test, the falloff and the write are all the
+// production path — and every log line about it carries `[SYNTHETIC, no second live client]` on
+// the line itself, because a prose caveat is separated from its number the moment somebody copies
+// the number.
+void coop_rep_test_set_bystander(bool armed, u16 id, const Fvector& pos,
+                                 CHARACTER_COMMUNITY_INDEX comm);
+
 #include "relation_registry_inline.h"
