@@ -971,6 +971,16 @@ u32 xrServer::OnDelayedMessage(NET_Packet& P, ClientID sender) // Non-Zero means
 			m_file_transfers->on_message(&P, sender);
 		}
 		break;
+	// MP fork (§3c FIX): the dialogue action, now that it arrives here instead of on the pump
+	// thread. This function is reached from xrServer::Update -> ProceedDelayedPackets, i.e. the
+	// GAME thread — the only thread allowed to be in the Lua VM. The handler is unchanged; all
+	// that moved is where it runs. r_begin above rewound the packet, so the payload reads
+	// exactly as it did on arrival.
+	case M_XRNET_DIALOG_ACTION:
+		{
+			coop_run_dialog_action(P);
+		}
+		break;
 	}
 #ifdef DEBUG
 	VERIFY(verify_entities());
@@ -1104,7 +1114,22 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 			// triggered. The client cannot run it itself — it would change only its own copy
 			// of a world it does not own — so it arrives here as (speaker, partner, dialog,
 			// phrase) and we run the very same script function against the real objects.
-			coop_run_dialog_action(P);
+			//
+			// MP fork (§3c FIX, dev/INSTABILITY_PLAN.md §3d): but NOT HERE. This function runs
+			// on the ENet pump thread, and running the phrase here walks straight into the Lua
+			// VM while the game thread is in it too — LuaJIT is single-threaded, and that race
+			// is the chronic headless-server instability. Measured, not argued: with the same
+			// bait called 3,500 times from this thread the server died in 88 s, while 10,500
+			// calls from the game thread survived the full cap (-coop_repro_pumplua /
+			// -coop_repro_gamelua).
+			//
+			// Defer it to the game thread with the mechanism the engine already has for exactly
+			// this: AddDelayedPacket queues under DelayedPackestCS, and xrServer::Update ->
+			// ProceedDelayedPackets -> OnDelayedMessage drains it on the game thread. Nothing
+			// about the action changes — same packet, same handler, same acting scope — only
+			// which thread is holding the VM when it runs. It also inherits the queue's existing
+			// correctness: a client that disconnects has its queued packets purged.
+			AddDelayedPacket(P, sender);
 		}
 		break;
 	case M_SPAWN:
