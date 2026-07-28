@@ -75,11 +75,27 @@ namespace
 	xr_map<shared_str, coop_offer>   s_task_pool;       // UNCLAIMED offers only; a claim removes
 	xr_map<shared_str, u16>          s_task_community;  // faction task id -> community it belongs to
 
-	// MP fork (§14 step 8 phase 3 Q2 / doc §7.3): task id -> the entity whose death completes it.
-	// Kept OUT of coop_offer on purpose: the pool entry dies with the claim, and this binding has
-	// to outlive it — it is what a death is looked up by. Erased when it fires, which is also how
-	// "exactly once" is enforced with no second flag to keep in step.
-	xr_map<shared_str, u16>          s_task_target;
+	// MP fork (§14 step 8 phase 3 Q2+Q3 / doc §7.3): task id -> its completion condition.
+	//
+	// Kept OUT of coop_offer on purpose: the pool entry dies with the claim, and this has to
+	// outlive it — it is what an event is looked up by. The whole record is erased when the
+	// condition reaches a terminal verdict, which is how "exactly once" is enforced with no
+	// second flag to keep in step.
+	//
+	// Q2 stored a bare u16 here, because its one shape (one entity, its death is the completion)
+	// needs no state between events. Q3's shapes do: "clear" has to know how many of the group are
+	// still standing, "defend" has to know whether the deadline has passed yet. Q2's target is now
+	// simply a kill condition of size 1 rather than a second mechanism kept alongside.
+	struct coop_condition
+	{
+		u8             kind;             // coop_cond_*
+		xr_vector<u16> remaining;        // kill: not yet dead. defend: the one to keep alive.
+		u64            deadline;         // defend: absolute game-time ms of the verdict. 0 = none.
+		u32            evaluations;      // how many events this condition has been advanced by
+
+		coop_condition(): kind(u8(coop_cond_none)), deadline(0), evaluations(0) {}
+	};
+	xr_map<shared_str, coop_condition> s_task_cond;
 
 	u16 coop_community_of(u16 actor_id)
 	{
@@ -149,8 +165,13 @@ void coop_task_offer(const shared_str& task_id, u16 offer_id, bool faction, bool
 	s_task_pool[task_id] = o;
 
 	// §7.3: the world-state change that completes it, recorded separately so it survives the claim.
+	// The convenience form is the n=1 kill condition — Q2's shape, expressed in Q3's record.
 	if (target_id != u16(-1))
-		s_task_target[task_id] = target_id;
+	{
+		xr_vector<u16> one;
+		one.push_back(target_id);
+		coop_task_set_condition(task_id, u8(coop_cond_kill), one, 0);
+	}
 
 	Msg("- COOP(quest): OFFER '%s' by %u faction=%d world_state=%d community=%d target=%u pool=%u",
 		task_id.c_str(), u32(offer_id), o.faction ? 1 : 0, o.world_state ? 1 : 0,
@@ -216,8 +237,38 @@ u32 coop_task_pool_size() { return u32(s_task_pool.size()); }
 
 u16 coop_task_target_of(const shared_str& task_id)
 {
-	xr_map<shared_str, u16>::iterator it = s_task_target.find(task_id);
-	return (it != s_task_target.end()) ? it->second : mp_coop_owner::none;
+	xr_map<shared_str, coop_condition>::iterator it = s_task_cond.find(task_id);
+	if (it == s_task_cond.end() || it->second.kind != u8(coop_cond_kill) || it->second.remaining.empty())
+		return mp_coop_owner::none;
+	return it->second.remaining[0];
+}
+
+u32 coop_task_cond_remaining(const shared_str& task_id)
+{
+	xr_map<shared_str, coop_condition>::iterator it = s_task_cond.find(task_id);
+	return (it != s_task_cond.end()) ? u32(it->second.remaining.size()) : 0u;
+}
+
+void coop_task_set_condition(const shared_str& task_id, u8 kind, const xr_vector<u16>& targets,
+                             u64 deadline_game_ms)
+{
+	if (!task_id.size() || kind == u8(coop_cond_none))
+		return;
+
+	coop_condition c;
+	c.kind     = kind;
+	c.deadline = deadline_game_ms;
+	// De-duplicate the target list. "Kill 3 mutants" with the same id listed twice would otherwise
+	// need two deaths of one entity, which is a task nobody can finish — and it would look like a
+	// completion bug rather than a bad offer, because every death would correctly decrement once.
+	for (u32 i = 0; i < targets.size(); ++i)
+		if (targets[i] != u16(-1) && std::find(c.remaining.begin(), c.remaining.end(), targets[i]) == c.remaining.end())
+			c.remaining.push_back(targets[i]);
+
+	s_task_cond[task_id] = c;
+
+	Msg("- COOP(quest): COND SET '%s' kind=%u targets=%u deadline=%I64u",
+		task_id.c_str(), u32(kind), u32(c.remaining.size()), deadline_game_ms);
 }
 
 void coop_dump_task_pool()
@@ -229,61 +280,154 @@ void coop_dump_task_pool()
 	FlushLog();
 }
 
-// --- §14 step 8 phase 3 Q2: completion on a world-state change (doc §7.3) ------------------
+// --- §14 step 8 phase 3 Q2+Q3: completion on a world-state change (doc §7.3) ----------------
 //
-// §7.3 splits completion into the half the server can already observe and the half that needs new
-// bookkeeping. This is the first half: a death is server-authoritative here — it arrives as GE_DIE
-// and lands in game_sv_Single::on_death — so a task bound to an entity completes when that entity
-// dies. §7.2's conservation is the point: the entity dies ONCE in the ONE world, so the task
-// completes once, for its holder, and the binding is spent.
-u32 coop_task_on_world_death(u16 dead_id, u16 killer_id)
+// §7.3 splits completion into the half the server can already observe and the half that needs
+// bookkeeping. Q2 did the first: a death is server-authoritative here — it arrives as GE_DIE and
+// lands in game_sv_Single::on_death — so a task bound to ONE entity completes when that entity
+// dies, and the hook IS the algorithm. Q3 does the second: "clear" and "defend" cannot be answered
+// from a single event, because the answer depends on what earlier events already did (how many of
+// the group are still standing) or on a clock that no event carries (is the escort still alive NOW
+// that the deadline is here). Both need a record between events, which is coop_condition.
+//
+// §7.2's conservation runs through all of it: the world changes ONCE, so the verdict is taken once
+// and the record is spent by it.
+//
+// Reach a terminal verdict on `id`: set the task's state, spend the condition, and say so.
+//
+// EVERY caller logs through here, at the instant the verdict is taken, and that is the single most
+// important property of this whole layer to preserve. A condition is CONSUMED by the verdict — the
+// remaining set empties, the record is erased — so anything that reads the condition afterwards
+// sees the same "nothing here" a task that never had one shows. Evidence that a task completed has
+// to be emitted AT the transition or it cannot be had at all; a later reader is measuring the
+// absence of state, not the presence of an outcome.
+static void coop_task_verdict(const shared_str& id, bool completed, LPCSTR why, u16 actor_id)
 {
-	if (!xr_enet::enabled() || !ai().get_alife() || s_task_target.empty())
-		return 0;
+	const u16 owner = coop_task_owner_of(id);
+	const u32 evals = (s_task_cond.find(id) != s_task_cond.end()) ? s_task_cond[id].evaluations : 0;
+	s_task_cond.erase(id);          // spent — exactly once, with no second flag to keep in step
 
-	// Collect first: completing mutates s_task_target (and can broadcast), and iterating a map
-	// while erasing out from under the iterator is how this would work in testing and crash later.
-	xr_vector<shared_str> bound;
-	for (xr_map<shared_str, u16>::iterator it = s_task_target.begin(); it != s_task_target.end(); ++it)
-		if (it->second == dead_id)
-			bound.push_back(it->first);
-	if (bound.empty())
-		return 0;
-
-	u32 completed = 0;
-	for (u32 i = 0; i < bound.size(); ++i)
+	CGameTask* const t = Level().GameTaskManager().HasGameTask(id, true);
+	if (!t)
 	{
-		const shared_str& id = bound[i];
-		s_task_target.erase(id);       // spent — exactly once, with no second flag to keep in step
-
-		CGameTask* const t = Level().GameTaskManager().HasGameTask(id, true);
-		if (!t)
-		{
-			// Bound but not in progress: still on the shelf, or already finished. Either way the
-			// world-state change has now happened, so an unclaimed offer must LEAVE the pool
-			// rather than stay claimable for a kill nobody can repeat — that is the same
-			// conservation §7.2 asks for, applied to an offer instead of a claim.
-			const bool was_offered = (s_task_pool.erase(id) != 0);
-			Msg("- COOP(quest): world death %u -> '%s' not in progress (was_offered=%d) — binding spent",
-				u32(dead_id), id.c_str(), was_offered ? 1 : 0);
-			continue;
-		}
-
-		const u16 owner = coop_task_owner_of(id);
-		Level().GameTaskManager().SetTaskState(t, eTaskStateCompleted);
-		++completed;
-		// killer_id is logged and NOT tested. See the header: a faction quest's owner is
-		// world_key, which is not an entity and can never be the killer, so crediting only the
-		// owner would make every faction quest uncompletable.
-		Msg("- COOP(quest): COMPLETE '%s' owner=%u killer=%u member_agnostic=%d (world death %u)",
-			id.c_str(), u32(owner), u32(killer_id),
-			(owner == mp_coop_owner::world_key) ? 1 : 0, u32(dead_id));
+		// Bound but not in progress: still on the shelf, or already finished. Either way the
+		// world-state change has now happened, so an unclaimed offer must LEAVE the pool rather
+		// than stay claimable for a change nobody can repeat — the same conservation §7.2 asks
+		// for, applied to an offer instead of a claim.
+		const bool was_offered = (s_task_pool.erase(id) != 0);
+		Msg("- COOP(quest): VERDICT '%s' %s but not in progress (was_offered=%d) — condition spent",
+			id.c_str(), completed ? "COMPLETE" : "FAIL", was_offered ? 1 : 0);
+		return;
 	}
 
-	if (completed)
+	Level().GameTaskManager().SetTaskState(t, completed ? eTaskStateCompleted : eTaskStateFail);
+
+	// `actor_id` is the killer for a death and mp_coop_owner::none for a deadline. It is logged and
+	// NOT tested: a faction quest's owner is world_key, which is not an entity and can never be the
+	// killer, so crediting only the owner would make every faction quest uncompletable (§7.4).
+	Msg("- COOP(quest): %s '%s' owner=%u killer=%u member_agnostic=%d evaluations=%u (%s)",
+		completed ? "COMPLETE" : "FAILED", id.c_str(), u32(owner), u32(actor_id),
+		(owner == mp_coop_owner::world_key) ? 1 : 0, evals, why);
+}
+
+u32 coop_task_on_world_death(u16 dead_id, u16 killer_id)
+{
+	if (!xr_enet::enabled() || !ai().get_alife() || s_task_cond.empty())
+		return 0;
+
+	// Collect first: a verdict mutates s_task_cond (and broadcasts), and iterating a map while
+	// erasing out from under the iterator is how this would work in testing and crash later.
+	xr_vector<shared_str> touched;
+	for (xr_map<shared_str, coop_condition>::iterator it = s_task_cond.begin(); it != s_task_cond.end(); ++it)
+		if (std::find(it->second.remaining.begin(), it->second.remaining.end(), dead_id) != it->second.remaining.end())
+			touched.push_back(it->first);
+	if (touched.empty())
+		return 0;
+
+	u32 terminal = 0;
+	for (u32 i = 0; i < touched.size(); ++i)
+	{
+		const shared_str& id = touched[i];
+		xr_map<shared_str, coop_condition>::iterator it = s_task_cond.find(id);
+		if (it == s_task_cond.end())
+			continue;                       // a previous verdict in this same loop spent it
+		coop_condition& c = it->second;
+
+		const u32 before = u32(c.remaining.size());
+		c.remaining.erase(std::remove(c.remaining.begin(), c.remaining.end(), dead_id), c.remaining.end());
+		const u32 after = u32(c.remaining.size());
+		++c.evaluations;
+
+		// Emitted BEFORE the verdict and at the instant of the transition, carrying both sides of
+		// it. This is the line that makes an intermediate step observable at all: after two of
+		// three deaths there is no state anywhere that says "two of three" once the third lands,
+		// and an implementation that completed on the FIRST death would leave a final state
+		// indistinguishable from a correct one.
+		Msg("- COOP(quest): COND '%s' kind=%u event=death id=%u before=%u after=%u eval=%u verdict=%s",
+			id.c_str(), u32(c.kind), u32(dead_id), before, after, c.evaluations,
+			(c.kind == u8(coop_cond_defend)) ? "FAIL"
+				: (after == 0 ? "COMPLETE" : "pending"));
+
+		if (c.kind == u8(coop_cond_defend))
+		{
+			// §7.3 defend: the thing you were keeping alive died. This is the only outcome in this
+			// layer that is not a completion, and it must land HERE rather than being left for the
+			// deadline sweep to notice — a task that stays "in progress" until its deadline after
+			// the escort is already dead is telling every player a lie for the whole interval.
+			coop_task_verdict(id, false, "defend target died before the deadline", killer_id);
+			++terminal;
+		}
+		else if (after == 0)
+		{
+			coop_task_verdict(id, true, "all kill targets down", killer_id);
+			++terminal;
+		}
+	}
+
+	if (terminal)
 		Level().GameTaskManager().coop_broadcast_tasks();
 	FlushLog();
-	return completed;
+	return terminal;
+}
+
+u32 coop_task_tick_conditions(u64 now_game_ms)
+{
+	if (!xr_enet::enabled() || !ai().get_alife() || s_task_cond.empty())
+		return 0;
+
+	xr_vector<shared_str> due;
+	for (xr_map<shared_str, coop_condition>::iterator it = s_task_cond.begin(); it != s_task_cond.end(); ++it)
+		if (it->second.kind == u8(coop_cond_defend) && it->second.deadline &&
+		    now_game_ms >= it->second.deadline)
+			due.push_back(it->first);
+	if (due.empty())
+		return 0;
+
+	u32 terminal = 0;
+	for (u32 i = 0; i < due.size(); ++i)
+	{
+		const shared_str& id = due[i];
+		xr_map<shared_str, coop_condition>::iterator it = s_task_cond.find(id);
+		if (it == s_task_cond.end())
+			continue;
+		coop_condition& c = it->second;
+		++c.evaluations;
+
+		// Reaching here at all means the target never died: a death would have spent the record in
+		// coop_task_on_world_death, and this sweep only ever sees records that still exist. The
+		// alive count is logged as read AT the deadline rather than inferred, so the log answers
+		// "what did the server believe when it decided" and not merely "what did it decide".
+		Msg("- COOP(quest): COND '%s' kind=%u event=deadline now=%I64u deadline=%I64u alive=%u eval=%u verdict=COMPLETE",
+			id.c_str(), u32(c.kind), now_game_ms, c.deadline, u32(c.remaining.size()), c.evaluations);
+
+		coop_task_verdict(id, true, "defend target alive at the deadline", mp_coop_owner::none);
+		++terminal;
+	}
+
+	if (terminal)
+		Level().GameTaskManager().coop_broadcast_tasks();
+	FlushLog();
+	return terminal;
 }
 
 // --- §14 step 8 phase 3 Q2: the co-op quest state rides the .scop (doc §7.2) ----------------
@@ -292,7 +436,15 @@ namespace
 	// Bumped whenever the layout below changes. An UNKNOWN version is refused rather than parsed
 	// (see the loader) — the same discipline the step-7 D3 dirty flag settled on, for the same
 	// reason: refusing loses the pool, guessing corrupts ownership.
-	const u16 coop_quest_state_version = 1;
+	//
+	// v1 (Q2): ... + a trailing str->u16 map of single kill targets.
+	// v2 (Q3): ... + a condition table (kind, target list, deadline, evaluation count).
+	//
+	// v1 is READ, not refused: it is a version we know, and its target map is exactly the n=1 kill
+	// condition v2 stores generally, so it migrates rather than being discarded. The refusal is for
+	// versions from the FUTURE, which is a different thing entirely — those we cannot interpret,
+	// and Q2's rule stands for them.
+	const u16 coop_quest_state_version = 2;
 
 	void coop_write_str_u16_map(IWriter& stream, xr_map<shared_str, u16>& m)
 	{
@@ -356,6 +508,8 @@ namespace
 			return true;
 		}
 
+		u64 u64v() { return room(8) ? s.r_u64() : u64(0); }
+		u32 u32v() { return room(4) ? s.r_u32() : 0u; }
 		u16 u16v() { return room(2) ? s.r_u16() : u16(0); }
 		u8  u8v()  { return room(1) ? s.r_u8()  : u8(0); }
 	};
@@ -396,13 +550,28 @@ void coop_task_state_save(IWriter& stream)
 		stream.w_stringZ(*it);
 
 	coop_write_str_u16_map(stream, s_task_community);
-	coop_write_str_u16_map(stream, s_task_target);
+
+	// v2: the condition table. `evaluations` is persisted with it rather than reset, because it is
+	// the count of events this condition has already absorbed — a "kill 3 of 3" that survived a
+	// restart having taken two of them is not the same condition as a fresh one, and a diagnostic
+	// that said so only until the next reboot would be worse than none.
+	stream.w_u32(u32(s_task_cond.size()));
+	for (xr_map<shared_str, coop_condition>::iterator it = s_task_cond.begin(); it != s_task_cond.end(); ++it)
+	{
+		stream.w_stringZ(it->first);
+		stream.w_u8(it->second.kind);
+		stream.w_u64(it->second.deadline);
+		stream.w_u32(it->second.evaluations);
+		stream.w_u16(u16(it->second.remaining.size()));
+		for (u32 i = 0; i < it->second.remaining.size(); ++i)
+			stream.w_u16(it->second.remaining[i]);
+	}
 
 	stream.close_chunk();
 
-	Msg("- COOP(quest): state saved  pool=%u owners=%u faction=%u community=%u targets=%u (v%u)",
+	Msg("- COOP(quest): state saved  pool=%u owners=%u faction=%u community=%u conditions=%u (v%u)",
 		u32(s_task_pool.size()), u32(s_task_owner.size()), u32(s_faction_task.size()),
-		u32(s_task_community.size()), u32(s_task_target.size()), u32(coop_quest_state_version));
+		u32(s_task_community.size()), u32(s_task_cond.size()), u32(coop_quest_state_version));
 }
 
 void coop_task_state_load(IReader& stream)
@@ -414,7 +583,7 @@ void coop_task_state_load(IReader& stream)
 	s_task_owner.clear();
 	s_faction_task.clear();
 	s_task_community.clear();
-	s_task_target.clear();
+	s_task_cond.clear();
 
 	// find_chunk REWINDS and scans, so remember where the caller was and put the cursor back:
 	// the registry read that precedes us must not be able to notice that we ran.
@@ -431,10 +600,14 @@ void coop_task_state_load(IReader& stream)
 	coop_quest_reader r(stream, stream.tell() + int(chunk_size));
 
 	const u16 ver = r.u16v();
-	if (!r.ok || ver != coop_quest_state_version)
+	// v1 and v2 differ ONLY in the trailing block, and everything before it is byte-identical, so
+	// one reader handles both and the version decides how the tail is read. A version we do not
+	// know is still refused outright — that rule was never about old files, it was about files
+	// from the future, whose fields we would be guessing at.
+	if (!r.ok || (ver != 1 && ver != 2))
 	{
 		stream.seek(caller_pos);
-		Msg("! COOP(quest): state version %u is not %u — REFUSING to parse it; pool and ownership start empty",
+		Msg("! COOP(quest): state version %u is neither 1 nor %u — REFUSING to parse it; pool and ownership start empty",
 			u32(ver), u32(coop_quest_state_version));
 		return;
 	}
@@ -468,7 +641,46 @@ void coop_task_state_load(IReader& stream)
 	}
 
 	coop_read_str_u16_map(r, s_task_community);
-	coop_read_str_u16_map(r, s_task_target);
+
+	u32 migrated = 0;
+	if (ver == 1)
+	{
+		// Q2's trailing block: task id -> ONE kill target. That is the n=1 case of a v2 kill
+		// condition, so it is migrated rather than dropped — a save made before Q3 keeps its
+		// bindings and the tasks in it stay completable. evaluations starts at 0, which is
+		// honest: v1 recorded no such count, and inventing one would be a diagnostic that lies.
+		xr_map<shared_str, u16> old_targets;
+		coop_read_str_u16_map(r, old_targets);
+		for (xr_map<shared_str, u16>::iterator it = old_targets.begin(); it != old_targets.end(); ++it)
+		{
+			coop_condition c;
+			c.kind = u8(coop_cond_kill);
+			c.remaining.push_back(it->second);
+			s_task_cond[it->first] = c;
+			++migrated;
+		}
+	}
+	else
+	{
+		const u32 cond_n = r.count(/*min bytes per condition: NUL + u8 + u64 + u32 + u16*/ 16);
+		for (u32 i = 0; i < cond_n && r.ok; ++i)
+		{
+			shared_str id;
+			if (!r.str(id))
+				break;
+			coop_condition c;
+			c.kind        = r.u8v();
+			c.deadline    = r.u64v();
+			c.evaluations = r.u32v();
+			const u16 n   = r.u16v();
+			if (!r.room(int(n) * 2))
+				break;
+			for (u16 j = 0; j < n; ++j)
+				c.remaining.push_back(r.u16v());
+			if (r.ok && id.size())
+				s_task_cond[id] = c;
+		}
+	}
 
 	stream.seek(caller_pos);
 
@@ -481,16 +693,20 @@ void coop_task_state_load(IReader& stream)
 		s_task_owner.clear();
 		s_faction_task.clear();
 		s_task_community.clear();
-		s_task_target.clear();
+		s_task_cond.clear();
 		Msg("! COOP(quest): state chunk is truncated or malformed (%u bytes) — DISCARDED, pool and ownership start empty",
 			chunk_size);
 		FlushLog();
 		return;
 	}
 
-	Msg("- COOP(quest): state loaded pool=%u owners=%u faction=%u community=%u targets=%u (v%u)",
+	Msg("- COOP(quest): state loaded pool=%u owners=%u faction=%u community=%u conditions=%u migrated=%u (v%u)",
 		u32(s_task_pool.size()), u32(s_task_owner.size()), u32(s_faction_task.size()),
-		u32(s_task_community.size()), u32(s_task_target.size()), u32(ver));
+		u32(s_task_community.size()), u32(s_task_cond.size()), migrated, u32(ver));
+	for (xr_map<shared_str, coop_condition>::iterator it = s_task_cond.begin(); it != s_task_cond.end(); ++it)
+		Msg("    cond '%s' kind=%u remaining=%u deadline=%I64u evaluations=%u", it->first.c_str(),
+			u32(it->second.kind), u32(it->second.remaining.size()), it->second.deadline,
+			it->second.evaluations);
 	FlushLog();
 }
 

@@ -2543,6 +2543,19 @@ void game_sv_Single::coop_rpg_probe_call(LPCSTR fn, LPCSTR phase, u16 world_id, 
 // MP fork (§14 step 8, harness): the entity id of the first connected client that has an actor.
 // The server's own loopback self-client is not a player and a client that has connected but has
 // not been given a body yet is not one either, so both are skipped and the caller retries.
+// MP fork (§14 step 8 phase 3 Q3, harness): a task's state READ AT THIS INSTANT.
+//
+// It exists so the probes can sample a transition while it is happening. A completion condition is
+// consumed by its own progress, so "the task was still in progress after two of three deaths" is
+// not recoverable afterwards from anything — not from the condition (spent), not from the task
+// (which by then says completed either way). Either it is sampled at the step or it is not
+// measured at all. -1 = no such task.
+static int coop_task_state_now(LPCSTR id)
+{
+	CGameTask* const t = Level().GameTaskManager().HasGameTask(shared_str(id), false);
+	return t ? int(t->GetTaskState()) : -1;
+}
+
 u16 game_sv_Single::coop_first_player_actor()
 {
 	struct finder
@@ -2987,6 +3000,177 @@ void game_sv_Single::Update()
 			Msg("- COOP(quest3r): replayed world death of %u -> completed_again=%u ktarget=%u vtarget=%u pass=%d",
 				u32(s_q3_target), again, u32(kt), u32(vt), pass ? 1 : 0);
 			FlushLog();
+		}
+	}
+
+	// MP fork (§14 step 8 phase 3 Q3, harness): -coop_test_quest4 <seconds> — §7.3's completion
+	// conditions that need BOOKKEEPING rather than a hook.
+	//
+	// Three tasks, chosen so that each one's failure mode is invisible to the other two:
+	//   coop_q4_clear  kill over THREE entities. The point is the INTERMEDIATE state: an
+	//                  implementation that completed on the first death leaves an end state
+	//                  identical to a correct one, so the only place the difference exists is at
+	//                  the transitions, and only while they are happening.
+	//   coop_q4_hold   defend with a SHORT deadline and a target that never dies -> completes via
+	//                  the real 1 Hz sweep on the real game clock.
+	//   coop_q4_guard  defend with a deadline so far out it cannot arrive during the test -> its
+	//                  verdict can only come from the real death, and it must be a FAILURE.
+	//
+	// The first two deaths are SYNTHETIC — they call coop_task_on_world_death directly, which is
+	// the same entry point game_sv_Single::on_death calls, so what goes unexercised is only the
+	// GE_DIE->on_death plumbing that Q2 already measured on a real death. The THIRD death is real
+	// (the client's -coop_test_kill), so every terminal verdict here is driven by a genuine
+	// server-authoritative event; the synthetic ones only move the bookkeeping to the interesting
+	// point. Two headless clients cannot share a wine prefix, so there is no second real body to
+	// kill (see [[xray-two-headless-clients]]).
+	if (xr_enet::enabled() && ai().get_alife() && coop_param("-coop_test_quest4"))
+	{
+		static bool s_q4_init      = false;
+		static bool s_q4_done      = false;
+		static u32  s_q4_armed     = 0;
+		static u32  s_q4_ms        = 0;
+		static u32  s_q4_retry     = 0;
+		static u32  s_q4_fired     = 0;
+		static u32  s_q4_replay_ms = 0;
+		static bool s_q4_replayed  = false;
+		static u64  s_q4_guard_deadline = 0;
+		if (!s_q4_init)
+		{
+			s_q4_init = true;
+			LPCSTR p = coop_param("-coop_test_quest4");
+			const float secs = p ? (float)atof(p) : 0.f;
+			s_q4_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 30000u;
+			s_q4_armed = Device.dwTimeGlobal;
+			LPCSTR r = coop_param("-coop_test_quest4_replay");
+			const float rsecs = r ? (float)atof(r) : 0.f;
+			s_q4_replay_ms = (rsecs > 0.f && rsecs <= 86400.f) ? (u32)(rsecs * 1000.f) : 0u;
+			Msg("- COOP(quest4): condition probe armed, firing in %ums (forced tick %s)",
+				s_q4_ms, s_q4_replay_ms ? "armed" : "off");
+		}
+		if (!s_q4_done && Device.dwTimeGlobal - s_q4_armed >= s_q4_ms &&
+		    Device.dwTimeGlobal - s_q4_retry >= 5000)
+		{
+			s_q4_retry = Device.dwTimeGlobal;
+			const u16 player_id = coop_first_player_actor();
+			if (player_id != mp_coop_owner::none)
+			{
+				s_q4_done = true;
+				const u16 synth1 = u16(0xF001);
+				const u16 synth2 = u16(0xF002);
+				const u64 now    = u64(GetGameTime());
+				// SHORT, so it arrives promptly whatever multiplier the game clock is running at —
+				// the test must not depend on a rate it never measured. FAR, so it provably cannot.
+				const u64 hold_deadline  = now + 60ull * 1000ull;             // ~1 game-minute
+				s_q4_guard_deadline      = now + 24ull * 3600ull * 1000ull;   // a game-day away
+				Msg("- COOP(quest4): setup player=%u synth=%u,%u now_game=%I64u hold_deadline=%I64u guard_deadline=%I64u",
+					u32(player_id), u32(synth1), u32(synth2), now, hold_deadline, s_q4_guard_deadline);
+
+				coop_task_offer("coop_q4_clear", 0, /*faction*/ false, /*world_state*/ true);
+				coop_task_offer("coop_q4_hold",  0, false, true);
+				coop_task_offer("coop_q4_guard", 0, false, true);
+				coop_task_claim("coop_q4_clear", player_id);
+				coop_task_claim("coop_q4_hold",  player_id);
+				coop_task_claim("coop_q4_guard", player_id);
+
+				xr_vector<u16> three;
+				three.push_back(synth1);
+				three.push_back(synth2);
+				three.push_back(player_id);        // the REAL one, deliberately last
+				coop_task_set_condition("coop_q4_clear", u8(coop_cond_kill), three, 0);
+
+				xr_vector<u16> one_hold;
+				one_hold.push_back(u16(0xF003));   // never dies
+				coop_task_set_condition("coop_q4_hold", u8(coop_cond_defend), one_hold, hold_deadline);
+
+				xr_vector<u16> one_guard;
+				one_guard.push_back(player_id);    // dies, and that is a FAILURE
+				coop_task_set_condition("coop_q4_guard", u8(coop_cond_defend), one_guard, s_q4_guard_deadline);
+
+				const u32 rem0 = coop_task_cond_remaining("coop_q4_clear");
+
+				// Each step samples the task state IMMEDIATELY after the event that moved it, not
+				// at the end. By the time the sequence finishes there is no state anywhere that
+				// says "this was 2 a moment ago" — the condition is consumed by its own progress,
+				// so the intermediate values exist only in these lines.
+				const u32 t1   = coop_task_on_world_death(synth1, synth1);
+				const u32 rem1 = coop_task_cond_remaining("coop_q4_clear");
+				const int st1  = coop_task_state_now("coop_q4_clear");
+				Msg("- COOP(quest4): step1 death=%u terminal=%u clear_remaining=%u clear_state=%d",
+					u32(synth1), t1, rem1, st1);
+
+				const u32 t2   = coop_task_on_world_death(synth2, synth2);
+				const u32 rem2 = coop_task_cond_remaining("coop_q4_clear");
+				const int st2  = coop_task_state_now("coop_q4_clear");
+				Msg("- COOP(quest4): step2 death=%u terminal=%u clear_remaining=%u clear_state=%d",
+					u32(synth2), t2, rem2, st2);
+
+				// eTaskStateInProgress == 1. The two NON-terminal steps carry this leg: a kill
+				// condition that fired early would show terminal=1 and state=2 at step 1, and an
+				// end-state check would see exactly what a correct run leaves behind.
+				const bool pass = (rem0 == 3) &&
+				                  (t1 == 0) && (rem1 == 2) && (st1 == int(eTaskStateInProgress)) &&
+				                  (t2 == 0) && (rem2 == 1) && (st2 == int(eTaskStateInProgress)) &&
+				                  (coop_task_cond_remaining("coop_q4_hold")  == 1) &&
+				                  (coop_task_cond_remaining("coop_q4_guard") == 1);
+				Msg("- COOP(quest4): setup done rem0=%u rem1=%u rem2=%u st1=%d st2=%d hold_rem=%u guard_rem=%u pass=%d",
+					rem0, rem1, rem2, st1, st2,
+					coop_task_cond_remaining("coop_q4_hold"),
+					coop_task_cond_remaining("coop_q4_guard"), pass ? 1 : 0);
+				Level().GameTaskManager().coop_broadcast_tasks();
+				s_q4_fired = Device.dwTimeGlobal;
+				FlushLog();
+			}
+		}
+
+		// The forced tick: evaluate every condition at a game time PAST the far deadline.
+		//
+		// This is the assertion the Overseer's hazard is made of. coop_q4_guard has already FAILED
+		// (the real death), and its record was spent by that verdict. If a verdict did not consume
+		// its condition, this tick would find guard's deadline passed and COMPLETE a task that
+		// already failed — turning a loss into a win, silently, minutes later. Nothing read after
+		// the fact could tell the difference: the task would simply say "completed".
+		//
+		// It is also self-checking in the other direction. If the real death never landed, guard is
+		// still live here, this tick completes it, and terminal comes back non-zero instead of 0.
+		if (s_q4_done && s_q4_replay_ms && !s_q4_replayed &&
+		    Device.dwTimeGlobal - s_q4_fired >= s_q4_replay_ms)
+		{
+			s_q4_replayed = true;
+			const u64 far_future = s_q4_guard_deadline + 1000ull;
+			const u32 terminal = coop_task_tick_conditions(far_future);
+			const u32 rc = coop_task_cond_remaining("coop_q4_clear");
+			const u32 rh = coop_task_cond_remaining("coop_q4_hold");
+			const u32 rg = coop_task_cond_remaining("coop_q4_guard");
+			const int sc = coop_task_state_now("coop_q4_clear");
+			const int sh = coop_task_state_now("coop_q4_hold");
+			const int sg = coop_task_state_now("coop_q4_guard");
+			// eTaskStateFail == 0, eTaskStateCompleted == 2.
+			const bool pass = (terminal == 0) && (rc == 0) && (rh == 0) && (rg == 0) &&
+			                  (sc == int(eTaskStateCompleted)) &&
+			                  (sh == int(eTaskStateCompleted)) &&
+			                  (sg == int(eTaskStateFail));
+			Msg("- COOP(quest4r): forced tick at %I64u -> terminal=%u clear(rem=%u state=%d) "
+				"hold(rem=%u state=%d) guard(rem=%u state=%d) pass=%d",
+				far_future, terminal, rc, sc, rh, sh, rg, sg, pass ? 1 : 0);
+			FlushLog();
+		}
+	}
+
+	// MP fork (§14 step 8 phase 3 Q3 / doc §7.3): the condition tick. Kill conditions are advanced
+	// by an EVENT (a death) and need no clock; defend conditions are the ones with a deadline, and
+	// a deadline nobody looks at never arrives.
+	//
+	// Once a second of wall time is plenty — the game clock runs faster than wall time, so this is
+	// already fine-grained relative to what it measures, and the resolution of "the escort survived"
+	// is not a thing any player can perceive to the frame. What it must NOT be is per-frame: the
+	// sweep walks every live condition, and this runs inside the server's Update.
+	if (xr_enet::enabled() && ai().get_alife())
+	{
+		static u32 s_cond_tick = 0;
+		if (Device.dwTimeGlobal - s_cond_tick >= 1000)
+		{
+			s_cond_tick = Device.dwTimeGlobal;
+			coop_task_tick_conditions(u64(GetGameTime()));
 		}
 	}
 

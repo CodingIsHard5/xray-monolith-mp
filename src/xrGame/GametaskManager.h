@@ -102,14 +102,47 @@ u16  coop_task_owner_of(const shared_str& task_id);
 u32  coop_task_pool_size();     // unclaimed offers
 void coop_dump_task_pool();
 
-// MP fork (§14 step 8 phase 3 Q2 / doc §7.3): completion driven by a world-state change.
+// MP fork (§14 step 8 phase 3 Q2+Q3 / doc §7.3): completion driven by a world-state change.
 //
-// The entity whose death completes `task_id`, or mp_coop_owner::none if the task is not bound to
-// one. A completed task's binding is DROPPED, so this also answers "has this already fired?".
+// Q2 did the shape that needs no bookkeeping at all: ONE entity, and its death IS the completion,
+// so the whole condition fits in a u16 and the hook is the algorithm. §7.3's other listed shapes
+// (clear, defend) do not fit that, because the answer depends on state accumulated ACROSS events —
+// how many of the group are still standing, whether the escort is still alive when the clock runs
+// out. Those need a record that survives between events, and Q3 is that record.
+//
+// The doc's own example is the plural one ("kill the mutants"), so Q2's single target is really the
+// n=1 case of a kill condition, and it is stored as exactly that rather than kept as a parallel
+// mechanism — one path to get wrong instead of two.
+enum coop_cond_kind
+{
+	coop_cond_none   = 0,
+	coop_cond_kill   = 1,   // §7.3 kill/clear: EVERY bound entity must die. Completes when none left.
+	coop_cond_defend = 2,   // §7.3 defend: a bound entity must still be alive at a game-time deadline.
+};
+
+// Attach a completion condition to a task. Replaces any condition already on it.
+//  kill   — `targets` all have to die; `deadline_game_ms` is ignored.
+//  defend — `targets` is the single entity to keep alive; the verdict is taken at
+//           `deadline_game_ms` (absolute Level().GetGameTime() ms). It FAILS the moment the entity
+//           dies before then, which is the first outcome in this layer that is not a completion.
+void coop_task_set_condition(const shared_str& task_id, u8 kind, const xr_vector<u16>& targets,
+                             u64 deadline_game_ms);
+
+// How many bound entities are still outstanding (kill: not yet dead; defend: still to be kept
+// alive), or 0 if the task carries no condition — INCLUDING the case where it carried one that has
+// already been spent. Those two are deliberately indistinguishable through this accessor, because
+// a caller that could tell them apart would be tempted to use "0" as evidence of completion. It is
+// not: a task that never had a condition also reads 0. Completion is evidenced by the COND log
+// line emitted AT the transition, never by reading this afterwards.
+u32  coop_task_cond_remaining(const shared_str& task_id);
+
+// The first outstanding entity of a kill condition (Q2's accessor, kept working on the Q3 record so
+// the Q2 harness stays a live regression test). mp_coop_owner::none when there is none.
 u16  coop_task_target_of(const shared_str& task_id);
 
 // Called from game_sv_Single::on_death — the server-authoritative death hook — for every entity
-// that dies. Completes every task bound to `dead_id`, exactly once, and returns how many.
+// that dies. Advances every condition `dead_id` appears in and returns how many tasks reached a
+// TERMINAL verdict (completed or failed) as a result.
 //
 // It never consults `killer_id` except to log it, and that is §7.4's member-agnostic completion
 // rather than an omission: a faction quest is owned by mp_coop_owner::world_key, which is not an
@@ -117,6 +150,18 @@ u16  coop_task_target_of(const shared_str& task_id);
 // every faction quest uncompletable. The doc is explicit that "a faction-level fact correctly does
 // not care which member".
 u32  coop_task_on_world_death(u16 dead_id, u16 killer_id);
+
+// Called on a timer from game_sv_Single::Update(). Takes the verdict on every defend condition
+// whose deadline has passed. Returns how many tasks reached a terminal verdict.
+//
+// The deadline is in GAME time, not wall time, which is what makes it survive a restart: the game
+// clock rides the .scop through time_manager(). A wall-clock deadline would silently restart with
+// the process and hand every defend task a fresh timer for free.
+//
+// u64 and not u32 because ALife::_TIME_ID is u64 and holds an ABSOLUTE date in ms — a u32 wraps
+// after 49.7 days of it, which on a game clock running at x6 is under nine real days of server
+// uptime, and the failure would be a deadline that silently moves into the past.
+u32  coop_task_tick_conditions(u64 now_game_ms);
 
 // MP fork (§14 step 8 phase 3 Q2 / doc §7.2): the co-op quest state rides the .scop.
 //
