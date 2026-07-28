@@ -14,6 +14,7 @@
 #include "GamePersistent.h"
 #include "../xrEngine/Rain.h"
 #include "character_community.h"
+#include "relation_registry.h"   // MP fork (§14 step 8 P4 R2): coop_rep_apply_overlay
 #include "character_rank.h"
 #include "character_reputation.h"
 #include "monster_community.h"
@@ -170,6 +171,15 @@ bool CLevel::Load_GameSpecific_Before()
 	CHARACTER_RANK::Reset();
 	CHARACTER_REPUTATION::Reset();
 	MONSTER_COMMUNITY::Reset();
+
+	// MP fork (§14 step 8 P4 R2 / doc §8.1): the four resets above are why a faction war never
+	// survived anything — config owns these tables at every level load, and the .scop had nothing
+	// in it to say otherwise. Now it does, and this is where it goes back on: R2 run 1 wrote the
+	// saved cells during the alife load, reported applied=2, and had them dropped by this very
+	// reset a moment later. Re-applying HERE also covers the case a load-time write could never
+	// have covered — a level CHANGE mid-session, which resets the table without loading a save.
+	// A no-op (0 cells, silent) on a client and on any world whose save carried no faction state.
+	coop_rep_apply_overlay("level load reset");
 
 	return (TRUE);
 }

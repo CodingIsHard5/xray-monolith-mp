@@ -172,6 +172,11 @@ u32 coop_rep_routed_count();
 u32 coop_rep_routed_zero_count();   // of those, the hardcoded-`0` call sites
 u32 coop_rep_refused_count();
 
+// Re-impose what the save said the world moved. The faction table is CONFIG's at every level
+// load — CLevel::Load_GameSpecific_Before resets it — so the saved state is an overlay that has
+// to be re-applied after each reset, not a one-shot write at load time. Returns cells applied.
+u32 coop_rep_apply_overlay(LPCSTR why);
+
 void coop_rep_state_save(IWriter& stream);
 void coop_rep_state_load(IReader& stream);
 

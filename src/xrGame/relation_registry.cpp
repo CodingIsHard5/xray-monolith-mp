@@ -284,6 +284,29 @@ namespace
 
 	const u16 coop_rep_state_version = 1;
 
+	// WHAT THE SAVE SAID THE WORLD MOVED, kept after it has been applied.
+	//
+	// R2 run 1 failed here, and the failure is worth the space: the loader reported applied=2 and
+	// the relation still read its config value afterwards. Both were true. `CLevel::Load_GameSpecific_Before`
+	// calls CHARACTER_COMMUNITY::Reset() (Level_load.cpp) AFTER the .scop is read, which drops the
+	// table, and the next read rebuilds it from ltx — so anything written into it during the alife
+	// load is discarded by the level load that follows.
+	//
+	// That reset is not a bug to route around; it is the stock invariant that CONFIG owns this
+	// table at every level load, and it is precisely why faction relations never persisted (R1).
+	// So the saved state is an OVERLAY on top of config rather than a one-shot write: it is kept
+	// here and re-applied every time the table is reset. That also buys the case a one-shot write
+	// would have silently lost — a faction war surviving a LEVEL CHANGE, not just a restart.
+	//
+	// Stored by NAME, like the file, so the overlay cannot be re-pointed at a different faction by
+	// anything that renumbers communities between a load and a reset.
+	struct rep_cell
+	{
+		shared_str from, to;
+		s32        goodwill;
+	};
+	xr_vector<rep_cell> s_rep_overlay;
+
 	// The ltx baseline, read straight out of pSettings rather than off the live table — which is
 	// the whole point: by the time a save is taken the live table may have MOVED, and the file
 	// is meant to record exactly that difference. Built once; config does not change under us.
@@ -399,6 +422,35 @@ u16 coop_rep_subject(int passed_id, bool is_write)
 	return mp_coop_owner::none;
 }
 
+u32 coop_rep_apply_overlay(LPCSTR why)
+{
+	if (s_rep_overlay.empty())
+		return 0;
+
+	u32 applied = 0, unknown = 0;
+	for (size_t i = 0; i < s_rep_overlay.size(); ++i)
+	{
+		const CHARACTER_COMMUNITY_INDEX from =
+			CHARACTER_COMMUNITY::IdToIndex(s_rep_overlay[i].from, CHARACTER_COMMUNITY_INDEX(-1), true);
+		const CHARACTER_COMMUNITY_INDEX to =
+			CHARACTER_COMMUNITY::IdToIndex(s_rep_overlay[i].to, CHARACTER_COMMUNITY_INDEX(-1), true);
+		if (from < 0 || to < 0)
+		{
+			++unknown;
+			continue;
+		}
+		CHARACTER_COMMUNITY::set_relation(from, to, CHARACTER_GOODWILL(s_rep_overlay[i].goodwill));
+		++applied;
+	}
+
+	// Says WHEN as well as how many, because the whole defect this exists for was an apply that
+	// happened at the wrong moment and reported success. A run where the level-load line never
+	// appears is a run where the overlay is not surviving the reset, and the log will show it.
+	Msg("- COOP(rep): faction overlay applied at '%s': %u cell(s), %u unknown community",
+		why, applied, unknown);
+	return applied;
+}
+
 void coop_rep_state_save(IWriter& stream)
 {
 	stream.open_chunk(COOP_REP_CHUNK_DATA);
@@ -447,9 +499,13 @@ void coop_rep_state_save(IWriter& stream)
 
 void coop_rep_state_load(IReader& stream)
 {
-	// Clear FIRST and unconditionally — the table is static and outlives restart_simulator, so a
-	// load that finds nothing must leave the server holding the CONFIG baseline and not the last
-	// world's faction war. (This is also what makes "no chunk" a correct, complete outcome.)
+	// Clear FIRST and unconditionally — BOTH the table and the overlay. They are static and
+	// outlive restart_simulator, so a load that finds nothing must leave the server holding the
+	// CONFIG baseline and not the last world's faction war. Clearing the overlay matters more
+	// than clearing the table, because the overlay is what the level-load reset re-applies: an
+	// overlay left standing would keep re-imposing world A's war on world B forever.
+	// (This is also what makes "no chunk" a correct, complete outcome.)
+	s_rep_overlay.clear();
 	CHARACTER_COMMUNITY::coop_reset_relations();
 
 	// find_chunk REWINDS and scans, so put the cursor back: the reads that precede us must not
@@ -477,10 +533,9 @@ void coop_rep_state_load(IReader& stream)
 		return;
 	}
 
-	// Applied into a staging list first: a truncated chunk must not leave half a faction war
+	// Read into a staging list first: a truncated chunk must not leave half a faction war
 	// standing, and the table cannot be rolled back once written.
-	struct pending_cell { CHARACTER_COMMUNITY_INDEX from, to; CHARACTER_GOODWILL goodwill; };
-	xr_vector<pending_cell> pending;
+	xr_vector<rep_cell> pending;
 
 	u32 unknown = 0;
 	const u32 cells = r.count(/*min bytes per cell: NUL + NUL + s32*/ 6);
@@ -512,10 +567,10 @@ void coop_rep_state_load(IReader& stream)
 			++unknown;
 			continue;
 		}
-		pending_cell c;
-		c.from = from;
-		c.to = to;
-		c.goodwill = CHARACTER_GOODWILL(goodwill);
+		rep_cell c;
+		c.from = from_name;
+		c.to = to_name;
+		c.goodwill = goodwill;
 		pending.push_back(c);
 	}
 
@@ -529,10 +584,10 @@ void coop_rep_state_load(IReader& stream)
 		return;
 	}
 
-	for (size_t i = 0; i < pending.size(); ++i)
-		CHARACTER_COMMUNITY::set_relation(pending[i].from, pending[i].to, pending[i].goodwill);
+	s_rep_overlay.swap(pending);
+	const u32 applied = coop_rep_apply_overlay("load");
 
 	Msg("- COOP(rep): faction state loaded moved=%u applied=%u unknown_community=%u (v%u)",
-		cells, u32(pending.size()), unknown, u32(ver));
+		cells, applied, unknown, u32(ver));
 	FlushLog();
 }
