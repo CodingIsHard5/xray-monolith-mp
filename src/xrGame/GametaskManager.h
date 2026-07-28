@@ -77,6 +77,7 @@ enum coop_claim_result
 	coop_claim_ok = 0,        // claimed; the offer has left the pool
 	coop_claim_taken,         // somebody else got there first
 	coop_claim_absent,        // never offered, or already gone
+	coop_claim_no_actor,      // Q4: nobody is acting — a personal errand cannot be owned by nobody
 };
 
 // Add an offer to the pool. `faction` is §7.4's authored classification — a faction quest is
@@ -115,9 +116,15 @@ void coop_dump_task_pool();
 // mechanism — one path to get wrong instead of two.
 enum coop_cond_kind
 {
-	coop_cond_none   = 0,
-	coop_cond_kill   = 1,   // §7.3 kill/clear: EVERY bound entity must die. Completes when none left.
-	coop_cond_defend = 2,   // §7.3 defend: a bound entity must still be alive at a game-time deadline.
+	coop_cond_none    = 0,
+	coop_cond_kill    = 1,   // §7.3 kill/clear: EVERY bound entity must die. Completes when none left.
+	coop_cond_defend  = 2,   // §7.3 defend: a bound entity must still be alive at a game-time deadline.
+	// §7.3 fetch/turn-in (Q4). The one shape whose completion is NOT a world-state change the
+	// server already observes: nothing happens in the world when a player is carrying the right
+	// items, and nothing happens when they walk up to the right NPC. The completion is the ACT of
+	// handing them over, which only exists inside a dialogue — which is why the doc files it under
+	// the DIALOGUE-ROUTED category it calls HARD rather than beside kill/clear/defend.
+	coop_cond_deliver = 3,
 };
 
 // Attach a completion condition to a task. Replaces any condition already on it.
@@ -128,9 +135,26 @@ enum coop_cond_kind
 void coop_task_set_condition(const shared_str& task_id, u8 kind, const xr_vector<u16>& targets,
                              u64 deadline_game_ms);
 
+// Arm a DELIVER condition (§7.3's fetch/turn-in shape). `count` of `section` must be handed to
+// `recipient` (mp_coop_owner::none = whichever NPC the player is actually talking to). Replaces
+// any condition already on the task, exactly like coop_task_set_condition.
+//
+// The section and the count are the whole condition: WHICH items is deliberately not tracked, so a
+// player who drops the quest medkits and picks up three others still turns the task in. Tracking
+// identity here would make a fetch task a set of entity ids, and the doc's conservation argument
+// (§7.2, "same conservation logic as loot") is about the ITEMS being finite, not about these ones.
+void coop_task_set_deliver(const shared_str& task_id, const shared_str& section, u16 count,
+                           u16 recipient);
+
+// §7.4's authored classification, set explicitly rather than inferred from whoever offered the
+// task. coop_task_offer captures the offerer's community, which is right when an NPC hands out its
+// own faction's work and wrong the moment content wants to say otherwise.
+void coop_task_set_community(const shared_str& task_id, u16 community);
+
 // How many bound entities are still outstanding (kill: not yet dead; defend: still to be kept
-// alive), or 0 if the task carries no condition — INCLUDING the case where it carried one that has
-// already been spent. Those two are deliberately indistinguishable through this accessor, because
+// alive; deliver: items still owed), or 0 if the task carries no condition — INCLUDING the case
+// where it carried one that has already been spent. Those two are deliberately indistinguishable
+// through this accessor, because
 // a caller that could tell them apart would be tempted to use "0" as evidence of completion. It is
 // not: a task that never had a condition also reads 0. Completion is evidenced by the COND log
 // line emitted AT the transition, never by reading this afterwards.
@@ -162,6 +186,64 @@ u32  coop_task_on_world_death(u16 dead_id, u16 killer_id);
 // after 49.7 days of it, which on a game clock running at x6 is under nine real days of server
 // uptime, and the failure would be a deadline that silently moves into the past.
 u32  coop_task_tick_conditions(u64 now_game_ms);
+
+// MP fork (§14 step 8 phase 3 Q4 / doc §7.3): DIALOGUE-ROUTED acquisition and turn-in.
+//
+// §7.3 splits tasks into the category whose completion the server can already see (kill / clear /
+// defend — Q2 and Q3) and the category the doc calls HARD: "anything acquired or turned in through
+// dialogue", which it says "requires the actor rework (Section 6) to be solid" and calls the
+// launch-critical foundational work. The reason it is hard is not the transaction, it is the
+// SUBJECT: a dialogue action runs on the server, on behalf of one player, in a process where
+// db.actor is nil and Actor() means "whichever player actor spawned last". Phases 1 and 2 built
+// the answer (mp_coop_owner::acting_actor()); Q4 is the first consumer that would be silently
+// WRONG without it rather than merely dead.
+enum coop_turnin_result
+{
+	coop_turnin_ok = 0,
+	coop_turnin_no_actor,      // no acting player — a turn-in is an act by a person
+	coop_turnin_no_task,       // not in progress for anyone (never claimed, or already finished)
+	coop_turnin_no_condition,  // nothing to turn in: no condition, or one already spent
+	coop_turnin_not_owner,     // §7.4: somebody else's errand, or not a member of the owning faction
+	coop_turnin_wrong_npc,     // the goods are owed to a different recipient
+	coop_turnin_short,         // the player does not have them — and NOTHING is taken
+	coop_turnin_failed,        // the hand-over itself could not be performed; nothing is taken
+};
+
+// Turn `task_id` in: hand the owed items to `npc_id` and take the verdict. ALL-OR-NOTHING — every
+// check runs before a single item moves, because a refusal that has already eaten two of the three
+// medkits is worse than no turn-in at all, and it is the one failure in this layer that destroys a
+// player's property rather than merely mis-reporting a task.
+coop_turnin_result coop_task_turn_in(const shared_str& task_id, u16 player_id, u16 npc_id);
+
+// §7.4's turn-in authority. Deliberately NOT coop_task_goes_to (which decides who SEES a task):
+// visibility and authority are different questions, and a squadmate who can see your errand on
+// their PDA must not be able to finish it for you.
+bool coop_task_may_turn_in(const shared_str& task_id, u16 player_id);
+
+// The DIALOGUE-ROUTED entry points: the subject is mp_coop_owner::acting_actor(), i.e. the player
+// the server is currently executing script on behalf of. These are what gamedata calls; the
+// player_id forms above are what the engine and the harness call.
+//
+// Both REFUSE when there is no acting player, and that refusal is the point rather than a guard:
+// the server reads flags and runs script autonomously all the time (phase 2 measured one stock
+// smart terrain doing it 46,318 times in five minutes), and a claim taken in that context would
+// hand a personal errand to nobody, or to whoever happened to be resolvable.
+coop_claim_result  coop_task_claim_acting(const shared_str& task_id);
+coop_turnin_result coop_task_turn_in_acting(const shared_str& task_id, u16 npc_id);
+
+// Is this task still on the shelf? Answers from the SERVER's pool on the server, and from the last
+// pool the client received on a client — which is what makes it usable as a dialogue PRECONDITION,
+// since preconditions stay client-local (they build the phrase list synchronously, before anything
+// is sent). The client's copy can be stale by design; the server refusing a claim is what actually
+// enforces §7.2, and the harness measures exactly that case.
+bool coop_task_offered(const shared_str& task_id);
+
+// Item plumbing, implemented in game_sv_single.cpp where the server's CSE tree and IPureServer
+// live. Both read and write the SERVER's own record of what a player is carrying — a turn-in that
+// believed the client's claim about its inventory would be a duplication exploit with a dialogue
+// box in front of it.
+u32 coop_items_count(u16 owner_id, const shared_str& section);
+u32 coop_items_hand_over(u16 from_id, u16 to_id, const shared_str& section, u16 count);
 
 // MP fork (§14 step 8 phase 3 Q2 / doc §7.2): the co-op quest state rides the .scop.
 //

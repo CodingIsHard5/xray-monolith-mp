@@ -54,9 +54,14 @@ protected:
 	template <class T>
 	void LoadSequence(CUIXml* ui_xml, XML_NODE* phrase_node, LPCSTR tag, T& str_vector);
 
-	//манипуляции с информацией во время вызовов Precondition и Action 
+	//манипуляции с информацией во время вызовов Precondition и Action
 	virtual bool CheckInfo(const CInventoryOwner* pOwner) const;
 	virtual void TransferInfo(const CInventoryOwner* pOwner) const;
+
+	// MP fork (§14 step 8 phase 3 Q4 / doc §6.1): whose info portion a dialogue's info tags mean.
+	// Stock is Actor(), which on a co-op server means "whichever player actor spawned last".
+	// NULL = refused: no subject could be resolved, and guessing one writes onto the wrong player.
+	const CInventoryOwner* coop_info_subject(const CInventoryOwner* pOwner, LPCSTR what) const;
 
 	//имя скриптовой функции, которая возвращает какой-то текст
 	shared_str m_sScriptTextFunc;

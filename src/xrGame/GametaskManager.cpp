@@ -93,9 +93,26 @@ namespace
 		u64            deadline;         // defend: absolute game-time ms of the verdict. 0 = none.
 		u32            evaluations;      // how many events this condition has been advanced by
 
-		coop_condition(): kind(u8(coop_cond_none)), deadline(0), evaluations(0) {}
+		// Q4 (deliver): what is owed, how many, and to whom. `recipient` is an entity id rather
+		// than a community or a name because a turn-in happens to the NPC in front of you, and
+		// mp_coop_owner::none means "whoever you are talking to" — a courier task with a named
+		// recipient and a "bring this back to anyone" errand are the same shape with one field set.
+		shared_str     item_section;
+		u16            item_count;
+		u16            recipient;
+
+		coop_condition(): kind(u8(coop_cond_none)), deadline(0), evaluations(0),
+		                  item_count(0), recipient(mp_coop_owner::none) {}
 	};
 	xr_map<shared_str, coop_condition> s_task_cond;
+
+	// MP fork (§14 step 8 phase 3 Q4): the CLIENT's copy of the shared offer pool, rebuilt from
+	// every M_XRNET_TASKS broadcast. It exists so a dialogue PRECONDITION can ask "is this job
+	// still going?" without a round trip — the phrase list has to be built synchronously. It is
+	// advisory by construction: between the broadcast and the click somebody else may have taken
+	// it, and only the server's own pool decides. Kept beside the server's map rather than in a
+	// client file so the two can never drift in what an entry means.
+	xr_set<shared_str> s_client_pool;
 
 	u16 coop_community_of(u16 actor_id)
 	{
@@ -246,7 +263,13 @@ u16 coop_task_target_of(const shared_str& task_id)
 u32 coop_task_cond_remaining(const shared_str& task_id)
 {
 	xr_map<shared_str, coop_condition>::iterator it = s_task_cond.find(task_id);
-	return (it != s_task_cond.end()) ? u32(it->second.remaining.size()) : 0u;
+	if (it == s_task_cond.end())
+		return 0u;
+	// Q4: for a delivery the outstanding thing is ITEMS, not entities. Same question, same
+	// accessor, same deliberate inability to tell "spent" from "never had one".
+	if (it->second.kind == u8(coop_cond_deliver))
+		return u32(it->second.item_count);
+	return u32(it->second.remaining.size());
 }
 
 void coop_task_set_condition(const shared_str& task_id, u8 kind, const xr_vector<u16>& targets,
@@ -269,6 +292,210 @@ void coop_task_set_condition(const shared_str& task_id, u8 kind, const xr_vector
 
 	Msg("- COOP(quest): COND SET '%s' kind=%u targets=%u deadline=%I64u",
 		task_id.c_str(), u32(kind), u32(c.remaining.size()), deadline_game_ms);
+}
+
+// --- §14 step 8 phase 3 Q4: the fetch/turn-in condition (doc §7.3, the dialogue-routed half) ----
+
+// Defined with the rest of the verdict machinery below. Every terminal outcome in this layer goes
+// through that one function, including a delivery — a second path that set a task's state and
+// logged its own line would be a second place for "exactly once" to be got wrong.
+static void coop_task_verdict(const shared_str& id, bool completed, LPCSTR why, u16 actor_id);
+
+void coop_task_set_deliver(const shared_str& task_id, const shared_str& section, u16 count,
+                           u16 recipient)
+{
+	if (!task_id.size() || !section.size() || !count)
+	{
+		Msg("! COOP(quest): DELIVER '%s' ignored — section='%s' count=%u is not a condition anything "
+			"could satisfy", task_id.c_str(), section.size() ? section.c_str() : "", u32(count));
+		return;
+	}
+
+	coop_condition c;
+	c.kind         = u8(coop_cond_deliver);
+	c.item_section = section;
+	c.item_count   = count;
+	c.recipient    = recipient;
+	s_task_cond[task_id] = c;
+
+	Msg("- COOP(quest): COND SET '%s' kind=%u deliver=%ux '%s' recipient=%u",
+		task_id.c_str(), u32(coop_cond_deliver), u32(count), section.c_str(), u32(recipient));
+}
+
+void coop_task_set_community(const shared_str& task_id, u16 community)
+{
+	if (!task_id.size())
+		return;
+	s_task_community[task_id] = community;
+	Msg("- COOP(quest): COMMUNITY '%s' = %d", task_id.c_str(), int(short(community)));
+}
+
+bool coop_task_may_turn_in(const shared_str& task_id, u16 player_id)
+{
+	const u16 owner = coop_task_owner_of(task_id);
+
+	// Unowned (0 = the pre-step-8 "goes to everyone" tag) or untracked: nothing to enforce.
+	if (owner == mp_coop_owner::none || owner == 0)
+		return true;
+
+	if (owner == player_id)
+		return true;                                  // §7.4 personal errand: its own player
+
+	if (owner == mp_coop_owner::world_key)
+	{
+		// §7.4 faction quest: "completion is MEMBER-AGNOSTIC — any member of that faction can
+		// complete it. This is a FEATURE, not the single-actor bug returning." The owner is a
+		// reserved registry key and not an entity, so the community was captured at offer time.
+		xr_map<shared_str, u16>::iterator c = s_task_community.find(task_id);
+		if (c == s_task_community.end() || c->second == u16(-1))
+			return true;                              // world work with no faction named: anyone
+		return coop_community_of(player_id) == c->second;
+	}
+
+	return false;                                     // somebody else's errand
+}
+
+coop_turnin_result coop_task_turn_in(const shared_str& task_id, u16 player_id, u16 npc_id)
+{
+	if (!xr_enet::enabled() || !ai().get_alife())
+		return coop_turnin_no_task;
+
+	// A turn-in is an act by a PERSON. The world tier is data, not a person, and "nobody" is not a
+	// subject either — refuse rather than pick one, which is the same rule the flag layer settled
+	// on in phase 1 and for the same reason: a plausible wrong answer here is unfalsifiable later.
+	if (player_id == mp_coop_owner::none || player_id == mp_coop_owner::world_key)
+	{
+		Msg("! COOP(quest): TURN-IN '%s' refused — no acting player (subject=%u)",
+			task_id.c_str(), u32(player_id));
+		return coop_turnin_no_actor;
+	}
+
+	CGameTask* const t = Level().GameTaskManager().HasGameTask(task_id, true);
+	if (!t)
+	{
+		Msg("- COOP(quest): TURN-IN '%s' by %u -> NO TASK (not in progress)",
+			task_id.c_str(), u32(player_id));
+		return coop_turnin_no_task;
+	}
+
+	xr_map<shared_str, coop_condition>::iterator it = s_task_cond.find(task_id);
+	if (it == s_task_cond.end() || it->second.kind != u8(coop_cond_deliver))
+	{
+		// Also the REPLAY case, and it is the one worth naming: a condition is consumed by the
+		// verdict that ends it, so a second turn-in of a task already delivered arrives here and
+		// takes nothing. That is §7.2's exactly-once with teeth — a second consume would destroy
+		// three more of the player's items for a reward already paid.
+		Msg("- COOP(quest): TURN-IN '%s' by %u -> NO CONDITION (nothing owed; already delivered, or "
+			"never a delivery)", task_id.c_str(), u32(player_id));
+		return coop_turnin_no_condition;
+	}
+
+	if (!coop_task_may_turn_in(task_id, player_id))
+	{
+		Msg("- COOP(quest): TURN-IN '%s' by %u -> NOT OWNER (owner=%u community=%d, player "
+			"community=%d)", task_id.c_str(), u32(player_id), u32(coop_task_owner_of(task_id)),
+			int(short(s_task_community.find(task_id) != s_task_community.end()
+				? s_task_community[task_id] : u16(-1))),
+			int(short(coop_community_of(player_id))));
+		return coop_turnin_not_owner;
+	}
+
+	coop_condition& c = it->second;
+	if (c.recipient != mp_coop_owner::none && c.recipient != npc_id)
+	{
+		Msg("- COOP(quest): TURN-IN '%s' by %u -> WRONG NPC (owed to %u, handed to %u)",
+			task_id.c_str(), u32(player_id), u32(c.recipient), u32(npc_id));
+		return coop_turnin_wrong_npc;
+	}
+
+	// The recipient has to be a real entity: you cannot hand something to nobody. With no named
+	// recipient it is whoever the player is talking to, which coop_run_dialog_action has already
+	// resolved to a live object on this server.
+	const u16 to_id = (c.recipient != mp_coop_owner::none) ? c.recipient : npc_id;
+	if (to_id == mp_coop_owner::none || to_id == player_id)
+	{
+		Msg("! COOP(quest): TURN-IN '%s' by %u -> FAILED (no recipient to hand %ux '%s' to)",
+			task_id.c_str(), u32(player_id), u32(c.item_count), c.item_section.c_str());
+		return coop_turnin_failed;
+	}
+
+	// Counted on the SERVER's own record of the player's inventory. This is the authority line of
+	// the whole increment: the client asked for this turn-in, the client drew the phrase, and the
+	// client's opinion of what it is carrying is worth nothing here.
+	const u32 have = coop_items_count(player_id, c.item_section);
+	if (have < u32(c.item_count))
+	{
+		Msg("- COOP(quest): TURN-IN '%s' by %u -> SHORT (has %u of %u '%s') — nothing taken",
+			task_id.c_str(), u32(player_id), have, u32(c.item_count), c.item_section.c_str());
+		return coop_turnin_short;
+	}
+
+	// Everything is decided; only now does anything move.
+	const shared_str section = c.item_section;
+	const u16 want = c.item_count;
+	const u32 moved = coop_items_hand_over(player_id, to_id, section, want);
+	if (moved != u32(want))
+	{
+		// The hand-over is all-or-nothing internally too (it resolves every item before it moves
+		// one), so this means the server's own tree disagreed with itself between the count and
+		// the move. Say so loudly and do NOT take the verdict: a completed task whose goods never
+		// arrived is a worse state than a refused turn-in.
+		Msg("! COOP(quest): TURN-IN '%s' by %u -> FAILED after counting %u: moved %u of %u '%s'",
+			task_id.c_str(), u32(player_id), have, moved, u32(want), section.c_str());
+		FlushLog();
+		return coop_turnin_failed;
+	}
+
+	// Q3's discipline: emit the transition from either side of it, before applying it. After the
+	// verdict the condition is gone, and a task delivered correctly is indistinguishable from one
+	// that was never a delivery at all.
+	++c.evaluations;
+	Msg("- COOP(quest): COND '%s' kind=%u event=turnin player=%u npc=%u before=%u after=0 "
+		"moved=%u eval=%u verdict=COMPLETE", task_id.c_str(), u32(coop_cond_deliver),
+		u32(player_id), u32(to_id), u32(want), moved, c.evaluations);
+
+	coop_task_verdict(task_id, true, "goods delivered", player_id);
+	Level().GameTaskManager().coop_broadcast_tasks();
+	FlushLog();
+	return coop_turnin_ok;
+}
+
+// --- the dialogue-routed entry points: the acting player is the subject --------------------
+
+coop_claim_result coop_task_claim_acting(const shared_str& task_id)
+{
+	const u16 who = mp_coop_owner::acting_actor();
+	if (who == mp_coop_owner::none)
+	{
+		// Doc §6.2's exception case, applied to quests: a read with no acting player is a WORLD
+		// read, and there is no such thing as a world CLAIM. The server runs script autonomously
+		// constantly, so this is a real path and not a defensive stub.
+		Msg("! COOP(quest): CLAIM '%s' refused — no acting player (autonomous world context)",
+			task_id.c_str());
+		return coop_claim_no_actor;
+	}
+	return coop_task_claim(task_id, who);
+}
+
+coop_turnin_result coop_task_turn_in_acting(const shared_str& task_id, u16 npc_id)
+{
+	const u16 who = mp_coop_owner::acting_actor();
+	if (who == mp_coop_owner::none)
+	{
+		Msg("! COOP(quest): TURN-IN '%s' refused — no acting player (autonomous world context)",
+			task_id.c_str());
+		return coop_turnin_no_actor;
+	}
+	return coop_task_turn_in(task_id, who, npc_id);
+}
+
+bool coop_task_offered(const shared_str& task_id)
+{
+	if (!task_id.size())
+		return false;
+	if (ai().get_alife())                           // the server: the pool itself
+		return s_task_pool.find(task_id) != s_task_pool.end();
+	return s_client_pool.find(task_id) != s_client_pool.end();
 }
 
 void coop_dump_task_pool()
@@ -439,12 +666,14 @@ namespace
 	//
 	// v1 (Q2): ... + a trailing str->u16 map of single kill targets.
 	// v2 (Q3): ... + a condition table (kind, target list, deadline, evaluation count).
+	// v3 (Q4): ... + the delivery fields on each condition (section, count, recipient).
 	//
-	// v1 is READ, not refused: it is a version we know, and its target map is exactly the n=1 kill
-	// condition v2 stores generally, so it migrates rather than being discarded. The refusal is for
-	// versions from the FUTURE, which is a different thing entirely — those we cannot interpret,
-	// and Q2's rule stands for them.
-	const u16 coop_quest_state_version = 2;
+	// v1 and v2 are READ, not refused: they are versions we know. v1's target map is exactly the
+	// n=1 kill condition v2 stores generally, and a v2 condition is a v3 condition with no delivery
+	// — both migrate rather than being discarded, so a save made before Q3 or before Q4 keeps its
+	// bindings and its tasks stay completable. The refusal is for versions from the FUTURE, which is
+	// a different thing entirely — those we cannot interpret, and Q2's rule stands for them.
+	const u16 coop_quest_state_version = 3;
 
 	void coop_write_str_u16_map(IWriter& stream, xr_map<shared_str, u16>& m)
 	{
@@ -565,6 +794,13 @@ void coop_task_state_save(IWriter& stream)
 		stream.w_u16(u16(it->second.remaining.size()));
 		for (u32 i = 0; i < it->second.remaining.size(); ++i)
 			stream.w_u16(it->second.remaining[i]);
+		// v3: the delivery, written for EVERY condition rather than only for deliveries. A record
+		// whose layout depends on its own kind field has two ways to be read and one of them is
+		// reached by a corrupted byte; a fixed record costs three fields on conditions that do not
+		// use them and cannot desynchronise the table behind it.
+		stream.w_stringZ(it->second.item_section);
+		stream.w_u16(it->second.item_count);
+		stream.w_u16(it->second.recipient);
 	}
 
 	stream.close_chunk();
@@ -600,14 +836,14 @@ void coop_task_state_load(IReader& stream)
 	coop_quest_reader r(stream, stream.tell() + int(chunk_size));
 
 	const u16 ver = r.u16v();
-	// v1 and v2 differ ONLY in the trailing block, and everything before it is byte-identical, so
-	// one reader handles both and the version decides how the tail is read. A version we do not
-	// know is still refused outright — that rule was never about old files, it was about files
+	// v1, v2 and v3 differ ONLY in the trailing block, and everything before it is byte-identical,
+	// so one reader handles all three and the version decides how the tail is read. A version we do
+	// not know is still refused outright — that rule was never about old files, it was about files
 	// from the future, whose fields we would be guessing at.
-	if (!r.ok || (ver != 1 && ver != 2))
+	if (!r.ok || (ver != 1 && ver != 2 && ver != 3))
 	{
 		stream.seek(caller_pos);
-		Msg("! COOP(quest): state version %u is neither 1 nor %u — REFUSING to parse it; pool and ownership start empty",
+		Msg("! COOP(quest): state version %u is not 1, 2 or %u — REFUSING to parse it; pool and ownership start empty",
 			u32(ver), u32(coop_quest_state_version));
 		return;
 	}
@@ -677,6 +913,16 @@ void coop_task_state_load(IReader& stream)
 				break;
 			for (u16 j = 0; j < n; ++j)
 				c.remaining.push_back(r.u16v());
+			if (ver >= 3)
+			{
+				// v3's delivery fields. A v2 condition simply has none, which is what a kill or a
+				// defend condition looks like anyway — so v2 needs no migration counter and gets
+				// none: nothing about it is being reinterpreted, there is just less of it.
+				if (!r.str(c.item_section))
+					break;
+				c.item_count = r.u16v();
+				c.recipient  = r.u16v();
+			}
 			if (r.ok && id.size())
 				s_task_cond[id] = c;
 		}
@@ -704,9 +950,11 @@ void coop_task_state_load(IReader& stream)
 		u32(s_task_pool.size()), u32(s_task_owner.size()), u32(s_faction_task.size()),
 		u32(s_task_community.size()), u32(s_task_cond.size()), migrated, u32(ver));
 	for (xr_map<shared_str, coop_condition>::iterator it = s_task_cond.begin(); it != s_task_cond.end(); ++it)
-		Msg("    cond '%s' kind=%u remaining=%u deadline=%I64u evaluations=%u", it->first.c_str(),
-			u32(it->second.kind), u32(it->second.remaining.size()), it->second.deadline,
-			it->second.evaluations);
+		Msg("    cond '%s' kind=%u remaining=%u deadline=%I64u evaluations=%u deliver=%ux '%s' recipient=%u",
+			it->first.c_str(), u32(it->second.kind), u32(it->second.remaining.size()),
+			it->second.deadline, it->second.evaluations, u32(it->second.item_count),
+			it->second.item_section.size() ? it->second.item_section.c_str() : "",
+			u32(it->second.recipient));
 	FlushLog();
 }
 
@@ -1025,6 +1273,13 @@ void CGameTaskManager::coop_apply_tasks(NET_Packet& packet)
 	// server that does not send the section cannot make this read run off the end of the packet.
 	// The pool is logged unconditionally, not under -dbg: this is the client's only evidence that
 	// a claim it lost actually removed the offer, and the harness reads it on the CLIENT side.
+	//
+	// Q4: the pool is also KEPT now, not merely logged, so a dialogue precondition can ask whether
+	// a job is still going without a round trip. Cleared first and unconditionally — an offer that
+	// left the server's pool must leave this one, and the broadcast carries the whole shelf rather
+	// than a delta, so "absent from this packet" is the only way a claim by somebody else is ever
+	// visible here.
+	s_client_pool.clear();
 	if (!packet.r_eof())
 	{
 		const u16 offers = packet.r_u16();
@@ -1035,6 +1290,8 @@ void CGameTaskManager::coop_apply_tasks(NET_Packet& packet)
 			packet.r_stringZ(oid);
 			const u16 by = packet.r_u16();
 			const u8  fl = packet.r_u8();
+			if (oid.size())
+				s_client_pool.insert(oid);
 			Msg("* COOP_POOL_CL:   offer '%s' by %u faction=%d world_state=%d",
 				oid.c_str(), u32(by), (fl & 1) ? 1 : 0, (fl & 2) ? 1 : 0);
 		}

@@ -291,6 +291,22 @@ public:
 	// over as LOCAL+ASPLAYER seconds later, and a client that already holds a copy drops the real
 	// one as a duplicate and then FATALs destroying the ghost. Measured 2026-07-26, see the plan.
 	bool coop_is_own_orphan(CSE_Abstract* E, xrClientData* CL);
+
+	// MP fork (§14 step 8 phase 3 Q4 / doc §7.3): the item side of a dialogue turn-in. Members
+	// rather than free functions because both need the server's CSE tree and its broadcast; the
+	// free wrappers the task layer calls (coop_items_count / coop_items_hand_over, declared in
+	// GametaskManager.h) find this object and forward.
+	//
+	// Both read the SERVER's own record of what a player carries — never the client's word for it.
+	u32 coop_count_carried(u16 owner_id, const shared_str& section);
+	// Moves `count` of `section` from one entity to another, or moves NOTHING and returns 0: every
+	// item is resolved before the first one is detached, because a hand-over that half-succeeded
+	// leaves the player short and the task unfinished, with no record of which items went where.
+	u32 coop_hand_over(u16 from_id, u16 to_id, const shared_str& section, u16 count);
+	// Harness support: put `count` of `section` into an entity's inventory (the same parented
+	// spawn the checkpoint rollback uses). A fetch task needs something to fetch, and the headless
+	// harness has no way to make a player pick things up.
+	u32 coop_grant_items(u16 owner_id, const shared_str& section, u16 count);
 public:
 	virtual BOOL OnTouch(u16 eid_who, u16 eid_what, BOOL bForced = FALSE);
 	virtual void OnDetach(u16 eid_who, u16 eid_what);

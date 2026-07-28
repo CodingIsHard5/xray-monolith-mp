@@ -1002,7 +1002,23 @@ void xrServer::coop_run_dialog_action(NET_Packet& P)
 	P.r_stringZ_s(dialog_id); // bounds-checked: this is attacker-reachable input
 	P.r_stringZ_s(phrase_id);
 
-	if (!g_pGameLevel || !dialog_id[0] || !phrase_id[0])
+	// The client that sent this is the player the action runs on behalf of. There is no other
+	// candidate and there must not be one: it is read off the packet's speaker rather than from
+	// anything ambient, which is the whole §6.1 seam in one argument.
+	coop_run_dialog_phrase(speaker_id, speaker_id, partner_id, dialog_id, phrase_id);
+}
+
+// MP fork (§14 step 8 phase 3 Q4): run one phrase's ACTION on behalf of `acting_id`.
+//
+// Split out of the wire handler above so the acting player is an argument rather than a
+// coincidence. Two callers want that: the handler (where the actor is the speaker) and the Q4
+// harness, which replays ONE phrase under two different acting scopes to show that the info write
+// follows the acting player and not Actor() — the same phrase, the same speakers, opposite
+// outcomes, which is the only way that routing is observable with a single client connected.
+void xrServer::coop_run_dialog_phrase(u16 acting_id, u16 speaker_id, u16 partner_id,
+                                      LPCSTR dialog_id, LPCSTR phrase_id)
+{
+	if (!g_pGameLevel || !dialog_id || !phrase_id || !dialog_id[0] || !phrase_id[0])
 		return;
 
 	CGameObject* const speaker = smart_cast<CGameObject*>(Level().Objects.net_Find(speaker_id));
@@ -1039,12 +1055,13 @@ void xrServer::coop_run_dialog_action(NET_Packet& P)
 
 	// MP fork (§19 co-op; §14 step 8 phase 1): mark which player is talking. Doc §6.1's
 	// "check the interacting player" — every per-player fact this action touches resolves
-	// against it: the task it may give (CGameTaskManager::GiveGameTaskToActor) and, since
-	// step 8 phase 1, any info portion the script layer reads or writes. The scope restores
-	// the previous value on EVERY exit path, including the script throwing: a context left
-	// set would silently attribute the server's next autonomous world read to whichever
-	// player last talked to someone.
-	mp_coop_owner::acting_scope coop_acting(speaker_id);
+	// against it: the task it may give (CGameTaskManager::GiveGameTaskToActor), the claim and
+	// turn-in of §7.2's shared pool (step 8 phase 3 Q4), and any info portion the script layer
+	// or the phrase's own <give_info> tags read or write. The scope restores the previous value
+	// on EVERY exit path, including the script throwing: a context left set would silently
+	// attribute the server's next autonomous world read to whichever player last talked to
+	// someone.
+	mp_coop_owner::acting_scope coop_acting(acting_id);
 
 	// Same call the single-player path makes, just with the server's own objects.
 	phrase->GetScriptHelper()->Action(speaker, partner, dialog_id, phrase_id);

@@ -2002,6 +2002,115 @@ int mp_coop_acting_actor()
 	return (id == mp_coop_owner::none) ? -1 : int(id);
 }
 
+// MP fork (§14 step 8 phase 3 Q4 / doc §7.2-7.3): the quest pool, from gamedata.
+//
+// This is the surface a dialogue actually needs, and it is deliberately small. §7.2's model is one
+// pool, one claimant, and a claim that REMOVES the offer; §7.3's dialogue-routed category means
+// both the claim and the turn-in happen inside a phrase's <action>, which the co-op fork already
+// ships to the server (PhraseScript.cpp) and runs inside an acting scope for the speaking player.
+// So gamedata never names WHO is claiming: it cannot, it is running on the server where db.actor
+// is nil, and the answer is already in the acting scope. That is the whole §6-must-be-solid
+// dependency the doc calls out, in one design decision.
+//
+// Every one of these is server-side except mp_coop_task_offered, which is answered on a client
+// from the pool the server last broadcast — that is what a dialogue PRECONDITION can use, because
+// preconditions build the phrase list synchronously and cannot wait for a round trip.
+u32 mp_coop_task_offer(LPCSTR task_id, u32 offer_id, bool faction, bool world_state)
+{
+	if (!task_id || !*task_id || !ai().get_alife())
+		return 0;
+	if (offer_id > 0xFFFF)
+	{
+		Msg("! mp_coop_task_offer: offer_id %u does not fit an entity id", offer_id);
+		return 0;
+	}
+	coop_task_offer(shared_str(task_id), u16(offer_id), faction, world_state);
+	return 1;
+}
+
+u32 mp_coop_task_deliver(LPCSTR task_id, LPCSTR section, u32 count, u32 recipient)
+{
+	if (!task_id || !*task_id || !section || !*section || !ai().get_alife())
+		return 0;
+	if (count > 0xFFFF || recipient > 0xFFFF)
+	{
+		Msg("! mp_coop_task_deliver: count %u / recipient %u out of range", count, recipient);
+		return 0;
+	}
+	coop_task_set_deliver(shared_str(task_id), shared_str(section), u16(count), u16(recipient));
+	return 1;
+}
+
+u32 mp_coop_task_faction(LPCSTR task_id, u32 community)
+{
+	if (!task_id || !*task_id || !ai().get_alife())
+		return 0;
+	if (community > 0xFFFF)
+		return 0;
+	coop_task_set_community(shared_str(task_id), u16(community));
+	return 1;
+}
+
+// Returns the coop_claim_result: 0 = claimed, 1 = somebody else has it, 2 = not on offer,
+// 3 = no acting player (an autonomous world context cannot own a personal errand).
+u32 mp_coop_task_claim(LPCSTR task_id)
+{
+	if (!task_id || !*task_id || !ai().get_alife())
+		return u32(coop_claim_absent);
+	return u32(coop_task_claim_acting(shared_str(task_id)));
+}
+
+// Returns the coop_turnin_result: 0 = delivered. Everything else is a refusal that took NOTHING
+// from the player, which is the property worth having in one place — see GametaskManager.h.
+u32 mp_coop_task_turn_in(LPCSTR task_id, u32 npc_id)
+{
+	if (!task_id || !*task_id || !ai().get_alife())
+		return u32(coop_turnin_no_task);
+	if (npc_id > 0xFFFF)
+		return u32(coop_turnin_wrong_npc);
+	return u32(coop_task_turn_in_acting(shared_str(task_id), u16(npc_id)));
+}
+
+// The mirror image of the turn-in, and the other half of what "acquired through dialogue" means:
+// the NPC HANDS the acting player something — the quest item to deliver, or the reward for having
+// delivered it. Same subject rule, same refusal when nobody is acting, and the same authority: the
+// server spawns it into the player's inventory, the client is told.
+u32 mp_coop_give_item(LPCSTR section, u32 count)
+{
+	if (!section || !*section || !count || !ai().get_alife())
+		return 0;
+	if (count > 64)                     // a dialogue reward, not a bulk spawner
+	{
+		Msg("! mp_coop_give_item: refusing to spawn %u x '%s' in one call", count, section);
+		return 0;
+	}
+	const u16 who = mp_coop_owner::acting_actor();
+	if (who == mp_coop_owner::none)
+	{
+		Msg("! mp_coop_give_item: no acting player — nobody to give '%s' to", section);
+		return 0;
+	}
+	if (!Level().Server)
+		return 0;
+	game_sv_Single* const tpGame = smart_cast<game_sv_Single*>(Level().Server->game);
+	return tpGame ? tpGame->coop_grant_items(who, shared_str(section), u16(count)) : 0u;
+}
+
+bool mp_coop_task_offered(LPCSTR task_id)
+{
+	return (task_id && *task_id) ? coop_task_offered(shared_str(task_id)) : false;
+}
+
+// How many of `section` the SERVER believes `owner_id` is carrying. Exposed so a dialogue can
+// offer the turn-in phrase only when it can be met — but note that this is advisory in exactly
+// the way the pool is: the refusal that matters is the server's, inside the turn-in itself.
+u32 mp_coop_carried(u32 owner_id, LPCSTR section)
+{
+	if (!section || !*section || owner_id > 0xFFFF || !ai().get_alife())
+		return 0;
+	return coop_items_count(u16(owner_id), shared_str(section));
+}
+
 //ability to update level netpacket
 void g_send(NET_Packet& P, bool bReliable = 0, bool bSequential = 1, bool bHighPriority = 0, bool bSendImmediately = 0)
 {
@@ -2938,6 +3047,18 @@ void CLevel::script_register(lua_State* L)
 
         // MP fork (§14 step 8 phase 1 / §6): the two ownership tiers. -1 = no such actor.
         def("mp_coop_world_actor", &mp_coop_world_actor),
-        def("mp_coop_acting_actor", &mp_coop_acting_actor)
+        def("mp_coop_acting_actor", &mp_coop_acting_actor),
+
+        // MP fork (§14 step 8 phase 3 Q4 / §7.2-7.3): dialogue-routed acquisition and turn-in.
+        // The claim and the turn-in take no player argument on purpose — the subject is the
+        // acting scope, because on the server there is no other honest answer.
+        def("mp_coop_task_offer", &mp_coop_task_offer),
+        def("mp_coop_task_deliver", &mp_coop_task_deliver),
+        def("mp_coop_task_faction", &mp_coop_task_faction),
+        def("mp_coop_task_claim", &mp_coop_task_claim),
+        def("mp_coop_task_turn_in", &mp_coop_task_turn_in),
+        def("mp_coop_task_offered", &mp_coop_task_offered),
+        def("mp_coop_carried", &mp_coop_carried),
+        def("mp_coop_give_item", &mp_coop_give_item)
 	];
 }

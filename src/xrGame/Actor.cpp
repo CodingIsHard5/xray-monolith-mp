@@ -37,6 +37,9 @@
 #include "ai_sounds.h"
 #include "ai_space.h"
 #include "../xrNetServer/xr_enet_transport.h"   // MP fork: xr_enet::enabled()
+#include "PhraseDialog.h"                       // MP fork (§14 step 8 Q4 harness): drive a dialogue
+#include "Phrase.h"
+#include "PhraseScript.h"
 #include "trade.h"
 #include "inventory.h"
 //#include "Physics.h"
@@ -1267,6 +1270,159 @@ void CActor::UpdateCL()
 					P.w_u32(0);
 					u_EventSend(P, net_flags(TRUE, TRUE, FALSE, TRUE));
 				}
+			}
+		}
+	}
+
+	// MP fork (§14 step 8 phase 3 Q4, harness): drive a real DIALOGUE from this client.
+	// Launch with: -coop_test_dialog <seconds> [-coop_test_dialog_step <seconds>]
+	//
+	// §7.3's hard category is "anything acquired or turned in through dialogue", so the test has to
+	// be a dialogue: a phrase this client picks, sent as M_XRNET_DIALOG_ACTION, run by the server
+	// inside an acting scope for THIS player. What is synthetic here is only the CLICK — a headless
+	// client has no talk window to render and no mouse to press — so the probe calls exactly what
+	// the talk window calls when a phrase is chosen: CDialogScriptHelper::Action on the same phrase
+	// object, with the same two speakers. Everything downstream of that call is the real path.
+	//
+	// The PRECONDITION is evaluated too, and logged, because that is the other half of the seam:
+	// preconditions stay client-local (the phrase list is built synchronously), so this is where a
+	// client decides which jobs are still on offer. Two of the phrases below are then run ANYWAY
+	// with a false precondition, deliberately — the server's refusal is what enforces §7.2, and a
+	// client that asks for a task it has already lost is exactly the case that must be refused
+	// rather than trusted. A test that only ever sent well-behaved requests would prove nothing
+	// about authority.
+	if (g_Alive() && this == Actor() && coop_thin_client())
+	{
+		static bool  s_dlg_init  = false;
+		static float s_dlg_delay = -1.f;
+		static float s_dlg_step  = 15.f;
+		static float s_dlg_accum = 0.f;
+		static u32   s_dlg_phase = 0;
+		static u16   s_dlg_npc   = u16(-1);
+		if (!s_dlg_init)
+		{
+			s_dlg_init = true;
+			// A bare strstr for "-coop_test_dialog" also matches inside "-coop_test_dialog_step",
+			// so a run given only the step flag would arm the probe with a garbage delay. Require
+			// a delimiter, the same rule the server's coop_param settled on for the same reason.
+			LPCSTR p = strstr(Core.Params, "-coop_test_dialog");
+			while (p && p[sizeof("-coop_test_dialog") - 1] != ' ' &&
+			       p[sizeof("-coop_test_dialog") - 1] != '\0')
+				p = strstr(p + 1, "-coop_test_dialog");
+			if (p)
+			{
+				p += sizeof("-coop_test_dialog") - 1;
+				while (*p == ' ') ++p;
+				s_dlg_delay = (float)atof(p);
+				if (s_dlg_delay <= 0.f) s_dlg_delay = 30.f;
+				LPCSTR q = strstr(Core.Params, "-coop_test_dialog_step");
+				if (q)
+				{
+					q += sizeof("-coop_test_dialog_step") - 1;
+					while (*q == ' ') ++q;
+					const float st = (float)atof(q);
+					if (st > 0.f) s_dlg_step = st;
+				}
+				Msg("- COOP(dialog-test): first phrase in %.0fs, one every %.0fs",
+					s_dlg_delay, s_dlg_step);
+			}
+		}
+		if (s_dlg_delay > 0.f)
+		{
+			s_dlg_accum += Device.fTimeDelta;
+			// The phrases, in the order the harness needs them to happen. Each one is a separate
+			// dialogue turn; nothing here depends on a server timer, because the SEQUENCE is the
+			// thing being tested and a sequence coordinated by two independent clocks is a race.
+			static LPCSTR const phrases[] = {
+				"claim_d",     // acquisition: claim an open offer, through dialogue
+				"claim_b",     // and lose one the attacker already took
+				"turnin_d",    // short: 2 of the 3 owed — and nothing may be taken
+				"resupply",    // the NPC hands over the last one
+				"turnin_d",    // delivered
+				"turnin_d",    // replayed: the condition is spent, so this must take nothing
+				"turnin_p",    // somebody else's errand
+				"turnin_f",    // a faction quest claimed by somebody else: §7.4 says yes
+				"turnin_w",    // a faction the player is not in
+				"turnin_r",    // owed to a recipient this NPC is not
+			};
+			const u32 total = sizeof(phrases) / sizeof(phrases[0]);
+			if (s_dlg_accum >= s_dlg_delay + float(s_dlg_phase) * s_dlg_step && s_dlg_phase < total)
+			{
+				const u32 phase = s_dlg_phase++;
+				if (phase == 0)
+				{
+					// One partner for the whole conversation, found once: an NPC that is online
+					// HERE is one the server has too, which is what makes the ids on the wire
+					// resolvable on both sides.
+					u32 seen = 0;
+					for (u32 i = 0; i < Level().Objects.o_count(); ++i)
+					{
+						CObject* const o = Level().Objects.o_get_by_iterator(i);
+						if (!o || o->getDestroy() || o->ID() == ID())
+							continue;
+						if (smart_cast<CActor*>(o))
+							continue;
+						CInventoryOwner* const io = smart_cast<CInventoryOwner*>(o);
+						CEntityAlive* const al = smart_cast<CEntityAlive*>(o);
+						if (!io || !al || !al->g_Alive())
+							continue;
+						++seen;
+						if (s_dlg_npc == u16(-1))
+							s_dlg_npc = u16(o->ID());
+					}
+					// Loud and separate from any result: "we could not find anybody to talk to" is
+					// not the same finding as "the dialogue did the wrong thing", and a harness
+					// that let the first read as the second would be measuring nothing.
+					Msg("- COOP(dialog-test): partner search: %u live NPC(s) here, chose %u",
+						seen, u32(s_dlg_npc));
+				}
+				if (s_dlg_npc == u16(-1))
+				{
+					Msg("! COOP(dialog-test): no NPC to talk to — phrase '%s' NOT sent",
+						phrases[phase]);
+				}
+				else
+				{
+					CGameObject* const partner =
+						smart_cast<CGameObject*>(Level().Objects.net_Find(s_dlg_npc));
+					if (!partner)
+					{
+						Msg("! COOP(dialog-test): partner %u vanished — phrase '%s' NOT sent",
+							u32(s_dlg_npc), phrases[phase]);
+					}
+					else if (!CPhraseDialog::GetById("coop_q5_dialog", true))
+					{
+						Msg("! COOP(dialog-test): dialog 'coop_q5_dialog' is not in this gamedata "
+							"— nothing to say");
+					}
+					else
+					{
+						DIALOG_SHARED_PTR dlg(xr_new<CPhraseDialog>());
+						dlg->Load("coop_q5_dialog");
+						CPhrase* const ph = dlg->coop_find_phrase(phrases[phase]);
+						if (!ph)
+						{
+							Msg("! COOP(dialog-test): phrase '%s' is not in coop_q5_dialog",
+								phrases[phase]);
+						}
+						else
+						{
+							const bool pre = ph->GetScriptHelper()->Precondition(
+								this, partner, "coop_q5_dialog", phrases[phase], "");
+							Msg("- COOP(dialog-test): phase %u phrase '%s' precondition=%d npc=%u"
+								" — saying it anyway (authority is the server's, not ours)",
+								phase, phrases[phase], pre ? 1 : 0, u32(s_dlg_npc));
+							ph->GetScriptHelper()->Action(this, partner, "coop_q5_dialog",
+							                              phrases[phase]);
+						}
+					}
+				}
+				if (s_dlg_phase >= total)
+				{
+					Msg("- COOP(dialog-test): conversation done (%u phrases)", total);
+					s_dlg_delay = -1.f;      // one conversation per run
+				}
+				FlushLog();
 			}
 		}
 	}

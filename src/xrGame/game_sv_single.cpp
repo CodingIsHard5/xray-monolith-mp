@@ -19,6 +19,10 @@
 #include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
 #include "mp_anchors.h"                            // MP fork: A-Life attention anchors
 #include "mp_coop_owner.h"                         // MP fork (§14 step 8 P1 / §6): the two ownership tiers
+#include "InventoryOwner.h"                        // MP fork (§14 step 8 Q4): HasInfo / CharacterInfo
+#include "character_info.h"                        // MP fork (§14 step 8 Q4): the player's community
+#include "Actor.h"                                 // MP fork (§14 step 8 Q4): tell a player actor apart
+#include "entity_alive.h"                          // MP fork (§14 step 8 Q4): only talk to the living
 #include "../xrEngine/x_ray.h"
 #include "../xrEngine/dedicated_server_only.h"
 #include "../xrEngine/no_single.h"
@@ -2071,6 +2075,152 @@ bool game_sv_Single::coop_spawn_checkpoint_item(CSE_Abstract* owner, xrClientDat
 	return spawn_end(it, CL->ID) != NULL;
 }
 
+// ============================================================================================
+// MP fork (§14 step 8 phase 3 Q4 / doc §7.3): the item side of a dialogue-routed TURN-IN.
+//
+// §7.3's fetch/deliver shape is the one completion condition that is not a world-state change the
+// server already observes. Nothing happens in the world when a player is carrying the right items;
+// the completion IS the hand-over, and the hand-over is an act of dialogue. So this is where the
+// increment needed a hot-path hook on item ownership rather than a reuse of an existing one — and
+// the whole reason it goes here is that ONLY the server may answer "what is this player carrying".
+// A turn-in that trusted the asking client would be an item-duplication exploit with a dialogue
+// box in front of it: claim three medkits you do not have, keep the ones you do.
+// ============================================================================================
+u32 game_sv_Single::coop_count_carried(u16 owner_id, const shared_str& section)
+{
+	if (!m_server || !section.size() || owner_id == u16(-1))
+		return 0;
+	CSE_Abstract* const owner = m_server->ID_to_entity(owner_id);
+	if (!owner)
+		return 0;
+
+	u32 n = 0;
+	for (u16 child_id : owner->children)
+	{
+		// The SERVER ID map only, deliberately, unlike the checkpoint bank which also consults
+		// A-Life for offline children. What is counted here must also be MOVABLE — an item this
+		// map cannot resolve cannot be handed to anybody, and counting it would turn a refusal
+		// ("you do not have them") into a failure after the fact ("we could not move them"),
+		// which is a strictly worse answer to the same question.
+		CSE_Abstract* const c = m_server->ID_to_entity(child_id);
+		if (!c || !c->s_name.size())
+			continue;
+		if (!xr_strcmp(c->s_name.c_str(), section.c_str()))
+			++n;
+	}
+	return n;
+}
+
+u32 game_sv_Single::coop_hand_over(u16 from_id, u16 to_id, const shared_str& section, u16 count)
+{
+	if (!m_server || !count || !section.size())
+		return 0;
+
+	CSE_Abstract* const from = m_server->ID_to_entity(from_id);
+	CSE_Abstract* const to   = m_server->ID_to_entity(to_id);
+	// Perform_transfer ASSERTS all three of these (what->ID_Parent == from->ID, from != to, and
+	// non-null). An assert on a dedicated server takes the session down for everyone, so each one
+	// is a checked refusal here rather than a trusted precondition.
+	if (!from || !to || from == to)
+	{
+		Msg("! COOP(quest): hand-over %ux '%s' refused — from=%u(%p) to=%u(%p)",
+			u32(count), section.c_str(), u32(from_id), from, u32(to_id), to);
+		return 0;
+	}
+
+	xr_vector<CSE_Abstract*> take;
+	for (u32 i = 0; i < from->children.size() && take.size() < u32(count); ++i)
+	{
+		CSE_Abstract* const c = m_server->ID_to_entity(from->children[i]);
+		if (!c || !c->s_name.size())
+			continue;
+		if (xr_strcmp(c->s_name.c_str(), section.c_str()))
+			continue;
+		if (c->ID_Parent != from->ID)
+			continue;                       // the children list and the parent link disagree
+		take.push_back(c);
+	}
+	if (take.size() < u32(count))
+	{
+		Msg("! COOP(quest): hand-over %ux '%s' refused — only %u movable on %u; NOTHING moved",
+			u32(count), section.c_str(), u32(take.size()), u32(from_id));
+		return 0;
+	}
+
+	// The stock server-side transfer: re-parent the CSE and ship the reject/take pair to every
+	// client in one M_EVENT_PACK, exactly as the deathmatch corpse-looting path does. The items
+	// are not DESTROYED — they change hands, which is what a turn-in is and what keeps §7.2's
+	// "same conservation logic as loot" true for the goods as well as for the task.
+	NET_Packet EventPack, PacketReject, PacketTake;
+	EventPack.w_begin(M_EVENT_PACK);
+	for (u32 i = 0; i < take.size(); ++i)
+	{
+		m_server->Perform_transfer(PacketReject, PacketTake, take[i], from, to);
+		EventPack.w_u8(u8(PacketReject.B.count));
+		EventPack.w(&PacketReject.B.data, PacketReject.B.count);
+		EventPack.w_u8(u8(PacketTake.B.count));
+		EventPack.w(&PacketTake.B.data, PacketTake.B.count);
+	}
+	if (EventPack.B.count > 2)
+		u_EventSend(EventPack);
+
+	Msg("- COOP(quest): hand-over %u x '%s' from %u to %u (server tree re-parented, clients told)",
+		u32(take.size()), section.c_str(), u32(from_id), u32(to_id));
+	return u32(take.size());
+}
+
+u32 game_sv_Single::coop_grant_items(u16 owner_id, const shared_str& section, u16 count)
+{
+	if (!m_server || !count || !section.size())
+		return 0;
+	CSE_Abstract* const owner = m_server->ID_to_entity(owner_id);
+	if (!owner || !owner->owner)
+	{
+		Msg("! COOP(quest-test): cannot grant %ux '%s' — entity %u is absent or unowned",
+			u32(count), section.c_str(), u32(owner_id));
+		return 0;
+	}
+
+	coop_checkpoint_item rec;
+	rec.section      = section;
+	rec.condition    = 1.f;
+	rec.ammo_elapsed = 0;
+	rec.ammo_type    = 0;
+	rec.slot         = 0xff;
+
+	u32 made = 0;
+	for (u16 i = 0; i < count; ++i)
+		if (coop_spawn_checkpoint_item(owner, owner->owner, rec))
+			++made;
+	Msg("- COOP(quest-test): granted %u of %u '%s' to %u", made, u32(count), section.c_str(),
+		u32(owner_id));
+	return made;
+}
+
+// The task layer's view of the two above: it knows about players and sections, not about
+// IPureServer. Declared in GametaskManager.h.
+namespace
+{
+	game_sv_Single* coop_server_game()
+	{
+		if (!g_pGameLevel || !Level().Server)
+			return NULL;
+		return smart_cast<game_sv_Single*>(Level().Server->game);
+	}
+}
+
+u32 coop_items_count(u16 owner_id, const shared_str& section)
+{
+	game_sv_Single* const g = coop_server_game();
+	return g ? g->coop_count_carried(owner_id, section) : 0u;
+}
+
+u32 coop_items_hand_over(u16 from_id, u16 to_id, const shared_str& section, u16 count)
+{
+	game_sv_Single* const g = coop_server_game();
+	return g ? g->coop_hand_over(from_id, to_id, section, count) : 0u;
+}
+
 void game_sv_Single::coop_poll_spawns()
 {
 	if (!xr_enet::enabled() || !ai().get_alife())
@@ -2554,6 +2704,50 @@ static int coop_task_state_now(LPCSTR id)
 {
 	CGameTask* const t = Level().GameTaskManager().HasGameTask(shared_str(id), false);
 	return t ? int(t->GetTaskState()) : -1;
+}
+
+// MP fork (§14 step 8 phase 3 Q4, harness): a live NPC that can be talked to and handed things.
+//
+// A dialogue needs a partner and a turn-in needs somebody to receive the goods, and both must be
+// ONLINE on this server — the harness cannot invent one, and it must not silently substitute the
+// player for one either, because a hand-over to yourself is not a hand-over. Returns
+// mp_coop_owner::none if the world has nobody, which the probe reports rather than working around:
+// "we could not find an NPC" and "the NPC refused" are different results and only one is a defect.
+static u16 coop_find_npc(u16 except_id)
+{
+	if (!g_pGameLevel)
+		return mp_coop_owner::none;
+	u16 found = mp_coop_owner::none;
+	u32 candidates = 0;
+	for (u32 i = 0; i < Level().Objects.o_count(); ++i)
+	{
+		CObject* const o = Level().Objects.o_get_by_iterator(i);
+		if (!o || o->getDestroy() || o->ID() == except_id)
+			continue;
+		if (smart_cast<CActor*>(o))
+			continue;                      // a player, not somebody to talk to
+		CInventoryOwner* const io = smart_cast<CInventoryOwner*>(o);
+		CEntityAlive* const alive = smart_cast<CEntityAlive*>(o);
+		if (!io || !alive || !alive->g_Alive())
+			continue;
+		++candidates;
+		if (found == mp_coop_owner::none)
+			found = o->ID();
+	}
+	Msg("- COOP(quest5): NPC search: %u live inventory owner(s) online, chose %u",
+		candidates, u32(found));
+	return found;
+}
+
+// Does this entity know this info portion? Read off the same store the dialogue's <give_info>
+// writes to (CInventoryOwner), so the question and the answer cannot be about different places.
+static bool coop_has_info(u16 id, LPCSTR info)
+{
+	if (!g_pGameLevel || id == mp_coop_owner::none || !info || !*info)
+		return false;
+	CObject* const o = Level().Objects.net_Find(id);
+	CInventoryOwner* const io = o ? smart_cast<CInventoryOwner*>(o) : NULL;
+	return io ? io->HasInfo(shared_str(info)) : false;
 }
 
 u16 game_sv_Single::coop_first_player_actor()
@@ -3152,6 +3346,229 @@ void game_sv_Single::Update()
 			Msg("- COOP(quest4r): forced tick at %I64u -> terminal=%u clear(rem=%u state=%d) "
 				"hold(rem=%u state=%d) guard(rem=%u state=%d) pass=%d",
 				far_future, terminal, rc, sc, rh, sh, rg, sg, pass ? 1 : 0);
+			FlushLog();
+		}
+	}
+
+	// MP fork (§14 step 8 phase 3 Q4, harness): -coop_test_quest5 <seconds> — §7.3's HARD category,
+	// dialogue-routed acquisition and turn-in.
+	//
+	// What this probe does NOT do is run the dialogue: that is the client's job (-coop_test_dialog),
+	// because the whole point is that the claim and the turn-in arrive as a real M_XRNET_DIALOG_ACTION
+	// from a real player and are attributed by the acting scope the server opens for it. What the
+	// probe does is build the state the dialogue then acts on, and take the assertions that need
+	// server-side reads.
+	//
+	// The setup is arranged so that every refusal has a DIFFERENT cause, because a turn-in that
+	// refuses everything for one reason passes a test that only checks it refused:
+	//   coop_q5_d  unclaimed, deliver 3      -> claimed BY THE DIALOGUE, then short, then delivered,
+	//                                          then replayed (and the replay must take nothing)
+	//   coop_q5_b  claimed by the attacker   -> the dialogue's claim LOSES, on a real client
+	//   coop_q5_p  the attacker's own errand -> refused: not the owner
+	//   coop_q5_f  faction, player's community, claimed by the attacker -> ACCEPTED: §7.4 says
+	//                                          completion is member-agnostic, and this is the
+	//                                          discriminating pair with coop_q5_p — same setup,
+	//                                          same claimant, one bit different
+	//   coop_q5_w  faction, a community the player is not in -> refused
+	//   coop_q5_r  the player's own, owed to a recipient nobody is -> refused: wrong NPC
+	//   coop_q5_u  never claimed -> stays in the pool, the client's control that a pool exists
+	//   coop_q5_z  the ROUTING control: claimed through the same entry point gamedata uses, once
+	//              with no acting scope (must refuse) and once with one (must succeed)
+	if (xr_enet::enabled() && ai().get_alife() && coop_param("-coop_test_quest5"))
+	{
+		static bool    s_q5_init     = false;
+		static bool    s_q5_done     = false;
+		static bool    s_q5_replayed = false;
+		static u32     s_q5_armed    = 0;
+		static u32     s_q5_ms       = 0;
+		static u32     s_q5_retry    = 0;
+		static u32     s_q5_fired    = 0;
+		static u32     s_q5_replay_ms = 0;
+		static string64 s_q5_item    = {0};
+		static u16     s_q5_player   = mp_coop_owner::none;
+		static u16     s_q5_partner  = mp_coop_owner::none;
+		if (!s_q5_init)
+		{
+			s_q5_init = true;
+			LPCSTR p = coop_param("-coop_test_quest5");
+			const float secs = p ? (float)atof(p) : 0.f;
+			s_q5_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 30000u;
+			s_q5_armed = Device.dwTimeGlobal;
+			LPCSTR r = coop_param("-coop_test_quest5_replay");
+			const float rsecs = r ? (float)atof(r) : 0.f;
+			s_q5_replay_ms = (rsecs > 0.f && rsecs <= 86400.f) ? (u32)(rsecs * 1000.f) : 0u;
+			// The fetch item is a FLAG, not a constant, because a section name that does not exist
+			// in this install fails at spawn time and would cost a full build cycle to change.
+			LPCSTR i = coop_param("-coop_test_quest5_item");
+			u32 n = 0;
+			while (i && *i && *i != ' ' && *i != '-' && n < sizeof(s_q5_item) - 1)
+				s_q5_item[n++] = *i++;
+			s_q5_item[n] = 0;
+			if (!n)
+				xr_strcpy(s_q5_item, "conserva");   // in stock Anomaly, and NOT in the starting kit
+			Msg("- COOP(quest5): dialogue probe armed, firing in %ums (item '%s', verify %s)",
+				s_q5_ms, s_q5_item, s_q5_replay_ms ? "armed" : "off");
+		}
+		if (!s_q5_done && Device.dwTimeGlobal - s_q5_armed >= s_q5_ms &&
+		    Device.dwTimeGlobal - s_q5_retry >= 5000)
+		{
+			s_q5_retry = Device.dwTimeGlobal;
+			const u16 player_id = coop_first_player_actor();
+			if (player_id != mp_coop_owner::none)
+			{
+				s_q5_done   = true;
+				s_q5_player = player_id;
+				const shared_str item(s_q5_item);
+				const u16 synth = u16(0xF005);
+
+				// The player's community, read off the live object — the same call the task layer
+				// makes, so the two cannot disagree about what a member is.
+				u16 pcomm = u16(-1);
+				if (CObject* const po = Level().Objects.net_Find(player_id))
+					if (CInventoryOwner* const pio = smart_cast<CInventoryOwner*>(po))
+						pcomm = u16(pio->CharacterInfo().Community().index());
+				// A community the player is demonstrably NOT in. Picked by construction rather
+				// than by finding some other faction, because "some other faction" is exactly the
+				// kind of environmental assumption that makes a negative gate vacuous when the
+				// level happens to disagree.
+				const u16 wrongcomm = (pcomm == 0) ? u16(1) : u16(0);
+
+				// A live NPC to be the dialogue's partner and the recipient of the goods. It is
+				// found here as well as on the client because the harness's info-subject replay
+				// needs one server-side; a missing one is reported, not worked around.
+				s_q5_partner = coop_find_npc(player_id);
+
+				const u32 base = coop_items_count(player_id, item);
+				const u32 granted = coop_grant_items(player_id, item, 2);   // 2 of the 3 owed
+				const u32 carried = coop_items_count(player_id, item);
+
+				coop_task_offer("coop_q5_d", 0, /*faction*/ false, /*world_state*/ false);
+				coop_task_set_deliver("coop_q5_d", item, 3, mp_coop_owner::none);
+				coop_task_offer("coop_q5_b", 0, false, false);
+				coop_task_offer("coop_q5_p", 0, false, false);
+				coop_task_set_deliver("coop_q5_p", item, 1, mp_coop_owner::none);
+				coop_task_offer("coop_q5_f", 0, /*faction*/ true, false);
+				coop_task_set_deliver("coop_q5_f", item, 1, mp_coop_owner::none);
+				coop_task_offer("coop_q5_w", 0, /*faction*/ true, false);
+				coop_task_set_deliver("coop_q5_w", item, 1, mp_coop_owner::none);
+				coop_task_offer("coop_q5_r", 0, false, false);
+				coop_task_set_deliver("coop_q5_r", item, 1, u16(0xF00A));   // a recipient nobody is
+				coop_task_offer("coop_q5_u", 0, false, false);              // never claimed
+				coop_task_offer("coop_q5_z", 0, false, false);              // the routing control
+
+				// The attacker gets there first on four of them. b is the one the real client will
+				// try for and lose; p, f and w are the ones it will try to TURN IN without having
+				// claimed, which is the §7.4 question.
+				const int b1 = int(coop_task_claim("coop_q5_b", synth));
+				coop_task_claim("coop_q5_p", synth);
+				coop_task_claim("coop_q5_f", synth);
+				coop_task_claim("coop_q5_w", synth);
+				// AFTER the claims: claiming a faction offer records the community captured at
+				// offer time, which for an ambient offer (offerer 0) is "none".
+				coop_task_set_community("coop_q5_f", pcomm);
+				coop_task_set_community("coop_q5_w", wrongcomm);
+
+				// The routing control, and it is the assertion this probe can make with no client
+				// dialogue at all: the SAME entry point gamedata calls, once with no acting player
+				// and once with one. The first must refuse — the server runs script autonomously
+				// all the time, and a claim taken in that context would hand a personal errand to
+				// nobody.
+				const int z0 = int(coop_task_claim_acting("coop_q5_z"));
+				int z1 = -1;
+				{
+					mp_coop_owner::acting_scope scope(player_id);
+					z1 = int(coop_task_claim_acting("coop_q5_z"));
+					coop_task_claim_acting("coop_q5_r");     // the player's own, for the NPC gate
+				}
+				const int t0 = int(coop_task_turn_in_acting("coop_q5_z", player_id));
+				const u16 zowner = coop_task_owner_of("coop_q5_z");
+				const u16 rowner = coop_task_owner_of("coop_q5_r");
+
+				const bool pass = (base == 0) && (granted == 2) && (carried == 2) &&
+				                  (b1 == coop_claim_ok) &&
+				                  (z0 == coop_claim_no_actor) && (z1 == coop_claim_ok) &&
+				                  (t0 == coop_turnin_no_actor) &&
+				                  (zowner == player_id) && (rowner == player_id) &&
+				                  (pcomm != u16(-1)) && (s_q5_partner != mp_coop_owner::none);
+				Msg("- COOP(quest5): setup done player=%u partner=%u synth=%u item='%s' base=%u "
+					"granted=%u carried=%u pcomm=%d wrongcomm=%d b1=%d z_noscope=%d z_scoped=%d "
+					"turnin_noscope=%d zowner=%u rowner=%u pool=%u pass=%d",
+					u32(player_id), u32(s_q5_partner), u32(synth), s_q5_item, base, granted,
+					carried, int(short(pcomm)), int(short(wrongcomm)), b1, z0, z1, t0,
+					u32(zowner), u32(rowner), coop_task_pool_size(), pass ? 1 : 0);
+				coop_dump_task_pool();
+				Level().GameTaskManager().coop_broadcast_tasks();
+				s_q5_fired = Device.dwTimeGlobal;
+				FlushLog();
+			}
+		}
+
+		// The verify stage: read the world the DIALOGUE left behind, and take the one assertion
+		// that needs the server to drive a phrase itself.
+		if (s_q5_done && s_q5_replay_ms && !s_q5_replayed &&
+		    Device.dwTimeGlobal - s_q5_fired >= s_q5_replay_ms)
+		{
+			s_q5_replayed = true;
+			const shared_str item(s_q5_item);
+			const u16 player_id = s_q5_player;
+			const u16 synth = u16(0xF005);
+
+			// --- what the dialogue did ---
+			const u16 downer = coop_task_owner_of("coop_q5_d");
+			const u16 bowner = coop_task_owner_of("coop_q5_b");
+			const int dstate = coop_task_state_now("coop_q5_d");
+			const int bstate = coop_task_state_now("coop_q5_b");
+			const int pstate = coop_task_state_now("coop_q5_p");
+			const int fstate = coop_task_state_now("coop_q5_f");
+			const int wstate = coop_task_state_now("coop_q5_w");
+			const int rstate = coop_task_state_now("coop_q5_r");
+			const u32 drem = coop_task_cond_remaining("coop_q5_d");
+			const u32 prem = coop_task_cond_remaining("coop_q5_p");
+			const u32 wrem = coop_task_cond_remaining("coop_q5_w");
+			const u32 rrem = coop_task_cond_remaining("coop_q5_r");
+			const u32 carried = coop_items_count(player_id, item);
+			const u32 with_npc = (s_q5_partner != mp_coop_owner::none)
+				? coop_items_count(s_q5_partner, item) : 0u;
+
+			// --- the info subject: ONE phrase, TWO acting scopes, opposite outcomes ---
+			//
+			// This is the only way the §6.1 routing is observable with a single client connected.
+			// Stock writes a dialogue's <give_info> to Actor(), which on this server is g_actor —
+			// "whichever player actor spawned last", i.e. this very player. So a run under an
+			// acting scope for an id that resolves to nobody must leave the player WITHOUT the
+			// portion; under stock behaviour they would have it, and nothing else in this test
+			// would notice.
+			bool ghost_after_bogus = true, ghost_after_real = false;
+			if (Level().Server && s_q5_partner != mp_coop_owner::none)
+			{
+				Level().Server->coop_run_dialog_phrase(synth, player_id, s_q5_partner,
+					"coop_q5_dialog", "probe_info");
+				ghost_after_bogus = coop_has_info(player_id, "coop_q5_ghost");
+				Level().Server->coop_run_dialog_phrase(player_id, player_id, s_q5_partner,
+					"coop_q5_dialog", "probe_info");
+				ghost_after_real = coop_has_info(player_id, "coop_q5_ghost");
+			}
+			// The portion the dialogue's own turn-in phrase gives, which lands through the same
+			// routing on the live path rather than the replayed one.
+			const bool delivered_info = coop_has_info(player_id, "coop_q5_delivered");
+
+			// eTaskStateInProgress == 1, eTaskStateCompleted == 2.
+			const bool pass =
+				(downer == player_id) && (dstate == int(eTaskStateCompleted)) && (drem == 0) &&
+				(bowner == synth) && (bstate != int(eTaskStateCompleted)) &&
+				(pstate == int(eTaskStateInProgress)) && (prem == 1) &&
+				(fstate == int(eTaskStateCompleted)) &&
+				(wstate == int(eTaskStateInProgress)) && (wrem == 1) &&
+				(rstate == int(eTaskStateInProgress)) && (rrem == 1) &&
+				(carried == 0) && (with_npc == 4) &&
+				(!ghost_after_bogus) && ghost_after_real && delivered_info;
+			Msg("- COOP(quest5v): verify downer=%u dstate=%d drem=%u bowner=%u bstate=%d "
+				"pstate=%d prem=%u fstate=%d wstate=%d wrem=%u rstate=%d rrem=%u "
+				"carried=%u with_npc=%u ghost_bogus=%d ghost_real=%d delivered_info=%d pass=%d",
+				u32(downer), dstate, drem, u32(bowner), bstate, pstate, prem, fstate, wstate,
+				wrem, rstate, rrem, carried, with_npc, ghost_after_bogus ? 1 : 0,
+				ghost_after_real ? 1 : 0, delivered_info ? 1 : 0, pass ? 1 : 0);
+			coop_dump_task_pool();
 			FlushLog();
 		}
 	}

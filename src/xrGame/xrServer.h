@@ -238,6 +238,13 @@ public:
 	// MP fork (§4 step 3, C2): mark a creature as decision-driven (called at the broadcast site).
 	void coop_mark_decision_driven(u16 id);
 
+	// MP fork (§14 step 8 phase 3 Q4): run one dialogue phrase's ACTION on behalf of a named
+	// player. coop_run_dialog_action (private, above) is this with the acting player read off the
+	// wire; the Q4 harness calls this directly to replay one phrase under two different acting
+	// scopes, which is how the info-subject routing is made observable with one client connected.
+	void coop_run_dialog_phrase(u16 acting_id, u16 speaker_id, u16 partner_id, LPCSTR dialog_id,
+	                            LPCSTR phrase_id);
+
 	void Export_game_type(IClient* CL);
 	void Perform_game_export();
 	BOOL PerformRP(CSE_Abstract* E);

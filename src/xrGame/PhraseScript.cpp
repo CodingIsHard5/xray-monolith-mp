@@ -12,6 +12,8 @@
 #include "level.h"                                 // MP fork (§19 co-op): Level().Send
 #include "../xrNetServer/xr_enet_transport.h"      // MP fork (§19 co-op): xr_enet::enabled
 #include "../xrServerEntities/xrMessages.h"        // MP fork (§19 co-op): M_XRNET_DIALOG_ACTION
+#include "alife_simulator.h"                       // MP fork (§14 step 8 Q4): ai().get_alife()
+#include "mp_coop_owner.h"                         // MP fork (§14 step 8 Q4): the acting player
 
 
 //загрузка из XML файла
@@ -40,13 +42,63 @@ void CDialogScriptHelper::LoadSequence(CUIXml* uiXml, XML_NODE* phrase_node,
 	}
 }
 
+// MP fork (§14 step 8 phase 3 Q4 / doc §6.1): WHOSE info portion is a dialogue talking about?
+//
+// Stock answers Actor() — the single local actor — for both the <has_info> gate and the
+// <give_info>/<disable_info> writes, and in single player that is right by construction. On a
+// co-op server it is wrong in the quietest possible way: Actor() is g_actor, and g_actor is
+// assigned in CActor::net_Spawn to any actor spawned LOCAL+ASPLAYER, which on the server is EVERY
+// co-op player. So it means "whichever player actor spawned last" — the same failure phase 1
+// measured in ai().alife().graph().actor() and rejected the world tier over. With one client
+// connected it happens to be the right actor, which is exactly why nothing has ever noticed.
+//
+// The subject is the ACTING player: the one this dialogue is being run on behalf of
+// (mp_coop_owner::acting_scope, opened by xrServer::coop_run_dialog_action). If a context is set
+// but does not resolve to an inventory owner, the write is REFUSED rather than falling back — a
+// fallback here would silently write a turn-in's info portion onto some other player, and the
+// stock fallback would write it onto whoever spawned last, which is the bug.
+//
+// Off the co-op server (single player, and every client, where preconditions run locally against
+// the one actor that exists) this is byte-for-byte the stock behaviour.
+const CInventoryOwner* CDialogScriptHelper::coop_info_subject(const CInventoryOwner* pOwner,
+                                                              LPCSTR what) const
+{
+	const bool coop_server = xr_enet::enabled() && !!ai().get_alife();
+	if (!coop_server)
+	{
+		const CActor* const a = Actor();
+		return a ? smart_cast<const CInventoryOwner*>(a) : NULL;
+	}
+
+	const u16 acting = mp_coop_owner::acting_actor();
+	if (acting != mp_coop_owner::none)
+	{
+		const CObject* const o = Level().Objects.net_Find(acting);
+		const CInventoryOwner* const io = o ? smart_cast<const CInventoryOwner*>(o) : NULL;
+		if (!io)
+			Msg("! COOP(dialog): %s has no subject — acting actor %u is not an inventory owner on "
+				"this server; REFUSING rather than attributing it to someone else", what, u32(acting));
+		return io;
+	}
+
+	// No interaction in progress: the speaker names its own subject. This is the path a
+	// server-side script action takes when it runs a dialogue helper outside coop_run_dialog_action.
+	if (!pOwner)
+		Msg("! COOP(dialog): %s has no subject — no acting actor and no speaker", what);
+	return pOwner;
+}
+
 bool CDialogScriptHelper::CheckInfo(const CInventoryOwner* pOwner) const
 {
 	THROW(pOwner);
 
+	const CInventoryOwner* const subject = coop_info_subject(pOwner, "an info precondition");
+	if (!subject)
+		return false;      // cannot be satisfied by an owner that does not exist
+
 	for (u32 i = 0; i < m_HasInfo.size(); ++i)
 	{
-		if (!Actor()->HasInfo(m_HasInfo[i]))
+		if (!subject->HasInfo(m_HasInfo[i]))
 		{
 #ifdef DEBUG
 			if(psAI_Flags.test(aiDialogs) )
@@ -58,7 +110,7 @@ bool CDialogScriptHelper::CheckInfo(const CInventoryOwner* pOwner) const
 
 	for (u32 i = 0; i < m_DontHasInfo.size(); i++)
 	{
-		if (Actor()->HasInfo(m_DontHasInfo[i]))
+		if (subject->HasInfo(m_DontHasInfo[i]))
 		{
 #ifdef DEBUG
 			if(psAI_Flags.test(aiDialogs) )
@@ -75,11 +127,29 @@ void CDialogScriptHelper::TransferInfo(const CInventoryOwner* pOwner) const
 {
 	THROW(pOwner);
 
+	if (!m_GiveInfo.size() && !m_DisableInfo.size())
+		return;                       // nothing to attribute: do not even ask whose
+
+	const CInventoryOwner* const subject = coop_info_subject(pOwner, "a dialogue info write");
+	if (!subject)
+		return;                       // refused, and said so in coop_info_subject
+
+	// §6.3's BRIDGE CASE arrives here: "a flag WRITTEN per-player by a dialogue action (give_info
+	// on turn-in) that is semantically a WORLD fact". This is the per-player half — the world half
+	// is phase 2's write-time promotion through the routed globals, which reads the same
+	// classification table. Both start from a correctly attributed player write, which is what
+	// this function now is.
+	const CObject* const who = smart_cast<const CObject*>(subject);
+	if (xr_enet::enabled() && ai().get_alife() && who)
+		Msg("- COOP(dialog): info write x%u/x%u -> subject %u (acting=%u)",
+			u32(m_GiveInfo.size()), u32(m_DisableInfo.size()), u32(who->ID()),
+			u32(mp_coop_owner::acting_actor()));
+
 	for (u32 i = 0; i < m_GiveInfo.size(); ++i)
-		Actor()->TransferInfo(m_GiveInfo[i], true);
+		subject->TransferInfo(m_GiveInfo[i], true);
 
 	for (u32 i = 0; i < m_DisableInfo.size(); ++i)
-		Actor()->TransferInfo(m_DisableInfo[i], false);
+		subject->TransferInfo(m_DisableInfo[i], false);
 }
 
 LPCSTR CDialogScriptHelper::GetScriptText(LPCSTR str_to_translate, const CGameObject* pSpeakerGO1,
