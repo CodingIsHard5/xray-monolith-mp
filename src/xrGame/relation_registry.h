@@ -169,6 +169,7 @@ u16 coop_rep_subject(int passed_id, bool is_write);
 // player, refused = calls that had no subject and were dropped. A seam that is
 // never exercised and a seam that works are indistinguishable without these.
 u32 coop_rep_routed_count();
+u32 coop_rep_routed_zero_count();   // of those, the hardcoded-`0` call sites
 u32 coop_rep_refused_count();
 
 void coop_rep_state_save(IWriter& stream);

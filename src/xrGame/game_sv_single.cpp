@@ -3899,8 +3899,8 @@ void game_sv_Single::Update()
 				// The seam's own counters. A seam that works and a seam that was never reached
 				// read identically off the values alone: routed=0 with every value correct means
 				// the probe named its subject itself and the routing was never exercised.
-				Msg("- COOP(rep2): seam routed=%u refused=%u (this pass: routed=%u refused=%u)",
-					coop_rep_routed_count(), coop_rep_refused_count(),
+				Msg("- COOP(rep2): seam routed=%u refused=%u zero=%u (this pass: routed=%u refused=%u)",
+					coop_rep_routed_count(), coop_rep_refused_count(), coop_rep_routed_zero_count(),
 					coop_rep_routed_count() - routed_before,
 					coop_rep_refused_count() - refused_before);
 				FlushLog();

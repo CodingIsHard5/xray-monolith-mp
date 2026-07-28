@@ -13,6 +13,7 @@
 
 // MP fork (§14 step 8 phase 4 R2): the routing seam + the faction tier's .scop chunk.
 #include "mp_coop_owner.h"
+#include "../xrNetServer/xr_enet_transport.h"   // xr_enet::enabled() — the id-0 route is co-op only
 #include "mp_coop_chunk_reader.h"
 #include "alife_space.h"                    // COOP_REP_CHUNK_DATA
 #include "alife_object_registry.h"
@@ -277,6 +278,7 @@ void RELATION_REGISTRY::SetCommunityRelation(CHARACTER_COMMUNITY_INDEX index1, C
 namespace
 {
 	u32 s_rep_routed  = 0;
+	u32 s_rep_routed_zero = 0;   // of those, the hardcoded-0 shape
 	u32 s_rep_refused = 0;
 	u32 s_rep_refuse_logged = 0;
 
@@ -340,6 +342,7 @@ namespace
 }
 
 u32 coop_rep_routed_count()  { return s_rep_routed; }
+u32 coop_rep_routed_zero_count() { return s_rep_routed_zero; }
 u32 coop_rep_refused_count() { return s_rep_refused; }
 
 u16 coop_rep_subject(int passed_id, bool is_write)
@@ -349,6 +352,26 @@ u16 coop_rep_subject(int passed_id, bool is_write)
 	// only for the call sites that had no subject to name.
 	if (passed_id != COOP_REP_ACTING)
 	{
+		// ...with ONE exception, and it is measured rather than assumed. A survey of the goodwill
+		// call sites in the deployed gamedata found three ways stock code names "the actor" and
+		// only one of them is a name: `AC_ID` (7 sites, and undefined in this build's script set,
+		// so it arrives as nil and the Lua wrapper turns it into the sentinel), `db.actor:id()`
+		// (3 sites, which raise before they ever reach here), and a HARDCODED 0 — the id the
+		// single-player actor always had. On this server entity 0 is the loopback self-client's
+		// fake host actor, so a literal 0 asks about a body no player owns, and every player
+		// shares the answer. Inside an acting scope that is unambiguously "the actor", so it is
+		// routed; with no acting player it is passed through exactly as before, because then
+		// there is no better answer and a refusal would change stock behaviour for nothing.
+		if (passed_id == 0 && xr_enet::enabled())
+		{
+			const u16 acting_for_zero = mp_coop_owner::acting_actor();
+			if (acting_for_zero != mp_coop_owner::none)
+			{
+				++s_rep_routed;
+				++s_rep_routed_zero;
+				return acting_for_zero;
+			}
+		}
 		if (passed_id < 0 || passed_id > int(u16(-1)))
 			return mp_coop_owner::none;
 		return u16(passed_id);
