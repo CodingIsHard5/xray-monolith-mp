@@ -1276,6 +1276,18 @@ void xrDebug::_initialize(const bool& dedicated)
 #endif // USE_BUG_TRAP
 	previous_filter = ::SetUnhandledExceptionFilter(UnhandledFilter); // exception handler to all "unhandled" exceptions
 
+	// COOP (§14 step 8 P4): the line above is why the wedge has stayed unattributed for five
+	// increments. `SetUnhandledExceptionFilter` fires only for UNHANDLED exceptions, and the access
+	// violations that kill this server are HANDLED — LuaJIT's `lj_err_unwind_win64` catches them and
+	// resumes. So the engine's own crash path never runs, nothing reaches the game log, and the only
+	// witness is a wine `+seh` trace in a different file with no game-log interleaving.
+	//
+	// A VECTORED handler runs first-chance, ahead of every SEH frame including LuaJIT's, so it sees
+	// the faults that are about to be swallowed. See coop_av_install() for what it does and does not
+	// do — in particular it does NOT change control flow.
+	if (dedicated)
+		coop_av_install();
+
 #if 0
     struct foo
     {

@@ -4199,6 +4199,12 @@ void game_sv_Single::Update()
 			// run's wait graph. R4's deadlock is `0118 holds 112A9C0 and wants heap.cs` against
 			// `0174 holds heap.cs and wants 112A9C0`; this is what turns `112A9C0` into a name.
 			coop_cs_dump();
+			// And the fault table, dumped HERE for the same reason but with a different job: at arm
+			// time there have been no faults yet, so this prints "INSTALLED, 0 recorded" — which is
+			// the control that makes a later zero readable. A run that ends with no COOP(av) lines
+			// and no arm-time line is an instrument that never registered; a run that ends with no
+			// COOP(av) lines but WITH the arm-time line genuinely had no access violations.
+			coop_av_dump();
 			Msg("- COOP(rep31): falloff[SYNTHETIC, no second live client] radius=%.1f m  "
 				"scale(0)=%.3f scale(r/2)=%.3f scale(r-0.1)=%.3f scale(r)=%.3f scale(r+1)=%.3f",
 				r, coop_rep_bystander_scale(0.f), coop_rep_bystander_scale(r * 0.5f),

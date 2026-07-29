@@ -92,6 +92,18 @@ extern XRCORE_API xrDebug Debug;
 
 XRCORE_API void LogStackTrace(LPCSTR header);
 
+// COOP (§14 step 8 P4): a FIRST-CHANCE access-violation reporter, installed on the dedicated server
+// only. See coop_av_report.cpp for the whole argument; the short version is that the engine's crash
+// handler above is `SetUnhandledExceptionFilter`, which fires only for exceptions NOBODY handles —
+// and the access violations that wedge this server are handled, by LuaJIT, which swallows them and
+// resumes. A vectored handler runs first-chance and sees them. It does NOT change control flow.
+//
+// `coop_av_dump()` is the POSITIVE CONTROL: called before any fault it reports the handler as
+// installed with zero sites, which is what makes a later zero readable as a real zero rather than as
+// an instrument that was never registered.
+XRCORE_API void coop_av_install();
+XRCORE_API void coop_av_dump();
+
 #include "xrDebug_macros.h"
 
 #endif // xrDebugH
