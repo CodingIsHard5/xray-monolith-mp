@@ -342,6 +342,26 @@ namespace
 	//
 	// Stored by NAME, like the file, so the overlay cannot be re-pointed at a different faction by
 	// anything that renumbers communities between a load and a reset.
+	// §14 step 8 P4 R3.2 — the pressure accumulator lives HERE, next to the overlay it gates,
+	// because coop_rep_state_save/_load are defined below this point and persist both. Declaring it
+	// beside the R3.2 tunables further down put it after its own serialiser (build 30409522906:
+	// 'rep_pressure_cell': undeclared identifier, and an 11 KB stub from a job reporting success).
+	struct rep_pressure_cell
+	{
+		shared_str from;      // the WRONGED faction
+		shared_str to;        // the faction held responsible
+		s32        value;     // accumulated, signed like the hits that made it
+		u64        stamp;     // GAME time this cell was last touched — its own decay clock
+	};
+	xr_vector<rep_pressure_cell> s_rep_pressure;
+
+	// The overlay's decay clock. Stored and restored, because a fresh timer and a correctly
+	// resumed one are indistinguishable from the VALUE alone — R3.2's third guard rail.
+	u64 s_rep_overlay_stamp = 0;
+
+	u32 s_pressure_crossed  = 0;   // bars crossed (a relation actually moved)
+	u32 s_pressure_held     = 0;   // kills absorbed by the bar (the griefer-loop counter)
+
 	struct rep_cell
 	{
 		shared_str from, to;
@@ -804,22 +824,9 @@ namespace
 	// a game-time interval, not a frame count.
 	const u64 COOP_REP_DECAY_TICK_MS = 30ull * 60ull * 1000ull;   // half a game-hour
 
-	struct rep_pressure_cell
-	{
-		shared_str from;      // the WRONGED faction
-		shared_str to;        // the faction held responsible
-		s32        value;     // accumulated, signed like the hits that made it
-		u64        stamp;     // GAME time this cell was last touched — its own decay clock
-	};
-	xr_vector<rep_pressure_cell> s_rep_pressure;
-
-	// The overlay's decay clock. Stored and restored, because a fresh timer and a correctly
-	// resumed one are indistinguishable from the VALUE alone — which is the whole point of R3.2's
-	// third guard rail.
-	u64 s_rep_overlay_stamp = 0;
-
-	u32 s_pressure_crossed  = 0;   // bars crossed (a relation actually moved)
-	u32 s_pressure_held     = 0;   // kills absorbed by the bar (the griefer-loop counter)
+	// (rep_pressure_cell / s_rep_pressure / s_rep_overlay_stamp / the counters are declared beside
+	// s_rep_overlay near the top of this file — coop_rep_state_save and _load are defined ABOVE
+	// this point and persist them, so they have to exist before those functions, not after.)
 
 	u32 s_bystanders_considered = 0;
 	u32 s_bystanders_moved      = 0;
