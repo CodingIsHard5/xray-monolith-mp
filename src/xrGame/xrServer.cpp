@@ -171,11 +171,36 @@ void xrServer::client_Destroy(IClient* C)
 		DelayedPacket pp;
 		pp.SenderID = alife_client->ID;
 		xr_deque<DelayedPacket>::iterator it;
+		// MP fork (§14 step 8 QR-D): INSTRUMENTED, and the numbers matter for two separate reasons.
+		//
+		// (1) purged= / dlg= is what licenses reading a disconnect test at all. "The queued claim
+		//     was thrown away" and "the queued claim had already run" produce the same end state
+		//     from outside, and only a count taken HERE tells them apart. purged=0 means the
+		//     injection missed its window and the run must report NOT MEASURED, not a pass.
+		//
+		// (2) tid= vs game= is a DEFECT REPORT, not diagnostics. This loop walks and erases
+		//     m_aDelayedPackets while holding NOTHING, and on the ENet transport it is reached
+		//     from the pump thread (xr_enet_transport.cpp calls client_Destroy straight out of the
+		//     enet_host_service loop). ProceedDelayedPackets mutates that same deque under
+		//     DelayedPackestCS — a lock this side never takes, so it buys no mutual exclusion
+		//     against this side at all. Worse, the drain holds a REFERENCE into the deque
+		//     (DelayedPacket& DPacket) across OnDelayedMessage, which for a dialogue action runs
+		//     Lua; an erase of that element mid-handler is a use-after-free.
+		//
+		//     The lock is deliberately NOT added here in this increment. Making the pump thread
+		//     block on DelayedPackestCS makes it wait for however long the game thread spends
+		//     inside Lua, which is the lock-across-a-slow-call shape this codebase has already
+		//     been burned by twice (the logCS/allocator ABBA deadlock, and why that invariant did
+		//     not transfer to mt_csEnter). A fix wants that question answered first, on purpose,
+		//     rather than a two-line change shipped on the strength of it looking obvious.
+		u32 purged = 0, purged_dlg = 0;
 		do
 		{
 			it = std::find(m_aDelayedPackets.begin(), m_aDelayedPackets.end(), pp);
 			if (it != m_aDelayedPackets.end())
 			{
+				if (it->MsgType == M_XRNET_DIALOG_ACTION) ++purged_dlg;
+				++purged;
 				m_aDelayedPackets.erase(it);
 				Msg("removing packet from delayed event storage");
 			}
@@ -183,6 +208,16 @@ void xrServer::client_Destroy(IClient* C)
 				break;
 		}
 		while (true);
+		{
+			extern u32 g_coop_game_thread_id;
+			const u32 tid = GetCurrentThreadId();
+			Msg("- COOP(disc): PURGE for client 0x%08x purged=%u dlg=%u queue_left=%u "
+				"tid=%u game=%u on_game_thread=%d",
+				pp.SenderID.value(), purged, purged_dlg, u32(m_aDelayedPackets.size()),
+				tid, g_coop_game_thread_id,
+				(g_coop_game_thread_id != 0 && tid == g_coop_game_thread_id) ? 1 : 0);
+			FlushLog();
+		}
 
 		if (pOwner)
 		{
@@ -1879,10 +1914,54 @@ void xrServer::ProceedDelayedPackets()
 		}
 	}
 
+	// MP fork (§14 step 8 QR-D, harness): -coop_test_disc_hold <ms> holds DIALOGUE ACTIONS in this
+	// queue for N ms after they were queued, and nothing else about them changes.
+	//
+	// WHY A KNOB AT ALL, stated because a synthetic delay in a test needs a reason: the window
+	// between "the packet was queued" and "the game thread drained it" is normally ONE FRAME, tens
+	// of milliseconds. Every claim about what happens when a client disconnects *inside* that window
+	// — including this codebase's own "the queue purges a departed client's packets, so it is fine
+	// by construction" — is therefore a claim about a window no test can hit by aiming at it. The
+	// HOLD is synthetic; the purge, the disconnect and the claim it exposes are all the real paths.
+	//
+	// It stops at the FRONT of the queue rather than skipping past held packets, so ordering is
+	// preserved exactly as an undelayed drain would see it. The cost is that an administrative
+	// packet queued behind a held dialogue action waits too — acceptable in a flag that is off
+	// unless a harness asks for it, and stated here rather than discovered.
+	static u32 s_hold_ms = 0;
+	static bool s_hold_init = false;
+	if (!s_hold_init)
+	{
+		s_hold_init = true;
+		LPCSTR h = strstr(Core.Params, "-coop_test_disc_hold");
+		if (h)
+		{
+			h += sizeof("-coop_test_disc_hold") - 1;
+			while (*h == ' ') ++h;
+			const float ms = (float)atof(h);
+			if (ms > 0.f && ms <= 120000.f) s_hold_ms = (u32)ms;
+			Msg("- COOP(disc): dialogue actions will be HELD %ums in the delayed queue "
+				"(harness knob; the purge and the claim are the real paths)", s_hold_ms);
+		}
+	}
+
 	DelayedPackestCS.Enter();
 	while (!m_aDelayedPackets.empty())
 	{
 		DelayedPacket& DPacket = *m_aDelayedPackets.begin();
+		if (s_hold_ms && DPacket.MsgType == M_XRNET_DIALOG_ACTION &&
+		    (Device.dwTimeGlobal - DPacket.QueuedAt) < s_hold_ms)
+		{
+			static u32 s_said = 0;
+			if (s_said < 4)
+			{
+				++s_said;
+				Msg("- COOP(disc): HOLDING a dialogue action from client 0x%08x, queued %ums ago "
+					"(hold=%ums) — the queue-to-drain window is open",
+					DPacket.SenderID.value(), Device.dwTimeGlobal - DPacket.QueuedAt, s_hold_ms);
+			}
+			break;                               // leave it at the front; ordering unchanged
+		}
 		OnDelayedMessage(DPacket.Packet, DPacket.SenderID);
 		//		OnMessage(DPacket.Packet, DPacket.SenderID);
 		m_aDelayedPackets.pop_front();
@@ -1898,6 +1977,15 @@ void xrServer::AddDelayedPacket(NET_Packet& Packet, ClientID Sender)
 	DelayedPacket* NewPacket = &(m_aDelayedPackets.back());
 	NewPacket->SenderID = Sender;
 	CopyMemory(&(NewPacket->Packet), &Packet, sizeof(NET_Packet));
+	// MP fork (§14 step 8 QR-D): stamp what and when. r_begin is safe to call here precisely
+	// because it REWINDS (r_pos = 0, then re-reads the type) — OnDelayedMessage calls it again on
+	// the way out, so moving the read cursor now cannot change how the payload parses later.
+	{
+		u16 t = 0;
+		NewPacket->Packet.r_begin(t);
+		NewPacket->MsgType  = t;
+		NewPacket->QueuedAt = Device.dwTimeGlobal;
+	}
 
 	DelayedPackestCS.Leave();
 }

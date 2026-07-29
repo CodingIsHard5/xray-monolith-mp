@@ -160,6 +160,13 @@ private:
 	{
 		ClientID SenderID;
 		NET_Packet Packet;
+		// MP fork (§14 step 8 phase 3 QR-D): what this packet is and when it was queued. Recorded
+		// so the "a departed client's packets are purged" claim can be MEASURED rather than argued
+		// — the purge log can say what it actually threw away, and -coop_test_disc_hold can widen
+		// the queue-to-drain window (normally about one frame) into one a disconnect can land in.
+		// operator== compares SenderID only, so neither field changes how a purge matches.
+		u16 MsgType  = 0;
+		u32 QueuedAt = 0;
 
 		bool operator ==(const DelayedPacket& other)
 		{

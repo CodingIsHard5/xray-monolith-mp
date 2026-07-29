@@ -3215,7 +3215,7 @@ void game_sv_Single::Update()
 		{
 			static bool s_r_init  = false;
 			static u32  s_r_armed = 0, s_r_ms = 0, s_r_retry = 0;
-			static u32  s_r_lead_ms = 3000, s_r_wait_ms = 240000;
+			static u32  s_r_lead_ms = 3000, s_r_wait_ms = 240000, s_r_grace_ms = 10000;
 			static u32  s_r_stage = 0, s_r_since = 0;
 			static u16  s_r_owner_a = mp_coop_owner::none, s_r_owner_b = mp_coop_owner::none;
 			if (!s_r_init)
@@ -3230,10 +3230,18 @@ void game_sv_Single::Update()
 				LPCSTR w = coop_param("-coop_test_race_wait");
 				const float wsecs = w ? (float)atof(w) : 0.f;
 				if (wsecs > 0.f && wsecs <= 3600.f) s_r_wait_ms = (u32)(wsecs * 1000.f);
+				// The verdict's grace window. A knob and not a constant because QR-D deliberately
+				// HOLDS the claims in the delayed queue (-coop_test_disc_hold) so a disconnect can
+				// land between queue and drain — and a verdict printed before the held claims drain
+				// would report x_owner=none and call it a result.
+				LPCSTR g = coop_param("-coop_test_race_grace");
+				const float gsecs = g ? (float)atof(g) : 0.f;
+				if (gsecs > 0.f && gsecs <= 300.f) s_r_grace_ms = (u32)(gsecs * 1000.f);
 				s_r_armed = Device.dwTimeGlobal;
 				s_r_since = Device.dwTimeGlobal;
 				Msg("- COOP(race): §7.2 two-claimant race armed, first look in %ums "
-					"(lead=%ums, per-stage wait=%ums)", s_r_ms, s_r_lead_ms, s_r_wait_ms);
+					"(lead=%ums, per-stage wait=%ums, verdict grace=%ums)",
+					s_r_ms, s_r_lead_ms, s_r_wait_ms, s_r_grace_ms);
 			}
 			if (s_r_stage < 3 && Device.dwTimeGlobal - s_r_armed >= s_r_ms &&
 			    Device.dwTimeGlobal - s_r_retry >= 2000)
@@ -3320,7 +3328,7 @@ void game_sv_Single::Update()
 					// The lead, plus a grace window big enough for the two claim packets to arrive
 					// and be drained. Fixed rather than "wait until x is claimed", because the
 					// interesting failure — NOBODY got it — has no event to wait for.
-					if (Device.dwTimeGlobal - s_r_since >= s_r_lead_ms + 10000)
+					if (Device.dwTimeGlobal - s_r_since >= s_r_lead_ms + s_r_grace_ms)
 					{
 						const u16 winner = coop_task_owner_of("coop_race_x");
 						Msg("- COOP(race): VERDICT x_owner=%u still_offered=%d pool=%u "
