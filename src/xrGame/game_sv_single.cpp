@@ -4789,7 +4789,17 @@ void game_sv_Single::Update()
 					}
 					s_r32_moves_seen = coop_rep_faction_moved_count();
 
-					if (s_r32_kills >= R32_MAX_KILLS || coop_rep_pressure_crossed() >= 1)
+					// STOP ON THE KILL COUNT ONLY — never on the crossing. Run 3 stopped the loop
+					// the moment the bar was crossed, and crossing RESETS the accumulator to zero,
+					// so the decay window always began from a freshly-zeroed cell: leg C measured
+					// `+0 -> +0` and leg D saved `cells=0`. Both became unreachable exactly when
+					// leg B started succeeding — the same shape as the half-life, moved from the
+					// parameter into the sequencing.
+					//
+					// Running the full count instead means kills after the crossing rebuild a
+					// residual (~3 x -7 against a bar of 50, so it cannot cross twice), which is
+					// what leg C decays and what leg D carries across the restart.
+					if (s_r32_kills >= R32_MAX_KILLS)
 					{
 						// Stop killing and watch the clock: leg C needs pressure to fall with NO
 						// further input, or "it went down" could just be the accumulator being
