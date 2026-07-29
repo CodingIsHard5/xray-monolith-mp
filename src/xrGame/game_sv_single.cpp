@@ -136,6 +136,11 @@ game_sv_Single::game_sv_Single()
 	m_coop_census_last = 0;
 	m_coop_census_init = false;
 	m_coop_test_rpg2_ms = 0;
+	m_coop_test_quest6_ms = 0;
+	m_coop_test_quest6_init = false;
+	m_coop_test_quest6_done = false;
+	m_coop_test_quest6_armed = 0;
+	m_coop_test_quest6_retry = 0;
 	m_coop_test_rpg2_armed = 0;
 	m_coop_test_rpg2_retry = 0;
 	m_coop_test_rpg2_init = false;
@@ -2870,6 +2875,75 @@ bool game_sv_Single::coop_test_rpg2_probe()
 	return true;
 }
 
+// ===== MP fork (§14 step 8 phase 3 Q5 / doc §7.5): QUEST NPCs ARE WORLD ENTITIES ================
+//
+// §7.5 is the one §7 requirement Q1-Q4 never covered, and this document only ever referred to it as
+// "Q5" without defining it. The doc is explicit:
+//
+//     "An escort or protect target is a SHARED world entity (one of it, everyone sees the same one,
+//      survival is server-authoritative). The QUEST RELATIONSHIP to it ('am I escorting this guy')
+//      is per-player or per-party. Same body/relationship split as everything else — the NPC doesn't
+//      hold flags, it IS a world object, and the quest lives on whoever took it."
+//
+// So this is Phase 1's ownership seam applied to a quest TARGET, and the discriminating gate is a
+// NEGATIVE: the relationship must NOT land on the NPC. A probe that only checked "the player has the
+// escort flag" would pass just as happily on an implementation that wrote the flag to all three.
+//
+// The write goes through the gamedata probe rather than through CInventoryOwner directly, and that
+// is deliberate: writing the info portion in C++ would bypass the very routing layer under test and
+// measure nothing. Lua `give_info` inside an acting scope is the same call a real quest script makes.
+//
+// The NPC is chosen with coop_find_npc — the same picker Q4 uses — so "we could not find an NPC" and
+// "the split failed" stay different results, which is the distinction Q4's header already insists on.
+bool game_sv_Single::coop_test_quest6_probe()
+{
+	const u16 world_id = mp_coop_owner::world_actor();
+	if (world_id == mp_coop_owner::none)
+	{
+		Msg("! COOP(quest6): no world tier");
+		return false;
+	}
+	const u16 player_id = coop_first_player_actor();
+	if (player_id == mp_coop_owner::none)
+		return false;   // nobody has an actor yet — retry, same as every other probe here
+
+	const u16 npc_id = coop_find_npc(player_id);
+	if (npc_id == mp_coop_owner::none)
+	{
+		// NOT a failure of the split — a failure to set up. Reported as its own state so the
+		// harness can call the gates NOT MEASURED instead of passing them vacuously.
+		Msg("! COOP(quest6): no live NPC online to stand in for an escort target — the §7.5 gates "
+			"below are NOT MEASURED, not passed");
+		return false;
+	}
+
+	Msg("- COOP(quest6): tiers world=%u player=%u npc=%u distinct=%u",
+		u32(world_id), u32(player_id), u32(npc_id),
+		u32((world_id != player_id && npc_id != world_id && npc_id != player_id) ? 1 : 0));
+
+	coop_quest6_probe_call("setup", world_id, player_id, npc_id);
+	{
+		// The relationship is taken BY a player. Written inside that player's acting scope, exactly
+		// as a quest script would write it when the player accepts the escort.
+		mp_coop_owner::acting_scope scope(player_id);
+		coop_quest6_probe_call("take", world_id, player_id, npc_id);
+	}
+	coop_quest6_probe_call("verify", world_id, player_id, npc_id);
+	return true;
+}
+
+void game_sv_Single::coop_quest6_probe_call(LPCSTR phase, u16 world_id, u16 player_id, u16 npc_id)
+{
+	luabind::functor<void> f;
+	if (!ai().script_engine().functor("_G.mp_coop_quest6_probe", f))
+	{
+		Msg("! COOP(quest6): gamedata probe _G.mp_coop_quest6_probe not registered (phase '%s') — "
+			"the §7.5 gates are NOT MEASURED", phase);
+		return;
+	}
+	f(phase, u32(world_id), u32(player_id), u32(npc_id));
+}
+
 void game_sv_Single::Update()
 {
 	inherited::Update();
@@ -3024,6 +3098,32 @@ void game_sv_Single::Update()
 			m_coop_test_rpg2_retry = Device.dwTimeGlobal;
 			if (coop_test_rpg2_probe())
 				m_coop_test_rpg2_done = true;
+		}
+
+		// MP fork (§14 step 8 phase 3 Q5 / doc §7.5): -coop_test_quest6 <seconds>. Numbered one
+		// ahead of its Q, because -coop_test_quest5 is already Q4's flag.
+		if (!m_coop_test_quest6_init)
+		{
+			m_coop_test_quest6_init = true;
+			LPCSTR p = coop_param("-coop_test_quest6");
+			if (p)
+			{
+				const float secs = (float)atof(p);
+				m_coop_test_quest6_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 30000u;
+				m_coop_test_quest6_armed = Device.dwTimeGlobal;
+				Msg("- COOP(quest6): §7.5 escort-target probe armed, firing in %ums", m_coop_test_quest6_ms);
+			}
+		}
+		// Retries on the same 5 s cadence as the others, because the probe legitimately returns
+		// false until a player has an actor AND an NPC is online — two conditions the harness
+		// cannot force and must not paper over.
+		if (m_coop_test_quest6_ms && !m_coop_test_quest6_done &&
+		    Device.dwTimeGlobal - m_coop_test_quest6_armed >= m_coop_test_quest6_ms &&
+		    Device.dwTimeGlobal - m_coop_test_quest6_retry >= 5000)
+		{
+			m_coop_test_quest6_retry = Device.dwTimeGlobal;
+			if (coop_test_quest6_probe())
+				m_coop_test_quest6_done = true;
 		}
 
 		// MP fork (§14 step 8 phase 2 / doc §6.2): the flag census on a timer. This is how the

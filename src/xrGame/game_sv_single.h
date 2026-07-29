@@ -279,6 +279,15 @@ private:
 	bool m_coop_test_rpg2_init;
 	bool m_coop_test_rpg2_done;
 	bool coop_test_rpg2_probe();
+	// MP fork (§14 step 8 phase 3 Q5 / doc §7.5): quest NPCs are world entities, the relationship
+	// is per-player. Probe numbering runs one ahead of the Q numbers (quest5 is Q4's flag).
+	bool coop_test_quest6_probe();
+	void coop_quest6_probe_call(LPCSTR phase, u16 world_id, u16 player_id, u16 npc_id);
+	u32  m_coop_test_quest6_ms;
+	u32  m_coop_test_quest6_armed;
+	u32  m_coop_test_quest6_retry;
+	bool m_coop_test_quest6_init;
+	bool m_coop_test_quest6_done;
 public:
 	// Server-side bank path. Exposed so gamedata can trigger it at a campfire/base via the
 	// `game.mp_set_checkpoint(name)` luabind export; the engine does not care what triggered it.
