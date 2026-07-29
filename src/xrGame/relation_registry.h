@@ -296,6 +296,15 @@ u32 coop_rep_pressure_held();
 s32 coop_rep_pressure_bar();
 s32 coop_rep_pressure_of(CHARACTER_COMMUNITY_INDEX from, CHARACTER_COMMUNITY_INDEX to);
 u64 coop_rep_overlay_stamp();
+u64 coop_rep_pressure_halflife_ms();
+
+// HARNESS ONLY. The shipped half-life is 6 GAME-hours, which no test can wait out, so the harness
+// compresses the SCALE. It does not touch the clock: decay still advances only because game time
+// advances, and the stored stamp is still what drives it. The alternative — winding a cell's stamp
+// backwards to fake elapsed time — would have the probe writing the state it then measures, and
+// would demonstrate the decay arithmetic rather than that the clock drives it. Values are logged.
+void coop_rep_test_set_pressure_tunables(s32 bar, u64 pressure_halflife_ms, u64 overlay_halflife_ms,
+                                         u64 decay_tick_ms);
 
 // HARNESS ONLY, and it is a CONSTRUCTION rather than an observation: two headless clients cannot
 // share a wine prefix ([[xray-two-headless-clients]]), so there is no second live player to stand

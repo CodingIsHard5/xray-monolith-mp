@@ -802,7 +802,12 @@ namespace
 	// moves at all. Chosen against the MEASURED magnitude rather than picked — but the magnitude is
 	// a world property that has already moved once (see the -140's history), so the bar is stated
 	// in absolute units and the run reports how many kills it actually took.
-	const s32 COOP_REP_PRESSURE_BAR = 50;
+	// Not const: the harness compresses these so decay can be OBSERVED. The alternative — winding
+	// a cell's stored stamp backwards to fake elapsed time — would have the probe writing the very
+	// state it then measures, and would prove the decay maths rather than that the CLOCK drives it.
+	// Compressing the half-life keeps real game time as the only thing that advances, which is the
+	// difference between measuring decay and computing it. Every value used is logged on the line.
+	s32 COOP_REP_PRESSURE_BAR = 50;
 
 	// Decay is on GAME time, u64. Q3 measured why: absolute game time read 63676055474670 ms, four
 	// orders of magnitude past what u32 holds, so every timestamp and every difference here is u64
@@ -812,17 +817,17 @@ namespace
 	// Pressure half-life: how long a grudge takes to be half-forgotten. Short relative to the
 	// overlay's, because "he has been killing us all afternoon" should expire faster than "we are
 	// at war with them".
-	const u64 COOP_REP_PRESSURE_HALFLIFE_MS = 6ull * COOP_REP_MS_PER_GAME_HOUR;
+	u64 COOP_REP_PRESSURE_HALFLIFE_MS = 6ull * COOP_REP_MS_PER_GAME_HOUR;
 
 	// Overlay half-life: the R2 overlay IS the decayable quantity — R3.2 adds no second
 	// representation of a faction relation, it shrinks the one that already exists back toward its
 	// config baseline. A cell that reaches baseline is dropped by coop_rep_faction_move, so "the
 	// war is over" stays a real state rather than a stored zero difference.
-	const u64 COOP_REP_OVERLAY_HALFLIFE_MS = 48ull * COOP_REP_MS_PER_GAME_HOUR;
+	u64 COOP_REP_OVERLAY_HALFLIFE_MS = 48ull * COOP_REP_MS_PER_GAME_HOUR;
 
 	// How often to bother decaying the overlay. Game time can run at a large multiplier, so this is
 	// a game-time interval, not a frame count.
-	const u64 COOP_REP_DECAY_TICK_MS = 30ull * 60ull * 1000ull;   // half a game-hour
+	u64 COOP_REP_DECAY_TICK_MS = 30ull * 60ull * 1000ull;   // half a game-hour
 
 	// (rep_pressure_cell / s_rep_pressure / s_rep_overlay_stamp / the counters are declared beside
 	// s_rep_overlay near the top of this file — coop_rep_state_save and _load are defined ABOVE
@@ -1006,6 +1011,22 @@ u32 coop_rep_pressure_cells()  { return u32(s_rep_pressure.size()); }
 u32 coop_rep_pressure_crossed(){ return s_pressure_crossed; }
 u32 coop_rep_pressure_held()   { return s_pressure_held; }
 s32 coop_rep_pressure_bar()    { return COOP_REP_PRESSURE_BAR; }
+u64 coop_rep_pressure_halflife_ms() { return COOP_REP_PRESSURE_HALFLIFE_MS; }
+
+// HARNESS ONLY. Compressing the clock's SCALE, never the clock: decay still advances only because
+// game time advances, so what the run measures is that the stored stamp drives it.
+void coop_rep_test_set_pressure_tunables(s32 bar, u64 pressure_halflife_ms, u64 overlay_halflife_ms,
+                                         u64 decay_tick_ms)
+{
+	if (bar > 0)                  COOP_REP_PRESSURE_BAR         = bar;
+	if (pressure_halflife_ms)     COOP_REP_PRESSURE_HALFLIFE_MS = pressure_halflife_ms;
+	if (overlay_halflife_ms)      COOP_REP_OVERLAY_HALFLIFE_MS  = overlay_halflife_ms;
+	if (decay_tick_ms)            COOP_REP_DECAY_TICK_MS        = decay_tick_ms;
+	Msg("- COOP(rep32): TUNABLES SET BY HARNESS bar=%d pressure_halflife=%I64u ms overlay_halflife=%I64u ms "
+		"decay_tick=%I64u ms (game time). Decay is still driven by the game clock; only its scale changed.",
+		COOP_REP_PRESSURE_BAR, COOP_REP_PRESSURE_HALFLIFE_MS, COOP_REP_OVERLAY_HALFLIFE_MS,
+		COOP_REP_DECAY_TICK_MS);
+}
 
 s32 coop_rep_pressure_of(CHARACTER_COMMUNITY_INDEX from, CHARACTER_COMMUNITY_INDEX to)
 {

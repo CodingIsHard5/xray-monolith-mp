@@ -4549,6 +4549,264 @@ void game_sv_Single::Update()
 		}
 	}
 
+
+	// ================== §14 step 8 P4 R3.2 — THE GUARD RAILS (doc §8.3) ==================
+	//
+	// `-coop_test_rep32 <arm_seconds>`. ONE client is enough and is deliberate: the bar is about
+	// history, not bystanders, and with a single client the shooter IS db.actor, which control A
+	// measured to be the condition under which the stock -140 fires at all. A two-client run would
+	// add the R3.1 shooter-selection variable to a test that is not about it.
+	//
+	// FOUR legs, because three of them are individually satisfiable by a broken bar:
+	//
+	//   A. the bar HOLDS      — kills accumulate, the relation does NOT move. A bar that refuses
+	//                           everything passes this leg, which is why leg B exists.
+	//   B. the bar is CROSSED — keep killing; at the threshold the relation moves exactly ONCE, by
+	//                           the accumulated amount, and the accumulator resets. A bar that
+	//                           refuses everything FAILS here. This is the leg that makes A mean
+	//                           something rather than being "the feature is switched off".
+	//   C. decay RUNS         — pressure falls as GAME time passes, on the clock, without any kill.
+	//   D. the restart is MEASURED — the world is saved mid-decay and the harness restarts the
+	//                           server. On reload the stored stamp must be the SAME u64 that was
+	//                           written, and the decay applied must correspond to the elapsed game
+	//                           time since it — not to zero. A fresh timer and a correctly-resumed
+	//                           one are indistinguishable from the pressure VALUE alone, so both
+	//                           the stamp and the elapsed difference are printed at both ends.
+	if (xr_enet::enabled() && ai().get_alife() && coop_param("-coop_test_rep32"))
+	{
+		static u32  s_r32_armed = 0;
+		static u32  s_r32_ms    = 0;
+		static bool s_r32_init  = false;
+		static int  s_r32_stage = 0;      // 0 wait/kill  1 decay-watch  2 done
+		static u16  s_r32_player = mp_coop_owner::none;
+		static u16  s_r32_last_victim = mp_coop_owner::none;
+		static int  s_r32_vcomm = -1, s_r32_kcomm = -1;
+		static u32  s_r32_kills = 0;
+		static u32  s_r32_retry = 0;
+		static u32  s_r32_next_kill_at = 0;
+		static s32  s_r32_rel_at_start = 0;
+		static s32  s_r32_peak_pressure = 0;
+		static u32  s_r32_moves_seen = 0;
+		static u64  s_r32_decay_start_game = 0;
+		static s32  s_r32_decay_start_val  = 0;
+		static u32  s_r32_decay_started_at = 0;
+		static bool s_r32_resume_mode = false;
+
+		const u32 R32_MAX_KILLS   = 14;     // enough to cross a 50 bar at -7/kill, with margin
+		const u32 R32_KILL_GAP_MS = 1500;
+		const u32 R32_DECAY_WATCH_MS = 90000;
+
+		if (!s_r32_init)
+		{
+			s_r32_init  = true;
+			s_r32_armed = Device.dwTimeGlobal;
+			LPCSTR p = coop_param("-coop_test_rep32");
+			s_r32_ms = p ? u32(atoi(p) * 1000) : 60000;
+
+			// RESUME MODE is leg D. The harness passes -coop_rep32_resume on the SECOND boot,
+			// against the world the first boot saved. This leg does not kill anything: it reads
+			// what the load restored and checks it against the game clock.
+			s_r32_resume_mode = (strstr(Core.Params, "-coop_rep32_resume") != NULL);
+
+			// Compress the clock's SCALE so decay is observable inside a test. Not the clock.
+			coop_rep_test_set_pressure_tunables(/*bar*/ 50,
+			                                    /*pressure halflife*/ 60ull * 1000ull,   // 1 game-min
+			                                    /*overlay halflife*/ 300ull * 1000ull,   // 5 game-min
+			                                    /*decay tick*/ 5ull * 1000ull);          // 5 game-sec
+			Msg("- COOP(rep32): armed in %u ms  mode=%s  game_now=%I64u",
+				s_r32_ms, s_r32_resume_mode ? "RESUME (leg D: the restart)" : "FRESH (legs A-C)",
+				coop_rep_game_time_ms());
+			FlushLog();
+		}
+
+		// ---------------- LEG D: the restart, measured ----------------
+		if (s_r32_resume_mode && s_r32_stage != 2
+		    && (Device.dwTimeGlobal - s_r32_armed) >= s_r32_ms)
+		{
+			s_r32_stage = 2;
+			const int stalker_idx = int(CHARACTER_COMMUNITY::IdToIndex(
+				"stalker", CHARACTER_COMMUNITY_INDEX(-1), true));
+			const int actor_idx = int(CHARACTER_COMMUNITY::IdToIndex(
+				"actor", CHARACTER_COMMUNITY_INDEX(-1), true));
+			const s32 pressure_now = (stalker_idx >= 0 && actor_idx >= 0)
+				? coop_rep_pressure_of(CHARACTER_COMMUNITY_INDEX(stalker_idx),
+				                       CHARACTER_COMMUNITY_INDEX(actor_idx)) : 0;
+			const u64 game_now = coop_rep_game_time_ms();
+			// The load already printed the stamp it restored and the elapsed difference. This line
+			// is what the harness compares against the SAVE line from the previous boot: same
+			// stamp, later clock, and a pressure that has moved BECAUSE of the gap.
+			Msg("- COOP(rep32): RESUME cells=%u pressure(stalker->actor)=%+d overlay_stamp=%I64u "
+				"game_now=%I64u — compare stamp with the pre-restart save line; a fresh timer and a "
+				"resumed one differ only there",
+				coop_rep_pressure_cells(), pressure_now, coop_rep_overlay_stamp(), game_now);
+			Msg("- COOP(rep32): DONE mode=RESUME kills=0 crossed=%u held=%u",
+				coop_rep_pressure_crossed(), coop_rep_pressure_held());
+			FlushLog();
+		}
+
+		// ---------------- LEGS A + B: kill in a loop, watch the bar ----------------
+		if (!s_r32_resume_mode && s_r32_stage == 0
+		    && (Device.dwTimeGlobal - s_r32_armed) >= s_r32_ms
+		    && (Device.dwTimeGlobal - s_r32_next_kill_at) >= R32_KILL_GAP_MS)
+		{
+			const u16 player_id = coop_first_player_actor();
+			CObject* const pobj = (player_id != mp_coop_owner::none)
+			                      ? Level().Objects.net_Find(player_id) : NULL;
+			CInventoryOwner* const pio = pobj ? smart_cast<CInventoryOwner*>(pobj) : NULL;
+
+			// Same community every time, or the pressure would be spread over several pairs and
+			// the bar would never be approached by any of them — a griefer loop that looks stopped
+			// because it was never aimed.
+			if (s_r32_vcomm < 0)
+				s_r32_vcomm = int(CHARACTER_COMMUNITY::IdToIndex(
+					"stalker", CHARACTER_COMMUNITY_INDEX(-1), true));
+
+			u16 victim_id = mp_coop_owner::none;
+			u32 live = 0;
+			if (pio)
+			{
+				for (u32 i = 0; i < Level().Objects.o_count(); ++i)
+				{
+					CObject* const o = Level().Objects.o_get_by_iterator(i);
+					if (!o || o->getDestroy() || o->ID() == player_id)
+						continue;
+					CEntityAlive* const alive = smart_cast<CEntityAlive*>(o);
+					if (!alive || !alive->g_Alive() || !smart_cast<CAI_Stalker*>(o))
+						continue;
+					CInventoryOwner* const cio = smart_cast<CInventoryOwner*>(o);
+					if (!cio || int(cio->Community()) != s_r32_vcomm)
+						continue;
+					++live;
+					if (victim_id == mp_coop_owner::none)
+						victim_id = o->ID();
+				}
+			}
+
+			if (!pio || victim_id == mp_coop_owner::none)
+			{
+				if ((Device.dwTimeGlobal - s_r32_retry) >= 5000u)
+				{
+					s_r32_retry = Device.dwTimeGlobal;
+					Msg("- COOP(rep32): waiting — player=%u live 'stalker' victims=%u kills so far=%u",
+						u32(player_id), live, s_r32_kills);
+				}
+				if ((Device.dwTimeGlobal - s_r32_armed) > (s_r32_ms + 300000u))
+				{
+					s_r32_stage = 2;
+					Msg("! COOP(rep32): no player with a live 'stalker' victim within 300 s — this "
+						"run measured NOTHING (a harness failure, not a result)");
+					FlushLog();
+				}
+			}
+			else
+			{
+				CObject* const vobj = Level().Objects.net_Find(victim_id);
+				CEntity* const ventity = vobj ? smart_cast<CEntity*>(vobj) : NULL;
+				CInventoryOwner* const vio = vobj ? smart_cast<CInventoryOwner*>(vobj) : NULL;
+				if (ventity && vio)
+				{
+					if (!s_r32_kills)
+					{
+						s_r32_player = player_id;
+						s_r32_kcomm  = int(pio->Community());
+						s_r32_rel_at_start = (s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
+							? RELATION_REGISTRY().GetCommunityRelation(
+								CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
+								CHARACTER_COMMUNITY_INDEX(s_r32_kcomm)) : 0;
+						Msg("- COOP(rep32): START player=%u victim_comm=%d killer_comm=%d "
+							"relation_at_start=%d bar=%d game_now=%I64u",
+							u32(player_id), s_r32_vcomm, s_r32_kcomm, s_r32_rel_at_start,
+							coop_rep_pressure_bar(), coop_rep_game_time_ms());
+					}
+
+					const u32 moves_before = coop_rep_faction_moved_count();
+					ventity->KillEntity(player_id);
+					++s_r32_kills;
+					s_r32_last_victim = victim_id;
+					s_r32_next_kill_at = Device.dwTimeGlobal;
+
+					// Sampled on the NEXT tick would be wrong: the propagation settles ~1 s after
+					// the kill, so the harness reads the per-kill COOP(rep32) line below only after
+					// the settle. Report what is true now and let the propagation's own lines carry
+					// the rest.
+					Msg("- COOP(rep32): kill %u/%u victim=%u — relation now %d, pressure %+d "
+						"(bar %d) crossed=%u held=%u moves_total=%u",
+						s_r32_kills, R32_MAX_KILLS, u32(victim_id),
+						(s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
+							? RELATION_REGISTRY().GetCommunityRelation(
+								CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
+								CHARACTER_COMMUNITY_INDEX(s_r32_kcomm)) : 0,
+						(s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
+							? coop_rep_pressure_of(CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
+							                       CHARACTER_COMMUNITY_INDEX(s_r32_kcomm)) : 0,
+						coop_rep_pressure_bar(), coop_rep_pressure_crossed(),
+						coop_rep_pressure_held(), moves_before);
+					FlushLog();
+
+					if (s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
+					{
+						const s32 pv = coop_rep_pressure_of(CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
+						                                    CHARACTER_COMMUNITY_INDEX(s_r32_kcomm));
+						if (_abs(pv) > _abs(s_r32_peak_pressure))
+							s_r32_peak_pressure = pv;
+					}
+					s_r32_moves_seen = coop_rep_faction_moved_count();
+
+					if (s_r32_kills >= R32_MAX_KILLS || coop_rep_pressure_crossed() >= 1)
+					{
+						// Stop killing and watch the clock: leg C needs pressure to fall with NO
+						// further input, or "it went down" could just be the accumulator being
+						// spent by a crossing.
+						s_r32_stage = 1;
+						s_r32_decay_started_at = Device.dwTimeGlobal;
+						s_r32_decay_start_game = coop_rep_game_time_ms();
+						s_r32_decay_start_val  = (s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
+							? coop_rep_pressure_of(CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
+							                       CHARACTER_COMMUNITY_INDEX(s_r32_kcomm)) : 0;
+						Msg("- COOP(rep32): KILLING DONE after %u kills — peak pressure %+d, "
+							"crossed=%u held=%u, relation %d -> %d. Now watching decay with NO "
+							"further kills from pressure %+d at game %I64u",
+							s_r32_kills, s_r32_peak_pressure, coop_rep_pressure_crossed(),
+							coop_rep_pressure_held(), s_r32_rel_at_start,
+							(s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
+								? RELATION_REGISTRY().GetCommunityRelation(
+									CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
+									CHARACTER_COMMUNITY_INDEX(s_r32_kcomm)) : 0,
+							s_r32_decay_start_val, s_r32_decay_start_game);
+						FlushLog();
+					}
+				}
+			}
+		}
+
+		// ---------------- LEG C: decay, with nothing being killed ----------------
+		if (!s_r32_resume_mode && s_r32_stage == 1
+		    && (Device.dwTimeGlobal - s_r32_decay_started_at) >= R32_DECAY_WATCH_MS)
+		{
+			s_r32_stage = 2;
+			const s32 now_val = (s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
+				? coop_rep_pressure_of(CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
+				                       CHARACTER_COMMUNITY_INDEX(s_r32_kcomm)) : 0;
+			const u64 game_now = coop_rep_game_time_ms();
+			Msg("- COOP(rep32): DECAY WATCH pressure %+d -> %+d over %I64u ms of game time "
+				"(halflife %I64u ms) with zero kills in the window",
+				s_r32_decay_start_val, now_val,
+				(game_now > s_r32_decay_start_game) ? (game_now - s_r32_decay_start_game) : 0ull,
+				coop_rep_pressure_halflife_ms());
+			Msg("- COOP(rep32): DONE mode=FRESH kills=%u peak_pressure=%+d crossed=%u held=%u "
+				"relation_start=%d relation_end=%d pressure_end=%+d cells=%u overlay_stamp=%I64u "
+				"game_now=%I64u",
+				s_r32_kills, s_r32_peak_pressure, coop_rep_pressure_crossed(),
+				coop_rep_pressure_held(), s_r32_rel_at_start,
+				(s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
+					? RELATION_REGISTRY().GetCommunityRelation(
+						CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
+						CHARACTER_COMMUNITY_INDEX(s_r32_kcomm)) : 0,
+				now_val, coop_rep_pressure_cells(), coop_rep_overlay_stamp(), game_now);
+			FlushLog();
+		}
+	}
+
 	/*	switch(phase) 	{
 			case GAME_PHASE_PENDING : {
 				OnRoundStart();
