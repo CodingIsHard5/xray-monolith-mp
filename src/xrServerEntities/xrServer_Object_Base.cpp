@@ -389,10 +389,40 @@ BOOL CSE_Abstract::Spawn_Read(NET_Packet& tNetPacket)
 	const u32 consumed = tNetPacket.r_tell();
 	if (consumed != state_end)
 	{
+		// MP fork (§14 open item 1, 2026-07-29): DUMP THE BYTES NOBODY READ.
+		//
+		// The deficit count alone has had this item stuck: "3 bytes somewhere in the actor" does not
+		// say which field, and a field-by-field diff of the whole engine chain against SPAWN_VERSION
+		// 128 finds every pair SYMMETRIC — CSE_ALifeCreatureActor, CreatureAbstract, TraderAbstract,
+		// PHSkeleton, DynamicObjectVisual, DynamicObject, ALifeObject, Visual, SpaceRestrictor, Shape,
+		// CustomZone and AnomalousZone all balance. The classes that DO report a deficit (actor,
+		// smart_terrain, ~40 zone_*, main_story_*_documents) are exactly the ones with Lua CSE
+		// subclasses, so the unread tail is most likely written by a script override's STATE_Write.
+		//
+		// The tail itself identifies the field where a count cannot: one byte 0x00/0x01 is a bool or
+		// a u8 flag, four bytes are a u32 or a float, and a readable ASCII run is a stringZ. This is
+		// the cheapest possible discriminator and it costs one log line on an already-failing path.
+		const int delta = (int)(consumed > state_end ? consumed - state_end : state_end - consumed);
+		string256 tail = {0};
+		if (consumed < state_end)
+		{
+			const u32 n = _min(state_end - consumed, u32(16));
+			const u32 keep = tNetPacket.r_tell();
+			char* w = tail;
+			for (u32 i = 0; i < n; ++i)
+			{
+				u8 b = 0;
+				tNetPacket.r_u8(b);
+				w += xr_sprintf(w, sizeof(tail) - (w - tail), "%02x ", u32(b));
+			}
+			tNetPacket.r_seek(keep);             // reading the tail must not BE the fix
+		}
 		Msg("! CSE(state): '%s' id %u read %d byte(s) %s than its STATE block declares (%u vs %u) "
-			"— snapping to the recorded end; anything after this block would have been misparsed",
-			s_name.c_str(), ID, (int)(consumed > state_end ? consumed - state_end : state_end - consumed),
-			consumed > state_end ? "MORE" : "fewer", consumed - state_begin, (u32)size);
+			"— snapping to the recorded end; anything after this block would have been misparsed"
+			"%s%s",
+			s_name.c_str(), ID, delta,
+			consumed > state_end ? "MORE" : "fewer", consumed - state_begin, (u32)size,
+			tail[0] ? " | unread tail: " : "", tail);
 		tNetPacket.r_seek(state_end);
 	}
 	return TRUE;
