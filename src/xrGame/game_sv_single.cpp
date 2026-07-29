@@ -4205,6 +4205,11 @@ void game_sv_Single::Update()
 			// and no arm-time line is an instrument that never registered; a run that ends with no
 			// COOP(av) lines but WITH the arm-time line genuinely had no access violations.
 			coop_av_dump();
+			// R5's control, same argument: R5's gate says a run in which the cell does NOT move must
+			// report NOT MEASURED rather than PASS, and that is only meaningful if the instrument is
+			// known to be live. This prints "INSTALLED, 0 writes" before any write happens.
+			extern void coop_rel_dump();
+			coop_rel_dump();
 			Msg("- COOP(rep31): falloff[SYNTHETIC, no second live client] radius=%.1f m  "
 				"scale(0)=%.3f scale(r/2)=%.3f scale(r-0.1)=%.3f scale(r)=%.3f scale(r+1)=%.3f",
 				r, coop_rep_bystander_scale(0.f), coop_rep_bystander_scale(r * 0.5f),
