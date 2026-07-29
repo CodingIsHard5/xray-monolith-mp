@@ -4155,6 +4155,10 @@ void game_sv_Single::Update()
 		// R4: the collective tier now goes through R3.2's accumulator, so each leg records what the
 		// bar did as well as what the relation did.
 		static u32  s_r31_cross_before = 0, s_r31_held_before = 0;
+		// R4: leg 3 needs a THIRD victim, and legs 1-2 have already killed two of leg 1's
+		// community. If that pool is empty the leg would wait out its whole bound measuring
+		// nothing — so the requirement is dropped, once, and SAID.
+		static bool s_r31_anycomm = false;
 
 		// A stand-in id, not an entity — the same construction R3.0 used, kept at the same value
 		// so the two runs' bystander rows are directly comparable.
@@ -4333,7 +4337,7 @@ void game_sv_Single::Update()
 					CInventoryOwner* const cio = smart_cast<CInventoryOwner*>(o);
 					if (!cio)
 						continue;
-					if (s_r31_vcomm >= 0 && int(cio->Community()) != s_r31_vcomm)
+					if (!s_r31_anycomm && s_r31_vcomm >= 0 && int(cio->Community()) != s_r31_vcomm)
 						continue;
 					// Run 3 measured that the shooter tier does NOT move for every victim: a
 					// `zombied` victim gave `personal 0 -> 0` where a `stalker` victim gives -140,
@@ -4384,9 +4388,35 @@ void game_sv_Single::Update()
 				if ((Device.dwTimeGlobal - s_r31_retry) >= 5000u)
 				{
 					s_r31_retry = Device.dwTimeGlobal;
-					Msg("- COOP(rep31): leg %d waiting — player=%u live_stalkers%s=%u",
-						s_r31_leg + 1, u32(player_id),
+					Msg("- COOP(rep31): leg %d waiting %u s — player=%u live_stalkers%s=%u",
+						s_r31_leg + 1,
+						(Device.dwTimeGlobal - s_r31_armed) / 1000u, u32(player_id),
 						(s_r31_vcomm >= 0) ? "(matching leg 1's community)" : "", stalkers);
+					// R4: FLUSHED. Without this the one line that says WHY a leg is stuck sits in the
+					// buffer until something else flushes it — and R4 run 1 lost leg 3 exactly that
+					// way: the log stopped growing, the harness's stall detector concluded "the
+					// server is gone" and killed it, and the probe's own account of the problem died
+					// in the buffer. A waiting line that does not reach the log is worse than no
+					// waiting line, because the silence gets attributed to the wrong component.
+					FlushLog();
+				}
+				// R4: leg 3 is the third kill of the run, and legs 1-2 have already spent two
+				// members of leg 1's community. If none is left, drop the community requirement
+				// rather than wait out the bound measuring nothing — and REPORT the consequence,
+				// because the shooter tier is community-specific (runs 3-5: a `zombied` victim
+				// gives 0 where a `stalker` gives -140). A leg 3 whose shooter takes +0 accumulates
+				// nothing, and its gates then correctly read NOT MEASURED instead of passing on an
+				// unmoved row that no write ever attempted.
+				if (!s_r31_anycomm && s_r31_leg >= 2 && stalkers == 0
+				    && (Device.dwTimeGlobal - s_r31_armed) > (s_r31_ms + 20000u))
+				{
+					s_r31_anycomm = true;
+					Msg("- COOP(rep31): leg %d found NO live stalker of leg 1's community left — "
+						"legs 1-2 killed them. Dropping the community requirement and taking any "
+						"live stalker. The shooter tier is community-specific, so this leg may now "
+						"measure a +0 shooter delta; that is a property of the run and its gates "
+						"will say NOT MEASURED rather than pass on an unmoved row.", s_r31_leg + 1);
+					FlushLog();
 				}
 				if ((Device.dwTimeGlobal - s_r31_armed) > (s_r31_ms + 300000u))
 				{
@@ -4394,6 +4424,18 @@ void game_sv_Single::Update()
 					Msg("! COOP(rep31): leg %d found no connected player with a LIVE STALKER%s "
 						"within 300 s — this run measured NOTHING (a harness failure, not a result)",
 						s_r31_leg + 1, (s_r31_vcomm >= 0) ? " of leg 1's community" : "");
+					// R4: emit DONE on the give-up too. The harness waits on this line, so a leg
+					// that gives up without it leaves the run to expire on a timeout — which R4
+					// run 1 did, and a timeout tells the reader nothing about WHICH leg stalled.
+					// The gates for the leg that never ran read NOT MEASURED on their own; this
+					// only stops the run hanging around to find that out.
+					Msg("- COOP(rep31): DONE legs=%d(GAVE UP on leg %d) bystanders_considered=%u "
+						"bystanders_moved=%u faction_moved=%u faction_refused=%u "
+						"pressure_crossed=%u pressure_held=%u",
+						s_r31_leg, s_r31_leg + 1, coop_rep_bystanders_considered(),
+						coop_rep_bystanders_moved(), coop_rep_faction_moved_count(),
+						coop_rep_faction_refused_count(), coop_rep_pressure_crossed(),
+						coop_rep_pressure_held());
 					FlushLog();
 				}
 			}
