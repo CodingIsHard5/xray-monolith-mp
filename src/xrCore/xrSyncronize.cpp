@@ -1,5 +1,48 @@
 #include "stdafx.h"
 #include "profiler.h"
+#include <intrin.h>
+#pragma intrinsic(_ReturnAddress)
+
+// ---- COOP (§14 step 8 P4): address -> construction site, so a wait graph can be read ------------
+//
+// See the header for why this exists. Constraints that shape it:
+//  * it runs from a CONSTRUCTOR during static init, before the log, before xrMemory is warm — so it
+//    must not allocate, must not log, and must not depend on any other global's lifetime. A fixed
+//    array of PODs with no destructor satisfies all three.
+//  * it is called from multiple threads. The index is bumped with an interlocked add.
+//  * OVERFLOW IS REPORTED, not silently dropped. A table that quietly stopped recording would make
+//    "that address is not one of ours" indistinguishable from "the table was full" — the same
+//    absence-vs-broken-instrument confusion this increment has hit repeatedly.
+namespace
+{
+	struct coop_cs_entry { void* cs; void* site; };
+	enum { COOP_CS_MAX = 1024 };
+	coop_cs_entry s_coop_cs[COOP_CS_MAX];
+	volatile long s_coop_cs_n = 0;
+}
+
+void coop_cs_register(void* cs, void* site)
+{
+	const long i = _InterlockedExchangeAdd(&s_coop_cs_n, 1);
+	if (i < COOP_CS_MAX)
+	{
+		s_coop_cs[i].cs   = cs;
+		s_coop_cs[i].site = site;
+	}
+}
+
+void coop_cs_dump()
+{
+	const long n = s_coop_cs_n;
+	const long shown = (n < COOP_CS_MAX) ? n : (long)COOP_CS_MAX;
+	Msg("- COOP(cs): %ld critical sections registered, %ld recorded%s. Match these addresses against "
+		"the `RtlpWaitForCriticalSection section <addr>` lines in dedicated_stderr.log; `site` is the "
+		"constructor's return address and resolves through AnomalyDX8.pdb.",
+		n, shown, (n > COOP_CS_MAX) ? " (TABLE FULL — the rest were DROPPED, this dump is partial)" : "");
+	for (long i = 0; i < shown; ++i)
+		Msg("- COOP(cs):   cs=%p site=%p", s_coop_cs[i].cs, s_coop_cs[i].site);
+	FlushLog();
+}
 
 #ifdef PROFILE_CRITICAL_SECTIONS
 static add_profile_portion_callback add_profile_portion = 0;
@@ -41,6 +84,7 @@ xrCriticalSection::xrCriticalSection()
 {
 	pmutex = xr_alloc<CRITICAL_SECTION>(1);
 	InitializeCriticalSection((CRITICAL_SECTION*)pmutex);
+	coop_cs_register(pmutex, _ReturnAddress());
 }
 
 xrCriticalSection::~xrCriticalSection()

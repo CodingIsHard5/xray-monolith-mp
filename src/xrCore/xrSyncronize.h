@@ -19,6 +19,26 @@ void XRCORE_API set_add_profile_portion(add_profile_portion_callback callback);
 # define MUTEX_PROFILE_ID(a) STRINGIZER(CONCATENIZE(MUTEX_PROFILE_PREFIX_ID,a))
 #endif // PROFILE_CRITICAL_SECTIONS
 
+// COOP (§14 step 8 P4): map a CRITICAL_SECTION ADDRESS back to the code that created it.
+//
+// A wedge on this server is reported by wine as a wait graph of raw pointers —
+//
+//     thread 0118 waits on 7E00D0 "heap.cs"   blocked by 0174
+//     thread 0174 waits on 112A9C0 (null)     blocked by 0118
+//
+// — and `112A9C0` is unnamed because `xrCriticalSection` heap-allocates its CRITICAL_SECTION, so the
+// address is a per-run malloc pointer with nothing attached to it. Attaching a debugger to read it
+// is blocked by ptrace policy, which is not ours to change; but the process that CREATED the lock is
+// ours, so the identity can be recorded at construction instead of recovered afterwards. Every
+// xrCriticalSection registers (its CRITICAL_SECTION address, the return address of its constructor)
+// and `coop_cs_dump()` prints the table into the same log the wait graph will appear in.
+//
+// The constructor's return address is used rather than a name because it needs no change at ~40
+// construction sites and it resolves through the PDB the same way every other address in this
+// investigation has.
+XRCORE_API void coop_cs_dump();
+void coop_cs_register(void* cs, void* site);   // called from the ctor below; no allocation, no log
+
 // Desc: Simple wrapper for critical section
 class XRCORE_API xrCriticalSection : xray::noncopyable
 {

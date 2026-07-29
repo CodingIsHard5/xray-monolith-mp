@@ -4194,6 +4194,11 @@ void game_sv_Single::Update()
 			// The falloff CURVE, measured at chosen distances rather than inferred from one
 			// write. The last sample is the increment's negative gate and it must be exactly 0.
 			const float r = coop_rep_bystander_radius();
+			// The lock table, dumped in the SAME RUN the wedge will happen in — the addresses are
+			// per-run heap pointers, so a dump from any other run is worthless for reading this
+			// run's wait graph. R4's deadlock is `0118 holds 112A9C0 and wants heap.cs` against
+			// `0174 holds heap.cs and wants 112A9C0`; this is what turns `112A9C0` into a name.
+			coop_cs_dump();
 			Msg("- COOP(rep31): falloff[SYNTHETIC, no second live client] radius=%.1f m  "
 				"scale(0)=%.3f scale(r/2)=%.3f scale(r-0.1)=%.3f scale(r)=%.3f scale(r+1)=%.3f",
 				r, coop_rep_bystander_scale(0.f), coop_rep_bystander_scale(r * 0.5f),
