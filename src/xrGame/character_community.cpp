@@ -125,10 +125,37 @@ CHARACTER_GOODWILL CHARACTER_COMMUNITY::relation(CHARACTER_COMMUNITY_INDEX from,
 // that already cost this increment a diagnosis cycle once.
 extern xr_vector<xr_string> get_lua_stack(lua_State* L);
 
+extern ENGINE_API bool g_dedicated_server;
+
 namespace
 {
 	u32 s_coop_rel_writes = 0;      // EVERY write, so a zero below is readable as a real zero
 	u32 s_coop_rel_logged = 0;
+	u32 s_coop_rel_clamped = 0;     // R9: writes to the `actor` pseudo-community, refused
+}
+
+// Resolved by NAME rather than hardcoded to 0. `game_relations.ltx` does put `actor` first today,
+// but a table index that a config file controls is not a constant, and the failure mode of guessing
+// wrong is a clamp that silently protects the wrong faction. Resolved once, lazily — this function
+// only ever runs after the ltx is loaded, since the relation table is built from it.
+static CHARACTER_COMMUNITY_INDEX coop_actor_community_index()
+{
+	static CHARACTER_COMMUNITY_INDEX s_idx = NO_COMMUNITY_INDEX;
+	static bool s_resolved = false;
+	if (!s_resolved)
+	{
+		s_resolved = true;
+		CHARACTER_COMMUNITY c;
+		c.set("actor");
+		s_idx = c.index();
+		// A failed resolve disables the clamp, so it must not be silent — that is the difference
+		// between "nothing tried to drift the actor cell" and "the guard was never armed".
+		Msg("%s COOP(relclamp): the `actor` pseudo-community resolves to index %d — the co-op server "
+		    "%s refuse faction drift on it",
+		    (s_idx == NO_COMMUNITY_INDEX) ? "!" : "-", (int)s_idx,
+		    (s_idx == NO_COMMUNITY_INDEX) ? "CANNOT (NOT ARMED — resolve failed)" : "will");
+	}
+	return s_idx;
 }
 
 void coop_rel_dump()
@@ -137,10 +164,11 @@ void coop_rel_dump()
 	// "INSTALLED, 0 writes". Without it a run with no write lines cannot be told apart from an
 	// instrument that was never compiled in — and R5's gate is explicitly that a still cell must be
 	// reported as NOT MEASURED, which is only meaningful if the instrument is known to be live.
-	Msg("- COOP(rel): faction<->faction write instrument is INSTALLED. %u write(s) so far, %u logged. "
-	    "Every write to the community relation table passes through CHARACTER_COMMUNITY::set_relation, "
-	    "so a run with no COOP(relw) line below had NO faction<->faction write.",
-	    s_coop_rel_writes, s_coop_rel_logged);
+	Msg("- COOP(rel): faction<->faction write instrument is INSTALLED. %u write(s) so far, %u logged, "
+	    "%u REFUSED on the `actor` community (R9's clamp). Every write to the community relation table "
+	    "passes through CHARACTER_COMMUNITY::set_relation, so a run with no COOP(relw) line below had "
+	    "NO faction<->faction write.",
+	    s_coop_rel_writes, s_coop_rel_logged, s_coop_rel_clamped);
 	FlushLog();
 }
 
@@ -153,6 +181,69 @@ void CHARACTER_COMMUNITY::set_relation(CHARACTER_COMMUNITY_INDEX from, CHARACTER
 
 	if (from == NO_COMMUNITY_INDEX || to == NO_COMMUNITY_INDEX)
 		return;
+
+	// ---- COOP (§14 step 8 P4 R9): THE `actor` COMMUNITY IS NOT DRIFTABLE ON A CO-OP SERVER -------
+	//
+	// `actor` is not a faction. It is the pseudo-community EVERY PLAYER SHARES, so a relation with it
+	// on either side is not "faction A vs faction B" — it is **how a faction regards players as a
+	// class**. In single-player that distinction does not exist, because the class has one member.
+	// In co-op it is §8.3's worst outcome: one shared cell that makes a faction hostile to everybody
+	// at once, for something one player did or for nothing anyone did at all.
+	//
+	// R5 named the writer on two runs, the second on the exact cell, so this clamp rests on an
+	// attribution and not on a hypothesis: `game_relations.script` — DoctorX Dynamic Faction
+	// Relations — drifts faction pairs in symmetric quads and writes `stalker -> actor 0 -> -12`
+	// among them. It is a single-player addon doing exactly what it was written to do; it has no
+	// notion that `actor` might mean more than one person. Nothing is wrong with the addon. What is
+	// wrong is running it, unmodified, against a shared world.
+	//
+	// SERVER ONLY, and that is the whole point of putting it here rather than in gamedata: the
+	// clients keep stock behaviour, the authoritative world does not drift a collective-player cell,
+	// and the addon is left intact rather than stubbed. A gamedata stub would also be invisible to
+	// version control (`[[xray-gamedata-deploy-location]]`) and would silently not exist on any
+	// machine that re-flattened its profile.
+	//
+	// AT THE CHOKE POINT, deliberately. `g_set_community_relation` already carries the note that a
+	// guard rail anywhere else is one a caller can walk around — this is the one function every
+	// faction<->faction write in the process reaches, so the rule holds for Lua callers, for this
+	// fork's own tier, and for the overlay apply alike.
+	//
+	// REFUSALS ARE REPORTED, not silent. A clamp nobody can see becomes a mystery the next time
+	// somebody wonders why a relation will not move, and this document has paid for silent
+	// instruments more than once.
+	if (g_dedicated_server)
+	{
+		const CHARACTER_COMMUNITY_INDEX actor_idx = coop_actor_community_index();
+		if (actor_idx != NO_COMMUNITY_INDEX && (from == actor_idx || to == actor_idx))
+		{
+			const CHARACTER_GOODWILL was = m_relation_table.table()[from][to];
+			if (was != goodwill)
+			{
+				++s_coop_rel_clamped;
+				if (s_coop_rel_clamped <= 16u || (s_coop_rel_clamped % 64u) == 0u)
+				{
+					const COMMUNITY_DATA* const df = GetByIndex(from, true);
+					const COMMUNITY_DATA* const dt = GetByIndex(to, true);
+					Msg("~ COOP(relclamp): REFUSED a write to the `actor` pseudo-community on the "
+						"co-op server — %s(%d) -> %s(%d) would have gone %d -> %d (delta %+d). "
+						"`actor` is shared by every player, so this cell is how a faction regards "
+						"PLAYERS AS A CLASS, not a faction-vs-faction relation. count=%u",
+						df ? df->id.c_str() : "<unknown>", from,
+						dt ? dt->id.c_str() : "<unknown>", to,
+						(int)was, (int)goodwill, (int)(goodwill - was), s_coop_rel_clamped);
+					lua_State* const L = ai().script_engine().lua();
+					if (L)
+					{
+						const xr_vector<xr_string> stack = get_lua_stack(L);
+						for (u32 f = 0; f < stack.size() && f < 8u; ++f)
+							Msg("~ COOP(relclamp):   %s", stack[f].c_str());
+					}
+					FlushLog();
+				}
+			}
+			return;
+		}
+	}
 
 	// ---- COOP (§14 step 8 P4 R5): record the write BEFORE it happens -----------------------------
 	{
