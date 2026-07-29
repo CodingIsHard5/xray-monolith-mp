@@ -3336,6 +3336,12 @@ void game_sv_Single::Update()
 							u32(winner), coop_task_offered("coop_race_x") ? 1 : 0,
 							coop_task_pool_size(), u32(s_r_owner_a), u32(s_r_owner_b),
 							(s_r_owner_a != s_r_owner_b) ? 1 : 0);
+						// QR-F: the delayed-queue lock's own numbers, printed with the verdict so
+						// one run carries both the §7.2 result and the cost of the mechanism.
+						{
+							extern void coop_report_cs_stats(LPCSTR when);
+							coop_report_cs_stats("at verdict");
+						}
 						FlushLog();
 						s_r_stage = 3;
 					}

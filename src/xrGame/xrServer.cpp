@@ -194,6 +194,13 @@ void xrServer::client_Destroy(IClient* C)
 		//     not transfer to mt_csEnter). A fix wants that question answered first, on purpose,
 		//     rather than a two-line change shipped on the strength of it looking obvious.
 		u32 purged = 0, purged_dlg = 0;
+		// MP fork (§14 step 8 QR-F): AND NOW IT TAKES THE LOCK. The objection that stopped this in
+		// QR-D — that making the pump block on DelayedPackestCS makes it wait on the game thread's
+		// Lua time — was answered by measurement rather than by argument, and it was already false:
+		// AddDelayedPacket takes this same CS from this same thread. The pump already waited. With
+		// the drain no longer holding the CS across the handler (see ProceedDelayedPackets), the
+		// longest anyone holds it is a 16 KB copy, so this wait is bounded by construction.
+		DelayedPackestCS.Enter();
 		do
 		{
 			it = std::find(m_aDelayedPackets.begin(), m_aDelayedPackets.end(), pp);
@@ -208,6 +215,7 @@ void xrServer::client_Destroy(IClient* C)
 				break;
 		}
 		while (true);
+		DelayedPackestCS.Leave();
 		{
 			extern u32 g_coop_game_thread_id;
 			const u32 tid = GetCurrentThreadId();
@@ -1894,6 +1902,40 @@ void xrServer::create_direct_client()
 }
 
 
+// MP fork (§14 step 8 QR-F): the two numbers that decide whether the fix did anything.
+//
+// hold  = how long the GAME thread owned DelayedPackestCS. Under the old wide lock this includes a
+//         whole Lua dialogue action; after the fix it is a 16 KB copy.
+// wait  = how long the PUMP thread waited to acquire it in AddDelayedPacket. This is the quantity
+//         that actually hurt: it is network pump downtime, and it was invisible because nothing
+//         measured it.
+//
+// Maxima rather than averages, because a stall is a tail event and an average hides it. Reported on
+// demand (coop_report_cs_stats) so a run can print one line instead of a stream.
+static volatile u32 g_cs_hold_max = 0, g_cs_hold_wide_max = 0, g_cs_wait_max = 0;
+static volatile u32 g_cs_hold_n = 0, g_cs_wait_n = 0;
+
+void coop_note_cs_hold(u32 ms, bool wide)
+{
+	++g_cs_hold_n;
+	if (wide) { if (ms > g_cs_hold_wide_max) g_cs_hold_wide_max = ms; }
+	else      { if (ms > g_cs_hold_max)      g_cs_hold_max      = ms; }
+}
+
+void coop_note_cs_wait(u32 ms)
+{
+	++g_cs_wait_n;
+	if (ms > g_cs_wait_max) g_cs_wait_max = ms;
+}
+
+void coop_report_cs_stats(LPCSTR when)
+{
+	Msg("- COOP(cs): %s delayed-queue lock: hold_max_narrow=%ums hold_max_wide=%ums "
+		"pump_wait_max=%ums holds=%u waits=%u",
+		when, g_cs_hold_max, g_cs_hold_wide_max, g_cs_wait_max, g_cs_hold_n, g_cs_wait_n);
+	FlushLog();
+}
+
 void xrServer::ProceedDelayedPackets()
 {
 	// MP fork (§3c): the §3c fix defers the dialogue action into this queue precisely so it runs
@@ -1945,33 +1987,82 @@ void xrServer::ProceedDelayedPackets()
 		}
 	}
 
-	DelayedPackestCS.Enter();
-	while (!m_aDelayedPackets.empty())
+	// MP fork (§14 step 8 QR-F): the critical section is NO LONGER HELD ACROSS THE HANDLER.
+	//
+	// It used to be, and that had two consequences that were not obvious from reading either side
+	// on its own. OnDelayedMessage runs the §3c-deferred dialogue action, i.e. it enters the Lua VM
+	// and can stay there for a long time on this gamedata. Holding DelayedPackestCS for that whole
+	// time meant:
+	//
+	//   1. THE PUMP STALLED. AddDelayedPacket takes this same CS and runs on the ENet pump thread,
+	//      so every arriving dialogue action blocked the network pump for the full duration of a
+	//      Lua call. That is a throughput bug hiding inside a correctness lock, and it is why the
+	//      "adding a lock to the purge would make the pump wait on Lua" objection turned out to be
+	//      moot: THE PUMP ALREADY WAITED, on the very same CS, one function over.
+	//   2. IT HELD A REFERENCE INTO THE DEQUE (`DelayedPacket&`) across the handler, so the
+	//      unsynchronised erase in client_Destroy could free the element being handled.
+	//
+	// Popping a COPY under the lock and releasing before the handler fixes both, and costs one
+	// 16 KB struct copy — the same copy AddDelayedPacket already makes on the way in. FIFO order is
+	// preserved: anything queued during a handler is appended to the BACK.
+	//
+	// -coop_test_widelock restores the old wide-lock behaviour so the pair can be MEASURED on one
+	// binary rather than argued across two builds.
+	static bool s_wide_init = false, s_wide = false;
+	if (!s_wide_init) { s_wide_init = true; s_wide = !!strstr(Core.Params, "-coop_test_widelock"); }
+
+	for (;;)
 	{
-		DelayedPacket& DPacket = *m_aDelayedPackets.begin();
-		if (s_hold_ms && DPacket.MsgType == M_XRNET_DIALOG_ACTION &&
-		    (Device.dwTimeGlobal - DPacket.QueuedAt) < s_hold_ms)
+		DelayedPacket pkt;
+		bool have = false;
+		const u32 t_enter = Device.TimerAsync();
+		DelayedPackestCS.Enter();
+		if (!m_aDelayedPackets.empty())
 		{
-			static u32 s_said = 0;
-			if (s_said < 4)
+			DelayedPacket& front = *m_aDelayedPackets.begin();
+			if (s_hold_ms && front.MsgType == M_XRNET_DIALOG_ACTION &&
+			    (Device.dwTimeGlobal - front.QueuedAt) < s_hold_ms)
 			{
-				++s_said;
-				Msg("- COOP(disc): HOLDING a dialogue action from client 0x%08x, queued %ums ago "
-					"(hold=%ums) — the queue-to-drain window is open",
-					DPacket.SenderID.value(), Device.dwTimeGlobal - DPacket.QueuedAt, s_hold_ms);
+				static u32 s_said = 0;
+				if (s_said < 4)
+				{
+					++s_said;
+					Msg("- COOP(disc): HOLDING a dialogue action from client 0x%08x, queued %ums ago "
+						"(hold=%ums) — the queue-to-drain window is open",
+						front.SenderID.value(), Device.dwTimeGlobal - front.QueuedAt, s_hold_ms);
+				}
+				DelayedPackestCS.Leave();
+				break;                           // leave it at the front; ordering unchanged
 			}
-			break;                               // leave it at the front; ordering unchanged
+			if (s_wide)
+			{
+				// THE OLD BEHAVIOUR, on purpose: handle it with the CS still held.
+				OnDelayedMessage(front.Packet, front.SenderID);
+				m_aDelayedPackets.pop_front();
+				coop_note_cs_hold(Device.TimerAsync() - t_enter, true);
+				DelayedPackestCS.Leave();
+				continue;
+			}
+			pkt  = front;                        // copy out...
+			m_aDelayedPackets.pop_front();       // ...and it is off the queue before we unlock
+			have = true;
 		}
-		OnDelayedMessage(DPacket.Packet, DPacket.SenderID);
-		//		OnMessage(DPacket.Packet, DPacket.SenderID);
-		m_aDelayedPackets.pop_front();
+		coop_note_cs_hold(Device.TimerAsync() - t_enter, false);
+		DelayedPackestCS.Leave();
+		if (!have)
+			break;
+		OnDelayedMessage(pkt.Packet, pkt.SenderID);
 	}
-	DelayedPackestCS.Leave();
 };
 
 void xrServer::AddDelayedPacket(NET_Packet& Packet, ClientID Sender)
 {
+	// THIS RUNS ON THE ENET PUMP THREAD, and this Enter() is the pump stalling. Measured, because
+	// the whole QR-F argument turned on whether the pump already waited here — it did.
+	extern void coop_note_cs_wait(u32 ms);
+	const u32 t_want = Device.TimerAsync();
 	DelayedPackestCS.Enter();
+	coop_note_cs_wait(Device.TimerAsync() - t_want);
 
 	m_aDelayedPackets.push_back(DelayedPacket());
 	DelayedPacket* NewPacket = &(m_aDelayedPackets.back());
