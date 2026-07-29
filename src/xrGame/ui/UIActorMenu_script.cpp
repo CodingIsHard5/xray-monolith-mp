@@ -51,6 +51,10 @@ using namespace luabind;
 //
 // So: check, name the CALLER, and return null instead of faulting. A Lua error on a nil return is a
 // diagnosable failure with a script name attached; an access violation swallowed by the VM is not.
+// Declared in script_game_object.h; taken by declaration rather than by including that header,
+// which drags the whole game-object binding surface into a UI translation unit.
+extern xr_vector<xr_string> get_lua_stack(lua_State* L);
+
 static CUIGameCustom* coop_ui_or_null(LPCSTR who)
 {
 	CUIGameCustom* const ui = CurrentGameUI();
@@ -67,8 +71,26 @@ static CUIGameCustom* coop_ui_or_null(LPCSTR who)
 		Msg("!COOP(uinull): %s called with NO game UI (CurrentGameUI() == null) — returning nil "
 			"instead of dereferencing it. This is a client HUD binding running somewhere it has no "
 			"UI, e.g. a dedicated server. count=%u", who, s_seen);
-		if (s_seen <= 8u)
-			ai().script_engine().print_stack();   // NAMES THE CALLING SCRIPT — the whole point
+
+		// NOT print_stack(). Its first run produced NOTHING and the instrument had to be validated
+		// before its silence could be read: `vscript_log` returns 0 in a release build unless
+		// `-dbg` is on the command line, and this harness passes `-dbg` to the CLIENTS only. So the
+		// traceback was suppressed by a log gate, not absent because the caller was not Lua — two
+		// states that look identical in the log. `get_lua_stack` + Msg is ungated, which is why the
+		// engine's own error path already uses it, and it lands in the log the harness scrapes.
+		lua_State* const L = ai().script_engine().lua();
+		if (!L)
+		{
+			Msg("!COOP(uinull):   no Lua state — this call did NOT come from a script");
+		}
+		else
+		{
+			xr_vector<xr_string> const stack = get_lua_stack(L);
+			if (stack.empty())
+				Msg("!COOP(uinull):   Lua stack is EMPTY — called from C++, not from a script");
+			for (u32 f = 0; f < stack.size() && f < 24u; ++f)
+				Msg("!COOP(uinull):   %s", stack[f].c_str());
+		}
 		FlushLog();
 	}
 	return nullptr;
