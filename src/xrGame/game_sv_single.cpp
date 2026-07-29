@@ -4708,7 +4708,32 @@ void game_sv_Single::Update()
 					if (!s_r32_kills)
 					{
 						s_r32_player = player_id;
-						s_r32_kcomm  = int(pio->Community());
+
+						// THE PLAYER NEEDS A REAL FACTION BEFORE THE FIRST KILL, and run 1 is why.
+						//
+						// Run 1 killed 14 stalkers, the shooter tier fired -140 every time, and the
+						// pressure accumulator never saw a single unit: `killer_comm` was 0, the
+						// `actor` pseudo-community every player shares, so R3.1's tier-3 guard
+						// REFUSED the collective hit 14 times before the bar was ever consulted.
+						// That refusal is correct — R3.0 established that a collective hit keyed on
+						// `actor` would move `stalker -> actor` and make one player's kill hostile
+						// for everybody — so the probe has to do what R3.1's leg 2 does and put the
+						// player in a real faction, or it measures a bar that was never reached.
+						//
+						// Re-read rather than assumed: "I called SetCommunity" and "the player is in
+						// that faction" are different claims, and only the second one licenses
+						// reading a faction-tier result.
+						const CHARACTER_COMMUNITY_INDEX chosen =
+							CHARACTER_COMMUNITY::IdToIndex("actor_stalker", CHARACTER_COMMUNITY_INDEX(-1), true);
+						const int before_set = int(pio->Community());
+						if (chosen >= 0)
+							pio->SetCommunity(chosen);
+						s_r32_kcomm = int(pio->Community());
+						Msg("- COOP(rep32): faction for the shooter: 'actor_stalker' index=%d; "
+							"player community %d -> %d (re-read) took=%d — without this the "
+							"collective tier is refused before the bar is consulted",
+							int(chosen), before_set, s_r32_kcomm,
+							(chosen >= 0 && s_r32_kcomm == int(chosen)) ? 1 : 0);
 						s_r32_rel_at_start = (s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
 							? RELATION_REGISTRY().GetCommunityRelation(
 								CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
