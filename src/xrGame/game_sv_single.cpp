@@ -4609,8 +4609,20 @@ void game_sv_Single::Update()
 			s_r32_resume_mode = (strstr(Core.Params, "-coop_rep32_resume") != NULL);
 
 			// Compress the clock's SCALE so decay is observable inside a test. Not the clock.
+			// THE HALF-LIFE HAS TO CLEAR THE BURST, and run 2 measured why it did not.
+			//
+			// Game time here runs ~6x real (540060 ms of game time inside a 90 s window), so the
+			// 1.5 s gap between kills is ~9 s of GAME time. At a 60 s half-life each gap decayed the
+			// accumulator to 0.90 of itself, so -7 per kill converged on an asymptote near -70 and
+			// peaked at -46 across 14 kills: it could not cross a bar of 50 however long the loop
+			// ran. Decay was outrunning the burst.
+			//
+			// That is the griefer assertion holding — but by accident, and it left leg B (the bar
+			// CAN be crossed) unproven, which is the one leg that separates a working bar from one
+			// that refuses everything. At 600 s the burst loses ~1% per gap and crosses around kill
+			// 8, while the 540 s decay window still shows a clear fall. Both legs become askable.
 			coop_rep_test_set_pressure_tunables(/*bar*/ 50,
-			                                    /*pressure halflife*/ 60ull * 1000ull,   // 1 game-min
+			                                    /*pressure halflife*/ 600ull * 1000ull,  // 10 game-min
 			                                    /*overlay halflife*/ 300ull * 1000ull,   // 5 game-min
 			                                    /*decay tick*/ 5ull * 1000ull);          // 5 game-sec
 			Msg("- COOP(rep32): armed in %u ms  mode=%s  game_now=%I64u",
