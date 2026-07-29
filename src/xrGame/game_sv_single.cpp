@@ -2758,38 +2758,6 @@ static bool coop_has_info(u16 id, LPCSTR info)
 	return io ? io->HasInfo(shared_str(info)) : false;
 }
 
-// MP fork (§14 step 8 phase 3 Q5 / doc §7.5, the PARTY half): every connected player that has an
-// actor. Same skips as coop_first_player_actor — the server's loopback self-client is not a player,
-// and a client with no body yet is not one either.
-//
-// WHAT "PARTY" MEANS HERE IS A DECISION, NOT A DISCOVERY, and it is recorded as one. §7.5 says the
-// quest relationship is "per-player or per-party" and §7.4 says to "lean toward party-shared
-// completion/reward for co-op cohesion" — but **neither the doc nor this fork ever defines a party**:
-// there is no grouping mechanism, no invite, no sub-party, and mp_coop_owner has exactly two tiers.
-// So the only implementable reading today is **party = everyone in the session**. That is a real
-// design choice with a real consequence (there can be no two parties on one server), it is taken
-// here rather than smuggled in, and it is the thing to overrule first if sub-parties are ever wanted.
-void game_sv_Single::coop_all_player_actors(xr_vector<u16>& out)
-{
-	struct finder
-	{
-		game_sv_Single* self;
-		xr_vector<u16>* out;
-		void operator()(IClient* client)
-		{
-			xrClientData* cd = static_cast<xrClientData*>(client);
-			if (cd == self->m_server->GetServerClient()) return;
-			if (!cd->owner) return;
-			out->push_back(cd->owner->ID);
-		}
-	};
-	out.clear();
-	finder fd;
-	fd.self = this;
-	fd.out = &out;
-	m_server->ForEachClientDo(fd);
-}
-
 u16 game_sv_Single::coop_first_player_actor()
 {
 	struct finder
@@ -2970,6 +2938,18 @@ bool game_sv_Single::coop_test_quest6_probe()
 	// by every member and is STILL not world state — which is the only thing that distinguishes it
 	// from the world tier once the party is the whole session. So the discriminating gates are
 	// world=false with members>=2, not "the players have it".
+	// WHAT "PARTY" MEANS HERE IS A DECISION, NOT A DISCOVERY. §7.5 says the relationship is
+	// "per-player or per-party" and §7.4 says to lean toward party-shared reward — but NEITHER the
+	// doc NOR this fork ever defines a party: there is no grouping, no invite, no sub-party, and
+	// mp_coop_owner has exactly two tiers. So the only implementable reading today is
+	// **party = everyone in the session**, with the real consequence that there cannot be two
+	// parties on one server. Taken explicitly here rather than smuggled in, and the first thing to
+	// overrule if sub-parties are ever wanted.
+	//
+	// coop_all_player_actors ALREADY EXISTED and is already used by the R3.1 probe. The first
+	// attempt at this increment added a second copy of it and the build caught it as
+	// "already has a body" — a reminder that the class-0 control applies to one's own additions:
+	// search for the CAPABILITY, not for the word you happen to be thinking in.
 	xr_vector<u16> members;
 	coop_all_player_actors(members);
 	Msg("- COOP(quest6): party members=%u (a party of fewer than 2 cannot tell party-scope from "
