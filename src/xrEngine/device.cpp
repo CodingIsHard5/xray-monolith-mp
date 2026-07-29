@@ -185,6 +185,28 @@ void mt_Thread(void* ptr)
 		PROF_EVENT();
 
 		START_PROFILE("Wait for device");
+		// ---- WHY THE logCS INVARIANT DOES NOT TRANSFER TO mt_csEnter -----------------------------
+		//
+		// §14 step 8 P4 named the locks in a measured deadlock and imposed a rule on logCS: never
+		// hold it across an allocation. The obvious next step is to apply the same rule to this
+		// lock, which the wait graph also named. IT CANNOT BE APPLIED, and the reason is structural
+		// rather than an omission:
+		//
+		// mt_csEnter/mt_csLeave are NOT data locks. They are a ping-pong HANDOFF pair that alternates
+		// the main thread and this one — the main thread holds mt_csEnter while it renders and
+		// releases it to let this thread run (device.cpp, "Resume threads" / "Suspend threads").
+		// Whichever thread holds it is, by construction, doing its entire frame's work underneath:
+		// seqParallel, seqFrameMT, and the parallel Lua GC below. "Do not allocate while holding it"
+		// would forbid the workload the interlock exists to schedule.
+		//
+		// So the hole is closed from the other side instead. A cycle needs BOTH arms; the rule that
+		// prevents it is that **logCS is a LEAF** — nothing is acquired while logCS is held — which
+		// is enforced at AddOne and by the reserve in InitLog. A thread holding this interlock may
+		// then allocate and log freely, because neither of those can be waiting on it.
+		//
+		// If a future change makes something acquire a lock while holding logCS, this comment is
+		// where the resulting deadlock will be explained, and the fix is there, not here.
+		//
 		// waiting for Device permission to execute
 		device.mt_csEnter.Enter();
 

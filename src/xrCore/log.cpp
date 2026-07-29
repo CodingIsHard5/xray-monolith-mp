@@ -123,6 +123,17 @@ extern bool is_console_mark(Console_mark type);
 // unknown code while logCS is held.** The lock exists to serialise the append and the de-dup state,
 // nothing more.
 //
+// Said as the property it is really buying: **logCS IS A LEAF LOCK.** Nothing is acquired while it
+// is held — not the heap, not the string container, not whatever a callback feels like taking. A
+// leaf cannot be one arm of a cycle, so this holds no matter what the OTHER thread is doing, which
+// is what makes it a rule rather than a fix for the one inversion that was caught.
+//
+// It is also why the same rule is NOT applied to CRenderDevice::mt_csEnter, the other lock the wait
+// graph named: that one is a ping-pong handoff between the main and secondary threads, and whichever
+// thread holds it is running its whole frame underneath, allocation included. Forbidding allocation
+// there would forbid the workload. The cycle is prevented from this side instead. See the long note
+// at the top of the secondary thread's loop in xrEngine/device.cpp.
+//
 // The residue, stated rather than glossed: `LogFile.push_back` can still grow the vector under the
 // lock, and the rare duplicate-collapse path formats under it. Both are bounded and neither nests a
 // second lock. Removing the growth entirely needs a different container for `LogFile` (a fixed ring,
@@ -322,7 +333,18 @@ LPCSTR log_name()
 
 void InitLog()
 {
-	LogFile.reserve(10000);
+	// THE LAST ALLOCATION UNDER logCS. AddOne's append is the only thing left inside the lock that
+	// can touch the heap, and it only does so when the vector grows. A co-op R3.1 run already writes
+	// ~7400 lines, so 10000 was one busy session away from reallocating INSIDE the critical section
+	// — which is the exact edge the deadlock needs. 262144 xr_strings of headroom costs a few MB
+	// once and makes the steady-state append allocation-free, so logCS behaves as a LEAF lock: taken,
+	// used, released, with nothing acquired underneath it.
+	//
+	// This does not make growth impossible, and it is not claimed to. A run long enough to exceed it
+	// reallocates once and then has twice the headroom; the amortised count over a whole session is
+	// a handful. Removing the possibility entirely needs a different container for LogFile, which is
+	// noted at AddOne and is not what this defect justifies.
+	LogFile.reserve(262144);
 }
 
 void CreateLog(BOOL nl)
