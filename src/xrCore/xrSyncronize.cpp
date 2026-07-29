@@ -15,19 +15,20 @@
 //    absence-vs-broken-instrument confusion this increment has hit repeatedly.
 namespace
 {
-	struct coop_cs_entry { void* cs; void* site; };
+	struct coop_cs_entry { void* cs; void* site; void* owner; };
 	enum { COOP_CS_MAX = 1024 };
 	coop_cs_entry s_coop_cs[COOP_CS_MAX];
 	volatile long s_coop_cs_n = 0;
 }
 
-void coop_cs_register(void* cs, void* site)
+void coop_cs_register(void* cs, void* site, void* owner)
 {
 	const long i = _InterlockedExchangeAdd(&s_coop_cs_n, 1);
 	if (i < COOP_CS_MAX)
 	{
-		s_coop_cs[i].cs   = cs;
-		s_coop_cs[i].site = site;
+		s_coop_cs[i].cs    = cs;
+		s_coop_cs[i].site  = site;
+		s_coop_cs[i].owner = owner;
 	}
 }
 
@@ -35,12 +36,21 @@ void coop_cs_dump()
 {
 	const long n = s_coop_cs_n;
 	const long shown = (n < COOP_CS_MAX) ? n : (long)COOP_CS_MAX;
-	Msg("- COOP(cs): %ld critical sections registered, %ld recorded%s. Match these addresses against "
-		"the `RtlpWaitForCriticalSection section <addr>` lines in dedicated_stderr.log; `site` is the "
-		"constructor's return address and resolves through AnomalyDX8.pdb.",
+	// `owner` is the xrCriticalSection OBJECT's address and is the field that actually identifies a
+	// global lock. Run 1 of this instrument recorded only `site` (the constructor's return address)
+	// and it did not discriminate: 71 of 101 locks shared ONE site inside wine, because every global
+	// is constructed from the same loader/CRT static-init thunk. A global's `this`, by contrast, is
+	// a fixed address in .data and resolves to its variable name in the PDB — `logCS`, `CacheCS`,
+	// and so on. Locals and members land on the heap/stack and resolve to nothing, which is correct:
+	// those are not the locks a wait graph full of process-lifetime globals is pointing at.
+	Msg("- COOP(cs): %ld critical sections registered, %ld recorded%s. Match `cs=` against the "
+		"`RtlpWaitForCriticalSection section <addr>` lines in dedicated_stderr.log, then resolve "
+		"`owner=` (the object's address, in .data for a global) through AnomalyDX8.pdb. `site=` is "
+		"the ctor's return address and is only useful for non-globals.",
 		n, shown, (n > COOP_CS_MAX) ? " (TABLE FULL — the rest were DROPPED, this dump is partial)" : "");
 	for (long i = 0; i < shown; ++i)
-		Msg("- COOP(cs):   cs=%p site=%p", s_coop_cs[i].cs, s_coop_cs[i].site);
+		Msg("- COOP(cs):   cs=%p owner=%p site=%p",
+			s_coop_cs[i].cs, s_coop_cs[i].owner, s_coop_cs[i].site);
 	FlushLog();
 }
 
@@ -84,7 +94,7 @@ xrCriticalSection::xrCriticalSection()
 {
 	pmutex = xr_alloc<CRITICAL_SECTION>(1);
 	InitializeCriticalSection((CRITICAL_SECTION*)pmutex);
-	coop_cs_register(pmutex, _ReturnAddress());
+	coop_cs_register(pmutex, _ReturnAddress(), this);
 }
 
 xrCriticalSection::~xrCriticalSection()

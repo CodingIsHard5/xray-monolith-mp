@@ -30,14 +30,16 @@ void XRCORE_API set_add_profile_portion(add_profile_portion_callback callback);
 // address is a per-run malloc pointer with nothing attached to it. Attaching a debugger to read it
 // is blocked by ptrace policy, which is not ours to change; but the process that CREATED the lock is
 // ours, so the identity can be recorded at construction instead of recovered afterwards. Every
-// xrCriticalSection registers (its CRITICAL_SECTION address, the return address of its constructor)
-// and `coop_cs_dump()` prints the table into the same log the wait graph will appear in.
+// xrCriticalSection registers (its CRITICAL_SECTION address, its OWN object address, the ctor's
+// return address) and `coop_cs_dump()` prints the table into the same log the wait graph appears in.
 //
-// The constructor's return address is used rather than a name because it needs no change at ~40
-// construction sites and it resolves through the PDB the same way every other address in this
-// investigation has.
+// `owner` — the object's own address — is the field that identifies a global, because a global lives
+// at a fixed .data address that the PDB names. Run 1 of this instrument recorded only the ctor's
+// return address and it did NOT discriminate: 71 of 101 locks shared one site inside wine, since
+// every global is constructed from the same loader static-init thunk. Keeping both costs 8 bytes and
+// covers the non-global case too.
 XRCORE_API void coop_cs_dump();
-void coop_cs_register(void* cs, void* site);   // called from the ctor below; no allocation, no log
+void coop_cs_register(void* cs, void* site, void* owner);  // from the ctor below; no allocation, no log
 
 // Desc: Simple wrapper for critical section
 class XRCORE_API xrCriticalSection : xray::noncopyable
