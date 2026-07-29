@@ -100,11 +100,58 @@ void CGroupHierarchyHolder::register_in_group_senses(CEntity* member)
 	}
 }
 
+// ===== COOP (§14 step 8 P4 R7): erase(end()) IS WHAT KILLS THE CO-OP SERVER AFTER LEG 2 ==========
+//
+// This function's only protection against "member is not in this group" was `VERIFY3`, and VERIFY3
+// COMPILES OUT IN RELEASE. So the shipped binary ran `m_members.erase(m_members.end())` — undefined
+// behaviour, in practice a memmove of elements from past the end of the vector.
+//
+// That is not a theoretical concern. The first-chance access-violation reporter caught it with a
+// stack, on the run that R3.1 has been dying on for five increments:
+//
+//     <wine CRT builtin, reading 0x7EE88D0D0000>      <- FAULTS
+//     CGroupHierarchyHolder::unregister_member+0x38
+//     CEntity::ChangeTeam+0x16e
+//     CInventoryOwner::SetCommunity+0x16f
+//     game_sv_Single::Update                          <- the R3.1 probe giving the player a faction
+//     xrServer::Update -> CLevel::net_Update
+//
+// and the engine's own handler agreed, as the LAST line the server ever wrote:
+//
+//     !! unhandled exception 0xC0000005 at address 0x00006FFFFCA1240E (accessing 0x00007EE88D0D0000)
+//
+// It is UNHANDLED because it is not inside a Lua call — nothing swallows it, the process dies, and
+// the tail of the log is the crash handler's console-variable dump. Which is why a log read from the
+// bottom looks like a server that simply stopped.
+//
+// `CEntity::ChangeTeam` calls here unconditionally, guarded by another compiled-out
+// `VERIFY(m_registered_member)` — unlike `CEntity::net_Destroy`, which tests that flag for real.
+//
+// THE FIX IS DELIBERATELY NARROW, AND IT DOES NOT PRETEND TO ANSWER THE REAL QUESTION. Skipping an
+// erase that cannot be performed replaces undefined behaviour with a no-op, which is strictly better
+// on every path — but *why* an entity reaches here unregistered is a separate defect, and silently
+// swallowing it would hide the thing worth fixing. So it is REPORTED, bounded the same way the other
+// co-op instruments here are bounded, rather than quietly returning.
 void CGroupHierarchyHolder::unregister_in_group(CEntity* member)
 {
 	VERIFY(member);
 	MEMBER_REGISTRY::iterator I = std::find(m_members.begin(), m_members.end(), member);
-	VERIFY3(I != m_members.end(), "Specified group member cannot be found", *member->cName());
+	if (I == m_members.end())
+	{
+		static u32 s_seen = 0;
+		++s_seen;
+		if (s_seen <= 8u || (s_seen % 256u) == 0u)
+		{
+			Msg("!COOP(group): unregister_in_group called for an entity that is NOT in this group — "
+				"skipping the erase, because erase(end()) is undefined behaviour and is what faulted "
+				"in CEntity::ChangeTeam. The hierarchy was already inconsistent before this call; "
+				"that is the defect this line reports rather than fixes. entity=%s group has %u "
+				"members. count=%u",
+				*member->cName(), (u32)m_members.size(), s_seen);
+			FlushLog();
+		}
+		return;
+	}
 	m_members.erase(I);
 }
 
