@@ -4152,12 +4152,32 @@ void game_sv_Single::Update()
 		static int  s_r31_f_actor_before = 0, s_r31_f_chosen_before = 0;
 		static u32  s_r31_bys_moved_before = 0, s_r31_fac_moved_before = 0, s_r31_fac_ref_before = 0;
 		static bool s_r31_shooter_logged = false;         // the shooter choice is logged once, not per tick
+		// R4: the collective tier now goes through R3.2's accumulator, so each leg records what the
+		// bar did as well as what the relation did.
+		static u32  s_r31_cross_before = 0, s_r31_held_before = 0;
 
 		// A stand-in id, not an entity — the same construction R3.0 used, kept at the same value
 		// so the two runs' bystander rows are directly comparable.
 		const u16 R31_BYSTANDER = u16(0xFFF0);
 		const int R31_BYSTANDER_SEED = 55;
 		const u32 R31_SETTLE_MS = 5000;
+
+		// ---- R4: leg 2 and leg 3 straddle the bar, and the two values are DERIVED ----------------
+		//
+		// R3.1 measured `leg2 collective moved = 1` on a pre-bar binary, where the write went
+		// straight at the relation. On any R3.2 binary the collective hit is
+		// `shooter_delta / COOP_REP_COLLECTIVE_DIVISOR` = -140/20 = -7 against a production bar of
+		// 50, so one kill is correctly HELD and that gate fails — which is R3.2 working, and is why
+		// R3.1's 25/25 was pinned to an old build.
+		//
+		// The re-baseline sets the bar to the single-kill magnitude ITSELF rather than disabling it.
+		// A bar of 0 or 1 would restore the old number by testing a path production does not have,
+		// which is the exact failure §8.3 names. At bar = 7 the comparison is `_abs(-7) < 7` — false,
+		// so it crosses — and at bar = 8 it is true, so it holds. The two legs therefore pin the
+		// BOUNDARY and its inclusivity, which no run has ever exercised: leg 2 alone is satisfied by
+		// a bar that crosses on anything, and leg 3 is what stops that.
+		const s32 R31_LEG2_BAR = 7;   // == |stock -140| / COOP_REP_COLLECTIVE_DIVISOR(20): crosses
+		const s32 R31_LEG3_BAR = 8;   // one above it: must HOLD, or the comparison is not a threshold
 
 		if (!s_r31_init)
 		{
@@ -4178,7 +4198,8 @@ void game_sv_Single::Update()
 			FlushLog();
 		}
 
-		if ((s_r31_stage == 0 || s_r31_stage == 2) && (Device.dwTimeGlobal - s_r31_armed) >= s_r31_ms)
+		if ((s_r31_stage == 0 || s_r31_stage == 2 || s_r31_stage == 5)
+		    && (Device.dwTimeGlobal - s_r31_armed) >= s_r31_ms)
 		{
 			// THE SHOOTER IS NOT "WHOEVER CONNECTED FIRST" ANY MORE, and run 6 is why.
 			//
@@ -4393,7 +4414,7 @@ void game_sv_Single::Update()
 					// LEG 2's whole question: give the player a REAL faction, then re-read it.
 					// "I called SetCommunity" and "the player is in that faction" are different
 					// claims, and only the second one licenses reading the leg-2 faction cell.
-					if (s_r31_leg == 1)
+					if (s_r31_leg >= 1)
 					{
 						const CHARACTER_COMMUNITY_INDEX chosen =
 							CHARACTER_COMMUNITY::IdToIndex("actor_stalker", CHARACTER_COMMUNITY_INDEX(-1), true);
@@ -4401,10 +4422,22 @@ void game_sv_Single::Update()
 						if (chosen >= 0)
 							pio->SetCommunity(chosen);
 						s_r31_faction_idx = int(pio->Community());     // RE-READ, not assumed
-						Msg("- COOP(rep31): leg2 chose a faction: 'actor_stalker' index=%d; "
+						Msg("- COOP(rep31): leg%d chose a faction: 'actor_stalker' index=%d; "
 							"player community %d -> %d (re-read) took=%d",
-							int(chosen), before_set, s_r31_faction_idx,
+							s_r31_leg + 1, int(chosen), before_set, s_r31_faction_idx,
 							(chosen >= 0 && s_r31_faction_idx == int(chosen)) ? 1 : 0);
+
+						// R4: set the bar for THIS leg, BEFORE the kill that tests it. Only the bar
+						// is touched — the half-lives and the tick keep their production values, so
+						// what these two legs measure is the threshold and nothing else.
+						coop_rep_test_set_pressure_tunables(
+							(s_r31_leg == 1) ? R31_LEG2_BAR : R31_LEG3_BAR, 0ull, 0ull, 0ull);
+						Msg("- COOP(rep31): leg%d bar set to %d — one collective hit of "
+							"|shooter|/%d is expected to %s (leg 2 and leg 3 straddle the boundary; "
+							"the AFTER line below prints the pressure actually produced, so this "
+							"prediction can be checked against it without leaving the log)",
+							s_r31_leg + 1, coop_rep_pressure_bar(), 20,
+							(s_r31_leg == 1) ? "CROSS it" : "be HELD BY it");
 						FlushLog();
 					}
 
@@ -4466,6 +4499,8 @@ void game_sv_Single::Update()
 					s_r31_bys_moved_before = coop_rep_bystanders_moved();
 					s_r31_fac_moved_before = coop_rep_faction_moved_count();
 					s_r31_fac_ref_before   = coop_rep_faction_refused_count();
+					s_r31_cross_before     = coop_rep_pressure_crossed();
+					s_r31_held_before      = coop_rep_pressure_held();
 
 					Msg("- COOP(rep31): leg%d BEFORE player=%u victim=%u victim_comm=%d killer_comm=%d "
 						"personal=%d bystander_seeded=%d faction_to_actor=%d faction_to_chosen=%d "
@@ -4479,14 +4514,14 @@ void game_sv_Single::Update()
 
 					ventity->KillEntity(player_id);
 					s_r31_killed_at = Device.dwTimeGlobal;
-					s_r31_stage = (s_r31_leg == 0) ? 1 : 3;
+					s_r31_stage = (s_r31_leg == 0) ? 1 : ((s_r31_leg == 1) ? 3 : 6);
 					Msg("- COOP(rep31): leg%d killed victim=%u attributed to player=%u",
 						s_r31_leg + 1, u32(victim_id), u32(player_id));
 					FlushLog();
 				}
 			}
 		}
-		else if ((s_r31_stage == 1 || s_r31_stage == 3)
+		else if ((s_r31_stage == 1 || s_r31_stage == 3 || s_r31_stage == 6)
 		         && (Device.dwTimeGlobal - s_r31_killed_at) >= R31_SETTLE_MS)
 		{
 			CObject* const vobj = Level().Objects.net_Find(s_r31_victim);
@@ -4525,6 +4560,22 @@ void game_sv_Single::Update()
 				coop_rep_bystanders_moved() - s_r31_bys_moved_before,
 				coop_rep_faction_moved_count() - s_r31_fac_moved_before,
 				coop_rep_faction_refused_count() - s_r31_fac_ref_before);
+
+			// R4: what the BAR did, on its own line, with every term needed to check it. The
+			// pressure is read AFTER the settle above, so a crossing shows +0 here — the cell is
+			// spent by the crossing — and that is exactly why `crossed`/`held` are reported as
+			// counts rather than inferred from the value.
+			Msg("- COOP(rep31): leg%d BAR bar=%d crossed=%u held=%u pressure_now=%+d cells=%u "
+				"faction_moved=%u — a hit of |shooter|/%d against bar %d",
+				s_r31_leg + 1, coop_rep_pressure_bar(),
+				coop_rep_pressure_crossed() - s_r31_cross_before,
+				coop_rep_pressure_held() - s_r31_held_before,
+				(s_r31_vcomm >= 0 && s_r31_kcomm >= 0)
+					? coop_rep_pressure_of(CHARACTER_COMMUNITY_INDEX(s_r31_vcomm),
+					                       CHARACTER_COMMUNITY_INDEX(s_r31_kcomm)) : 0,
+				coop_rep_pressure_cells(),
+				coop_rep_faction_moved_count() - s_r31_fac_moved_before,
+				20, coop_rep_pressure_bar());
 			FlushLog();
 
 			if (s_r31_stage == 1)
@@ -4535,15 +4586,27 @@ void game_sv_Single::Update()
 				s_r31_armed = Device.dwTimeGlobal;
 				s_r31_ms = 3000;
 			}
+			else if (s_r31_stage == 3)
+			{
+				// LEG 3 — the same kill against a bar one point HIGHER, which must hold. Leg 2's
+				// crossing SPENT its accumulator (the cell is erased on crossing), so leg 3 starts
+				// from zero pressure rather than from leg 2's residue; without that this leg would
+				// be measuring the leftovers of the previous one.
+				s_r31_leg = 2;
+				s_r31_stage = 5;
+				s_r31_armed = Device.dwTimeGlobal;
+				s_r31_ms = 3000;
+			}
 			else
 			{
 				s_r31_stage = 4;
 				coop_rep_test_set_bystander(false, 0, Fvector().set(0.f, 0.f, 0.f),
 				                            CHARACTER_COMMUNITY_INDEX(-1));
-				Msg("- COOP(rep31): DONE  bystanders_considered=%u bystanders_moved=%u "
-					"faction_moved=%u faction_refused=%u",
+				Msg("- COOP(rep31): DONE legs=3 bystanders_considered=%u bystanders_moved=%u "
+					"faction_moved=%u faction_refused=%u pressure_crossed=%u pressure_held=%u",
 					coop_rep_bystanders_considered(), coop_rep_bystanders_moved(),
-					coop_rep_faction_moved_count(), coop_rep_faction_refused_count());
+					coop_rep_faction_moved_count(), coop_rep_faction_refused_count(),
+					coop_rep_pressure_crossed(), coop_rep_pressure_held());
 				FlushLog();
 			}
 		}
