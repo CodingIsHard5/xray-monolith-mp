@@ -1028,15 +1028,24 @@ void coop_rep_test_set_pressure_tunables(s32 bar, u64 pressure_halflife_ms, u64 
 		COOP_REP_DECAY_TICK_MS);
 }
 
+// DECAYED ON READ, from the cell's own stamp — see the R3.2 truncation decision in
+// dev/RPG_LAYER_PLAN.md. The stored pair is (value at the last EVENT, time of that event); the
+// current value is derived. That is ONE truncation per observation instead of one per tick, so the
+// rounding error no longer accumulates and the number matches the half-life at every magnitude.
 s32 coop_rep_pressure_of(CHARACTER_COMMUNITY_INDEX from, CHARACTER_COMMUNITY_INDEX to)
 {
 	if (from < 0 || to < 0)
 		return 0;
 	const shared_str fn = CHARACTER_COMMUNITY::IndexToId(from, NULL, true);
 	const shared_str tn = CHARACTER_COMMUNITY::IndexToId(to,   NULL, true);
+	const u64 now = coop_rep_game_time_ms();
 	for (size_t i = 0; i < s_rep_pressure.size(); ++i)
 		if (s_rep_pressure[i].from == fn && s_rep_pressure[i].to == tn)
-			return s_rep_pressure[i].value;
+		{
+			const u64 dt = (now > s_rep_pressure[i].stamp) ? (now - s_rep_pressure[i].stamp) : 0ull;
+			return coop_rep_decay_toward_zero(s_rep_pressure[i].value, dt,
+			                                  COOP_REP_PRESSURE_HALFLIFE_MS);
+		}
 	return 0;
 }
 
@@ -1050,37 +1059,33 @@ void coop_rep_decay_tick()
 	if (!now)
 		return;                                     // no A-Life clock yet: not an epoch, just absent
 
-	// ---- pressure: per-cell clocks, because cells are created at different times -------------
+	// ---- pressure: HOUSEKEEPING ONLY. The value is decayed on READ, not written down here.
+	//
+	// Writing partial decay back each tick was the defect: every tick truncated toward zero, so a
+	// 5 s tick across a 540 s window applied 108 truncations and any magnitude under ~108 reached
+	// zero regardless of the half-life. Exponential in the formula, near-linear in practice, and
+	// worst in exactly the regime this feature exists for. Keeping (value-at-last-event, stamp) and
+	// deriving the present value means ONE truncation per observation, so the error stops
+	// accumulating. This loop now only drops cells that have fully expired.
 	for (size_t i = 0; i < s_rep_pressure.size(); )
 	{
 		rep_pressure_cell& c = s_rep_pressure[i];
-		if (now <= c.stamp)                          // clock went backwards (load of an older world)
+		if (now < c.stamp)                           // clock went backwards (load of an older world)
 		{
 			c.stamp = now;
 			++i;
 			continue;
 		}
 		const u64 dt = now - c.stamp;
-		if (dt < COOP_REP_DECAY_TICK_MS)
+		const s32 live = coop_rep_decay_toward_zero(c.value, dt, COOP_REP_PRESSURE_HALFLIFE_MS);
+		if (!live)
 		{
-			++i;
-			continue;
-		}
-		const s32 before = c.value;
-		c.value = coop_rep_decay_toward_zero(c.value, dt, COOP_REP_PRESSURE_HALFLIFE_MS);
-		c.stamp = now;
-		if (!c.value)
-		{
-			Msg("- COOP(rep32): pressure %s -> %s decayed to ZERO (was %+d over %I64u ms of game "
-				"time) — the grudge expired before it reached the bar",
-				c.from.c_str(), c.to.c_str(), before, dt);
+			Msg("- COOP(rep32): pressure %s -> %s expired (was %+d at its last kill, %I64u ms of "
+				"game time ago) — the grudge decayed away before it reached the bar",
+				c.from.c_str(), c.to.c_str(), c.value, dt);
 			s_rep_pressure.erase(s_rep_pressure.begin() + i);
 			continue;
 		}
-		if (before != c.value)
-			Msg("- COOP(rep32): pressure %s -> %s decayed %+d -> %+d over %I64u ms game time "
-				"(bar %d)", c.from.c_str(), c.to.c_str(), before, c.value,
-				dt, COOP_REP_PRESSURE_BAR);
 		++i;
 	}
 
