@@ -2922,6 +2922,9 @@ bool game_sv_Single::coop_test_quest6_probe()
 		u32((world_id != player_id && npc_id != world_id && npc_id != player_id) ? 1 : 0));
 
 	coop_quest6_probe_call("setup", world_id, player_id, npc_id);
+	// Runs BEFORE the take, so the control's own write cannot be confused with the escort write,
+	// and so a run whose store cannot answer for NPCs says so before the gate is even asked.
+	coop_quest6_probe_call("control", world_id, player_id, npc_id);
 	{
 		// The relationship is taken BY a player. Written inside that player's acting scope, exactly
 		// as a quest script would write it when the player accepts the escort.
