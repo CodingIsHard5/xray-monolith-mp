@@ -4591,6 +4591,12 @@ void game_sv_Single::Update()
 		static s32  s_r32_decay_start_val  = 0;
 		static u32  s_r32_decay_started_at = 0;
 		static bool s_r32_resume_mode = false;
+		// The relation AT THE CROSSING. Run 4 moved it to -46 and then the OVERLAY decayed back to
+		// baseline across the 540 s window, so a gate comparing start against the post-window value
+		// read "the relation never moved" on a run where it moved and then correctly cooled off.
+		// Guard rail 1 and guard rail 2 assert on the same cell at different times; sampling once at
+		// the end cannot see both.
+		static s32  s_r32_rel_at_crossing = 0;
 
 		const u32 R32_MAX_KILLS   = 14;     // enough to cross a 50 bar at -7/kill, with margin
 		const u32 R32_KILL_GAP_MS = 1500;
@@ -4624,7 +4630,15 @@ void game_sv_Single::Update()
 			coop_rep_test_set_pressure_tunables(/*bar*/ 50,
 			                                    /*pressure halflife*/ 600ull * 1000ull,  // 10 game-min
 			                                    /*overlay halflife*/ 300ull * 1000ull,   // 5 game-min
-			                                    /*decay tick*/ 5ull * 1000ull);          // 5 game-sec
+			                                    // A COARSER TICK, because truncation — not the
+			                                    // half-life — dominates small magnitudes. Each tick
+			                                    // rounds toward zero, so at a 5 s tick a 540 s window
+			                                    // applies 108 truncations and anything under ~108
+			                                    // reaches zero regardless of half-life: run 4's
+			                                    // residual of -17 was gone long before 600 s implied,
+			                                    // taking leg D's payload with it. At 60 s the window
+			                                    // is ~9 steps, so -17 decays visibly and survives.
+			                                    /*decay tick*/ 60ull * 1000ull);         // 60 game-sec
 			Msg("- COOP(rep32): armed in %u ms  mode=%s  game_now=%I64u",
 				s_r32_ms, s_r32_resume_mode ? "RESUME (leg D: the restart)" : "FRESH (legs A-C)",
 				coop_rep_game_time_ms());
@@ -4805,6 +4819,10 @@ void game_sv_Single::Update()
 						// further input, or "it went down" could just be the accumulator being
 						// spent by a crossing.
 						s_r32_stage = 1;
+						s_r32_rel_at_crossing = (s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
+							? RELATION_REGISTRY().GetCommunityRelation(
+								CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
+								CHARACTER_COMMUNITY_INDEX(s_r32_kcomm)) : 0;
 						s_r32_decay_started_at = Device.dwTimeGlobal;
 						s_r32_decay_start_game = coop_rep_game_time_ms();
 						s_r32_decay_start_val  = (s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
@@ -4841,10 +4859,10 @@ void game_sv_Single::Update()
 				(game_now > s_r32_decay_start_game) ? (game_now - s_r32_decay_start_game) : 0ull,
 				coop_rep_pressure_halflife_ms());
 			Msg("- COOP(rep32): DONE mode=FRESH kills=%u peak_pressure=%+d crossed=%u held=%u "
-				"relation_start=%d relation_end=%d pressure_end=%+d cells=%u overlay_stamp=%I64u "
-				"game_now=%I64u",
+				"relation_start=%d relation_at_crossing=%d relation_end=%d pressure_end=%+d "
+				"cells=%u overlay_stamp=%I64u game_now=%I64u",
 				s_r32_kills, s_r32_peak_pressure, coop_rep_pressure_crossed(),
-				coop_rep_pressure_held(), s_r32_rel_at_start,
+				coop_rep_pressure_held(), s_r32_rel_at_start, s_r32_rel_at_crossing,
 				(s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
 					? RELATION_REGISTRY().GetCommunityRelation(
 						CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
