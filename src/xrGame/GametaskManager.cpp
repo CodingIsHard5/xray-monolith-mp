@@ -206,8 +206,14 @@ coop_claim_result coop_task_claim(const shared_str& task_id, u16 player_id)
 		// is removed on claim and this is the answer a loser gets. The distinction between the
 		// two only matters to a log line, so make the log line carry it.
 		const bool given = (Level().GameTaskManager().HasGameTask(task_id, false) != NULL);
-		Msg("- COOP(quest): CLAIM '%s' by %u -> %s", task_id.c_str(), u32(player_id),
-			given ? "TAKEN (already claimed)" : "ABSENT (never offered)");
+		// frame= is here for the QR race suite (§14 step 8 phase 3): two live claimants can only be
+		// shown to have CONTENDED if their two claims are timestamped by something finer than the
+		// log's second. Both run on the game thread out of one ProceedDelayedPackets drain, so the
+		// same frame number means both packets were already queued when that drain started —
+		// i.e. in flight together. A different frame number is not a failure, it is a weaker run,
+		// and the harness reports the contention gate NOT MEASURED rather than passing it.
+		Msg("- COOP(quest): CLAIM '%s' by %u -> %s frame=%u", task_id.c_str(), u32(player_id),
+			given ? "TAKEN (already claimed)" : "ABSENT (never offered)", Device.dwFrame);
 		return given ? coop_claim_taken : coop_claim_absent;
 	}
 
@@ -237,9 +243,9 @@ coop_claim_result coop_task_claim(const shared_str& task_id, u16 player_id)
 		s_faction_task.insert(task_id);
 	}
 
-	Msg("- COOP(quest): CLAIM '%s' by %u -> OK owner=%u faction=%d pool=%u",
+	Msg("- COOP(quest): CLAIM '%s' by %u -> OK owner=%u faction=%d pool=%u frame=%u",
 		task_id.c_str(), u32(player_id), u32(coop_task_owner_of(task_id)),
-		o.faction ? 1 : 0, u32(s_task_pool.size()));
+		o.faction ? 1 : 0, u32(s_task_pool.size()), Device.dwFrame);
 
 	Level().GameTaskManager().coop_broadcast_tasks();
 	return coop_claim_ok;

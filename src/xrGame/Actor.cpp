@@ -1175,6 +1175,97 @@ float CActor::currentFOV()
 
 #include "UI\UIInventoryUtilities.h"
 
+// MP fork (§14 step 8 phase 3 QR, harness): the two-live-claimants race — see the block in
+// CActor::UpdateCL for what it is for. The state is file-scope rather than function-static because
+// the CONTESTED claim is not fired from here at all: it is fired by CLevel from the server's
+// decision broadcast, so that both clients say it on the same shared clock instead of on two
+// wall clocks that were started 30 s apart.
+static char s_coop_race_side = 'a';       // which of the two per-client control offers this client takes
+
+// Say one phrase of coop_race_dialog to whatever NPC is online here. Returns false and says WHY
+// on every giving-up path: "there was nobody to talk to" and "the claim was refused" are different
+// findings, and a harness that could not tell them apart would be measuring nothing.
+static bool coop_race_say(LPCSTR phrase, LPCSTR why)
+{
+	CActor* const self = Actor();
+	if (!self)
+	{
+		Msg("! COOP(race-cl): no local actor — phrase '%s' (%s) NOT sent", phrase, why);
+		return false;
+	}
+	// The partner is found once and kept. An NPC that is online HERE is one the server has too,
+	// which is what makes the id on the wire resolvable on both sides.
+	static u16 s_race_npc = u16(-1);
+	if (s_race_npc == u16(-1))
+	{
+		u32 seen = 0;
+		for (u32 i = 0; i < Level().Objects.o_count(); ++i)
+		{
+			CObject* const o = Level().Objects.o_get_by_iterator(i);
+			if (!o || o->getDestroy() || o->ID() == self->ID())
+				continue;
+			if (smart_cast<CActor*>(o))
+				continue;
+			CInventoryOwner* const io = smart_cast<CInventoryOwner*>(o);
+			CEntityAlive* const al = smart_cast<CEntityAlive*>(o);
+			if (!io || !al || !al->g_Alive())
+				continue;
+			++seen;
+			if (s_race_npc == u16(-1))
+				s_race_npc = u16(o->ID());
+		}
+		Msg("- COOP(race-cl): partner search: %u live NPC(s) here, chose %u", seen, u32(s_race_npc));
+	}
+	if (s_race_npc == u16(-1))
+	{
+		Msg("! COOP(race-cl): no NPC to talk to — phrase '%s' (%s) NOT sent", phrase, why);
+		return false;
+	}
+	CGameObject* const partner = smart_cast<CGameObject*>(Level().Objects.net_Find(s_race_npc));
+	if (!partner)
+	{
+		Msg("! COOP(race-cl): partner %u vanished — phrase '%s' (%s) NOT sent",
+			u32(s_race_npc), phrase, why);
+		return false;
+	}
+	if (!CPhraseDialog::GetById("coop_race_dialog", true))
+	{
+		// Asked through GetById's quiet form once per call site; a miss dumps every dialog id the
+		// gamedata knows (1175 lines here), which is why it is not asked in a loop.
+		Msg("! COOP(race-cl): dialog 'coop_race_dialog' is not in this gamedata — phrase '%s' (%s) "
+			"NOT sent", phrase, why);
+		return false;
+	}
+	DIALOG_SHARED_PTR dlg(xr_new<CPhraseDialog>());
+	dlg->Load("coop_race_dialog");
+	CPhrase* const ph = dlg->coop_find_phrase(phrase);
+	if (!ph)
+	{
+		Msg("! COOP(race-cl): phrase '%s' is not in coop_race_dialog (%s)", phrase, why);
+		return false;
+	}
+	Msg("- COOP(race-cl): SAY '%s' (%s) side=%c npc=%u local_ts=%u",
+		phrase, why, s_coop_race_side, u32(s_race_npc), Level().timeServer());
+	// Exactly what the talk window calls when a phrase is clicked. On a thin client this ships
+	// M_XRNET_DIALOG_ACTION; the server runs the action inside an acting scope for THIS player.
+	ph->GetScriptHelper()->Action(self, partner, "coop_race_dialog", phrase);
+	FlushLog();
+	return true;
+}
+
+// Called by CLevel::coop_dispatch_due_decisions when the server's start decision comes due, i.e.
+// at the same server-clock tick on every client. Deliberately NOT deferred to the next UpdateCL:
+// one frame of slack on each client is up to a frame of relative jitter between them, which is the
+// whole quantity this test is trying to keep small.
+void coop_race_fire_claim()
+{
+	static bool s_fired = false;
+	if (s_fired)
+		return;                                  // one contested claim per run, per client
+	s_fired = true;
+	coop_race_say("race_x", "CONTESTED");
+}
+
 void CActor::UpdateCL()
 {
 	if (g_Alive() && Level().CurrentViewEntity() == this)
@@ -1427,6 +1518,78 @@ void CActor::UpdateCL()
 					Msg("- COOP(dialog-test): conversation done (%u phrases)", total);
 					s_dlg_delay = -1.f;      // one conversation per run
 				}
+				FlushLog();
+			}
+		}
+	}
+
+	// MP fork (§14 step 8 phase 3 QR, harness): TWO LIVE CLAIMANTS RACE ONE CLAIM ON THE WIRE.
+	// Launch with: -coop_test_race <seconds> -coop_test_race_side a|b
+	//
+	// This is the one thing every Q1..Q5 increment named as NOT covered. Q1 and Q4 both proved a
+	// refusal, but the loser was always a SYNTHETIC id the server claimed on behalf of — so what
+	// had never been exercised is two real client claim paths contending for one pool entry, with
+	// the loss landing in a real client's own task list.
+	//
+	// Two claims per client, and they are different in kind:
+	//
+	//  1. THE CONTROL, on this client's own timer: side 'a' claims coop_race_a, side 'b' claims
+	//     coop_race_b. Uncontested, so it MUST succeed — and it is what makes the race result
+	//     readable. Without it, "client b did not get the task" is equally well explained by
+	//     client b's claim path being broken, and the suite would certify first-claim-wins on an
+	//     instrument that cannot fail. Class-0 control: before believing the absence, find
+	//     something you know should be there.
+	//
+	//  2. THE CONTESTED CLAIM, fired NOT on this client's clock but by the server, through the
+	//     decision channel (M_XRNET_DECISION, kind COOP_DECISION_KIND_RACE). Two independent
+	//     wall clocks 30 s apart cannot be made to contend on purpose; the decision channel is
+	//     the shared clock this fork already built and already measured (<5 ms across clients,
+	//     §4 C2), so both clients say the phrase within a few ms of each other and the two
+	//     packets are in flight together. The server waits until BOTH controls have landed
+	//     before it broadcasts, so the ordering is a handshake, not a guess.
+	//
+	// Nothing here decides who wins. The harness asserts exactly-one-of-two and reads the winner
+	// out of the server's log; a suite that expected a particular client to win would be testing
+	// its own scheduling assumption rather than the transaction.
+	if (g_Alive() && this == Actor() && coop_thin_client())
+	{
+		static bool  s_race_init  = false;
+		static float s_race_delay = -1.f;
+		static float s_race_accum = 0.f;
+		if (!s_race_init)
+		{
+			s_race_init = true;
+			// Same delimiter rule as -coop_test_dialog, and for the same reason: a bare strstr
+			// for "-coop_test_race" also matches inside "-coop_test_race_side", so a run given
+			// only the side flag would arm the probe with a garbage delay.
+			LPCSTR p = strstr(Core.Params, "-coop_test_race");
+			while (p && p[sizeof("-coop_test_race") - 1] != ' ' &&
+			       p[sizeof("-coop_test_race") - 1] != '\0')
+				p = strstr(p + 1, "-coop_test_race");
+			if (p)
+			{
+				p += sizeof("-coop_test_race") - 1;
+				while (*p == ' ') ++p;
+				s_race_delay = (float)atof(p);
+				if (s_race_delay <= 0.f) s_race_delay = 60.f;
+				LPCSTR q = strstr(Core.Params, "-coop_test_race_side");
+				if (q)
+				{
+					q += sizeof("-coop_test_race_side") - 1;
+					while (*q == ' ') ++q;
+					s_coop_race_side = (*q == 'b' || *q == 'B') ? 'b' : 'a';
+				}
+				Msg("- COOP(race-cl): armed, side '%c', control claim in %.0fs; the contested "
+					"claim waits for the server's start broadcast", s_coop_race_side, s_race_delay);
+			}
+		}
+		if (s_race_delay > 0.f)
+		{
+			s_race_accum += Device.fTimeDelta;
+			if (s_race_accum >= s_race_delay)
+			{
+				s_race_delay = -1.f;             // one control claim per run
+				coop_race_say(s_coop_race_side == 'b' ? "race_mine_b" : "race_mine_a", "control");
 				FlushLog();
 			}
 		}

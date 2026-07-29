@@ -3184,6 +3184,156 @@ void game_sv_Single::Update()
 			else
 				Msg("! COOP(rpg-census): _G.mp_coop_rpg_census not registered");
 		}
+
+		// MP fork (§14 step 8 phase 3 QR / doc §7.2): TWO LIVE CLAIMANTS RACE ONE CLAIM ON THE WIRE.
+		//   -coop_test_race <seconds> [-coop_test_race_lead <ms>] [-coop_test_race_wait <seconds>]
+		//
+		// Every phase-3 increment named this as the thing it did NOT cover. Q1 and Q4 each proved a
+		// refusal, but the loser was a SYNTHETIC id the server claimed on behalf of — so what was
+		// never exercised is two real client claim paths contending for one pool entry, with the
+		// loss landing in a real client's own adopted task list.
+		//
+		// The server's job here is the SETUP and the HANDSHAKE, not the claims: the claims are the
+		// clients' and they arrive as real M_XRNET_DIALOG_ACTION packets.
+		//
+		//   stage 0  wait for TWO player actors, then offer three tasks:
+		//              coop_race_a  the side-'a' client's own uncontested control
+		//              coop_race_b  the side-'b' client's own uncontested control
+		//              coop_race_x  THE CONTESTED ONE — both clients say the same phrase for it
+		//   stage 1  wait until BOTH controls have left the pool. This is a handshake and not a
+		//            timer on purpose: it is the only thing that makes "client b did not get x"
+		//            readable, because a client whose claim path is broken cannot land its own
+		//            uncontested control either, and the run reports NOT MEASURED instead of a
+		//            first-claim-wins that was really a walkover.
+		//   stage 2  broadcast the start on the decision channel and, after the lead, print the
+		//            verdict the harness reads.
+		//
+		// Bounded at every stage, and a give-up line says which stage and that it is a HARNESS
+		// outcome rather than a result — "two clients never both connected" and "the transaction
+		// admitted two claimants" are different findings and must not share an exit.
+		if (coop_param("-coop_test_race"))
+		{
+			static bool s_r_init  = false;
+			static u32  s_r_armed = 0, s_r_ms = 0, s_r_retry = 0;
+			static u32  s_r_lead_ms = 3000, s_r_wait_ms = 240000;
+			static u32  s_r_stage = 0, s_r_since = 0;
+			static u16  s_r_owner_a = mp_coop_owner::none, s_r_owner_b = mp_coop_owner::none;
+			if (!s_r_init)
+			{
+				s_r_init = true;
+				LPCSTR p = coop_param("-coop_test_race");
+				const float secs = p ? (float)atof(p) : 0.f;
+				s_r_ms = (secs > 0.f && secs <= 86400.f) ? (u32)(secs * 1000.f) : 60000u;
+				LPCSTR l = coop_param("-coop_test_race_lead");
+				const float lead = l ? (float)atof(l) : 0.f;
+				if (lead > 0.f && lead <= 60000.f) s_r_lead_ms = (u32)lead;
+				LPCSTR w = coop_param("-coop_test_race_wait");
+				const float wsecs = w ? (float)atof(w) : 0.f;
+				if (wsecs > 0.f && wsecs <= 3600.f) s_r_wait_ms = (u32)(wsecs * 1000.f);
+				s_r_armed = Device.dwTimeGlobal;
+				s_r_since = Device.dwTimeGlobal;
+				Msg("- COOP(race): §7.2 two-claimant race armed, first look in %ums "
+					"(lead=%ums, per-stage wait=%ums)", s_r_ms, s_r_lead_ms, s_r_wait_ms);
+			}
+			if (s_r_stage < 3 && Device.dwTimeGlobal - s_r_armed >= s_r_ms &&
+			    Device.dwTimeGlobal - s_r_retry >= 2000)
+			{
+				s_r_retry = Device.dwTimeGlobal;
+				// Stage 0's give-up window starts at the FIRST LOOK, not at arm time. Otherwise
+				// -coop_test_race <seconds> would silently eat into the budget for "did two
+				// clients ever both get an actor", which is the one thing stage 0 is waiting on.
+				static bool s_r_looked = false;
+				if (!s_r_looked) { s_r_looked = true; s_r_since = Device.dwTimeGlobal; }
+				const bool late = (Device.dwTimeGlobal - s_r_since) >= s_r_wait_ms;
+				if (s_r_stage == 0)
+				{
+					xr_vector<u16> members;
+					coop_all_player_actors(members);
+					if (members.size() < 2)
+					{
+						if (late)
+						{
+							Msg("! COOP(race): only %u player actor(s) after %ums — a race needs "
+								"TWO live claimants, so the gates below are NOT MEASURED, not "
+								"passed", u32(members.size()), s_r_wait_ms);
+							s_r_stage = 3;
+						}
+					}
+					else
+					{
+						// The offerer is cosmetic here (no faction task, no kill condition), but a
+						// real NPC id keeps the pool entries looking like every other offer.
+						const u16 npc = coop_find_npc(members[0]);
+						coop_task_offer("coop_race_a", npc, false, false, u16(-1));
+						coop_task_offer("coop_race_b", npc, false, false, u16(-1));
+						coop_task_offer("coop_race_x", npc, false, false, u16(-1));
+						Msg("- COOP(race): offers up pool=%u players=%u p0=%u p1=%u offerer=%u",
+							coop_task_pool_size(), u32(members.size()), u32(members[0]),
+							u32(members[1]), u32(npc));
+						s_r_stage = 1;
+						s_r_since = Device.dwTimeGlobal;
+					}
+				}
+				else if (s_r_stage == 1)
+				{
+					const bool a_gone = !coop_task_offered("coop_race_a");
+					const bool b_gone = !coop_task_offered("coop_race_b");
+					if (!a_gone || !b_gone)
+					{
+						if (late)
+						{
+							Msg("! COOP(race): the two control claims did not both land in %ums "
+								"(a_claimed=%d b_claimed=%d) — one client's claim path never "
+								"worked, so the race gates are NOT MEASURED", s_r_wait_ms,
+								a_gone ? 1 : 0, b_gone ? 1 : 0);
+							s_r_stage = 3;
+						}
+					}
+					else
+					{
+						s_r_owner_a = coop_task_owner_of("coop_race_a");
+						s_r_owner_b = coop_task_owner_of("coop_race_b");
+						Msg("- COOP(race): controls landed a_owner=%u b_owner=%u distinct=%d — "
+							"both claim paths work, so a loss below means the transaction refused "
+							"it and not that the client was mute",
+							u32(s_r_owner_a), u32(s_r_owner_b),
+							(s_r_owner_a != s_r_owner_b) ? 1 : 0);
+						// Subject 0xFFFF and not 0: coop_broadcast_decision marks its subject
+						// decision-driven, which throttles that entity's M_UPDATE stream. This
+						// decision has no subject at all — it is a starting pistol — so it names
+						// an id no entity has rather than an id some entity might.
+						const u32 sent = Level().coop_broadcast_decision(
+							/*subject*/ u16(0xFFFF), u8(CLevel::COOP_DECISION_KIND_RACE),
+							NULL, 0, s_r_lead_ms);
+						// clients= is the count of clients backed by a REAL player actor, i.e.
+						// how many claimants the starting pistol actually reached. Fewer than two
+						// and there was no race, whatever the claim lines go on to say.
+						Msg("- COOP(race): START broadcast kind=%u lead=%ums clients=%u "
+							"pool=%u now=%u", u32(CLevel::COOP_DECISION_KIND_RACE), s_r_lead_ms,
+							sent, coop_task_pool_size(), Level().timeServer());
+						s_r_stage = 2;
+						s_r_since = Device.dwTimeGlobal;
+					}
+				}
+				else if (s_r_stage == 2)
+				{
+					// The lead, plus a grace window big enough for the two claim packets to arrive
+					// and be drained. Fixed rather than "wait until x is claimed", because the
+					// interesting failure — NOBODY got it — has no event to wait for.
+					if (Device.dwTimeGlobal - s_r_since >= s_r_lead_ms + 10000)
+					{
+						const u16 winner = coop_task_owner_of("coop_race_x");
+						Msg("- COOP(race): VERDICT x_owner=%u still_offered=%d pool=%u "
+							"a_owner=%u b_owner=%u controls_distinct=%d",
+							u32(winner), coop_task_offered("coop_race_x") ? 1 : 0,
+							coop_task_pool_size(), u32(s_r_owner_a), u32(s_r_owner_b),
+							(s_r_owner_a != s_r_owner_b) ? 1 : 0);
+						FlushLog();
+						s_r_stage = 3;
+					}
+				}
+			}
+		}
 	}
 
 	// MP fork (test harness): -coop_test_quest creates a synthetic task after 10s,

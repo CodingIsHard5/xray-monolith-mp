@@ -1104,6 +1104,22 @@ void CLevel::coop_dispatch_due_decisions()
 				    Server ? "SV-SELF" : "CLIENT", d.subject_id, u32(d.kind), d.exec_tick, now,
 				    s32(now) - s32(d.exec_tick), m_coop_decisions_executed);
 
+			// MP fork (§14 step 8 phase 3 QR, harness): the START of the two-live-claimants race.
+			// This rides the decision channel and not a launch flag because the two clients boot
+			// 30 s apart, and a contest between two independent wall clocks is not a contest. The
+			// channel already stamps exec_tick on the SERVER's clock and every client fires when
+			// its own synchronised clock reaches it — measured at <5 ms spread in §4 C2 — which
+			// is what puts both claim packets in flight together. Handled in the engine rather
+			// than through the Lua seam below so the race does not depend on gamedata being
+			// registered: a missing script would silently turn the contest into a walkover.
+			// The server never fires it on itself (no thin-client actor there); the guard is that
+			// coop_race_fire_claim needs Actor(), and a dedicated server has none.
+			if (d.kind == COOP_DECISION_KIND_RACE && !Server)
+			{
+				extern void coop_race_fire_claim();
+				coop_race_fire_claim();
+			}
+
 			// mp_api seam (increment B): hand the fired decision to gamedata. The client's
 			// native X-Ray AI executes it; real NPC control (set movement target / combat
 			// enemy) plugs into _G.mp_coop_on_decision. Args are hex-encoded so the binary

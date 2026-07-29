@@ -176,6 +176,12 @@ public:
 	// identical decisions step off on the same tick regardless of ping (C2 proved the
 	// shared clock holds to <5ms). Between decisions there is zero traffic — the client
 	// runs native X-Ray AI locally. See dev/DECISION_REPLICATION_PLAN.md.
+	// Decision KINDS 1..5 are gamedata's (mp_coop_decision_client.script: MOVE, COMBAT, MOVE_OBJ,
+	// FLEE, SETLOCAL) and are dispatched through the Lua seam. This one is the engine's own and is
+	// numbered well clear of them: §14 step 8 phase 3 QR uses the decision channel purely as the
+	// SHARED CLOCK it already is, to make two clients say one dialogue phrase at the same tick.
+	enum { COOP_DECISION_KIND_RACE = 9 };
+
 	struct CoopDecision
 	{
 		u32           exec_tick  = 0;
