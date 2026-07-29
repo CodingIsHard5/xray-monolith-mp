@@ -35,6 +35,20 @@ void FlushLog()
 	if (!no_log)
 	{
 		PROF_EVENT("Flushing");
+		// SECOND A-SIDE SITE for the invariant on AddOne below: this holds logCS across file I/O,
+		// and the filesystem layer allocates. It is left as-is DELIBERATELY, with the reason
+		// recorded rather than silently accepted:
+		//
+		// FlushLog rewrites the WHOLE file from LogFile every call, so the lock cannot simply be
+		// dropped around the I/O — a concurrent AddOne would mutate the vector mid-write. Making it
+		// safe means snapshotting under the lock (an allocation of its own, though one that does not
+		// nest a second lock) or switching to append-only writes with a persistent handle. Both are
+		// real changes to how the log file is produced, and this defect does not license them at
+		// 3am on the back of a deadlock fix.
+		//
+		// It is also the far colder path: AddOne runs per line, FlushLog runs at explicit flushes.
+		// The measured cycle went through AddOne. Recorded here so the next worker finds a named
+		// follow-up instead of a trap.
 		logCS.Enter();
 		IWriter* f = FS.w_open(logFName);
 		if (f)
@@ -88,62 +102,95 @@ BOOL logTimestamps = FALSE;
 enum Console_mark;
 extern bool is_console_mark(Console_mark type);
 
+// ============================ INVARIANT: logCS IS NOT HELD ACROSS AN ALLOCATION ==================
+//
+// §14 step 8 P4 measured a real deadlock on the co-op dedicated server and named both locks from an
+// in-engine registry:
+//
+//     thread A  holds logCS          and waits on  ntdll heap.cs      (it allocated while logging)
+//     thread B  holds ntdll heap.cs  and waits on  logCS              (it logged while allocating)
+//
+// A cycle. The process stays ALIVE and WEDGED — every other thread piles up behind the two, no
+// crash is produced and nothing reaches the log, because the log is precisely what is jammed.
+//
+// This function was the A side, and it was generous about it: under the lock it built a std::string,
+// concatenated a timestamp, constructed a `shared_str` — which takes the string container's OWN
+// global lock, so two global locks were nested here — grew `LogFile`, and then called an arbitrary
+// user callback that may do all of the above again.
+//
+// THE RULE, stated so a future caller has something to violate rather than a silent trap to fall
+// into: **build first, then lock; do not allocate, do not take another lock, and do not call out to
+// unknown code while logCS is held.** The lock exists to serialise the append and the de-dup state,
+// nothing more.
+//
+// The residue, stated rather than glossed: `LogFile.push_back` can still grow the vector under the
+// lock, and the rare duplicate-collapse path formats under it. Both are bounded and neither nests a
+// second lock. Removing the growth entirely needs a different container for `LogFile` (a fixed ring,
+// or a per-thread staging buffer), which is a bigger change than this defect justifies — the cycle
+// is broken once the common path stops allocating under the lock. `FlushLog` still holds logCS
+// across file I/O and is the remaining A-side site; see the note there.
 void AddOne(const char* split)
 {
-
-	logCS.Enter();
-
 #ifdef DEBUG
     OutputDebugString(split);
     OutputDebugString("\n");
 #endif
 
-	// DUMP_PHASE;
-	{
-		// demonized: add timestamps to log
-		std::string t = split;
-		if (logTimestamps) {
-			std::string c = "";
-			if (t.length() > 0 && is_console_mark((Console_mark)t[0])) {
-				c += t[0];
-				c += " ";
-				t.erase(0, 1);
-			}
-			t = c + "[" + timeInHMSMMM() + "] " + t;
+	// ---- everything below happens with NO LOCK HELD ------------------------------------------
+	// demonized: add timestamps to log
+	std::string t = split;
+	if (logTimestamps) {
+		std::string c = "";
+		if (t.length() > 0 && is_console_mark((Console_mark)t[0])) {
+			c += t[0];
+			c += " ";
+			t.erase(0, 1);
 		}
-		auto temp = shared_str(t.c_str());
+		t = c + "[" + timeInHMSMMM() + "] " + t;
+	}
+	// shared_str construction takes the string container's own global lock. Done here it nests
+	// nothing; done under logCS it made this function hold two global locks at once.
+	const shared_str temp = shared_str(t.c_str());
+	xr_string line(temp.c_str());          // the allocation that used to happen under the lock
+
+	// ---- lock held from here, for the shared state only ---------------------------------------
+	{
+		logCS.Enter();
+
 		static shared_str last_str;
 		static int items_count;
 
 		if (last_str.equal(temp))
 		{
-			xr_string tmp = temp.c_str();
-
+			// Duplicate collapse. This path DOES format under the lock, because the counter it
+			// prints is the shared state being read. It runs only for a repeated identical line.
 			if (items_count == 0)
 				items_count = 2;
 			else
 				items_count++;
 
+			xr_string tmp = temp.c_str();
 			tmp += " [";
 			tmp += std::to_string(items_count).c_str();
 			tmp += "]";
 
-			LogFile.erase(LogFile.end()-1);
-			LogFile.push_back(xr_string(tmp.c_str()));
+			LogFile.erase(LogFile.end() - 1);
+			LogFile.push_back(tmp);
 		}
 		else
 		{
-			// DUMP_PHASE;
-			LogFile.push_back(xr_string(temp.c_str()));
+			LogFile.push_back(std::move(line));   // moved, not rebuilt
 			last_str = temp;
 			items_count = 0;
 		}
+
+		logCS.Leave();
 	}
 
-	//exec CallBack
-	if (LogExecCB && LogCB)LogCB(split);
-
-	logCS.Leave();
+	// The callback is UNKNOWN CODE: it can allocate, log, or take any lock it likes. Calling it
+	// under logCS is how a single misbehaving subscriber turns into the wedge above. Outside.
+	if (LogExecCB && LogCB)
+		LogCB(split);
 }
 
 void Log(const char* s)
