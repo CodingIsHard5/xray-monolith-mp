@@ -33,29 +33,77 @@
 
 using namespace luabind;
 
+// ============ COOP: these accessors dereference a UI that a DEDICATED SERVER does not have ========
+//
+// Every one of them is exported to Lua below, and every one dereferences CurrentGameUI() without
+// checking it. On a headless server `CurrentGameUI()` is
+//
+//     g_hud ? HUD().GetGameUI() : nullptr
+//
+// and BOTH of its null paths end at the same unguarded member read. §14 step 8 P4 R4 measured what
+// that costs: `get_maingame` faulted (c0000005 reading 0xa8 — the offset of UIMainIngameWnd),
+// LuaJIT's lj_err_unwind_win64 CAUGHT the access violation and unwound, so the calling script
+// carried on and hit it again — 264 times — until nested __C_specific_handler frames exhausted the
+// stack. The thread then died holding critical sections and three others deadlocked behind it, so
+// the process stayed ALIVE AND WEDGED: no crash, no log line, just a server that stops.
+//
+// The swallowing is what makes this severe. An AV that terminated would have named itself.
+//
+// So: check, name the CALLER, and return null instead of faulting. A Lua error on a nil return is a
+// diagnosable failure with a script name attached; an access violation swallowed by the VM is not.
+static CUIGameCustom* coop_ui_or_null(LPCSTR who)
+{
+	CUIGameCustom* const ui = CurrentGameUI();
+	if (ui)
+		return ui;
+
+	// BOUNDED, because the measured failure called this 264 times in one burst and an unbounded
+	// traceback per call would bury the log it is meant to explain. The count keeps rising after
+	// the tracebacks stop, so the rate stays visible without the volume.
+	static u32 s_seen = 0;
+	++s_seen;
+	if (s_seen <= 8u || (s_seen % 64u) == 0u)
+	{
+		Msg("!COOP(uinull): %s called with NO game UI (CurrentGameUI() == null) — returning nil "
+			"instead of dereferencing it. This is a client HUD binding running somewhere it has no "
+			"UI, e.g. a dedicated server. count=%u", who, s_seen);
+		if (s_seen <= 8u)
+			ai().script_engine().print_stack();   // NAMES THE CALLING SCRIPT — the whole point
+		FlushLog();
+	}
+	return nullptr;
+}
+
 CUIActorMenu* GetActorMenu()
 {
-	return &CurrentGameUI()->GetActorMenu();
+	CUIGameCustom* const ui = coop_ui_or_null("get_actor_menu");
+	return ui ? &ui->GetActorMenu() : nullptr;
 }
 
 CUIPdaWnd* GetPDAMenu()
 {
-	return &CurrentGameUI()->GetPdaMenu();
+	CUIGameCustom* const ui = coop_ui_or_null("get_pda_menu");
+	return ui ? &ui->GetPdaMenu() : nullptr;
 }
 
 CUIMainIngameWnd* GetMainGameMenu()
 {
-	return CurrentGameUI()->UIMainIngameWnd;
+	CUIGameCustom* const ui = coop_ui_or_null("get_maingame");
+	return ui ? ui->UIMainIngameWnd : nullptr;
 }
 
 CUIMessagesWindow* GetMessagesMenu()
 {
-	return CurrentGameUI()->m_pMessagesWnd;
+	CUIGameCustom* const ui = coop_ui_or_null("get_messages_menu");
+	return ui ? ui->m_pMessagesWnd : nullptr;
 }
 
 u8 GrabMenuMode()
 {
-	return (u8)(CurrentGameUI()->GetActorMenu().GetMenuMode());
+	CUIGameCustom* const ui = coop_ui_or_null("GrabMenuMode");
+	if (!ui)
+		return (u8)0;
+	return (u8)(ui->GetActorMenu().GetMenuMode());
 }
 
 CScriptGameObject* CUIActorMenu::GetCurrentItemAsGameObject()
