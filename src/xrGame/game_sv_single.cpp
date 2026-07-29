@@ -4577,7 +4577,7 @@ void game_sv_Single::Update()
 		static u32  s_r32_armed = 0;
 		static u32  s_r32_ms    = 0;
 		static bool s_r32_init  = false;
-		static int  s_r32_stage = 0;      // 0 wait/kill  1 decay-watch  2 done
+		static int  s_r32_stage = 0;      // 0 wait/kill  3 settle  1 decay-watch  2 done
 		static u16  s_r32_player = mp_coop_owner::none;
 		static u16  s_r32_last_victim = mp_coop_owner::none;
 		static int  s_r32_vcomm = -1, s_r32_kcomm = -1;
@@ -4597,10 +4597,17 @@ void game_sv_Single::Update()
 		// Guard rail 1 and guard rail 2 assert on the same cell at different times; sampling once at
 		// the end cannot see both.
 		static s32  s_r32_rel_at_crossing = 0;
+		// The LAST kill's pressure add has not landed when the kill count reaches its target — see
+		// the settle stage below.
+		static u32  s_r32_settle_from = 0;
+		static u32  s_r32_settle_want = 0;
 
 		const u32 R32_MAX_KILLS   = 14;     // enough to cross a 50 bar at -7/kill, with margin
 		const u32 R32_KILL_GAP_MS = 1500;
 		const u32 R32_DECAY_WATCH_MS = 90000;
+		// Bound on the settle wait. The condition below is what actually releases it; this only
+		// stops a run where the tier never fires from waiting forever.
+		const u32 R32_SETTLE_MAX_MS = 8000;
 
 		if (!s_r32_init)
 		{
@@ -4815,32 +4822,65 @@ void game_sv_Single::Update()
 					// what leg C decays and what leg D carries across the restart.
 					if (s_r32_kills >= R32_MAX_KILLS)
 					{
-						// Stop killing and watch the clock: leg C needs pressure to fall with NO
-						// further input, or "it went down" could just be the accumulator being
-						// spent by a crossing.
-						s_r32_stage = 1;
-						s_r32_rel_at_crossing = (s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
-							? RELATION_REGISTRY().GetCommunityRelation(
-								CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
-								CHARACTER_COMMUNITY_INDEX(s_r32_kcomm)) : 0;
-						s_r32_decay_started_at = Device.dwTimeGlobal;
-						s_r32_decay_start_game = coop_rep_game_time_ms();
-						s_r32_decay_start_val  = (s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
-							? coop_rep_pressure_of(CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
-							                       CHARACTER_COMMUNITY_INDEX(s_r32_kcomm)) : 0;
-						Msg("- COOP(rep32): KILLING DONE after %u kills — peak pressure %+d, "
-							"crossed=%u held=%u, relation %d -> %d. Now watching decay with NO "
-							"further kills from pressure %+d at game %I64u",
-							s_r32_kills, s_r32_peak_pressure, coop_rep_pressure_crossed(),
-							coop_rep_pressure_held(), s_r32_rel_at_start,
-							(s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
-								? RELATION_REGISTRY().GetCommunityRelation(
-									CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
-									CHARACTER_COMMUNITY_INDEX(s_r32_kcomm)) : 0,
-							s_r32_decay_start_val, s_r32_decay_start_game);
-						FlushLog();
+						// Stop killing, but do NOT sample the decay baseline here: the kill above
+						// was issued microseconds ago and its reputation propagation settles ~1 s
+						// later (the comment on the per-kill line says so). Sampling now records
+						// the pressure from BEFORE the final kill, so run 6 logged a window of
+						// `-24 -> -16` whose ratio (67%) matches no half-life, while the cell that
+						// actually decayed was the -31 the final kill produced 6 s of game time
+						// INSIDE the window — making "with zero kills in the window" false as well.
+						// Both were invisible while decay drained to zero, because zero is zero
+						// whatever the baseline was; the formula-accurate decay is what exposed
+						// them. Same class as the crossing-sample this probe already fixed once:
+						// a baseline sampled at the wrong moment, not a wrong mechanism.
+						//
+						// So settle first. The release condition is OBSERVABLE — every kill has
+						// produced a bar decision — rather than a duration guessed to cover it.
+						s_r32_stage = 3;
+						s_r32_settle_from = Device.dwTimeGlobal;
+						s_r32_settle_want = s_r32_kills;
 					}
 				}
+			}
+		}
+
+		// ---------------- SETTLE: let the final kill's pressure add land ----------------
+		if (!s_r32_resume_mode && s_r32_stage == 3)
+		{
+			const u32 decided = coop_rep_pressure_held() + coop_rep_pressure_crossed();
+			const bool landed  = (decided >= s_r32_settle_want);
+			const bool expired = (Device.dwTimeGlobal - s_r32_settle_from) >= R32_SETTLE_MAX_MS;
+			if (landed || expired)
+			{
+				// A run whose tier never fired decides nothing, so the bound must exist — but it
+				// must also SAY it was hit, or a baseline sampled early looks identical to one
+				// sampled correctly.
+				Msg("- COOP(rep32): SETTLED after %u ms — %u of %u kills had reached a bar "
+					"decision%s",
+					Device.dwTimeGlobal - s_r32_settle_from, decided, s_r32_settle_want,
+					landed ? "" : " — SETTLE BOUND HIT, the baseline below may predate the final "
+					              "kill's pressure add");
+				s_r32_stage = 1;
+				s_r32_rel_at_crossing = (s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
+					? RELATION_REGISTRY().GetCommunityRelation(
+						CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
+						CHARACTER_COMMUNITY_INDEX(s_r32_kcomm)) : 0;
+				s_r32_decay_started_at = Device.dwTimeGlobal;
+				s_r32_decay_start_game = coop_rep_game_time_ms();
+				s_r32_decay_start_val  = (s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
+					? coop_rep_pressure_of(CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
+					                       CHARACTER_COMMUNITY_INDEX(s_r32_kcomm)) : 0;
+				Msg("- COOP(rep32): KILLING DONE after %u kills — peak pressure %+d, "
+					"crossed=%u held=%u, relation %d -> %d. Now watching decay with NO "
+					"further kills from pressure %+d at game %I64u",
+					s_r32_kills, s_r32_peak_pressure, coop_rep_pressure_crossed(),
+					coop_rep_pressure_held(), s_r32_rel_at_start,
+					(s_r32_vcomm >= 0 && s_r32_kcomm >= 0)
+						? RELATION_REGISTRY().GetCommunityRelation(
+							CHARACTER_COMMUNITY_INDEX(s_r32_vcomm),
+							CHARACTER_COMMUNITY_INDEX(s_r32_kcomm)) : 0,
+					s_r32_decay_start_val, s_r32_decay_start_game);
+				FlushLog();
 			}
 		}
 
