@@ -1221,17 +1221,37 @@ struct coop_pump_msg_scope
 
 u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadcasting with "flags" as returned
 {
+	u16 type;
+	P.r_begin(type);
+	const coop_pump_msg_scope coop_msg_ctx(u32(type));
+
 	// MP fork (§3c REPRODUCTION): this function runs on the ENet PUMP thread — see the
 	// pump-thread peek's own comment further down this file — and M_XRNET_DIALOG_ACTION already
 	// walks from here into the Lua VM. Bait it here rather than at the dialogue case, so the
 	// reproduction is about WHERE the VM is entered and not about anything the dialogue does.
 	// Off unless -coop_repro_pumplua is passed.
+	//
+	// MOVED BELOW THE SCOPE, 2026-07-30 (INSTABILITY_PLAN §4g). It used to sit three lines HIGHER,
+	// above `P.r_begin(type)` — and that made it the one thing this axis could not measure with it.
+	//
+	// The audit's pump-message column is set by coop_pump_msg_scope, constructed on the line above.
+	// This bait is the ONLY path that enters Lua from inside OnMessage by construction, so it is
+	// the column's only possible control — and firing before the scope, it could never exercise it.
+	// Every audit site therefore reported `none (not in OnMessage)`, in every run on record, and
+	// §4.4.ii's headline ("22 sites, 5.58 M touches, and NOT ONE inside OnMessage") rested on a
+	// column that had never been shown able to produce anything else. That is false-confidence
+	// class 0 in the place this axis was most confident: not proven broken — proven UNDEMONSTRATED,
+	// which is worth the same for an absence claim.
+	//
+	// What the move changes, stated because §4a makes this the STANDING REGRESSION CONTROL and a
+	// silent semantic drift here would invalidate every "zero outside the interlock" recorded:
+	// the bait now enters the VM AFTER `P.r_begin(type)` rather than before it. It never touches
+	// P, so the packet is unaffected; what it gains is that t_coop_pump_msg is set when it runs.
+	// The gate is that -coop_repro_pumplua must STILL kill the server, still naming the defect
+	// class, at both ends of the batch. If it does not, this edit broke the control and nothing
+	// else in the run means anything.
 	if (strstr(Core.Params, "-coop_repro_pumplua"))
 		coop_repro_bait("pump");
-
-	u16 type;
-	P.r_begin(type);
-	const coop_pump_msg_scope coop_msg_ctx(u32(type));
 #ifdef DEBUG
 	VERIFY(verify_entities());
 #endif
