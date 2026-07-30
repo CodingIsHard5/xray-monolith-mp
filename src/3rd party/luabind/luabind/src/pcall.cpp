@@ -23,11 +23,17 @@
 #include <luabind/detail/pcall.hpp>
 #include <luabind/error.hpp>
 #include <luabind/lua_include.hpp>
+#include <luabind/detail/coop_vm_audit.hpp>
 
 namespace luabind { namespace detail
 {
 	int pcall(lua_State *L, int nargs, int nresults)
 	{
+		// §3c audit (§4f): EVERY luabind call passes here. The two accessors §4b instrumented do
+		// not see a caller that already holds its lua_State* — CScriptBinderObjectWrapper::save is
+		// one, and it was measured running on the ENet pump thread with a symbolicated stack while
+		// the audit reported no site at all. One branch per call, not per argument.
+		coop_vm_touch_check_luabind();
 		pcall_callback_fun e = get_pcall_callback();
 		int en = 0;
 		if ( e )
@@ -45,6 +51,10 @@ namespace luabind { namespace detail
 
 	int resume_impl(lua_State *L, int nargs, int)
 	{
+		// Resuming a coroutine is a VM entry like any other, and it is instrumented here for the
+		// same reason: leaving one door unwatched is what made the previous answer narrower than
+		// it read.
+		coop_vm_touch_check_luabind();
 		return lua_resume(L, nargs);
 	}
 
