@@ -32,6 +32,18 @@
 #include <malloc.h>
 #pragma warning(pop)
 
+// MP fork (§4i): C4930 — "prototyped function not called (was a variable definition intended?)" —
+// is MSVC telling you a MOST VEXING PARSE just silently deleted an object. It cost this project
+// §4.4.ii's entire pump-message column: `const coop_pump_msg_scope coop_msg_ctx(u32(type));`
+// declared a function, so the RAII scope that sets the column was never constructed, in every build
+// on record. The warning was emitted every single time, at /W1, into a log nobody opens.
+//
+// An RAII guard whose constructor never runs is indistinguishable at runtime from one that ran and
+// found nothing, which is why this survived an audit that was specifically looking at that column.
+// Promote it to an ERROR for this translation unit: this file is full of scope guards, and the next
+// one to be written with parentheses should fail the build rather than quietly do nothing.
+#pragma warning(error:4930)
+
 u32 g_sv_traffic_optimization_level = eto_none;
 
 xrClientData::xrClientData() :
@@ -1223,7 +1235,25 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 {
 	u16 type;
 	P.r_begin(type);
-	const coop_pump_msg_scope coop_msg_ctx(u32(type));
+	// BRACES, NOT PARENTHESES, AND THE COMPILER HAD BEEN SAYING SO SINCE THE DAY THIS WAS WRITTEN.
+	//
+	// This was `const coop_pump_msg_scope coop_msg_ctx(u32(type));` — a MOST VEXING PARSE. With the
+	// inner parentheses, `u32(type)` is a valid parameter declaration, so the whole line declares a
+	// FUNCTION named coop_msg_ctx taking a u32 and returning const coop_pump_msg_scope. No object is
+	// created, the constructor never runs, and t_coop_pump_msg — which nothing else writes — stays
+	// at coop_pump_msg_none forever.
+	//
+	// So §4.4.ii's pump-message column was not merely undemonstrated (§4g), it was DEAD, in every
+	// build on record. §4g reasoned that `case M_SAVE_GAME:` sits inside the switch and therefore
+	// inside the scope, so "for real messages the label should be set". That is refuted: there was
+	// no scope. Moving the bait below it (§4h) was necessary and NOT sufficient — two independent
+	// reasons the column could never fire, and fixing only the one that was reasoned about would
+	// have produced a failing gate 2 and a hunt in the wrong place.
+	//
+	// MSVC prints this as warning C4930 at /W1 and the build is /WX-, so it has been in every build
+	// log this project has ever produced, unread. The #pragma below makes the next one a BUILD
+	// ERROR rather than a line in a log nobody opens — the instrument, not the vigilance.
+	const coop_pump_msg_scope coop_msg_ctx{u32(type)};
 
 	// MP fork (§3c REPRODUCTION): this function runs on the ENet PUMP thread — see the
 	// pump-thread peek's own comment further down this file — and M_XRNET_DIALOG_ACTION already
