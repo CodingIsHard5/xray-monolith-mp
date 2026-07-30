@@ -374,8 +374,31 @@ void coop_vm_touch_offthread()
 	// in. Reading it first is the difference between measuring the touch and measuring ourselves.
 	const bool interlocked = (g_coop_mt_window != 0);
 
-	enum { MAX_SITES = 48, MAX_FRAMES = 12, SKIP_FRAMES = 1 };
-	struct site { void* key; u32 count; u32 outside; };
+	// MAX_MSGS: a site's pump message used to be stamped at FIRST SIGHTING and never revisited, so a
+	// site first seen outside a message kept `none` for the whole run — and one first seen during a
+	// connect handshake kept THAT for the whole run. Measured (INSTABILITY_PLAN §4j, build
+	// 30578875845): the moment the column started working, **19 of 20 sites reported the same
+	// message, M_SECURE_KEY_SYNC**, across 85 s and 28,960 touches. Nineteen distinct call sites did
+	// not all run exclusively under a key-sync handshake; they were all first SEEN during one.
+	//
+	// That is false-confidence class 0's THIRD STATE — a working instrument, answering honestly,
+	// with a key that cannot tell the cases apart. It is not a broken instrument (wants a repair)
+	// and not a real negative (wants acting on); it wants A BETTER KEY. So a site now carries the
+	// SET of messages it has been seen under, and a new one is announced when it first appears.
+	//
+	// Bounded rather than per-touch: recording every touch would be 28,960 lines for the run above.
+	// Eight is well above the number of distinct M_* types any one site is expected to serve, and
+	// the cap announces itself instead of silently truncating.
+	enum { MAX_SITES = 48, MAX_FRAMES = 12, SKIP_FRAMES = 1, MAX_MSGS = 8 };
+	struct site
+	{
+		void* key;
+		u32   count;
+		u32   outside;
+		u32   msgs[MAX_MSGS];   // the distinct pump messages this site has been seen under
+		u32   msg_count;
+		bool  msg_capped;
+	};
 	static site     s_sites[MAX_SITES];
 	static u32      s_site_count = 0;
 	static bool     s_capped = false;
@@ -411,7 +434,46 @@ void coop_vm_touch_offthread()
 		// event, and a loud one: it is the §3c defect appearing on a path that looked ordinary.
 		// Announcing it only in the periodic summary would bury it under a million safe touches.
 		const bool first_outside = (!interlocked && out == 1);
+
+		// THE KEY FIX (§4j): a known site seen under a message it has not been seen under before is
+		// new information, and it was previously discarded. Decide inside the lock, print outside it
+		// — every Msg() in this function is deliberately outside, and a string format under a lock
+		// held by a path this hot is how an instrument becomes the thing it is measuring.
+		const u32 now_msg = coop_current_pump_message();
+		bool  msg_is_new = false, msg_now_capped = false;
+		u32   msg_seen_n = 0;
+		{
+			site& S = s_sites[i];
+			u32 m = 0;
+			for (; m < S.msg_count; ++m)
+				if (S.msgs[m] == now_msg)
+					break;
+			if (m == S.msg_count)
+			{
+				if (S.msg_count < MAX_MSGS)
+				{
+					S.msgs[S.msg_count++] = now_msg;
+					msg_is_new = true;
+					msg_seen_n = S.msg_count;
+				}
+				else if (!S.msg_capped)
+				{
+					S.msg_capped = true;
+					msg_now_capped = true;
+				}
+			}
+		}
 		s_lock.Leave();
+		if (msg_is_new)
+			Msg("! COOP(vm-audit): site #%u ALSO seen under pump message: %s (0x%X) — %u distinct "
+			    "messages for this site now. thread %u, frame interlock: %s. (The first-sighting "
+			    "label is NOT the whole story for this site; see INSTABILITY_PLAN §4j.)",
+			    i, coop_pump_message_name(now_msg), now_msg, msg_seen_n, tid,
+			    interlocked ? "INSIDE" : "OUTSIDE — THIS IS THE §3c DEFECT CLASS");
+		if (msg_now_capped)
+			Msg("! COOP(vm-audit): site #%u has been seen under more than %u distinct pump messages "
+			    "— the message list for this site is INCOMPLETE from here on, do not read it as the "
+			    "full set", i, u32(MAX_MSGS));
 		if (first_outside)
 			Msg("! COOP(vm-audit): site #%u touched the VM OUTSIDE THE FRAME INTERLOCK — this is "
 				"the §3c defect class, not the engine's ordinary MT work (see INSTABILITY_PLAN §4d)", i);
@@ -437,6 +499,12 @@ void coop_vm_touch_offthread()
 	s_sites[idx].key = key;
 	s_sites[idx].count = 1;
 	s_sites[idx].outside = interlocked ? 0 : 1;
+	// Seed the message SET with the first sighting, so the known-site path below has something to
+	// compare against and the first message is not silently absent from the site's own list.
+	// (s_sites is static and therefore zero-initialised; these are set explicitly anyway, because
+	// relying on that would break the day someone makes the table reusable.)
+	s_sites[idx].msg_count = 0;
+	s_sites[idx].msg_capped = false;
 
 	if (!s_module_base)
 	{
@@ -449,6 +517,8 @@ void coop_vm_touch_offthread()
 	}
 	void* const base = s_module_base;
 	const u32 msg = coop_current_pump_message();
+	s_sites[idx].msgs[0] = msg;
+	s_sites[idx].msg_count = 1;
 	s_lock.Leave();
 
 	string4096 trace;
