@@ -387,9 +387,24 @@ void coop_vm_touch_offthread()
 	// SET of messages it has been seen under, and a new one is announced when it first appears.
 	//
 	// Bounded rather than per-touch: recording every touch would be 28,960 lines for the run above.
-	// Eight is well above the number of distinct M_* types any one site is expected to serve, and
-	// the cap announces itself instead of silently truncating.
-	enum { MAX_SITES = 48, MAX_FRAMES = 12, SKIP_FRAMES = 1, MAX_MSGS = 8 };
+	//
+	// MAX_MSGS WAS 8, AND THE FIRST RUN WITH THE FIX MEASURED THAT AS TOO SMALL: 19 of 21 sites hit
+	// the cap and said so, making every one of those lists a FLOOR rather than a total (§4k result).
+	// "Eight is well above the number any one site is expected to serve" was a guess, and it was
+	// wrong by a lot.
+	//
+	// 64 is not a bigger guess, it is THE SIZE OF THE SPACE. xrMessages.h defines 58 distinct M_*
+	// enumerators with a highest value of 0x39 (57), and a site's set may additionally hold the
+	// `none` sentinel — 59 worst case. A real site therefore CANNOT overflow 64, so the cap's
+	// silence becomes a meaningful statement (this list is complete) rather than an unknown.
+	//
+	// That silence is only readable because the cap has been SHOWN TO FIRE: the MAX_MSGS=8 build
+	// announced it 19 times on this exact code path. Without that positive, "0 cap announcements"
+	// would be indistinguishable from a cap that never worked — the class-1 shape where the
+	// expected value is also what you get when nothing happened.
+	//
+	// Cost: 48 sites x 64 x 4 B = 12 KB of static table, against a server capped at 12 GB.
+	enum { MAX_SITES = 48, MAX_FRAMES = 12, SKIP_FRAMES = 1, MAX_MSGS = 64 };
 	struct site
 	{
 		void* key;
