@@ -187,19 +187,30 @@ void xrServer::client_Destroy(IClient* C)
 		//     (DelayedPacket& DPacket) across OnDelayedMessage, which for a dialogue action runs
 		//     Lua; an erase of that element mid-handler is a use-after-free.
 		//
+		//     [SUPERSEDED BY QR-F — the lock IS taken now; kept because it records why it was not,
+		//     and the answer turned out to be measurable. See the QR-F note below.]
 		//     The lock is deliberately NOT added here in this increment. Making the pump thread
 		//     block on DelayedPackestCS makes it wait for however long the game thread spends
 		//     inside Lua, which is the lock-across-a-slow-call shape this codebase has already
 		//     been burned by twice (the logCS/allocator ABBA deadlock, and why that invariant did
 		//     not transfer to mt_csEnter). A fix wants that question answered first, on purpose,
 		//     rather than a two-line change shipped on the strength of it looking obvious.
-		u32 purged = 0, purged_dlg = 0;
+		u32 purged = 0, purged_dlg = 0, queue_left = 0;
 		// MP fork (§14 step 8 QR-F): AND NOW IT TAKES THE LOCK. The objection that stopped this in
 		// QR-D — that making the pump block on DelayedPackestCS makes it wait on the game thread's
-		// Lua time — was answered by measurement rather than by argument, and it was already false:
-		// AddDelayedPacket takes this same CS from this same thread. The pump already waited. With
-		// the drain no longer holding the CS across the handler (see ProceedDelayedPackets), the
-		// longest anyone holds it is a 16 KB copy, so this wait is bounded by construction.
+		// Lua time — was answered by measurement rather than by argument: with the drain no longer
+		// holding the CS across the handler (see ProceedDelayedPackets), the longest anyone holds
+		// it is a 16 KB copy, so this wait is bounded by construction.
+		//
+		// MEASURED AFTERWARDS, and it corrects this comment rather than confirming it (leg 4,
+		// build 30501037870): the wait the objection feared was never large. On the claim path a
+		// whole Lua dialogue action inside the lock is hold_max_wide = 3 ms, and the pump's
+		// observed wait is 0 ms — so the "the pump already waited, for a Lua call's duration"
+		// argument is right about the mechanism and wrong about the magnitude. What justifies
+		// this lock is the use-after-free QR-D measured (an unsynchronised erase from the pump
+		// thread, on_game_thread=0 on all three runs), NOT throughput. Scope, because the number
+		// is only as wide as what ran: the actions measured are task CLAIMS. A heavier action —
+		// Q4's delivery, which moves items — has not been measured inside this lock.
 		DelayedPackestCS.Enter();
 		do
 		{
@@ -215,13 +226,17 @@ void xrServer::client_Destroy(IClient* C)
 				break;
 		}
 		while (true);
+		// Read the size INSIDE the lock. It is only a diagnostic, but the game thread pops from
+		// this deque under this same CS, and a concurrent size() on a std::deque is a race like
+		// any other — the one place left in this function that took the old liberty.
+		queue_left = u32(m_aDelayedPackets.size());
 		DelayedPackestCS.Leave();
 		{
 			extern u32 g_coop_game_thread_id;
 			const u32 tid = GetCurrentThreadId();
 			Msg("- COOP(disc): PURGE for client 0x%08x purged=%u dlg=%u queue_left=%u "
 				"tid=%u game=%u on_game_thread=%d",
-				pp.SenderID.value(), purged, purged_dlg, u32(m_aDelayedPackets.size()),
+				pp.SenderID.value(), purged, purged_dlg, queue_left,
 				tid, g_coop_game_thread_id,
 				(g_coop_game_thread_id != 0 && tid == g_coop_game_thread_id) ? 1 : 0);
 			FlushLog();
