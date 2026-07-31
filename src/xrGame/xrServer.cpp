@@ -1057,6 +1057,41 @@ u32 xrServer::OnDelayedMessage(NET_Packet& P, ClientID sender) // Non-Zero means
 			coop_run_dialog_action(P);
 		}
 		break;
+	// MP fork (§4r FIX, second attempt): the DEFERRED GE_DIE lands here. Without this case the
+	// packet was queued and then silently DROPPED — the switch had four cases and no default, so
+	// the death simply stopped happening: rollback 0, respawn 0, and an audit reporting zero
+	// un-interlocked touches because the event it would have measured never ran.
+	//
+	// That vacuous pass is exactly what §4r's gate 3 ("the death still works") was written to
+	// catch, and it caught it on the first run. Recorded here because the lesson is structural
+	// rather than about this one message: AddDelayedPacket accepts ANY packet, and this drain
+	// handles a whitelist — so deferring a message is two edits, and doing only the first one
+	// produces silence rather than an error.
+	case M_EVENT:
+		{
+			Process_event(P, sender);
+		}
+		break;
+	default:
+		{
+			// SAY SOMETHING WHEN THE QUEUE DROPS A PACKET. The bug above existed because this
+			// switch had no default: a deferred message the drain does not know is discarded with
+			// no error, no log line and no counter, which is indistinguishable from a message that
+			// ran fine. Once per type, because a per-packet line on a hot path is its own problem.
+			static u32 s_said[8] = {0};
+			static u32 s_said_n = 0;
+			bool seen = false;
+			for (u32 i = 0; i < s_said_n; ++i)
+				if (s_said[i] == u32(type)) { seen = true; break; }
+			if (!seen && s_said_n < 8)
+			{
+				s_said[s_said_n++] = u32(type);
+				Msg("! COOP(delayed): a packet of type %u was DEFERRED but this drain has no case "
+					"for it — it is being DROPPED. Deferring a message needs an AddDelayedPacket "
+					"call AND a case here; only the first was done.", u32(type));
+			}
+		}
+		break;
 	}
 #ifdef DEBUG
 	VERIFY(verify_entities());
