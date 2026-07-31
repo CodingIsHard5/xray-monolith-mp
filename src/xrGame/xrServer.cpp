@@ -1332,6 +1332,60 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 		break;
 	case M_EVENT:
 		{
+			// MP fork (§4p FIX, dev/INSTABILITY_PLAN.md §4p): GE_DIE is deferred to the game
+			// thread, for the same reason and by the same mechanism as M_XRNET_DIALOG_ACTION above.
+			//
+			// MEASURED, not reasoned: with the audit's OUTSIDE-stack instrument armed, a client's
+			// own death printed this stack, on THIS thread, outside the frame interlock —
+			//
+			//   xr_enet pump_thread -> OnMessage -> Process_event -> game_sv_Single::on_death
+			//   -> CALifeSimulatorBase::on_death
+			//   -> CWrapperAbstractCreature<CSE_ALifeCreatureActor>::on_death
+			//   -> luabind::detail::pcall -> Lua
+			//
+			// The culprit is one line of CALifeSimulatorBase::on_death: `creature->on_death(killer)`.
+			// The base implementation is C++, but the ACTOR's CSE is a script-wrapped class, so that
+			// virtual dispatches through luabind into the VM. Stock code, reached by the most
+			// ordinary event in the game.
+			//
+			// ONLY GE_DIE IS DEFERRED, and that is a deliberate limit rather than laziness. M_EVENT
+			// also carries ownership, hits and position changes; deferring all of them by a frame
+			// would change hit registration and item handling for every player to fix a defect
+			// measured on one event type. The peek is a rewind, so the non-deferred path sees a
+			// packet identical to the one it sees today, and the QUEUED copy carries the pre-peek
+			// cursor (AddDelayedPacket byte-copies the whole NET_Packet, r_pos included).
+			//
+			// NOT CLOSED BY THIS, and named so it is not assumed: any CSE virtual on a
+			// script-wrapped class reached from Process_event has the same shape — the ownership
+			// path consults used_ai_locations(), for one. GE_DIE is the only one OBSERVED, and an
+			// unobserved path is not a clean path (§4.4.ii's own rule).
+			const u32 r_save = P.r_tell();
+			u16 ev_type = 0;
+			// Bounds-checked by hand: NET_Packet's own r_pos VERIFY compiles out in release
+			// (INFORMATION.md open questions / the VERIFY-macros memory), so a short packet would
+			// otherwise be read past its end by this peek — a new fault in code added to fix one.
+			if ((P.B.count - r_save) >= (sizeof(u32) + sizeof(u16)))
+			{
+				u32 ev_time = 0;
+				P.r_u32(ev_time);
+				P.r_u16(ev_type);
+				P.r_seek(r_save);
+			}
+			if (ev_type == GE_DIE)
+			{
+				// Said once, because a per-death line is noise and a silent behaviour change is
+				// worse: a run has to be able to prove the deferral is the code it is testing.
+				static bool s_said = false;
+				if (!s_said)
+				{
+					s_said = true;
+					Msg("- COOP(death-defer): GE_DIE is deferred to the game thread (§4p). It "
+						"reached Lua from this thread through CSE on_death -> luabind; the queue "
+						"drains in xrServer::Update.");
+				}
+				AddDelayedPacket(P, sender);
+				break;
+			}
 			Process_event(P, sender);
 #ifdef DEBUG
 			VERIFY(verify_entities());
