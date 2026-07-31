@@ -478,6 +478,11 @@ void coop_vm_touch_offthread()
 				}
 			}
 		}
+		// §4o: the module base, read under the lock so the first-OUTSIDE stack below can be
+		// symbolicated. It is set by the first new-site registration, which always precedes any
+		// known-site hit — but it is READ rather than assumed, because a NULL printed next to a
+		// stack silently makes every RVA in it wrong.
+		void* const base_known = s_module_base;
 		s_lock.Leave();
 		if (msg_is_new)
 			Msg("! COOP(vm-audit): site #%u ALSO seen under pump message: %s (0x%X) — %u distinct "
@@ -490,8 +495,34 @@ void coop_vm_touch_offthread()
 			    "— the message list for this site is INCOMPLETE from here on, do not read it as the "
 			    "full set", i, u32(MAX_MSGS));
 		if (first_outside)
+		{
 			Msg("! COOP(vm-audit): site #%u touched the VM OUTSIDE THE FRAME INTERLOCK — this is "
 				"the §3c defect class, not the engine's ordinary MT work (see INSTABILITY_PLAN §4d)", i);
+			// §4o: AND ITS STACK, which until now was never printed for a KNOWN site.
+			//
+			// This cost a result. §4o caught the first stock path doing this — a client's own
+			// death — and could not name the caller, because a site's stack was printed at FIRST
+			// SIGHTING only and site #1's first sighting is its ordinary, harmless one
+			// (CALifeSwitchManager::switch_object on mt_Thread, inside the interlock). The
+			// identity of the Lua entry point was therefore known and the path that reached it
+			// un-interlocked was not — which is the half that decides where the fix goes.
+			//
+			// The frames are already captured unconditionally at the top of this function for
+			// every touch, so this adds no cost to the hot path: it only formats them, on an
+			// event that by definition happens at most once per site per process.
+			string4096 otrace;
+			otrace[0] = 0;
+			for (u16 f = 0; f < got; ++f)
+			{
+				string64 one;
+				xr_sprintf(one, " 0x%p", frames[f]);
+				xr_strcat(otrace, one);
+			}
+			Msg("! COOP(vm-audit): site #%u OUTSIDE-stack (thread %u, pump message %s (0x%X)), "
+			    "module base 0x%p, absolute — subtract the base for an RVA to symbolicate:%s",
+			    i, tid, coop_pump_message_name(now_msg), now_msg, base_known, otrace);
+			FlushLog();
+		}
 		if ((c % 1000) == 0)
 			Msg("! COOP(vm-audit): site #%u has now touched the VM off the game thread %u times, "
 				"%u of them OUTSIDE the interlock (%u / %u outside, in total)",
