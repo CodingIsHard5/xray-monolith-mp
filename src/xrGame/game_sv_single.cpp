@@ -118,6 +118,7 @@ game_sv_Single::game_sv_Single()
 	m_coop_autosave_interval_ms = 0;
 	m_coop_autosave_last = 0;
 	m_coop_autosave_init = false;
+	m_coop_bigalloc_init = false;   // §5g: -coop_bigalloc parsed once, on the first Update()
 	m_coop_test_worlditem_id = 0xffff;
 	m_coop_test_worlditem_pos.set(0.f, 0.f, 0.f);
 	m_coop_test_checkpoint_ms = 0;
@@ -2979,6 +2980,31 @@ void game_sv_Single::coop_quest6_probe_call(LPCSTR phase, u16 world_id, u16 play
 void game_sv_Single::Update()
 {
 	inherited::Update();
+	// MP fork §5g — big-allocation tracing. Armed once from `-coop_bigalloc <MB>`, then ticked here
+	// so the ring is printed from a normal frame rather than from inside the allocator (a logger
+	// that allocates, called by the allocator, is unbounded recursion). Disarmed by default and one
+	// compare when off. Placed FIRST so a record banked by anything below is printed on this same
+	// frame rather than a frame later — the events being hunted are seconds apart and the pairing
+	// of a grow with its matching free is what distinguishes the two live hypotheses.
+	if (!m_coop_bigalloc_init)
+	{
+		m_coop_bigalloc_init = true;
+		LPCSTR p = coop_param("-coop_bigalloc");
+		if (p)
+		{
+			// Megabytes on the command line; bytes internally. A missing or unparseable value
+			// would otherwise arm at 0 and record EVERY allocation in the engine, which on this
+			// path means recording from inside every allocation — so an unusable argument
+			// disarms loudly instead of producing an unusable run.
+			const int mb = atoi(p);
+			if (mb > 0)
+				coop_bigalloc_arm(size_t(mb) * 1024u * 1024u);
+			else
+				Msg("! COOP(bigalloc): -coop_bigalloc needs a positive size in MB (got '%s') — "
+				    "NOT armed. Arming at 0 would record every allocation in the engine.", p);
+		}
+	}
+	coop_bigalloc_tick();
 	coop_poll_spawns();    // MP fork (§14 co-op): give ready clients their own actor + reconnection
 	coop_update_anchors(); // MP fork (§15 co-op): re-centre A-Life on the players
 	// MP fork (§14 step 7 phase 4 D2): an operator/harness stop request. Does not return if one

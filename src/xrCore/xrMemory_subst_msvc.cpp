@@ -39,6 +39,116 @@ ICF u32 get_pool(size_t size)
 const bool g_use_pure_alloc = true;
 #endif // PURE_ALLOC
 
+// ---------------------------------------------------------------------------------------------
+// MP fork, §5g — big-allocation tracing. Rationale and the coverage control: xrMemory.h.
+#include <intrin.h>
+
+XRCORE_API size_t g_coop_bigalloc_min = 0;   // 0 = disarmed
+
+namespace
+{
+    // A power of two so the wrap is a mask rather than a modulo — this runs inside the allocator.
+    const u32 COOP_BA_RING = 512;
+    coop_bigalloc_rec  s_ba_ring[COOP_BA_RING];
+    volatile LONG      s_ba_seq = 0;          // total records EVER banked; also the ring cursor
+    volatile LONG      s_ba_emitted = 0;      // how many the dump has already printed
+
+    // The coverage control. 64-bit so a long run cannot wrap them; guarded by the same interlock
+    // discipline as the ring. These are the numbers to compare against the harness RSS curve.
+    volatile LONG64    s_ba_alloc_bytes = 0;
+    volatile LONG64    s_ba_free_bytes = 0;
+    volatile LONG64    s_ba_alloc_count = 0;
+    volatile LONG64    s_ba_free_count = 0;
+
+    // NOTHING in here may allocate. It is called from inside mem_alloc; a logger that allocates
+    // would recurse without bound. Fixed storage, interlocked index, no Msg, no shared_str.
+    void coop_ba_record(u32 op, size_t size, size_t oldsize, void* ra)
+    {
+        if (op == 2)
+        {
+            _InterlockedExchangeAdd64(&s_ba_free_bytes, (LONG64)oldsize);
+            _InterlockedExchangeAdd64(&s_ba_free_count, 1);
+        }
+        else
+        {
+            _InterlockedExchangeAdd64(&s_ba_alloc_bytes, (LONG64)size);
+            _InterlockedExchangeAdd64(&s_ba_alloc_count, 1);
+        }
+        const LONG n = _InterlockedIncrement(&s_ba_seq) - 1;
+        coop_bigalloc_rec& r = s_ba_ring[u32(n) & (COOP_BA_RING - 1)];
+        r.seq = u32(n);
+        r.op = op;
+        r.ms = GetTickCount();
+        r.size = size;
+        r.oldsize = oldsize;
+        r.ra = ra;
+    }
+}
+
+void coop_bigalloc_arm(size_t min_bytes)
+{
+    g_coop_bigalloc_min = min_bytes;
+    if (min_bytes)
+        Msg("* COOP(bigalloc): ARMED at %u bytes (%u MB). Every xrMemory alloc/realloc/free at or "
+            "above this is recorded with its return address. Totals are printed alongside so they "
+            "can be cross-footed against the harness RSS curve — if they do not account for the "
+            "growth, the growth is not xrMemory's.",
+            u32(min_bytes), u32(min_bytes / (1024 * 1024)));
+}
+
+void coop_bigalloc_tick()
+{
+    if (!g_coop_bigalloc_min) return;
+
+    const LONG banked = s_ba_seq;
+    LONG shown = s_ba_emitted;
+    if (banked == shown) return;
+
+    // If more than the ring's worth arrived since the last tick, records were overwritten. Say so
+    // rather than printing the survivors as though they were all of them — a silently truncated
+    // log is the same defect as a silently truncated sweep.
+    if (u32(banked - shown) > COOP_BA_RING)
+    {
+        Msg("! COOP(bigalloc): %u records OVERWRITTEN before they could be printed (ring holds %u). "
+            "The list below is the tail, not the set.", u32(banked - shown) - COOP_BA_RING, COOP_BA_RING);
+        shown = banked - LONG(COOP_BA_RING);
+    }
+
+    for (LONG i = shown; i < banked; ++i)
+    {
+        const coop_bigalloc_rec& r = s_ba_ring[u32(i) & (COOP_BA_RING - 1)];
+        switch (r.op)
+        {
+        case 0:
+            Msg("* COOP(bigalloc) #%u t=%u ALLOC   %u MB (%u bytes) ra=%p",
+                r.seq, r.ms, u32(r.size / (1024 * 1024)), u32(r.size), r.ra);
+            break;
+        case 1:
+            // The pairing that separates "a fresh block nobody frees" from "a container growing and
+            // the old block not going back to the OS".
+            Msg("* COOP(bigalloc) #%u t=%u REALLOC %u MB <- %u MB (grew %d MB) ra=%p",
+                r.seq, r.ms, u32(r.size / (1024 * 1024)), u32(r.oldsize / (1024 * 1024)),
+                int((LONG64(r.size) - LONG64(r.oldsize)) / (1024 * 1024)), r.ra);
+            break;
+        default:
+            Msg("* COOP(bigalloc) #%u t=%u FREE    %u MB (%u bytes) ra=%p",
+                r.seq, r.ms, u32(r.oldsize / (1024 * 1024)), u32(r.oldsize), r.ra);
+            break;
+        }
+    }
+    s_ba_emitted = banked;
+
+    // THE CONTROL LINE. Printed on every tick that had records, deliberately next to them: a reader
+    // must not be able to quote a call site without also seeing whether the traced allocations
+    // account for the process's actual growth.
+    Msg("* COOP(bigalloc) TOTALS: allocated %u MB in %u calls, freed %u MB in %u calls, net %d MB "
+        "— cross-foot this net against the RSS curve; a net far below the observed growth means the "
+        "leak is NOT going through xrMemory and no record above can explain it.",
+        u32(s_ba_alloc_bytes / (1024 * 1024)), u32(s_ba_alloc_count),
+        u32(s_ba_free_bytes / (1024 * 1024)), u32(s_ba_free_count),
+        int((s_ba_alloc_bytes - s_ba_free_bytes) / (1024 * 1024)));
+}
+
 #define PURE_MEMORY_FILL_ZERO
 #define PURE_MEMORY_ALIGNMENT 1 << 4
 
@@ -55,6 +165,9 @@ void* xrMemory::mem_alloc(size_t size
 	{
 		//void* result = malloc(size);
 		void* result = _aligned_malloc(size, PURE_MEMORY_ALIGNMENT);
+		// §5g. Recorded AFTER the allocation so a failed one is not counted as growth.
+		if (g_coop_bigalloc_min && size >= g_coop_bigalloc_min && result)
+			coop_ba_record(0, size, 0, _ReturnAddress());
 #ifdef PURE_MEMORY_FILL_ZERO
 		if (result)
 			memset(result, 0, size);
@@ -141,6 +254,14 @@ void xrMemory::mem_free(void* P)
 #ifdef PURE_ALLOC
 	if (g_use_pure_alloc)
 	{
+		// §5g: the size must be read BEFORE the free — afterwards the block is gone and any
+		// number taken from it is whatever the allocator left behind.
+		if (g_coop_bigalloc_min && P)
+		{
+			const size_t coop_ba_sz = _aligned_msize(P, PURE_MEMORY_ALIGNMENT, 0);
+			if (coop_ba_sz >= g_coop_bigalloc_min)
+				coop_ba_record(2, 0, coop_ba_sz, _ReturnAddress());
+		}
 		//free(P);
 		_aligned_free(P);
 		return;
@@ -201,7 +322,17 @@ void* xrMemory::mem_realloc(void* P, size_t size
 #endif // PURE_MEMORY_FILL_ZERO
 
 		//void* result = realloc(P, size);
+		// §5g needs the OLD size, and only the arm path pays for reading it.
+		size_t coop_ba_old = 0;
+		if (g_coop_bigalloc_min && P)
+			coop_ba_old = _aligned_msize(P, PURE_MEMORY_ALIGNMENT, 0);
 		void* result = _aligned_realloc(P, size, PURE_MEMORY_ALIGNMENT);
+		// Either side crossing the threshold is interesting: a big block shrinking is as much a
+		// clue as one growing, and recording only growth would make the log agree with the
+		// hypothesis by construction.
+		if (g_coop_bigalloc_min && result &&
+		    (size >= g_coop_bigalloc_min || coop_ba_old >= g_coop_bigalloc_min))
+			coop_ba_record(1, size, coop_ba_old, _ReturnAddress());
 
 #ifdef PURE_MEMORY_FILL_ZERO
 		if (result && size > old_size)
