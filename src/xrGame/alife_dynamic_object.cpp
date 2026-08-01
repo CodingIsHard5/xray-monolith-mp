@@ -171,10 +171,29 @@ void CSE_ALifeDynamicObject::try_switch_online()
 
 void CSE_ALifeDynamicObject::try_switch_offline()
 {
-	// MP fork: online set is tiny, so tracing every offline decision under
-	// -dbg is cheap and pins down which check keeps an object online
-	// (boot 19/20: second offline flip after a round trip never happens)
-	bool const dbg = !!strstr(Core.Params, "-dbg");
+	// MP fork: this trace pins down which check keeps an object online (boot 19/20: the second
+	// offline flip after a round trip never happens).
+	//
+	// ITS ORIGINAL JUSTIFICATION WAS WRONG, AND IT WAS MEASURED WRONG ON 2026-07-31 (§5h). The
+	// comment here read "online set is tiny, so tracing every offline decision under -dbg is
+	// cheap". It is not tiny and it is not cheap: this call site emitted **1,488,943 lines in a
+	// 900-second run — about 1650 a second — which was 98% of every line the server logged.**
+	//
+	// That mattered far beyond noise, because `xrCore`'s `LogFile` retains every logged line
+	// forever (§5g), so this trace WAS the server's memory leak: ~29 MB/min, reaching a 12 GiB cap
+	// in about six hours. The unbounded container is a real defect on its own and is being fixed
+	// separately — but the rate that made it look urgent came from here.
+	//
+	// Two changes, and the second is the one that matters:
+	//  1. The flag lookup is resolved ONCE. It was a `strstr` over the whole command line executed
+	//     per object per switch tick.
+	//  2. It no longer rides on the blanket `-dbg`. `-dbg` is needed for script errors to be
+	//     reported at all, so every diagnostic run had to accept 1650 lines/second of this to get
+	//     them. It now has its OWN flag and is off unless asked for by name.
+	static int s_switch_dbg = -1;
+	if (s_switch_dbg < 0)
+		s_switch_dbg = strstr(Core.Params, "-coop_dbg_switch") ? 1 : 0;
+	bool const dbg = (s_switch_dbg == 1);
 
 	if (!can_switch_offline())
 	{
