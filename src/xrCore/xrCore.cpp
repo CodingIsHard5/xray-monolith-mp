@@ -38,6 +38,28 @@ extern xr_string get_modded_exes_version_string();
 extern LPCSTR get_modded_exes_name();
 extern std::string timeInDMYHMSMMM();
 
+// §5s — a delimiter-safe command-line lookup for xrCore. `strstr` alone would match
+// `-coop_addrmap` inside `-coop_addrmap_top` and then parse that flag's argument as the floor,
+// which is the defect the game layer's `coop_param` was written to avoid; this is its twin, living
+// here because xrCore cannot see a static defined in xrGame.
+static LPCSTR coop_core_param(LPCSTR flag)
+{
+	if (!Core.Params) return NULL;
+	const size_t n = xr_strlen(flag);
+	LPCSTR p = Core.Params;
+	while ((p = strstr(p, flag)) != NULL)
+	{
+		LPCSTR after = p + n;
+		if (!*after || *after == ' ' || *after == '\t')
+		{
+			while (*after == ' ' || *after == '\t') ++after;
+			return after;
+		}
+		p += n;
+	}
+	return NULL;
+}
+
 void xrCore::_initialize(LPCSTR _ApplicationName, LogCallback cb, BOOL init_fs, LPCSTR fs_fname)
 {
 	xr_strcpy(ApplicationName, _ApplicationName);
@@ -95,6 +117,50 @@ void xrCore::_initialize(LPCSTR _ApplicationName, LogCallback cb, BOOL init_fs, 
 		DUMP_PHASE;
 
 		InitLog();
+
+		// §5s — ARM THE ADDRESS MAP HERE, NOT IN THE GAME LAYER, AND THE REASON IS A MEASUREMENT.
+		//
+		// `-coop_addrmap` used to be armed from `game_sv_Single::Update`, alongside every other
+		// coop probe. That is after the level loads, so every allocation made during boot was
+		// INVISIBLE to it — and §5s's arena census read the consequence without at first seeing
+		// it: occupancy tracked arena AGE (arenas born during load read 55-87%, ones born after
+		// read 27-50%) purely because the older an arena was, the more of its contents predated
+		// the instrument. The census could not answer the question it was built for in a 900 s
+		// window, since the only unambiguously post-arming arena was the one still filling.
+		//
+		// Correcting for that downstream would need the arming instant expressed on the smaps
+		// sampler's clock, and nothing relates the two. Arming before anything allocates removes
+		// the bias at its source instead: there is then no such thing as an invisible block.
+		//
+		// WHY THIS SPECIFIC LINE. `Params` is populated (and lowercased) further up, so the flag
+		// is readable; `InitLog()` has run, so `Msg` has somewhere to go; and `Memory._initialize`
+		// has run, so the allocator is live. Anything earlier would arm an instrument that cannot
+		// report and might not have an allocator to hook.
+		//
+		// It is worth more than convenience: this machine is shared with its owner and with the
+		// fleet, four census attempts were already lost to load, and an instrument that only
+		// yields a reading after 900 quiet seconds is one you rarely get to use. Making SHORT
+		// censuses readable is what makes the measurement repeatable here at all.
+		{
+			LPCSTR pa = coop_core_param("-coop_addrmap");
+			if (pa)
+			{
+				LPCSTR pams = coop_core_param("-coop_addrmap_ms");
+				LPCSTR patop = coop_core_param("-coop_addrmap_top");
+				LPCSTR pacen = coop_core_param("-coop_addrmap_census");
+				const int bytes = atoi(pa);
+				const int ivl = pams ? atoi(pams) : 0;
+				const int top = patop ? atoi(patop) : 0;
+				const int cen = pacen ? atoi(pacen) : 0;
+				if (bytes > 0)
+					coop_addrmap_arm(size_t(bytes), ivl > 0 ? u32(ivl) : 0,
+					                 top > 0 ? u32(top) : 0, cen > 0 ? u32(cen) : 0);
+				else
+					Msg("! COOP(addrmap): -coop_addrmap needs a positive floor in BYTES (got "
+					    "'%s') -- NOT armed.", pa);
+			}
+		}
+
 		_initialize_cpu();
 
 		// Debug._initialize ();

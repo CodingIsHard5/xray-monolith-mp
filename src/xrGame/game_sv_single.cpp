@@ -3049,26 +3049,13 @@ void game_sv_Single::Update()
 				Msg("! COOP(rasites): -coop_rasites needs a positive floor in BYTES (got '%s') — "
 				    "NOT armed.", pr);
 		}
-		// §5p — net bytes per 1 MiB of ADDRESS SPACE. Independent of the other three: the run it
-		// is built for arms this ALONE alongside the smaps sampler, so the log rate stays where
-		// §5n measured it and the two tables describe the same address space.
-		LPCSTR pa = coop_param("-coop_addrmap");
-		if (pa)
-		{
-			LPCSTR pams = coop_param("-coop_addrmap_ms");
-			LPCSTR patop = coop_param("-coop_addrmap_top");
-			LPCSTR pacen = coop_param("-coop_addrmap_census");
-			const int bytes = atoi(pa);
-			const int ivl = pams ? atoi(pams) : 0;
-			const int top = patop ? atoi(patop) : 0;
-			const int cen = pacen ? atoi(pacen) : 0;
-			if (bytes > 0)
-				coop_addrmap_arm(size_t(bytes), ivl > 0 ? u32(ivl) : 0, top > 0 ? u32(top) : 0,
-				                 cen > 0 ? u32(cen) : 0);
-			else
-				Msg("! COOP(addrmap): -coop_addrmap needs a positive floor in BYTES (got '%s') — "
-				    "NOT armed.", pa);
-		}
+		// §5p/§5s — `-coop_addrmap` is NOT armed here. It is armed in `xrCore::_initialize`,
+		// immediately after `InitLog()`, because arming after the level loads made every boot
+		// allocation invisible to it and §5s's arena census read that as a property of the heap
+		// (occupancy tracking arena age) rather than of the instrument. The other three probes
+		// stay here: they measure rates during steady state, where boot coverage does not change
+		// the reading. This comment is the pointer a reader of this block needs, since the flag
+		// no longer appears in the file where its siblings are parsed.
 	}
 	coop_bigalloc_tick();
 	coop_poll_spawns();    // MP fork (§14 co-op): give ready clients their own actor + reconnection

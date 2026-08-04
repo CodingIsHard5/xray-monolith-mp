@@ -723,7 +723,9 @@ void coop_addrmap_arm(size_t min_bytes, u32 print_interval_ms, u32 top_n, u32 ce
         "cheap: the bucket is a function of the POINTER, and the free path has the pointer, so "
         "alloc-adds and free-subtracts land in the same bucket by construction. It answers the "
         "question smaps cannot -- /proc does not record which allocator owns an anonymous "
-        "page, and this says which pages xrMemory is holding live.%s",
+        "page, and this says which pages xrMemory is holding live. ARMED FROM xrCore::_initialize "
+        "(§5s), so NOTHING it could see is invisible to it -- an arena's census figure is a "
+        "measurement rather than a lower bound, whatever the arena's age.%s",
         u32(min_bytes), s_am_top_n, print_interval_ms ? print_interval_ms : s_am_interval_ms,
         census_every ? " A CENSUS of every non-empty region is printed on every n-th interval."
                      : "");
