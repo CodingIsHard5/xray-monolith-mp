@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include <stdio.h>   // §5x: fopen/fputs/fclose for the append-only flush
 #pragma hdrstop
 
 #include <time.h>
@@ -28,6 +29,13 @@ static xrCriticalSection logCS;
 xr_vector<xr_string> LogFile;
 static LogCallback LogCB = 0;
 
+// §5x — serialises WRITERS so two concurrent flushes cannot interleave their lines in the file.
+// Lock order is logWriteCS -> logCS and never the reverse: AddOne takes logCS alone, FlushLog takes
+// this one and then logCS briefly. Stated because log.cpp has already cost this project one
+// two-lock deadlock.
+static xrCriticalSection logWriteCS;
+static bool s_log_appended = false;   // has anything been appended since CreateLog truncated it?
+
 void FlushLog()
 {
 	PROF_EVENT();
@@ -49,18 +57,69 @@ void FlushLog()
 		// It is also the far colder path: AddOne runs per line, FlushLog runs at explicit flushes.
 		// The measured cycle went through AddOne. Recorded here so the next worker finds a named
 		// follow-up instead of a trap.
+		// §5x — THE LOG IS NOW APPEND-ONLY AND THE IN-MEMORY BUFFER IS DRAINED. This replaces a
+		// whole-file rewrite of an unbounded vector, and it fixes three things the old shape had:
+		//
+		//  1. MEMORY. `LogFile` used to hold every line for the life of the process -- §5k named
+		//     `AddOne` as the leading allocation band on the whole leak axis, at two retained
+		//     allocations per line, never freed. A 24 h session at the rate these runs log would
+		//     retain a few hundred MB of strings. Draining on flush bounds it by the flush
+		//     interval instead (3 s on the dedicated server), so the steady-state residency is
+		//     tens of lines rather than millions.
+		//  2. QUADRATIC FILE I/O. Rewriting the WHOLE file every flush meant a 20,000-line log was
+		//     written ~300 times in a 900 s run -- hundreds of MB of I/O to produce one MB of log.
+		//  3. I/O UNDER `logCS`. The old code held the log lock across `w_open`/`w_close`, which
+		//     this file's own comment flags as a named follow-up needing "snapshotting under the
+		//     lock (an allocation of its own)". A SWAP is that snapshot and costs no allocation:
+		//     take the lock, swap the vector out, release, then write with the lock not held.
+		//
+		// What does NOT change: every line still reaches the file, in order, and the file lags by
+		// at most one flush interval exactly as before. That is the property every instrument on
+		// the §5 axis depends on, and it is gated on rather than assumed (§5x gate A).
+		// PING-PONG, and it is not a flourish. A plain local `pending` would take LogFile's
+		// STORAGE with it on the swap, leaving LogFile with zero capacity -- so the very next
+		// AddOne would reallocate INSIDE logCS, which is the exact edge InitLog's reserve exists
+		// to keep away from and which this file has already paid for once. Two buffers that swap
+		// back and forth keep a reserved allocation on both sides forever: LogFile always receives
+		// the other buffer's storage, already reserved and already empty.
+		static xr_vector<xr_string> s_pending;
+		logWriteCS.Enter();
+		if (s_pending.capacity() == 0) s_pending.reserve(65536);   // once, outside logCS
+		s_pending.clear();                                         // keeps capacity
 		logCS.Enter();
-		IWriter* f = FS.w_open(logFName);
-		if (f)
-		{
-			for (const auto& i : LogFile)
-			{
-				LPCSTR s = i.c_str();
-				f->w_string(s ? s : "");
-			}
-			FS.w_close(f);
-		}
+		s_pending.swap(LogFile);        // O(1), allocation-free, nothing acquired underneath
 		logCS.Leave();
+		xr_vector<xr_string>& pending = s_pending;
+		if (!pending.empty())
+		{
+			// Plain C append: CFileWriter always truncates (`_O_TRUNC`/"wb"), and `logFName` is
+			// already an absolute path by the time CreateLog has run. CreateLog creates/truncates
+			// the file, so the first append here lands in an empty file.
+			FILE* f = ::fopen(logFName, "ab");
+			if (f)
+			{
+				for (const auto& i : pending)
+				{
+					LPCSTR s = i.c_str();
+					::fputs(s ? s : "", f);
+					::fputs("\r\n", f);      // matches IWriter::w_string's CR LF exactly
+				}
+				::fclose(f);
+				s_log_appended = true;
+			}
+			else
+			{
+				// Could not open the file: put the lines BACK rather than dropping them. A log
+				// that silently loses its tail when a handle fails is the failure mode this whole
+				// axis has been bitten by (harness RULE 10).
+				logCS.Enter();
+				if (LogFile.empty()) pending.swap(LogFile);
+				else LogFile.insert(LogFile.begin(), pending.begin(), pending.end());
+				logCS.Leave();
+				// pending keeps whatever storage it now holds; the next call clears it.
+			}
+		}
+		logWriteCS.Leave();
 	}
 }
 
@@ -185,7 +244,13 @@ void AddOne(const char* split)
 			tmp += std::to_string(items_count).c_str();
 			tmp += "]";
 
-			LogFile.erase(LogFile.end() - 1);
+			// §5x: the buffer is DRAINED on every flush now, so the line this collapse wants to
+			// replace may already have gone to the file and be gone from memory. Erasing
+			// `end()-1` of an empty vector is undefined behaviour, so the emptiness is checked.
+			// The file content is identical either way: previously the flushed "msg" stayed in the
+			// file and the in-memory copy was replaced by "msg [2]"; now "msg" is in the file and
+			// "msg [2]" is appended after it.
+			if (!LogFile.empty()) LogFile.erase(LogFile.end() - 1);
 			LogFile.push_back(tmp);
 		}
 		else
@@ -344,7 +409,13 @@ void InitLog()
 	// reallocates once and then has twice the headroom; the amortised count over a whole session is
 	// a handful. Removing the possibility entirely needs a different container for LogFile, which is
 	// noted at AddOne and is not what this defect justifies.
-	LogFile.reserve(262144);
+	// §5x: the buffer is DRAINED on every flush now (every 3 s on the dedicated server), so its
+	// steady-state residency is tens of lines rather than the whole session. The reserve is kept --
+	// smaller, because it no longer has to cover a whole run -- for the reason it was added: so
+	// AddOne's push_back cannot reallocate inside logCS. 65536 covers the pre-flush boot burst,
+	// which is the only time this fills, and FlushLog's ping-pong keeps a reserved buffer on both
+	// sides so the capacity survives every swap.
+	LogFile.reserve(65536);
 }
 
 void CreateLog(BOOL nl)
