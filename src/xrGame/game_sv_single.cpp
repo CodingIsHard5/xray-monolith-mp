@@ -3029,6 +3029,26 @@ void game_sv_Single::Update()
 				Msg("! COOP(allocsites): -coop_allocsites needs a positive size in BYTES (got "
 				    "'%s') — NOT armed.", ps);
 		}
+		// §5k — net bytes per ALLOCATING return address inside a band, in BYTES for the same
+		// reason: the band §5j named is 128-255 B. Independent of the other two, because the
+		// point of arming it alone is to leave the log rate where the histogram measured it.
+		LPCSTR pr = coop_param("-coop_rasites");
+		if (pr)
+		{
+			LPCSTR prmax = coop_param("-coop_rasites_max");
+			LPCSTR print = coop_param("-coop_rasites_ms");
+			LPCSTR prtop = coop_param("-coop_rasites_top");
+			const int lo = atoi(pr);
+			const int hi = prmax ? atoi(prmax) : 0;
+			const int ivl = print ? atoi(print) : 0;
+			const int top = prtop ? atoi(prtop) : 0;
+			if (lo > 0)
+				coop_rasites_arm(size_t(lo), hi > 0 ? size_t(hi) : 0,
+				                 ivl > 0 ? u32(ivl) : 0, top > 0 ? u32(top) : 0);
+			else
+				Msg("! COOP(rasites): -coop_rasites needs a positive floor in BYTES (got '%s') — "
+				    "NOT armed.", pr);
+		}
 	}
 	coop_bigalloc_tick();
 	coop_poll_spawns();    // MP fork (§14 co-op): give ready clients their own actor + reconnection

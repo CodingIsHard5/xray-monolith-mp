@@ -234,19 +234,56 @@ XRCORE_API void coop_bigalloc_arm(size_t min_bytes, size_t max_bytes);
 // ring at that band with `-coop_bigalloc`/`-coop_bigalloc_max` and get return addresses for a
 // population small enough to print. Two cheap steps instead of one expensive one.
 //
+// BOTH HALVES OF THAT PARAGRAPH WERE WRONG, AND THE RUN THAT USED IT SAID SO. See §5k below.
+//
 // THE INTERVAL DELTA IS THE READING, not the cumulative. A cumulative net is dominated by boot
 // and says nothing about steady state, which is the same mistake the whole-run MB/min figure made
 // in §5e/§5f/§5h. Both are printed, with the delta first.
 XRCORE_API extern size_t g_coop_allocsites_min;
 XRCORE_API void coop_allocsites_arm(size_t min_bytes, u32 print_interval_ms);
 
-// The single fast-path compare shared by both instruments: the SMALLER armed floor, 0 when both
-// are disarmed. One global read per allocation whether or not anything is armed, which is what the
-// hot path pays in a normal build.
+// -------------------------------------------------------------------------------------------
+// §5k — NET BYTES PER RETURN ADDRESS, inside an armed band. Built because §5j's own run refuted
+// both halves of the paragraph above.
+//
+// §5j armed the histogram at ONE BYTE — every allocation in the engine taking two atomics — and
+// the server did the same work per second as the unarmed control on all four proxies (RSS samples
+// 0.99, vmwatch 0.99, MP_INV 1.01, log lines 1.02). So the §4d fear was misplaced: what cost 10x
+// there was per-event PRINTING, not per-event RECORDING. The per-allocation budget is real.
+//
+// And the two-step's second step turned out to be impossible as designed. §5j named the band —
+// `128 .. 255 B`, +2.17 MB and +12,062 live blocks over a 630 s steady window, climbing on 20 of
+// 21 intervals — and that band takes ~240 allocations/second. Pointing the per-event ring at it
+// would print ~14,000 lines per 30 s interval against a log that writes 12 lines/s: §5i's gate D
+// confound multiplied by forty. **The ring cannot be pointed at the band the histogram found.**
+//
+// So the live-block map is built after all, but only inside the band, where it is cheap:
+//
+//   * a fixed open-addressed map from live block POINTER -> (allocating return address, size),
+//     sized once at arm time and never grown;
+//   * a fixed table of RETURN ADDRESSES, each netting bytes and counting allocs/frees;
+//   * on free, the block's ALLOCATING site is looked up and debited — which is the whole point,
+//     because a free's own return address is the deallocation site and netting against it would
+//     produce a table of large positives and large negatives that says nothing about leaking.
+//
+// WHAT MUST BE PRINTED FOR THE READING TO MEAN ANYTHING, and is therefore printed every interval:
+// map occupancy and its high-water mark, insert overflows, site-table overflows, and frees whose
+// block was NOT in the map (every block allocated before arming, plus anything an overflow lost).
+// A table that silently drops sites reports a subset as if it were the set — and the subset always
+// looks tidier than the truth.
+XRCORE_API extern size_t g_coop_rasites_min;
+XRCORE_API extern size_t g_coop_rasites_max;
+XRCORE_API void coop_rasites_arm(size_t min_bytes, size_t max_bytes, u32 print_interval_ms, u32 top_n);
+
+// The single fast-path compare shared by all three instruments: the SMALLEST armed floor, 0 when
+// they are all disarmed. One global read per allocation whether or not anything is armed, which is
+// what the hot path pays in a normal build.
 XRCORE_API extern size_t g_coop_mem_track_min;
-// The one entry point the allocator calls. Dispatches to the histogram and/or the per-event ring
-// according to what is armed and what the sizes are. op: 0 alloc, 1 realloc, 2 free.
-XRCORE_API void coop_mem_note(u32 op, size_t size, size_t oldsize, void* ra);
+// The one entry point the allocator calls. Dispatches to the histogram, the per-event ring and/or
+// the return-address table according to what is armed and what the sizes are.
+// op: 0 alloc, 1 realloc, 2 free. `ptr` is the resulting block (alloc/realloc), `oldptr` the one
+// being released (free/realloc) — §5k needs the pointers, the older two instruments ignore them.
+XRCORE_API void coop_mem_note(u32 op, size_t size, size_t oldsize, void* ra, void* ptr, void* oldptr);
 
 // Call from a normal frame (NOT from inside an allocation). Emits any records banked since the last
 // call, plus the running totals that serve as the coverage control, plus the §5j histogram when

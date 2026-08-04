@@ -42,11 +42,15 @@ const bool g_use_pure_alloc = true;
 // ---------------------------------------------------------------------------------------------
 // MP fork, §5g — big-allocation tracing. Rationale and the coverage control: xrMemory.h.
 #include <intrin.h>
+#include <limits.h>
 
 XRCORE_API size_t g_coop_bigalloc_min = 0;   // 0 = disarmed
 XRCORE_API size_t g_coop_bigalloc_max = 0;   // 0 = no upper bound (§5j)
 XRCORE_API size_t g_coop_allocsites_min = 0; // 0 = disarmed (§5j)
-// The single fast-path compare for both instruments: the smaller armed floor, 0 when both are off.
+XRCORE_API size_t g_coop_rasites_min = 0;    // 0 = disarmed (§5k)
+XRCORE_API size_t g_coop_rasites_max = 0;    // 0 = no upper bound (§5k)
+// The single fast-path compare for all three instruments: the smallest armed floor, 0 when they
+// are all off.
 XRCORE_API size_t g_coop_mem_track_min = 0;
 
 namespace
@@ -122,6 +126,203 @@ namespace
         }
     }
 
+    // ---------------------------------------------------------------------------------------
+    // §5k — the live-block map and the per-return-address table. Rationale: xrMemory.h.
+    //
+    // Both are fixed storage. The site table is static (256 KB, one cache line per site so two hot
+    // allocation sites cannot false-share). The block map is VirtualAlloc'd at arm time, because
+    // it is sized for the band's live population and a 6 MB static array would be paid for by
+    // every build whether or not anyone ever arms this.
+    const u32 COOP_RA_SITES = 4096;                 // power of two: probe mask, not modulo
+    const u32 COOP_RA_PROBE = 32;                   // give up after this many; count the give-up
+    struct alignas(64) coop_rasite
+    {
+        volatile LONG64 ra;         // 0 = empty. Claimed by CAS; never released.
+        volatile LONG64 net_bytes;
+        volatile LONG64 n_alloc;
+        volatile LONG64 n_free;
+        char            _pad[64 - 4 * sizeof(LONG64)];
+    };
+    coop_rasite s_ra[COOP_RA_SITES];
+    LONG64      s_ra_prev_net[COOP_RA_SITES];       // read only by the tick, which is one thread
+
+    // The block map. `ptr` 0 = empty, 1 = tombstone (a slot whose block was freed). Tombstones are
+    // required rather than tidy: nulling a slot would cut the probe chain of every key that hashed
+    // before it, and those keys would then look like blocks that were never allocated.
+    const LONG64 COOP_RA_TOMB = 1;
+    struct coop_blk
+    {
+        volatile LONG64 ptr;
+        void*           ra;
+        u32             size;
+        u32             _pad;
+    };
+    coop_blk*       s_rb = NULL;
+    u32             s_rb_mask = 0;
+    u32             s_rb_capacity = 0;
+    volatile LONG64 s_rb_live = 0;                  // slots currently holding a block
+    volatile LONG64 s_rb_live_hw = 0;               // high-water mark of the above
+    volatile LONG64 s_rb_insert_overflow = 0;       // probe ran out: the block is NOT tracked
+    volatile LONG64 s_rb_unknown_free = 0;          // freed a block the map never held
+    volatile LONG64 s_rb_unknown_bytes = 0;
+    volatile LONG64 s_ra_site_overflow = 0;         // site table full: the bytes are NOT attributed
+    u32             s_ra_interval_ms = 30000;
+    u32             s_ra_last_print = 0;
+    u32             s_ra_top_n = 12;
+
+    // Fibonacci hashing on the pointer, shifted past the allocator's alignment bits — the low four
+    // bits of every block are zero here (PURE_MEMORY_ALIGNMENT is 16), and hashing them would put
+    // every key into one sixteenth of the table.
+    ICF u32 coop_ra_hash(LONG64 key, u32 mask)
+    {
+        u64 h = (u64)key >> 4;
+        h *= 0x9E3779B97F4A7C15ull;
+        return u32(h >> 40) & mask;
+    }
+
+    // Find-or-claim a site slot. Returns NULL when the table is full, and the caller counts that
+    // rather than silently folding the bytes into a neighbour.
+    coop_rasite* coop_ra_site(void* ra)
+    {
+        const LONG64 key = (LONG64)ra;
+        u32 h = coop_ra_hash(key, COOP_RA_SITES - 1);
+        for (u32 i = 0; i < COOP_RA_PROBE; ++i)
+        {
+            coop_rasite& s = s_ra[(h + i) & (COOP_RA_SITES - 1)];
+            const LONG64 cur = s.ra;
+            if (cur == key) return &s;
+            if (cur == 0)
+            {
+                const LONG64 won = _InterlockedCompareExchange64(&s.ra, key, 0);
+                if (won == 0 || won == key) return &s;
+            }
+        }
+        _InterlockedExchangeAdd64(&s_ra_site_overflow, 1);
+        return NULL;
+    }
+
+    void coop_ra_add(void* ra, LONG64 delta, bool is_alloc)
+    {
+        coop_rasite* s = coop_ra_site(ra);
+        if (!s) return;
+        _InterlockedExchangeAdd64(&s->net_bytes, delta);
+        _InterlockedExchangeAdd64(is_alloc ? &s->n_alloc : &s->n_free, 1);
+    }
+
+    // Insert a live block. The slot is claimed by CAS and ra/size written after — a block cannot be
+    // freed before the allocator has returned it to its caller, so any thread that can reach the
+    // erase side has already synchronised with these stores. That is an argument about the
+    // allocator's contract rather than a memory-model proof, and it is written down as such: this
+    // is a diagnostic, and the failure it could produce (one block attributed to the wrong site) is
+    // visible as a site that allocates without ever freeing.
+    void coop_rb_insert(void* ptr, void* ra, size_t size)
+    {
+        if (!s_rb || !ptr) return;
+        const LONG64 key = (LONG64)ptr;
+        u32 h = coop_ra_hash(key, s_rb_mask);
+        for (u32 i = 0; i < COOP_RA_PROBE; ++i)
+        {
+            coop_blk& b = s_rb[(h + i) & s_rb_mask];
+            // Re-read and retry the SAME slot a few times before moving on: losing the CAS means
+            // another thread claimed it this instant, and it may have claimed it for a key that
+            // makes this slot unusable — or it may have released it again. Walking on immediately
+            // would spend the probe budget on contention rather than on collisions.
+            for (u32 tries = 0; tries < 4; ++tries)
+            {
+                const LONG64 cur = b.ptr;
+                if (cur != 0 && cur != COOP_RA_TOMB && cur != key) break;
+                if (_InterlockedCompareExchange64(&b.ptr, key, cur) != cur) continue;
+                b.ra = ra;
+                b.size = u32(size);
+                if (cur != key)
+                {
+                    const LONG64 live = _InterlockedExchangeAdd64(&s_rb_live, 1) + 1;
+                    // High-water is a read-modify-write without a CAS loop, so under contention it
+                    // can miss a peak by a block or two. It is a capacity warning, not a
+                    // measurement, and an occupancy figure that is one short never changes what a
+                    // reader does with it.
+                    if (live > s_rb_live_hw) s_rb_live_hw = live;
+                }
+                return;
+            }
+        }
+        _InterlockedExchangeAdd64(&s_rb_insert_overflow, 1);
+    }
+
+    // Erase and return the ALLOCATING site. Returns NULL when the block was never tracked, which
+    // is normal for everything allocated before arming and must be counted, not ignored.
+    void* coop_rb_erase(void* ptr, u32* out_size)
+    {
+        if (!s_rb || !ptr) return NULL;
+        const LONG64 key = (LONG64)ptr;
+        u32 h = coop_ra_hash(key, s_rb_mask);
+        for (u32 i = 0; i < COOP_RA_PROBE; ++i)
+        {
+            coop_blk& b = s_rb[(h + i) & s_rb_mask];
+            const LONG64 cur = b.ptr;
+            if (cur == 0) return NULL;                       // empty ends the chain; tombstone does not
+            if (cur == key)
+            {
+                void* ra = b.ra;
+                if (out_size) *out_size = b.size;
+                if (_InterlockedCompareExchange64(&b.ptr, COOP_RA_TOMB, key) == key)
+                {
+                    _InterlockedExchangeAdd64(&s_rb_live, -1);
+                    return ra;
+                }
+                return NULL;                                 // someone else took it; do not double-book
+            }
+        }
+        return NULL;
+    }
+
+    ICF bool coop_ra_in_band(size_t s)
+    {
+        return s && s >= g_coop_rasites_min && (!g_coop_rasites_max || s <= g_coop_rasites_max);
+    }
+
+    // NOTHING in here may allocate. It is called from inside mem_alloc; a logger that allocates
+    // would recurse without bound. Fixed storage, interlocked index, no Msg, no shared_str.
+    void coop_ra_note(u32 op, size_t size, size_t oldsize, void* ra, void* ptr, void* oldptr)
+    {
+        // The release side FIRST, so a realloc that reuses its own pointer erases before it
+        // re-inserts. Doing it the other way round would erase the entry just written.
+        //
+        // THE ERASE IS TRIED ABOVE THE FLOOR, NOT INSIDE THE BAND, and the difference is a leak
+        // this would otherwise manufacture. The two sides do not see the same number: the alloc
+        // hook has the REQUESTED size, the free hook has `_aligned_msize`, which rounds up to the
+        // allocator's granularity. A block requested at 250 with a band of [128, 255] is freed
+        // reporting 256 — outside the band — so a band-gated erase would never debit it, and the
+        // site that allocated it would climb forever on paper. Above the floor the probe is
+        // essentially free anyway: §5j's histogram counted ~525,000 allocations at >= 128 B over
+        // its 900 s run (~580/second) against ~280,000 PER SECOND overall — the floor is where
+        // the traffic stops being hot, which is why the erase can afford to ignore the ceiling.
+        //
+        // The DEBIT uses the size stored at insertion, never the size the free reports, so the
+        // rounding cannot leak into the arithmetic either.
+        if (oldptr && (op == 1 || op == 2) && oldsize >= g_coop_rasites_min)
+        {
+            u32 sz = 0;
+            void* owner = coop_rb_erase(oldptr, &sz);
+            if (owner)
+                coop_ra_add(owner, -(LONG64)sz, false);
+            else if (coop_ra_in_band(oldsize))
+            {
+                // Normal for every block allocated before arming, and for anything an insert
+                // overflow lost. Counted rather than ignored: if this number keeps climbing at
+                // steady state, the map is dropping live blocks and every site total is a
+                // lower bound.
+                _InterlockedExchangeAdd64(&s_rb_unknown_free, 1);
+                _InterlockedExchangeAdd64(&s_rb_unknown_bytes, (LONG64)oldsize);
+            }
+        }
+        if (ptr && (op == 0 || op == 1) && coop_ra_in_band(size))
+        {
+            coop_ra_add(ra, (LONG64)size, true);
+            coop_rb_insert(ptr, ra, size);
+        }
+    }
+
     // NOTHING in here may allocate. It is called from inside mem_alloc; a logger that allocates
     // would recurse without bound. Fixed storage, interlocked index, no Msg, no shared_str.
     void coop_ba_record(u32 op, size_t size, size_t oldsize, void* ra)
@@ -159,8 +360,9 @@ namespace
 // the hot path is the `g_coop_mem_track_min` compare at the call site, and everything past it has
 // already qualified. NOTHING here allocates: it is called from inside mem_alloc, and a logger that
 // allocates would recurse without bound.
-void coop_mem_note(u32 op, size_t size, size_t oldsize, void* ra)
+void coop_mem_note(u32 op, size_t size, size_t oldsize, void* ra, void* ptr, void* oldptr)
 {
+    if (g_coop_rasites_min) coop_ra_note(op, size, oldsize, ra, ptr, oldptr);
     if (g_coop_allocsites_min)
     {
         // The histogram takes both sides of every operation, so a realloc's released block lands
@@ -187,7 +389,9 @@ static void coop_mem_recompute_floor()
 {
     const size_t a = g_coop_bigalloc_min ? g_coop_bigalloc_min : ~size_t(0);
     const size_t b = g_coop_allocsites_min ? g_coop_allocsites_min : ~size_t(0);
-    const size_t lo = (a < b) ? a : b;
+    const size_t c = g_coop_rasites_min ? g_coop_rasites_min : ~size_t(0);
+    size_t lo = (a < b) ? a : b;
+    if (c < lo) lo = c;
     g_coop_mem_track_min = (lo == ~size_t(0)) ? 0 : lo;
 }
 
@@ -205,6 +409,130 @@ void coop_allocsites_arm(size_t min_bytes, u32 print_interval_ms)
             "point -coop_bigalloc/-coop_bigalloc_max at that band to get return addresses for a "
             "population small enough to print.",
             u32(min_bytes), print_interval_ms ? print_interval_ms : s_sc_interval_ms);
+}
+
+// §5k. The block map is sized here, once, and never grown: growing it would mean rehashing from
+// inside the allocator. `want_slots` is chosen by the caller from the live population the histogram
+// measured, and the banner prints what was actually reserved so a run cannot silently be smaller
+// than it was asked to be. VirtualAlloc rather than xrMemory — this map is consulted from inside
+// xrMemory, and allocating it there would be a recursion waiting for the first grow.
+void coop_rasites_arm(size_t min_bytes, size_t max_bytes, u32 print_interval_ms, u32 top_n)
+{
+    if (max_bytes && min_bytes && max_bytes < min_bytes)
+    {
+        Msg("! COOP(rasites): the band [%u, %u] is EMPTY (max below min), so nothing could ever be "
+            "recorded — NOT armed. Reported rather than corrected: a run that records nothing must "
+            "not look like a run that found nothing.", u32(min_bytes), u32(max_bytes));
+        return;
+    }
+    if (!min_bytes)
+    {
+        Msg("! COOP(rasites): needs a positive floor in BYTES — NOT armed.");
+        return;
+    }
+    // 2^19 slots x 24 B = 12 MB. §5j measured ~65,000 live blocks in the 128-255 B band over 900 s,
+    // so this is ~8x that population: the map must not be the thing that fills up first, and its
+    // occupancy is printed every interval so "it did not" is a measurement rather than a hope.
+    const u32 slots = 1u << 19;
+    if (!s_rb)
+    {
+        void* mem = VirtualAlloc(NULL, size_t(slots) * sizeof(coop_blk), MEM_COMMIT | MEM_RESERVE,
+                                 PAGE_READWRITE);
+        if (!mem)
+        {
+            Msg("! COOP(rasites): could not reserve the %u-slot live-block map (%u KB) — NOT armed. "
+                "Arming without the map would attribute every free to 'unknown' and read as a leak "
+                "at every site at once.", slots, u32(size_t(slots) * sizeof(coop_blk) / 1024));
+            return;
+        }
+        s_rb = (coop_blk*)mem;                 // VirtualAlloc zeroes: every slot starts empty
+        s_rb_capacity = slots;
+        s_rb_mask = slots - 1;
+    }
+    if (print_interval_ms) s_ra_interval_ms = print_interval_ms;
+    if (top_n) s_ra_top_n = top_n;
+    s_ra_last_print = GetTickCount();
+    g_coop_rasites_min = min_bytes;
+    g_coop_rasites_max = max_bytes;
+    coop_mem_recompute_floor();
+    Msg("* COOP(rasites): ARMED on the band [%u, %u] bytes, printing the top %u sites every %u ms. "
+        "Bytes are netted per ALLOCATING return address: a free is debited to the site that "
+        "allocated the block, looked up in a %u-slot live-block map (%u KB), because a free's own "
+        "return address is the deallocation site and netting against it would say nothing about "
+        "leaking. Map occupancy, insert overflows, site-table overflows and frees of untracked "
+        "blocks are printed every interval — a table that silently drops sites reports a subset as "
+        "if it were the set.",
+        u32(min_bytes), u32(max_bytes), s_ra_top_n,
+        print_interval_ms ? print_interval_ms : s_ra_interval_ms,
+        s_rb_capacity, u32(size_t(s_rb_capacity) * sizeof(coop_blk) / 1024));
+}
+
+// §5k. Runs on the game thread from a normal frame, so it may Msg and may call into the loader —
+// neither of which is safe from inside the allocator. The DELTA is the reading, for the same reason
+// it is in §5j: a cumulative net is dominated by boot.
+static void coop_ra_tick()
+{
+    const u32 now = GetTickCount();
+    if (u32(now - s_ra_last_print) < s_ra_interval_ms) return;
+    const u32 elapsed = now - s_ra_last_print;
+    s_ra_last_print = now;
+
+    LONG64 total_delta = 0, total_net = 0;
+    u32 used = 0;
+    for (u32 i = 0; i < COOP_RA_SITES; ++i)
+    {
+        if (!s_ra[i].ra) continue;
+        ++used;
+        total_delta += s_ra[i].net_bytes - s_ra_prev_net[i];
+        total_net += s_ra[i].net_bytes;
+    }
+    Msg("* COOP(rasites) t=%u interval=%u ms — NET %d KB this interval, %d KB since armed across "
+        "%u site(s). Map: %I64d live of %u slots (high-water %I64d), insert overflow %I64d, "
+        "site-table overflow %I64d, frees of untracked blocks %I64d (%I64d KB).",
+        now, elapsed, int(total_delta / 1024), int(total_net / 1024), used,
+        s_rb_live, s_rb_capacity, s_rb_live_hw, s_rb_insert_overflow, s_ra_site_overflow,
+        s_rb_unknown_free, s_rb_unknown_bytes / 1024);
+
+    // Top N by |interval delta|, selected without sorting the table: N passes over 4096 entries on
+    // one frame every 30 s. A sort would need scratch storage, and this runs where allocating is
+    // merely undesirable rather than forbidden — but the simpler thing that cannot allocate is the
+    // one to write.
+    for (u32 rank = 0; rank < s_ra_top_n; ++rank)
+    {
+        u32 best = COOP_RA_SITES;
+        LONG64 best_abs = 0;
+        for (u32 i = 0; i < COOP_RA_SITES; ++i)
+        {
+            if (!s_ra[i].ra || s_ra_prev_net[i] == LLONG_MIN) continue;   // MIN marks "already shown"
+            const LONG64 d = s_ra[i].net_bytes - s_ra_prev_net[i];
+            const LONG64 a = d < 0 ? -d : d;
+            if (a > best_abs) { best_abs = a; best = i; }
+        }
+        if (best == COOP_RA_SITES || !best_abs) break;
+        const coop_rasite& s = s_ra[best];
+        void* const ra = (void*)s.ra;
+        // Symbolication support: the base of whichever module the site is in, resolved HERE rather
+        // than in the allocator, and per site rather than once — allocations come from xrCore,
+        // xrGame and the CRT, and one base printed for all of them makes most of the RVAs wrong.
+        HMODULE h = NULL;
+        const char* modname = "?";
+        char path[MAX_PATH] = {0};
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                               (LPCSTR)ra, &h) && h &&
+            GetModuleFileNameA(h, path, MAX_PATH))
+        {
+            const char* slash = strrchr(path, '\\');
+            modname = slash ? slash + 1 : path;
+        }
+        Msg("*   ra=%p  %s+0x%I64X  delta %+9d KB | net %+9d KB | allocs %I64d frees %I64d live %I64d",
+            ra, modname, h ? (LONG64)((char*)ra - (char*)h) : (LONG64)0,
+            int((s.net_bytes - s_ra_prev_net[best]) / 1024), int(s.net_bytes / 1024),
+            s.n_alloc, s.n_free, s.n_alloc - s.n_free);
+        s_ra_prev_net[best] = LLONG_MIN;    // temporarily, so the next rank picks a different site
+    }
+    // Restore the previous-net snapshot for every site, including the ones just shown.
+    for (u32 i = 0; i < COOP_RA_SITES; ++i)
+        if (s_ra[i].ra) s_ra_prev_net[i] = s_ra[i].net_bytes;
 }
 
 void coop_bigalloc_arm(size_t min_bytes, size_t max_bytes)
@@ -260,9 +588,10 @@ static void coop_sc_tick()
 
 void coop_bigalloc_tick()
 {
-    // Ordered so the histogram runs even when the per-event ring is disarmed — the two are
+    // Ordered so the histogram runs even when the per-event ring is disarmed — the three are
     // independent instruments and §5j's whole point is being able to run the cheap one alone.
     if (g_coop_allocsites_min) coop_sc_tick();
+    if (g_coop_rasites_min) coop_ra_tick();
     if (!g_coop_bigalloc_min) return;
 
     const LONG banked = s_ba_seq;
@@ -350,7 +679,7 @@ void* xrMemory::mem_alloc(size_t size
 		// §5g. Recorded AFTER the allocation so a failed one is not counted as growth.
 		// §5j: one compare against the shared floor, then both instruments decide for themselves.
 		if (g_coop_mem_track_min && size >= g_coop_mem_track_min && result)
-			coop_mem_note(0, size, 0, _ReturnAddress());
+			coop_mem_note(0, size, 0, _ReturnAddress(), result, NULL);
 #ifdef PURE_MEMORY_FILL_ZERO
 		if (result)
 			memset(result, 0, size);
@@ -443,7 +772,7 @@ void xrMemory::mem_free(void* P)
 		{
 			const size_t coop_ba_sz = _aligned_msize(P, PURE_MEMORY_ALIGNMENT, 0);
 			if (coop_ba_sz >= g_coop_mem_track_min)
-				coop_mem_note(2, 0, coop_ba_sz, _ReturnAddress());
+				coop_mem_note(2, 0, coop_ba_sz, _ReturnAddress(), NULL, P);
 		}
 		//free(P);
 		_aligned_free(P);
@@ -515,7 +844,7 @@ void* xrMemory::mem_realloc(void* P, size_t size
 		// hypothesis by construction.
 		if (g_coop_mem_track_min && result &&
 		    (size >= g_coop_mem_track_min || coop_ba_old >= g_coop_mem_track_min))
-			coop_mem_note(1, size, coop_ba_old, _ReturnAddress());
+			coop_mem_note(1, size, coop_ba_old, _ReturnAddress(), result, P);
 
 #ifdef PURE_MEMORY_FILL_ZERO
 		if (result && size > old_size)
