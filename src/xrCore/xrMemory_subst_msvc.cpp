@@ -49,6 +49,7 @@ XRCORE_API size_t g_coop_bigalloc_max = 0;   // 0 = no upper bound (§5j)
 XRCORE_API size_t g_coop_allocsites_min = 0; // 0 = disarmed (§5j)
 XRCORE_API size_t g_coop_rasites_min = 0;    // 0 = disarmed (§5k)
 XRCORE_API size_t g_coop_rasites_max = 0;    // 0 = no upper bound (§5k)
+XRCORE_API size_t g_coop_addrmap_min = 0;    // 0 = disarmed (§5p)
 // The single fast-path compare for all three instruments: the smallest armed floor, 0 when they
 // are all off.
 XRCORE_API size_t g_coop_mem_track_min = 0;
@@ -124,6 +125,63 @@ namespace
             _InterlockedExchangeAdd64(&b.net_bytes, -(LONG64)oldsize);
             _InterlockedExchangeAdd64(&b.n_free, 1);
         }
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // §5p — NET BYTES PER 1 MiB OF ADDRESS SPACE. Rationale: xrMemory.h.
+    //
+    // The one thing §5k needed a live-block map for — remembering something about a block so the
+    // free can undo it — this does not need at all, and that is the whole reason it is cheap: the
+    // bucket is a function of the POINTER, and the free path has the pointer. A block's address
+    // does not change between its allocation and its release, so `alloc adds to bucket(ptr)` and
+    // `free subtracts from bucket(oldptr)` net exactly, with no bookkeeping in between.
+    const u32 COOP_AM_SLOTS = 8192;         // ~8 GB of touched address space at 1 MiB granularity
+    const u32 COOP_AM_PROBE = 16;
+    struct alignas(64) coop_ambucket
+    {
+        volatile LONG64 key;                // (address >> 20) + 1, so 0 can mean empty
+        volatile LONG64 net_bytes;
+        volatile LONG64 n_alloc;
+        volatile LONG64 n_free;
+        char            _pad[64 - 4 * sizeof(LONG64)];
+    };
+    coop_ambucket s_am[COOP_AM_SLOTS];
+    LONG64        s_am_prev_net[COOP_AM_SLOTS];
+    volatile LONG64 s_am_overflow = 0;
+    u32           s_am_interval_ms = 30000;
+    u32           s_am_last_print = 0;
+    u32           s_am_top_n = 16;
+
+    ICF u32 coop_am_hash(LONG64 key)
+    {
+        u64 h = (u64)key * 0x9E3779B97F4A7C15ull;
+        return u32(h >> 45) & (COOP_AM_SLOTS - 1);
+    }
+
+    // Called from inside the allocator: fixed storage, no logging, no allocation.
+    ICF void coop_am_add(void* p, LONG64 delta, bool is_alloc)
+    {
+        if (!p) return;
+        const LONG64 key = (LONG64)((u64)p >> 20) + 1;
+        u32 h = coop_am_hash(key);
+        for (u32 i = 0; i < COOP_AM_PROBE; ++i)
+        {
+            coop_ambucket& b = s_am[(h + i) & (COOP_AM_SLOTS - 1)];
+            LONG64 cur = b.key;
+            if (cur != key)
+            {
+                if (cur != 0) continue;
+                cur = _InterlockedCompareExchange64(&b.key, key, 0);
+                if (cur != 0 && cur != key) continue;
+            }
+            _InterlockedExchangeAdd64(&b.net_bytes, delta);
+            _InterlockedExchangeAdd64(is_alloc ? &b.n_alloc : &b.n_free, 1);
+            return;
+        }
+        // The table is full for this key's probe run. Counted rather than folded into a
+        // neighbour: a bucket that absorbed someone else's bytes is worse than a missing one,
+        // because it looks like a region that grew.
+        _InterlockedExchangeAdd64(&s_am_overflow, 1);
     }
 
     // ---------------------------------------------------------------------------------------
@@ -370,6 +428,16 @@ namespace
 void coop_mem_note(u32 op, size_t size, size_t oldsize, void* ra, void* ptr, void* oldptr)
 {
     if (g_coop_rasites_min) coop_ra_note(op, size, oldsize, ra, ptr, oldptr);
+    if (g_coop_addrmap_min)
+    {
+        // Both sides, each against its own pointer: a realloc that moved its block must debit the
+        // region it left and credit the one it landed in, or a heap that relocates would read as
+        // growth everywhere it went.
+        if (oldptr && (op == 1 || op == 2) && oldsize >= g_coop_addrmap_min)
+            coop_am_add(oldptr, -(LONG64)oldsize, false);
+        if (ptr && (op == 0 || op == 1) && size >= g_coop_addrmap_min)
+            coop_am_add(ptr, (LONG64)size, true);
+    }
     if (g_coop_allocsites_min)
     {
         // The histogram takes both sides of every operation, so a realloc's released block lands
@@ -397,8 +465,10 @@ static void coop_mem_recompute_floor()
     const size_t a = g_coop_bigalloc_min ? g_coop_bigalloc_min : ~size_t(0);
     const size_t b = g_coop_allocsites_min ? g_coop_allocsites_min : ~size_t(0);
     const size_t c = g_coop_rasites_min ? g_coop_rasites_min : ~size_t(0);
+    const size_t d = g_coop_addrmap_min ? g_coop_addrmap_min : ~size_t(0);
     size_t lo = (a < b) ? a : b;
     if (c < lo) lo = c;
+    if (d < lo) lo = d;
     g_coop_mem_track_min = (lo == ~size_t(0)) ? 0 : lo;
 }
 
@@ -543,6 +613,77 @@ static void coop_ra_tick()
         if (s_ra[i].ra) s_ra_prev_net[i] = s_ra[i].net_bytes;
 }
 
+// §5p. Runs on the game thread from a normal frame. The DELTA is the reading, as everywhere else
+// on this axis, and the ADDRESS is printed as a 1 MiB-aligned range so it can be laid straight
+// against `dev/harness/smaps_arenas.py`'s mapping table without arithmetic in the reader's head.
+static void coop_am_tick()
+{
+    const u32 now = GetTickCount();
+    if (u32(now - s_am_last_print) < s_am_interval_ms) return;
+    const u32 elapsed = now - s_am_last_print;
+    s_am_last_print = now;
+
+    LONG64 total_delta = 0, total_net = 0;
+    u32 used = 0;
+    for (u32 i = 0; i < COOP_AM_SLOTS; ++i)
+    {
+        if (!s_am[i].key) continue;
+        ++used;
+        total_delta += s_am[i].net_bytes - s_am_prev_net[i];
+        total_net += s_am[i].net_bytes;
+    }
+    Msg("* COOP(addrmap) t=%u interval=%u ms -- NET %d KB this interval, %d KB since armed "
+        "across %u region(s) of 1 MiB. Table overflow %I64d. Each line is a 1 MiB slice of ADDRESS "
+        "SPACE, so it lays directly against the smaps arena table: a region whose xrMemory net "
+        "climbs while its arena commits is that arena's owner, and one whose arena commits while "
+        "this stays flat is NOT.",
+        now, elapsed, int(total_delta / 1024), int(total_net / 1024), used, s_am_overflow);
+
+    for (u32 rank = 0; rank < s_am_top_n; ++rank)
+    {
+        u32 best = COOP_AM_SLOTS;
+        LONG64 best_abs = 0;
+        for (u32 i = 0; i < COOP_AM_SLOTS; ++i)
+        {
+            if (!s_am[i].key || s_am_prev_net[i] == LLONG_MIN) continue;
+            const LONG64 d = s_am[i].net_bytes - s_am_prev_net[i];
+            const LONG64 a = d < 0 ? -d : d;
+            if (a > best_abs) { best_abs = a; best = i; }
+        }
+        if (best == COOP_AM_SLOTS || !best_abs) break;
+        const coop_ambucket& b = s_am[best];
+        const u64 base = (u64(b.key) - 1) << 20;
+        Msg("*   %016I64X-%016I64X  delta %+9d KB | net %+9d KB | allocs %I64d frees %I64d",
+            base, base + (u64(1) << 20),
+            int((b.net_bytes - s_am_prev_net[best]) / 1024), int(b.net_bytes / 1024),
+            b.n_alloc, b.n_free);
+        s_am_prev_net[best] = LLONG_MIN;
+    }
+    for (u32 i = 0; i < COOP_AM_SLOTS; ++i)
+        if (s_am[i].key) s_am_prev_net[i] = s_am[i].net_bytes;
+}
+
+void coop_addrmap_arm(size_t min_bytes, u32 print_interval_ms, u32 top_n)
+{
+    if (!min_bytes)
+    {
+        Msg("! COOP(addrmap): needs a positive floor in BYTES -- NOT armed.");
+        return;
+    }
+    g_coop_addrmap_min = min_bytes;
+    if (print_interval_ms) s_am_interval_ms = print_interval_ms;
+    if (top_n) s_am_top_n = top_n;
+    s_am_last_print = GetTickCount();
+    coop_mem_recompute_floor();
+    Msg("* COOP(addrmap): ARMED at %u bytes, printing the top %u regions every %u ms. Bytes are "
+        "netted per 1 MiB of ADDRESS SPACE. It needs no live-block map and that is why it is "
+        "cheap: the bucket is a function of the POINTER, and the free path has the pointer, so "
+        "alloc-adds and free-subtracts land in the same bucket by construction. It answers the "
+        "question smaps cannot -- /proc does not record which allocator owns an anonymous "
+        "page, and this says which pages xrMemory is holding live.",
+        u32(min_bytes), s_am_top_n, print_interval_ms ? print_interval_ms : s_am_interval_ms);
+}
+
 void coop_bigalloc_arm(size_t min_bytes, size_t max_bytes)
 {
     g_coop_bigalloc_min = min_bytes;
@@ -600,6 +741,7 @@ void coop_bigalloc_tick()
     // independent instruments and §5j's whole point is being able to run the cheap one alone.
     if (g_coop_allocsites_min) coop_sc_tick();
     if (g_coop_rasites_min) coop_ra_tick();
+    if (g_coop_addrmap_min) coop_am_tick();
     if (!g_coop_bigalloc_min) return;
 
     const LONG banked = s_ba_seq;

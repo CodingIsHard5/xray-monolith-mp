@@ -275,6 +275,30 @@ XRCORE_API extern size_t g_coop_rasites_min;
 XRCORE_API extern size_t g_coop_rasites_max;
 XRCORE_API void coop_rasites_arm(size_t min_bytes, size_t max_bytes, u32 print_interval_ms, u32 top_n);
 
+// -------------------------------------------------------------------------------------------
+// §5p — NET BYTES PER 1 MiB OF ADDRESS SPACE, and it exists to answer the one question `/proc`
+// cannot.
+//
+// §5l-§5o measured, from per-mapping smaps, that essentially all of the server's steady RSS growth
+// lands in ONE anonymous arena at a time, from a family of identical 16,580,608-byte reservations
+// that are filled and retired in turn. §5n then measured that only 26% of that growth is
+// `xrMemory` live bytes with the audit probe off — the other 0.40-0.60 MB/min is committed,
+// RESIDENT, written memory that no allocator instrument accounts for. `/proc` does not record
+// which allocator owns an anonymous page, so smaps can say WHERE the growth is and never WHOSE.
+//
+// This says whose, for the only allocator we can instrument: it nets bytes per 1 MiB slice of
+// address space, so a region's `xrMemory` net can be laid straight against that region's committed
+// growth in the smaps table. **A region whose arena commits while this stays flat is not
+// `xrMemory`'s.**
+//
+// It is cheap for a reason worth stating, because §5k's design note said the opposite about return
+// addresses: the bucket is a function of the POINTER, and the free path HAS the pointer. A block's
+// address does not change between allocation and release, so alloc-adds and free-subtracts land in
+// the same bucket by construction — no live-block map, no per-block bookkeeping, one hash and two
+// atomics per allocation. That is the same budget §5j measured as free at a one-byte floor.
+XRCORE_API extern size_t g_coop_addrmap_min;
+XRCORE_API void coop_addrmap_arm(size_t min_bytes, u32 print_interval_ms, u32 top_n);
+
 // The single fast-path compare shared by all three instruments: the SMALLEST armed floor, 0 when
 // they are all disarmed. One global read per allocation whether or not anything is armed, which is
 // what the hot path pays in a normal build.
