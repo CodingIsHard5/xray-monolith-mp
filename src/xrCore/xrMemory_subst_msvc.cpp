@@ -162,6 +162,11 @@ namespace
     u32             s_rb_capacity = 0;
     volatile LONG64 s_rb_live = 0;                  // slots currently holding a block
     volatile LONG64 s_rb_live_hw = 0;               // high-water mark of the above
+    // Tombstones are NOT free space: a probe walks through them, so the load factor that decides
+    // whether inserts start overflowing is live+tombstones, not live. Counting only `live` would
+    // report a map that is 12% full when it is 34% occupied — an occupancy gate that cannot fire
+    // is worse than none, because it reads as a passed check.
+    volatile LONG64 s_rb_tomb = 0;
     volatile LONG64 s_rb_insert_overflow = 0;       // probe ran out: the block is NOT tracked
     volatile LONG64 s_rb_unknown_free = 0;          // freed a block the map never held
     volatile LONG64 s_rb_unknown_bytes = 0;
@@ -236,6 +241,7 @@ namespace
                 b.size = u32(size);
                 if (cur != key)
                 {
+                    if (cur == COOP_RA_TOMB) _InterlockedExchangeAdd64(&s_rb_tomb, -1);
                     const LONG64 live = _InterlockedExchangeAdd64(&s_rb_live, 1) + 1;
                     // High-water is a read-modify-write without a CAS loop, so under contention it
                     // can miss a peak by a block or two. It is a capacity warning, not a
@@ -268,6 +274,7 @@ namespace
                 if (_InterlockedCompareExchange64(&b.ptr, COOP_RA_TOMB, key) == key)
                 {
                     _InterlockedExchangeAdd64(&s_rb_live, -1);
+                    _InterlockedExchangeAdd64(&s_rb_tomb, 1);
                     return ra;
                 }
                 return NULL;                                 // someone else took it; do not double-book
@@ -487,11 +494,12 @@ static void coop_ra_tick()
         total_net += s_ra[i].net_bytes;
     }
     Msg("* COOP(rasites) t=%u interval=%u ms — NET %d KB this interval, %d KB since armed across "
-        "%u site(s). Map: %I64d live of %u slots (high-water %I64d), insert overflow %I64d, "
-        "site-table overflow %I64d, frees of untracked blocks %I64d (%I64d KB).",
+        "%u site(s). Map: %I64d live + %I64d tombstones = %I64d occupied of %u slots (high-water "
+        "%I64d live), insert overflow %I64d, site-table overflow %I64d, frees of untracked blocks "
+        "%I64d (%I64d KB).",
         now, elapsed, int(total_delta / 1024), int(total_net / 1024), used,
-        s_rb_live, s_rb_capacity, s_rb_live_hw, s_rb_insert_overflow, s_ra_site_overflow,
-        s_rb_unknown_free, s_rb_unknown_bytes / 1024);
+        s_rb_live, s_rb_tomb, s_rb_live + s_rb_tomb, s_rb_capacity, s_rb_live_hw,
+        s_rb_insert_overflow, s_ra_site_overflow, s_rb_unknown_free, s_rb_unknown_bytes / 1024);
 
     // Top N by |interval delta|, selected without sorting the table: N passes over 4096 entries on
     // one frame every 30 s. A sort would need scratch storage, and this runs where allocating is
