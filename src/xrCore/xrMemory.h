@@ -297,7 +297,8 @@ XRCORE_API void coop_rasites_arm(size_t min_bytes, size_t max_bytes, u32 print_i
 // the same bucket by construction — no live-block map, no per-block bookkeeping, one hash and two
 // atomics per allocation. That is the same budget §5j measured as free at a one-byte floor.
 XRCORE_API extern size_t g_coop_addrmap_min;
-XRCORE_API void coop_addrmap_arm(size_t min_bytes, u32 print_interval_ms, u32 top_n);
+XRCORE_API void coop_addrmap_arm(size_t min_bytes, u32 print_interval_ms, u32 top_n,
+                                 u32 census_every);
 
 // The single fast-path compare shared by all three instruments: the SMALLEST armed floor, 0 when
 // they are all disarmed. One global read per allocation whether or not anything is armed, which is

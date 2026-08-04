@@ -151,6 +151,11 @@ namespace
     u32           s_am_interval_ms = 30000;
     u32           s_am_last_print = 0;
     u32           s_am_top_n = 16;
+    // §5s — the CENSUS. Every n-th interval the tick prints EVERY non-empty bucket instead of the
+    // top N. Rationale (xrMemory.h): six runs have shown this system's run-to-run variance exceeds
+    // the effects being chased, so the next reading must be a static census rather than a rate.
+    u32           s_am_census_every = 0;   // 0 = never
+    u32           s_am_ticks = 0;
 
     ICF u32 coop_am_hash(LONG64 key)
     {
@@ -639,6 +644,43 @@ static void coop_am_tick()
         "this stays flat is NOT.",
         now, elapsed, int(total_delta / 1024), int(total_net / 1024), used, s_am_overflow);
 
+    // §5s: on a census tick, walk the table in address order and print everything. Address order
+    // rather than rank order on purpose -- the output is meant to be laid against a mapping table,
+    // and a list sorted by size is the wrong shape for that join.
+    ++s_am_ticks;
+    const bool census = s_am_census_every && (s_am_ticks % s_am_census_every) == 0;
+    if (census)
+    {
+        u32 shown = 0;
+        LONG64 shown_net = 0;
+        // Selection sort by address over a fixed table: O(n^2) on 8192 slots is ~30 ms once every
+        // few minutes on the game thread, and it allocates nothing. A sort needing scratch storage
+        // would have to allocate, on a path whose whole discipline is that it does not.
+        LONG64 after = 0;
+        for (;;)
+        {
+            LONG64 lowest = 0;
+            u32 idx = COOP_AM_SLOTS;
+            for (u32 i = 0; i < COOP_AM_SLOTS; ++i)
+            {
+                const LONG64 k = s_am[i].key;
+                if (!k || k <= after) continue;
+                if (idx == COOP_AM_SLOTS || k < lowest) { lowest = k; idx = i; }
+            }
+            if (idx == COOP_AM_SLOTS) break;
+            after = lowest;
+            const coop_ambucket& b = s_am[idx];
+            const u64 base = (u64(lowest) - 1) << 20;
+            Msg("*  census %016I64X-%016I64X  net %+9d KB | allocs %I64d frees %I64d",
+                base, base + (u64(1) << 20), int(b.net_bytes / 1024), b.n_alloc, b.n_free);
+            ++shown;
+            shown_net += b.net_bytes;
+        }
+        Msg("* COOP(addrmap) CENSUS complete: %u regions, %d KB of live bytes accounted. This is "
+            "a SNAPSHOT and says nothing about rate -- that is the point of it, and also its "
+            "limit.", shown, int(shown_net / 1024));
+    }
+
     for (u32 rank = 0; rank < s_am_top_n; ++rank)
     {
         u32 best = COOP_AM_SLOTS;
@@ -663,7 +705,7 @@ static void coop_am_tick()
         if (s_am[i].key) s_am_prev_net[i] = s_am[i].net_bytes;
 }
 
-void coop_addrmap_arm(size_t min_bytes, u32 print_interval_ms, u32 top_n)
+void coop_addrmap_arm(size_t min_bytes, u32 print_interval_ms, u32 top_n, u32 census_every)
 {
     if (!min_bytes)
     {
@@ -673,6 +715,7 @@ void coop_addrmap_arm(size_t min_bytes, u32 print_interval_ms, u32 top_n)
     g_coop_addrmap_min = min_bytes;
     if (print_interval_ms) s_am_interval_ms = print_interval_ms;
     if (top_n) s_am_top_n = top_n;
+    s_am_census_every = census_every;
     s_am_last_print = GetTickCount();
     coop_mem_recompute_floor();
     Msg("* COOP(addrmap): ARMED at %u bytes, printing the top %u regions every %u ms. Bytes are "
@@ -680,8 +723,14 @@ void coop_addrmap_arm(size_t min_bytes, u32 print_interval_ms, u32 top_n)
         "cheap: the bucket is a function of the POINTER, and the free path has the pointer, so "
         "alloc-adds and free-subtracts land in the same bucket by construction. It answers the "
         "question smaps cannot -- /proc does not record which allocator owns an anonymous "
-        "page, and this says which pages xrMemory is holding live.",
-        u32(min_bytes), s_am_top_n, print_interval_ms ? print_interval_ms : s_am_interval_ms);
+        "page, and this says which pages xrMemory is holding live.%s",
+        u32(min_bytes), s_am_top_n, print_interval_ms ? print_interval_ms : s_am_interval_ms,
+        census_every ? " A CENSUS of every non-empty region is printed on every n-th interval."
+                     : "");
+    if (census_every)
+        Msg("* COOP(addrmap): census every %u intervals -- a full table in ADDRESS order, meant to "
+            "be laid against a mapping table. It is a snapshot and says nothing about rate.",
+            census_every);
 }
 
 void coop_bigalloc_arm(size_t min_bytes, size_t max_bytes)

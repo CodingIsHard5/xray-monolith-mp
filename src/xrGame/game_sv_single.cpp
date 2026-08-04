@@ -3057,11 +3057,14 @@ void game_sv_Single::Update()
 		{
 			LPCSTR pams = coop_param("-coop_addrmap_ms");
 			LPCSTR patop = coop_param("-coop_addrmap_top");
+			LPCSTR pacen = coop_param("-coop_addrmap_census");
 			const int bytes = atoi(pa);
 			const int ivl = pams ? atoi(pams) : 0;
 			const int top = patop ? atoi(patop) : 0;
+			const int cen = pacen ? atoi(pacen) : 0;
 			if (bytes > 0)
-				coop_addrmap_arm(size_t(bytes), ivl > 0 ? u32(ivl) : 0, top > 0 ? u32(top) : 0);
+				coop_addrmap_arm(size_t(bytes), ivl > 0 ? u32(ivl) : 0, top > 0 ? u32(top) : 0,
+				                 cen > 0 ? u32(cen) : 0);
 			else
 				Msg("! COOP(addrmap): -coop_addrmap needs a positive floor in BYTES (got '%s') — "
 				    "NOT armed.", pa);
