@@ -2997,11 +2997,37 @@ void game_sv_Single::Update()
 			// path means recording from inside every allocation — so an unusable argument
 			// disarms loudly instead of producing an unusable run.
 			const int mb = atoi(p);
+			// §5j: an optional UPPER bound, so a band can be traced once the histogram names one
+			// without lowering the floor and drowning the log (§5i gate D).
+			LPCSTR pmax = coop_param("-coop_bigalloc_max");
+			const int mbmax = pmax ? atoi(pmax) : 0;
 			if (mb > 0)
-				coop_bigalloc_arm(size_t(mb) * 1024u * 1024u);
+				coop_bigalloc_arm(size_t(mb) * 1024u * 1024u,
+				                  mbmax > 0 ? size_t(mbmax) * 1024u * 1024u : 0);
 			else
 				Msg("! COOP(bigalloc): -coop_bigalloc needs a positive size in MB (got '%s') — "
 				    "NOT armed. Arming at 0 would record every allocation in the engine.", p);
+			if (mbmax > 0 && mbmax < mb)
+				Msg("! COOP(bigalloc): -coop_bigalloc_max %d is BELOW -coop_bigalloc %d, so the "
+				    "band is empty and nothing can ever be recorded. This is reported rather than "
+				    "silently corrected: a run that records nothing must not look like a run that "
+				    "found nothing.", mbmax, mb);
+		}
+		// §5j — the size-class histogram, armed independently of the ring and in BYTES, because
+		// the population it exists for is sub-megabyte. Its cost is paid per allocation, so the
+		// banner says what is armed and the harness compares the run's own work rate against an
+		// unarmed run (§4d: an instrument that costs its own measurement is worse than none).
+		LPCSTR ps = coop_param("-coop_allocsites");
+		if (ps)
+		{
+			const int bytes = atoi(ps);
+			LPCSTR pint = coop_param("-coop_allocsites_ms");
+			const int ivl = pint ? atoi(pint) : 0;
+			if (bytes > 0)
+				coop_allocsites_arm(size_t(bytes), ivl > 0 ? u32(ivl) : 0);
+			else
+				Msg("! COOP(allocsites): -coop_allocsites needs a positive size in BYTES (got "
+				    "'%s') — NOT armed.", ps);
 		}
 	}
 	coop_bigalloc_tick();

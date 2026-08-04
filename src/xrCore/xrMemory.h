@@ -203,9 +203,54 @@ struct coop_bigalloc_rec
 // 0 disarms. Set from the command line by the game layer; the disarmed cost is one compare of a
 // global against a size_t already in a register.
 XRCORE_API extern size_t g_coop_bigalloc_min;
-XRCORE_API void coop_bigalloc_arm(size_t min_bytes);
+// §5j: an UPPER bound on the per-event ring, so a band can be traced once one is named. 0 = no
+// upper bound. Without it, narrowing the search means lowering the floor, which drowns the log in
+// the very traffic the leak has to be measured against (§5i gate D).
+XRCORE_API extern size_t g_coop_bigalloc_max;
+XRCORE_API void coop_bigalloc_arm(size_t min_bytes, size_t max_bytes);
+
+// -------------------------------------------------------------------------------------------
+// §5j — THE SIZE-CLASS HISTOGRAM, and why the per-event ring above cannot answer what is left.
+//
+// §5i measured, on a corrected reading of that ring, that **no allocation of 1 MB or more leaks at
+// all** in 720 s of steady state: every record is matched byte-for-byte by its free. Meanwhile the
+// server still grows ~1.6 MB/min, of which the LogFile container explains ~0.19. So the remaining
+// ~1.4 MB/min is sub-megabyte, and the ring is the wrong instrument for it by construction — one
+// printed line per event, against a population that allocates constantly, would make the log
+// larger than the leak (§5i's gate D exists precisely because the tracer's own output feeds the
+// LogFile leak it is measuring).
+//
+// So: no per-event output at all. Bytes are NETTED into a fixed table of power-of-two size classes
+// — allocation adds, free subtracts, realloc does both into its two classes — and the table is
+// printed on an interval. **A leak of many small blocks shows up as one size class whose net
+// climbs every interval**, which is a shape no amount of RSS curve can produce, and it needs no
+// per-block bookkeeping: the free path already knows the block's exact size (`_aligned_msize`),
+// so the subtraction lands in the same class the addition did.
+//
+// WHAT IT DELIBERATELY CANNOT DO. It cannot name a call site — netting per site would need a
+// map from every live block to its allocating return address, which is a per-allocation hash
+// insert and erase on the hot path, and this project has already had one instrument cost its own
+// measurement (§4d, the VM audit at ~10x slowdown). Naming the SIZE is enough to then point the
+// ring at that band with `-coop_bigalloc`/`-coop_bigalloc_max` and get return addresses for a
+// population small enough to print. Two cheap steps instead of one expensive one.
+//
+// THE INTERVAL DELTA IS THE READING, not the cumulative. A cumulative net is dominated by boot
+// and says nothing about steady state, which is the same mistake the whole-run MB/min figure made
+// in §5e/§5f/§5h. Both are printed, with the delta first.
+XRCORE_API extern size_t g_coop_allocsites_min;
+XRCORE_API void coop_allocsites_arm(size_t min_bytes, u32 print_interval_ms);
+
+// The single fast-path compare shared by both instruments: the SMALLER armed floor, 0 when both
+// are disarmed. One global read per allocation whether or not anything is armed, which is what the
+// hot path pays in a normal build.
+XRCORE_API extern size_t g_coop_mem_track_min;
+// The one entry point the allocator calls. Dispatches to the histogram and/or the per-event ring
+// according to what is armed and what the sizes are. op: 0 alloc, 1 realloc, 2 free.
+XRCORE_API void coop_mem_note(u32 op, size_t size, size_t oldsize, void* ra);
+
 // Call from a normal frame (NOT from inside an allocation). Emits any records banked since the last
-// call, plus the running totals that serve as the coverage control. Cheap and safe when disarmed.
+// call, plus the running totals that serve as the coverage control, plus the §5j histogram when
+// its interval is up. Cheap and safe when disarmed.
 XRCORE_API void coop_bigalloc_tick();
 
 #endif // xrMemoryH

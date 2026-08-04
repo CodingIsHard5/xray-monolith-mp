@@ -44,6 +44,10 @@ const bool g_use_pure_alloc = true;
 #include <intrin.h>
 
 XRCORE_API size_t g_coop_bigalloc_min = 0;   // 0 = disarmed
+XRCORE_API size_t g_coop_bigalloc_max = 0;   // 0 = no upper bound (§5j)
+XRCORE_API size_t g_coop_allocsites_min = 0; // 0 = disarmed (§5j)
+// The single fast-path compare for both instruments: the smaller armed floor, 0 when both are off.
+XRCORE_API size_t g_coop_mem_track_min = 0;
 
 namespace
 {
@@ -59,6 +63,64 @@ namespace
     volatile LONG64    s_ba_free_bytes = 0;
     volatile LONG64    s_ba_alloc_count = 0;
     volatile LONG64    s_ba_free_count = 0;
+    // §5j FIX. A REALLOC used to be booked as an allocation of its NEW size with the old block it
+    // released booked nowhere, so a container doubling 0->1->2->4->8 MB was recorded as 15 MB
+    // allocated for 8 MB taken. Over §5i's seven autosave cycles that manufactured **+49 MB of net
+    // growth that never happened** — the same order as the residual the run was sent to find, at
+    // the one site whose repetition the pre-registration said would count as naming a leak. The
+    // released side is now booked separately: net is alloc + realloc_new - realloc_old - free, and
+    // the two realloc figures are printed rather than folded, so a reader can see the correction
+    // instead of trusting it.
+    volatile LONG64    s_ba_realloc_new_bytes = 0;
+    volatile LONG64    s_ba_realloc_old_bytes = 0;
+    volatile LONG64    s_ba_realloc_count = 0;
+
+    // ---------------------------------------------------------------------------------------
+    // §5j — the size-class histogram. Rationale: xrMemory.h.
+    //
+    // 48 classes covers 1 byte to 128 TB, so no allocation this process can make falls off the end
+    // and gets silently attributed to the last bucket. Each is padded to its own cache line: every
+    // thread in the engine allocates, and three hot counters sharing a line would turn this into a
+    // contention experiment measuring itself.
+    const u32 COOP_SC_CLASSES = 48;
+    struct alignas(64) coop_sizeclass
+    {
+        volatile LONG64 net_bytes;
+        volatile LONG64 n_alloc;
+        volatile LONG64 n_free;
+        char            _pad[64 - 3 * sizeof(LONG64)];
+    };
+    coop_sizeclass s_sc[COOP_SC_CLASSES];
+    LONG64         s_sc_prev_net[COOP_SC_CLASSES];   // read only by the tick, which is one thread
+    u32            s_sc_interval_ms = 30000;
+    u32            s_sc_last_print = 0;
+
+    // floor(log2(size)), i.e. the class whose range is [2^i, 2^(i+1)). Size 0 cannot occur on the
+    // paths that call this (a zero-byte allocation never reaches the threshold compare), but it is
+    // handled rather than assumed: a shift by 63 of a zero would index class 0 anyway.
+    ICF u32 coop_sc_index(size_t size)
+    {
+        unsigned long idx = 0;
+        if (!_BitScanReverse64(&idx, (unsigned __int64)size)) return 0;
+        return (idx < COOP_SC_CLASSES) ? u32(idx) : (COOP_SC_CLASSES - 1);
+    }
+
+    // Called from inside the allocator, so the same rule as the ring: this allocates NOTHING.
+    ICF void coop_sc_note(size_t size, size_t oldsize)
+    {
+        if (size)
+        {
+            coop_sizeclass& b = s_sc[coop_sc_index(size)];
+            _InterlockedExchangeAdd64(&b.net_bytes, (LONG64)size);
+            _InterlockedExchangeAdd64(&b.n_alloc, 1);
+        }
+        if (oldsize)
+        {
+            coop_sizeclass& b = s_sc[coop_sc_index(oldsize)];
+            _InterlockedExchangeAdd64(&b.net_bytes, -(LONG64)oldsize);
+            _InterlockedExchangeAdd64(&b.n_free, 1);
+        }
+    }
 
     // NOTHING in here may allocate. It is called from inside mem_alloc; a logger that allocates
     // would recurse without bound. Fixed storage, interlocked index, no Msg, no shared_str.
@@ -68,6 +130,14 @@ namespace
         {
             _InterlockedExchangeAdd64(&s_ba_free_bytes, (LONG64)oldsize);
             _InterlockedExchangeAdd64(&s_ba_free_count, 1);
+        }
+        else if (op == 1)
+        {
+            // §5j: BOTH sides of a realloc. Booking only the new size is what produced §5i's
+            // phantom +7 MB per autosave cycle.
+            _InterlockedExchangeAdd64(&s_ba_realloc_new_bytes, (LONG64)size);
+            _InterlockedExchangeAdd64(&s_ba_realloc_old_bytes, (LONG64)oldsize);
+            _InterlockedExchangeAdd64(&s_ba_realloc_count, 1);
         }
         else
         {
@@ -85,9 +155,67 @@ namespace
     }
 }
 
-void coop_bigalloc_arm(size_t min_bytes)
+// §5j: the allocator's single entry point into both instruments. Kept out of line deliberately —
+// the hot path is the `g_coop_mem_track_min` compare at the call site, and everything past it has
+// already qualified. NOTHING here allocates: it is called from inside mem_alloc, and a logger that
+// allocates would recurse without bound.
+void coop_mem_note(u32 op, size_t size, size_t oldsize, void* ra)
+{
+    if (g_coop_allocsites_min)
+    {
+        // The histogram takes both sides of every operation, so a realloc's released block lands
+        // in ITS class rather than being netted against the new one. Sizes below the floor are
+        // dropped on each side independently — a 2 MB block shrinking to 512 bytes with a 1 KB
+        // floor must still book its release, or the class would grow forever on paper.
+        const size_t s = (size >= g_coop_allocsites_min) ? size : 0;
+        const size_t o = (oldsize >= g_coop_allocsites_min) ? oldsize : 0;
+        if (s || o) coop_sc_note(s, o);
+    }
+    if (g_coop_bigalloc_min)
+    {
+        const size_t hi = g_coop_bigalloc_max;
+        const bool in_new = size >= g_coop_bigalloc_min && (!hi || size <= hi);
+        const bool in_old = oldsize >= g_coop_bigalloc_min && (!hi || oldsize <= hi);
+        if (in_new || in_old) coop_ba_record(op, size, oldsize, ra);
+    }
+}
+
+// §5j: the fast path at every hook is one compare against this, so arming either instrument costs
+// the other nothing. It is the SMALLER of the two armed floors, treating a disarmed one as
+// infinite — get this backwards and the lower instrument silently never fires.
+static void coop_mem_recompute_floor()
+{
+    const size_t a = g_coop_bigalloc_min ? g_coop_bigalloc_min : ~size_t(0);
+    const size_t b = g_coop_allocsites_min ? g_coop_allocsites_min : ~size_t(0);
+    const size_t lo = (a < b) ? a : b;
+    g_coop_mem_track_min = (lo == ~size_t(0)) ? 0 : lo;
+}
+
+void coop_allocsites_arm(size_t min_bytes, u32 print_interval_ms)
+{
+    g_coop_allocsites_min = min_bytes;
+    if (print_interval_ms) s_sc_interval_ms = print_interval_ms;
+    s_sc_last_print = GetTickCount();
+    coop_mem_recompute_floor();
+    if (min_bytes)
+        Msg("* COOP(allocsites): ARMED at %u bytes, printing every %u ms. Bytes are NETTED per "
+            "power-of-two size class (alloc adds, free subtracts, realloc does both) — a leak of "
+            "many small blocks is ONE CLASS whose net climbs every interval. It cannot name a call "
+            "site by design (that needs a live-block map on the hot path); once a class is named, "
+            "point -coop_bigalloc/-coop_bigalloc_max at that band to get return addresses for a "
+            "population small enough to print.",
+            u32(min_bytes), print_interval_ms ? print_interval_ms : s_sc_interval_ms);
+}
+
+void coop_bigalloc_arm(size_t min_bytes, size_t max_bytes)
 {
     g_coop_bigalloc_min = min_bytes;
+    g_coop_bigalloc_max = max_bytes;
+    coop_mem_recompute_floor();
+    if (min_bytes && max_bytes)
+        Msg("* COOP(bigalloc): the per-event ring is bounded ABOVE at %u bytes (%u MB) as well — "
+            "only blocks in [%u, %u] are recorded.",
+            u32(max_bytes), u32(max_bytes / (1024 * 1024)), u32(min_bytes), u32(max_bytes));
     if (min_bytes)
         Msg("* COOP(bigalloc): ARMED at %u bytes (%u MB). Every xrMemory alloc/realloc/free at or "
             "above this is recorded with its return address. Totals are printed alongside so they "
@@ -96,8 +224,45 @@ void coop_bigalloc_arm(size_t min_bytes)
             u32(min_bytes), u32(min_bytes / (1024 * 1024)));
 }
 
+// §5j. The DELTA is the reading and the cumulative is context: a cumulative net is dominated by
+// boot and says nothing about steady state, which is the mistake every whole-run MB/min figure on
+// this axis made before §5f. A class is printed when it moved in this interval OR is non-zero
+// overall, so a class that leaks and then stops does not vanish from the report.
+static void coop_sc_tick()
+{
+    const u32 now = GetTickCount();
+    if (u32(now - s_sc_last_print) < s_sc_interval_ms) return;
+    const u32 elapsed = now - s_sc_last_print;
+    s_sc_last_print = now;
+
+    LONG64 total_delta = 0, total_net = 0;
+    for (u32 i = 0; i < COOP_SC_CLASSES; ++i)
+    {
+        const LONG64 net = s_sc[i].net_bytes;
+        total_delta += net - s_sc_prev_net[i];
+        total_net += net;
+    }
+    Msg("* COOP(allocsites) t=%u interval=%u ms — NET %d KB this interval, %d KB since armed "
+        "(per size class below; the interval column is the one that names a leak)",
+        now, elapsed, int(total_delta / 1024), int(total_net / 1024));
+
+    for (u32 i = 0; i < COOP_SC_CLASSES; ++i)
+    {
+        const LONG64 net = s_sc[i].net_bytes;
+        const LONG64 delta = net - s_sc_prev_net[i];
+        s_sc_prev_net[i] = net;
+        if (!delta && !net) continue;
+        Msg("*   [%12I64u .. %12I64u B] delta %+9d KB | net %+9d KB | allocs %I64d frees %I64d",
+            (u64(1) << i), (u64(2) << i) - 1,
+            int(delta / 1024), int(net / 1024), s_sc[i].n_alloc, s_sc[i].n_free);
+    }
+}
+
 void coop_bigalloc_tick()
 {
+    // Ordered so the histogram runs even when the per-event ring is disarmed — the two are
+    // independent instruments and §5j's whole point is being able to run the cheap one alone.
+    if (g_coop_allocsites_min) coop_sc_tick();
     if (!g_coop_bigalloc_min) return;
 
     const LONG banked = s_ba_seq;
@@ -126,9 +291,15 @@ void coop_bigalloc_tick()
         case 1:
             // The pairing that separates "a fresh block nobody frees" from "a container growing and
             // the old block not going back to the OS".
-            Msg("* COOP(bigalloc) #%u t=%u REALLOC %u MB <- %u MB (grew %d MB) ra=%p",
+            // §5j: the MB fields are kept so existing readers and banked logs still parse, and
+            // the EXACT bytes are appended because rounding a chain's first step to "0 MB" is
+            // what made dev/harness/bigalloc_net.py carry a sub-MB error it could bound but not
+            // remove. A grow of 900 KB and a grow of nothing printed identically.
+            Msg("* COOP(bigalloc) #%u t=%u REALLOC %u MB <- %u MB (grew %d MB) "
+                "[exact %u <- %u bytes] ra=%p",
                 r.seq, r.ms, u32(r.size / (1024 * 1024)), u32(r.oldsize / (1024 * 1024)),
-                int((LONG64(r.size) - LONG64(r.oldsize)) / (1024 * 1024)), r.ra);
+                int((LONG64(r.size) - LONG64(r.oldsize)) / (1024 * 1024)),
+                u32(r.size), u32(r.oldsize), r.ra);
             break;
         default:
             Msg("* COOP(bigalloc) #%u t=%u FREE    %u MB (%u bytes) ra=%p",
@@ -141,12 +312,23 @@ void coop_bigalloc_tick()
     // THE CONTROL LINE. Printed on every tick that had records, deliberately next to them: a reader
     // must not be able to quote a call site without also seeing whether the traced allocations
     // account for the process's actual growth.
-    Msg("* COOP(bigalloc) TOTALS: allocated %u MB in %u calls, freed %u MB in %u calls, net %d MB "
+    //
+    // §5j CORRECTION. This line used to book a REALLOC as an allocation of its new size and the
+    // block it released as nothing, so net drifted upward by the whole history of every growing
+    // container: §5i's seven autosave cycles booked +49 MB that never happened, and the
+    // pre-registered refutation fired on it. The realloc figures are now printed SEPARATELY rather
+    // than folded in, so the correction is visible in the log instead of having to be trusted.
+    Msg("* COOP(bigalloc) TOTALS: allocated %u MB in %u calls, freed %u MB in %u calls, "
+        "realloc %u MB <- %u MB in %u calls, NET %d MB "
         "— cross-foot this net against the RSS curve; a net far below the observed growth means the "
-        "leak is NOT going through xrMemory and no record above can explain it.",
+        "leak is NOT going through xrMemory and no record above can explain it. NET counts a realloc "
+        "as (new - old), which is the memory it actually took.",
         u32(s_ba_alloc_bytes / (1024 * 1024)), u32(s_ba_alloc_count),
         u32(s_ba_free_bytes / (1024 * 1024)), u32(s_ba_free_count),
-        int((s_ba_alloc_bytes - s_ba_free_bytes) / (1024 * 1024)));
+        u32(s_ba_realloc_new_bytes / (1024 * 1024)), u32(s_ba_realloc_old_bytes / (1024 * 1024)),
+        u32(s_ba_realloc_count),
+        int((s_ba_alloc_bytes + s_ba_realloc_new_bytes - s_ba_realloc_old_bytes - s_ba_free_bytes)
+            / (1024 * 1024)));
 }
 
 #define PURE_MEMORY_FILL_ZERO
@@ -166,8 +348,9 @@ void* xrMemory::mem_alloc(size_t size
 		//void* result = malloc(size);
 		void* result = _aligned_malloc(size, PURE_MEMORY_ALIGNMENT);
 		// §5g. Recorded AFTER the allocation so a failed one is not counted as growth.
-		if (g_coop_bigalloc_min && size >= g_coop_bigalloc_min && result)
-			coop_ba_record(0, size, 0, _ReturnAddress());
+		// §5j: one compare against the shared floor, then both instruments decide for themselves.
+		if (g_coop_mem_track_min && size >= g_coop_mem_track_min && result)
+			coop_mem_note(0, size, 0, _ReturnAddress());
 #ifdef PURE_MEMORY_FILL_ZERO
 		if (result)
 			memset(result, 0, size);
@@ -256,11 +439,11 @@ void xrMemory::mem_free(void* P)
 	{
 		// §5g: the size must be read BEFORE the free — afterwards the block is gone and any
 		// number taken from it is whatever the allocator left behind.
-		if (g_coop_bigalloc_min && P)
+		if (g_coop_mem_track_min && P)
 		{
 			const size_t coop_ba_sz = _aligned_msize(P, PURE_MEMORY_ALIGNMENT, 0);
-			if (coop_ba_sz >= g_coop_bigalloc_min)
-				coop_ba_record(2, 0, coop_ba_sz, _ReturnAddress());
+			if (coop_ba_sz >= g_coop_mem_track_min)
+				coop_mem_note(2, 0, coop_ba_sz, _ReturnAddress());
 		}
 		//free(P);
 		_aligned_free(P);
@@ -324,15 +507,15 @@ void* xrMemory::mem_realloc(void* P, size_t size
 		//void* result = realloc(P, size);
 		// §5g needs the OLD size, and only the arm path pays for reading it.
 		size_t coop_ba_old = 0;
-		if (g_coop_bigalloc_min && P)
+		if (g_coop_mem_track_min && P)
 			coop_ba_old = _aligned_msize(P, PURE_MEMORY_ALIGNMENT, 0);
 		void* result = _aligned_realloc(P, size, PURE_MEMORY_ALIGNMENT);
 		// Either side crossing the threshold is interesting: a big block shrinking is as much a
 		// clue as one growing, and recording only growth would make the log agree with the
 		// hypothesis by construction.
-		if (g_coop_bigalloc_min && result &&
-		    (size >= g_coop_bigalloc_min || coop_ba_old >= g_coop_bigalloc_min))
-			coop_ba_record(1, size, coop_ba_old, _ReturnAddress());
+		if (g_coop_mem_track_min && result &&
+		    (size >= g_coop_mem_track_min || coop_ba_old >= g_coop_mem_track_min))
+			coop_mem_note(1, size, coop_ba_old, _ReturnAddress());
 
 #ifdef PURE_MEMORY_FILL_ZERO
 		if (result && size > old_size)
