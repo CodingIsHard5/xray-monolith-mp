@@ -218,19 +218,30 @@ void AddOne(const char* split)
 		}
 		t = c + "[" + timeInHMSMMM() + "] " + t;
 	}
-	// shared_str construction takes the string container's own global lock. Done here it nests
-	// nothing; done under logCS it made this function hold two global locks at once.
-	const shared_str temp = shared_str(t.c_str());
+	// §5x-b — NOT a shared_str, and the reason is measured. `-coop_rasites 8..255` on the capped
+	// build shows this line's allocation site at **937 allocs / 0 frees, every block still live**,
+	// while the sibling site (the xr_string below) now frees normally after the §5x drain. A
+	// `shared_str` is interned in xrCore's global string container, so every DISTINCT log line the
+	// server ever emits is retained there for the life of the process -- the same unbounded-growth
+	// defect §5x just removed from `LogFile`, one layer along, and invisible until the log itself
+	// stopped dominating the band.
+	//
+	// Nothing here needs interning. `temp` exists only to compare against the previous line and to
+	// build `line`; a plain std::string does both, allocates once, and frees on scope exit. The
+	// comment this replaces described the LOCKING rationale, which is unaffected: constructing a
+	// std::string takes no global lock at all, so the property it was protecting is strictly
+	// improved rather than preserved.
+	const std::string& temp = t;
 	xr_string line(temp.c_str());          // the allocation that used to happen under the lock
 
 	// ---- lock held from here, for the shared state only ---------------------------------------
 	{
 		logCS.Enter();
 
-		static shared_str last_str;
+		static std::string last_str;   // §5x-b: was shared_str -- see the note at `temp`
 		static int items_count;
 
-		if (last_str.equal(temp))
+		if (last_str == temp)
 		{
 			// Duplicate collapse. This path DOES format under the lock, because the counter it
 			// prints is the shared state being read. It runs only for a repeated identical line.
@@ -239,7 +250,7 @@ void AddOne(const char* split)
 			else
 				items_count++;
 
-			xr_string tmp = temp.c_str();
+			xr_string tmp = temp.c_str();   // §5x-b: temp is a std::string now; c_str() unchanged
 			tmp += " [";
 			tmp += std::to_string(items_count).c_str();
 			tmp += "]";
