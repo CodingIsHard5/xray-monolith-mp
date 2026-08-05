@@ -990,6 +990,7 @@ void CSkeletonX_ST::AfterLoad(CKinematics* parent, u16 child_idx)
 {
 	inherited2::AfterLoad(parent, child_idx);
 	inherited2::_CollectBoneFaces(this, iBase, iCount);
+	m_coop_afterload_done = true;   // §10 stage A: ownership discriminator
 	// §7g: protected member, so called on `this` from inside the derived class rather
 	// than through a free helper, which cannot reach it.
 	if (g_coop_skin_release && g_dedicated_server) coop_release_vertices();
@@ -1000,6 +1001,7 @@ void CSkeletonX_PM::AfterLoad(CKinematics* parent, u16 child_idx)
 	inherited2::AfterLoad(parent, child_idx);
 	FSlideWindow& SW = nSWI.sw[0]; // max LOD
 	inherited2::_CollectBoneFaces(this, iBase + SW.offset, SW.num_tris * 3);
+	m_coop_afterload_done = true;   // §10 stage A: ownership discriminator
 	if (g_coop_skin_release && g_dedicated_server) coop_release_vertices();
 }
 

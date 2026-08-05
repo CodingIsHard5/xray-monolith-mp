@@ -77,6 +77,23 @@ protected:
 	virtual void _FillVertices(const Fmatrix& view, CSkeletonWallmark& wm, const Fvector& normal, float size,
 	                           Fvisual* V, u16 bone_id, u32 iBase, u32 iCount) =0;
 
+	// §10 STAGE A — THE OWNERSHIP DISCRIMINATOR, and it exists before the plumbing on purpose.
+	//
+	// The plan is to replace the shared-container dock with a PRIVATE xr_alloc buffer that
+	// _CollectBoneFaces consumes and AfterLoad then frees. The hazard is exact: CSkeletonX::_Copy
+	// copies Vertices1W..4W to every duplicated instance. With ref_smem that is refcounted and safe;
+	// with a raw private pointer it would be two owners of one buffer -- a double free, or a
+	// use-after-free if the original frees first. "A private buffer that turns out to be shared is a
+	// use-after-free with extra steps."
+	//
+	// Freeing in AfterLoad is safe ONLY IF AfterLoad always completes before any _Copy of that
+	// object. That is what the sequence looks like (Instance_Load -> Load -> children AfterLoad ->
+	// register; Instance_Duplicate -> Copy comes later) but this session has twice been wrong about
+	// exactly this class of assumption, so it is MEASURED rather than reasoned: the flag below is set
+	// in AfterLoad, and _Copy counts any source that has not set it. That count must be ZERO before
+	// a single byte is freed.
+	bool m_coop_afterload_done = false;
+
 	// §7g: drop this child's references to the shared vertex blocks. Called from AfterLoad, i.e.
 	// after _CollectBoneFaces -- the last load-time consumer -- has finished with them.
 	void coop_release_vertices()

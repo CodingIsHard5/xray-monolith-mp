@@ -35,8 +35,23 @@ void CSkeletonX::AfterLoad(CKinematics* parent, u16 child_idx)
 	ChildIDX = child_idx;
 }
 
+// §10 STAGE A counters. Read-only instrumentation: nothing here changes behaviour, allocates, or
+// frees. Its whole job is to answer one question before the plumbing is written -- can a per-child
+// buffer be freed in AfterLoad without another object still pointing at it?
+static u32 g_coop_copy_total = 0;          // every _Copy
+static u32 g_coop_copy_before_afterload = 0; // _Copy from a source whose AfterLoad has NOT run
+static u32 g_coop_copy_with_verts = 0;     // _Copy from a source still holding vertex data
+
 void CSkeletonX::_Copy(CSkeletonX* B)
 {
+	++g_coop_copy_total;
+	// THE GATE. If AfterLoad has not completed on the SOURCE, then freeing in AfterLoad would either
+	// not have happened yet (harmless) or -- if the order is ever reversed -- would leave this copy
+	// holding a pointer to freed memory. Non-zero here means the design is unsafe as drawn.
+	if (!B->m_coop_afterload_done) ++g_coop_copy_before_afterload;
+	if ((*B->Vertices1W) || (*B->Vertices2W) || (*B->Vertices3W) || (*B->Vertices4W))
+		++g_coop_copy_with_verts;
+
 	Parent = NULL;
 	ChildIDX = B->ChildIDX;
 	Vertices1W = B->Vertices1W;
@@ -337,6 +352,9 @@ static void coop_skeleton_note_load(LPCSTR N, u32 render_mode, bool soft, u32 by
 	if (now - g_coop_skin_last_report >= 60000)
 	{
 		g_coop_skin_last_report = now;
+		Msg("* COOP(ownership): _Copy total=%u, from-source-before-AfterLoad=%u (MUST be 0 before "
+		    "anything is freed), from-source-still-holding-vertices=%u.",
+		    g_coop_copy_total, g_coop_copy_before_afterload, g_coop_copy_with_verts);
 		Msg("* COOP(skin): skinned=%u soft=%u (%u%%) soft_bytes=%u KB. The soft fraction is what a "
 		    "renderless server could stop copying, IF nothing needs it.",
 		    g_coop_skin_total, g_coop_skin_soft,
