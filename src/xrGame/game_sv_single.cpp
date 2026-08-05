@@ -3017,6 +3017,34 @@ void game_sv_Single::Update()
 		// the population it exists for is sub-megabyte. Its cost is paid per allocation, so the
 		// banner says what is armed and the harness compares the run's own work rate against an
 		// unarmed run (§4d: an instrument that costs its own measurement is worse than none).
+		// §7g — shared-memory reclamation, three switches so a matched pair runs on one binary:
+		//   -coop_smem <ms>       census only (READ-ONLY; the discriminator)
+		//   -coop_smem_clean      also call smem_container::clean()
+		//   -coop_skin_release    release skinned vertex arrays at the end of AfterLoad
+		// The census is armed on its own first, deliberately. Its job is to prove that
+		// dwReference==0 identifies exactly the blocks nothing is using -- BEFORE any switch that
+		// frees on that judgement is thrown.
+		LPCSTR psm = coop_param("-coop_smem");
+		if (psm)
+		{
+			const int ivl = atoi(psm);
+			if (ivl > 0)
+				coop_smem_arm(u32(ivl), coop_param("-coop_smem_clean") != 0,
+				              coop_param("-coop_skin_release") != 0);
+			else
+				Msg("! COOP(smem): -coop_smem needs a positive interval in MS (got '%s') — NOT "
+				    "armed. A census that never runs is not a zero, it is an absence.", psm);
+		}
+		else if (coop_param("-coop_smem_clean") || coop_param("-coop_skin_release"))
+		{
+			// Refuse rather than silently act: freeing or releasing with no census means the
+			// judgement being acted on is never observed.
+			Msg("! COOP(smem): -coop_smem_clean / -coop_skin_release given WITHOUT -coop_smem. "
+			    "Refusing to arm either: they act on the liveness judgement the census exists to "
+			    "check, and acting unobserved is how a double free surfaces hours later somewhere "
+			    "unrelated.");
+		}
+
 		LPCSTR ps = coop_param("-coop_allocsites");
 		if (ps)
 		{

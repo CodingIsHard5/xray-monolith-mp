@@ -53,6 +53,18 @@ public:
 	void clean();
 	void dump();
 	u32 stat_economy();
+	// COOP §7g — THE DISCRIMINATOR, and it exists before the plumbing on purpose.
+	//
+	// clean() decides what to free on one bit: dwReference == 0. Everything downstream of this
+	// change rests on that bit being TRUE for blocks nothing is using and FALSE for blocks something
+	// is. This is a READ-ONLY census of exactly that judgement -- no frees, no mutation -- so the
+	// bit can be proved against known-live and known-dead populations BEFORE anything is released.
+	//
+	// The proof is a matched pair on one binary: with the AfterLoad release disarmed, `dead` must be
+	// ~0 (everything docked is still referenced -- the known-LIVE control). Arm the release and
+	// `dead` must jump by the vertex blocks and nothing else (known-DEAD). A discriminator that
+	// reports the same number in both states is not measuring the thing it is about to free on.
+	void census(u32& live, u32& dead, u32& dead_bytes);
 #ifdef PROFILE_CRITICAL_SECTIONS
     smem_container ():cs(MUTEX_PROFILE_ID(smem_container)) {}
 #endif // PROFILE_CRITICAL_SECTIONS

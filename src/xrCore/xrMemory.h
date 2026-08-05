@@ -315,4 +315,16 @@ XRCORE_API void coop_mem_note(u32 op, size_t size, size_t oldsize, void* ra, voi
 // its interval is up. Cheap and safe when disarmed.
 XRCORE_API void coop_bigalloc_tick();
 
+// COOP §7g — shared-memory reclamation, in THREE independent switches so the control and the
+// treatment run on ONE binary and differ by one bit at a time:
+//   g_coop_smem_interval_ms  census only (read-only, always safe -- the discriminator)
+//   g_coop_smem_allow_clean  actually call smem_container::clean()
+//   g_coop_skin_release      release the skinned vertex arrays at the end of AfterLoad
+// Arming the release WITHOUT the clean is the honest intermediate: it proves the refcount reaches
+// zero for exactly the blocks intended, before anything is freed on the strength of that.
+XRCORE_API extern u32 g_coop_smem_interval_ms;
+XRCORE_API extern bool g_coop_smem_allow_clean;
+XRCORE_API extern bool g_coop_skin_release;
+XRCORE_API void coop_smem_arm(u32 interval_ms, bool allow_clean, bool skin_release);
+
 #endif // xrMemoryH

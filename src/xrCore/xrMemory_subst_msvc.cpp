@@ -845,8 +845,54 @@ static void coop_pool_tick()
     s_pool_prev = st;
 }
 
+XRCORE_API u32 g_coop_smem_interval_ms = 0;      // 0 = disarmed (§7g)
+XRCORE_API bool g_coop_smem_allow_clean = false; // census only until proven
+XRCORE_API bool g_coop_skin_release = false;     // AfterLoad release, off by default
+
+void coop_smem_arm(u32 interval_ms, bool allow_clean, bool skin_release)
+{
+	g_coop_smem_interval_ms = interval_ms;
+	g_coop_smem_allow_clean = allow_clean;
+	g_coop_skin_release = skin_release;
+	Msg("* COOP(smem): ARMED census every %u ms, allow_clean=%d, skin_release=%d. The census is "
+	    "READ-ONLY and reports live/dead blocks by the same dwReference==0 predicate clean() frees "
+	    "on, so the judgement can be checked before anything acts on it.",
+	    interval_ms, int(allow_clean), int(skin_release));
+}
+
+static u32 s_smem_last = 0;
+
+static void coop_smem_tick()
+{
+	const u32 now = GetTickCount();
+	if (u32(now - s_smem_last) < g_coop_smem_interval_ms) return;
+	s_smem_last = now;
+	if (!g_pSharedMemoryContainer) return;
+
+	u32 live = 0, dead = 0, dead_bytes = 0;
+	g_pSharedMemoryContainer->census(live, dead, dead_bytes);
+	Msg("* COOP(smem) t=%u — %u live, %u DEAD (%u KB reclaimable) of %u blocks. In release "
+	    "xrMemory::mem_compact() is compiled out entirely, so clean() is never called and every one "
+	    "of those DEAD blocks is retained for the life of the process.",
+	    now, live, dead, dead_bytes / 1024, live + dead);
+
+	if (g_coop_smem_allow_clean && dead)
+	{
+		g_pSharedMemoryContainer->clean();
+		u32 l2 = 0, d2 = 0, b2 = 0;
+		g_pSharedMemoryContainer->census(l2, d2, b2);
+		// The post-condition is the check: clean() must remove the dead and leave the live alone.
+		// A live count that MOVED means it freed something referenced, which is the failure this
+		// whole staged approach exists to avoid -- so it is reported loudly rather than assumed.
+		Msg("* COOP(smem): clean() ran — dead %u -> %u, live %u -> %u.%s",
+		    dead, d2, live, l2,
+		    (l2 != live) ? "  !! LIVE COUNT MOVED: clean() freed a REFERENCED block. Disarm." : "");
+	}
+}
+
 void coop_bigalloc_tick()
 {
+	if (g_coop_smem_interval_ms) coop_smem_tick();
     // Independent of every other probe: the pool can be armed with all the instruments disarmed,
     // which is exactly the configuration the paired arms use.
     if (g_coop_pool_span.load(std::memory_order_relaxed)) coop_pool_tick();

@@ -68,6 +68,26 @@ void smem_container::clean()
 	cs.Leave();
 }
 
+void smem_container::census(u32& live, u32& dead, u32& dead_bytes)
+{
+	// READ-ONLY. Same predicate clean() uses, deliberately: a census that judged liveness any other
+	// way would validate a different bit from the one the frees depend on.
+	live = dead = dead_bytes = 0;
+	cs.Enter();
+	for (cdb::iterator it = container.begin(); it != container.end(); ++it)
+	{
+		if (0 == *it) continue;
+		if (0 == (*it)->dwReference.load(std::memory_order_relaxed))
+		{
+			++dead;
+			dead_bytes += (*it)->dwLength;
+		}
+		else
+			++live;
+	}
+	cs.Leave();
+}
+
 void smem_container::dump()
 {
 	cs.Enter();

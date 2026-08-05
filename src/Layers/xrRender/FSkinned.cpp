@@ -12,6 +12,8 @@
 #include "../../xrEngine/fmesh.h"
 #include "../../xrCPU_Pipe/xrCPU_Pipe.h"
 #include "FSkinned.h"
+// §7g needs g_dedicated_server; not in this project's PCH chain (SkeletonX.cpp hit the same).
+#include "../../xrEngine/IGame_Persistent.h"
 #include "SkeletonX.h"
 
 #include "../xrRenderDX10/dx10BufferUtils.h"
@@ -964,10 +966,33 @@ void CSkeletonX_ext::_CollectBoneFaces(Fvisual* V, u32 iBase, u32 iCount)
 #endif	//USE_DX10	//	Don't use hardware buffers in DX10 since we can't read them
 }
 
+// COOP §7g — RELEASE AFTER CONSUME.
+//
+// AfterLoad is the ONLY caller of _CollectBoneFaces (audited, §7f), which makes it the last load-time
+// consumer of the skinned vertex arrays. Releasing here therefore keeps EVERY load-time invariant
+// satisfied -- child_faces is built from real data, LL_GetBoneGroups and LL_Validate see a fully
+// populated structure -- and still returns the memory. That is why this shape was chosen over §7e's
+// skip: a skip has to prove nothing downstream needed what it skipped, and §7e proved I could not
+// enumerate that reliably.
+//
+// What remains after the release are the POST-load consumers, and they are accounted for:
+//   _Render_soft      draws nothing on a server (guarded, §7d) -- and this machine renders nothing
+//   _PickBone         returns FALSE on an empty array (guarded, §7d)
+//   _EnumBoneVertices same data, same guard
+//   _FillVertices     wallmarks, visual only
+//
+// NOTE ON WHAT THIS DOES AND DOES NOT DO ON ITS OWN: dropping a ref_smem reference does not free
+// anything. The block stays docked in g_pSharedMemoryContainer until clean() reclaims it, and in a
+// release build clean() is never called because xrMemory::mem_compact()'s entire body is inside
+// #ifdef DEBUG_MEMORY_MANAGER. So this switch on its own only drives the refcount to zero -- which is
+// precisely the intermediate state worth observing before anything is freed on that judgement.
 void CSkeletonX_ST::AfterLoad(CKinematics* parent, u16 child_idx)
 {
 	inherited2::AfterLoad(parent, child_idx);
 	inherited2::_CollectBoneFaces(this, iBase, iCount);
+	// §7g: protected member, so called on `this` from inside the derived class rather
+	// than through a free helper, which cannot reach it.
+	if (g_coop_skin_release && g_dedicated_server) coop_release_vertices();
 }
 
 void CSkeletonX_PM::AfterLoad(CKinematics* parent, u16 child_idx)
@@ -975,6 +1000,7 @@ void CSkeletonX_PM::AfterLoad(CKinematics* parent, u16 child_idx)
 	inherited2::AfterLoad(parent, child_idx);
 	FSlideWindow& SW = nSWI.sw[0]; // max LOD
 	inherited2::_CollectBoneFaces(this, iBase + SW.offset, SW.num_tris * 3);
+	if (g_coop_skin_release && g_dedicated_server) coop_release_vertices();
 }
 
 template <typename T>

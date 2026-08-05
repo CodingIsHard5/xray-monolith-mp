@@ -77,6 +77,16 @@ protected:
 	virtual void _FillVertices(const Fmatrix& view, CSkeletonWallmark& wm, const Fvector& normal, float size,
 	                           Fvisual* V, u16 bone_id, u32 iBase, u32 iCount) =0;
 
+	// §7g: drop this child's references to the shared vertex blocks. Called from AfterLoad, i.e.
+	// after _CollectBoneFaces -- the last load-time consumer -- has finished with them.
+	void coop_release_vertices()
+	{
+		Vertices1W = ref_smem<vertBoned1W>();
+		Vertices2W = ref_smem<vertBoned2W>();
+		Vertices3W = ref_smem<vertBoned3W>();
+		Vertices4W = ref_smem<vertBoned4W>();
+	}
+
 	BOOL _PickBoneSoft1W(IKinematics::pick_result& r, float range, const Fvector& S, const Fvector& D, u16* indices,
 	                     CBoneData::FacesVec& faces);
 	BOOL _PickBoneSoft2W(IKinematics::pick_result& r, float range, const Fvector& S, const Fvector& D, u16* indices,
