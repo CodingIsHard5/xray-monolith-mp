@@ -787,8 +787,53 @@ static void coop_sc_tick()
     }
 }
 
+// §6c — THE POOL'S STATS LINE, and it lives here rather than in coop_pool.cpp on purpose: that file
+// deliberately depends on no engine header (no Msg, no GetTickCount), which is exactly what lets
+// dev/harness/pool_control compile THE REAL allocator instead of a copy of it.
+//
+// `RECLAIMED` is the number that answers a question §6b could only mark unknown: whether any engine
+// code frees a block that `luabind_new` allocated. Those arrive at `xrMemory::mem_free`, not at the
+// luabind free path, and only the safety net there increments this. The luabind path deliberately
+// does NOT touch it, so a non-zero value here is evidence of cross-allocator frees rather than an
+// artefact of the normal route.
+//
+// `bad_frees` and `foreign` should both stay at 0 in production. Every call site tests owns() before
+// calling coop_pool_free, so a foreign count above zero means a caller broke that contract, and a
+// bad_free means a wild or interior pointer reached the free path. They are printed every interval
+// precisely so they cannot fail quietly.
+static u32 s_pool_last_print = 0;
+XRCORE_API u32 g_coop_pool_interval_ms = 30000;
+static coop_pool_stats_t s_pool_prev = { 0, 0, 0, 0, 0, 0, 0, 0 };
+
+static void coop_pool_tick()
+{
+    const u32 now = GetTickCount();
+    if (u32(now - s_pool_last_print) < g_coop_pool_interval_ms) return;
+    s_pool_last_print = now;
+
+    coop_pool_stats_t st;
+    coop_pool_get_stats(st);
+
+    // THE INTERVAL DELTA IS THE READING, not the cumulative -- a cumulative count is dominated by
+    // boot and says nothing about steady state, which is the correction §5e/§5f/§5h all needed.
+    // Both are printed, delta first.
+    Msg("* COOP(pool): d_alloc=%I64u d_free=%I64u d_fallback=%I64u | live=%I64u chunks=%I64u "
+        "(%I64u KiB) | RECLAIMED=%I64u bad_frees=%I64u foreign=%I64u | cum_alloc=%I64u",
+        st.allocs - s_pool_prev.allocs,
+        st.frees - s_pool_prev.frees,
+        st.fallbacks - s_pool_prev.fallbacks,
+        st.live, st.chunks, st.chunks * 64,
+        st.reclaimed, st.bad_frees, st.foreign_frees, st.allocs);
+
+    s_pool_prev = st;
+}
+
 void coop_bigalloc_tick()
 {
+    // Independent of every other probe: the pool can be armed with all the instruments disarmed,
+    // which is exactly the configuration the paired arms use.
+    if (g_coop_pool_span.load(std::memory_order_relaxed)) coop_pool_tick();
+
     // Ordered so the histogram runs even when the per-event ring is disarmed — the three are
     // independent instruments and §5j's whole point is being able to run the cheap one alone.
     if (g_coop_allocsites_min) coop_sc_tick();
