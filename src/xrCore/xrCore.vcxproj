@@ -465,6 +465,7 @@
     </ClCompile>
     <ClCompile Include="clsid.cpp" />
     <ClCompile Include="coop_av_report.cpp" />
+    <ClCompile Include="coop_pool.cpp" />
     <ClCompile Include="cpuid.cpp" />
     <ClCompile Include="crc32.cpp" />
     <ClCompile Include="dump_string.cpp" />
