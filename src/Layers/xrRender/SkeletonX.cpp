@@ -225,6 +225,62 @@ void CSkeletonX::_Render_soft(ref_geom& hGeom, u32 vCount, u32 iOffset, u32 pCou
 	RCache.Render(D3DPT_TRIANGLELIST, vOffset, 0, vCount, iOffset, pCount);
 }
 
+// COOP §7d — the skinning-mode census. See the note at the end of CSkeletonX::_Load for why this
+// exists and why it changes no behaviour. Counters only; the summary rides on the model census's
+// cadence rather than adding a second one, so a quiet run stays quiet.
+static u32 g_coop_skin_by_mode[8] = {0};
+static u32 g_coop_skin_soft = 0;
+static u64 g_coop_skin_soft_bytes = 0;
+static u32 g_coop_skin_total = 0;
+static bool g_coop_skin_caps_printed = false;
+static u32 g_coop_skin_last_report = 0;
+
+static void coop_skeleton_note_load(LPCSTR N, u32 render_mode, bool soft, u32 bytes)
+{
+	if (!g_coop_skin_caps_printed)
+	{
+		g_coop_skin_caps_printed = true;
+		// The value the whole scoping decision turns on, printed once. hw_bones_cnt is recomputed
+		// here exactly as _Load computes it, so the log carries the number actually used and not a
+		// second derivation that could drift from it.
+		Msg("* COOP(skin): HW.Caps.geometry.dwRegisters=%u -> hw_bones_cnt=%u, "
+		    "ps_r1_SoftwareSkinning=%d. Models whose bone count exceeds hw_bones_cnt copy their whole "
+		    "vertex array into system memory; that copy is what §7c measured.",
+		    HW.Caps.geometry.dwRegisters,
+		    u32(u16((HW.Caps.geometry.dwRegisters - 22 - 3) / 3)),
+		    ps_r1_SoftwareSkinning);
+	}
+	++g_coop_skin_total;
+	if (render_mode < 8) ++g_coop_skin_by_mode[render_mode];
+	// Summary on the SAME 60 s rule the model census uses, but emitted from here so no symbol
+	// crosses a translation unit. ModelPool.cpp and SkeletonX.cpp are compiled into EVERY render
+	// layer (R1..R4), and an exe that links more than one would turn a shared non-static helper into
+	// a duplicate symbol at link time. A self-contained counter cannot do that. Checked rather than
+	// assumed: both files appear in all four xrRender_R*.vcxproj.
+	const u32 now = Device.dwTimeGlobal;
+	if (!g_coop_skin_last_report) g_coop_skin_last_report = now;
+	if (now - g_coop_skin_last_report >= 60000)
+	{
+		g_coop_skin_last_report = now;
+		Msg("* COOP(skin): skinned=%u soft=%u (%u%%) soft_bytes=%u KB. The soft fraction is what a "
+		    "renderless server could stop copying, IF nothing needs it.",
+		    g_coop_skin_total, g_coop_skin_soft,
+		    g_coop_skin_total ? (100 * g_coop_skin_soft / g_coop_skin_total) : 0,
+		    u32(g_coop_skin_soft_bytes / 1024));
+	}
+	if (soft)
+	{
+		++g_coop_skin_soft;
+		g_coop_skin_soft_bytes += bytes;
+		// First few only: which models are paying, by name, without turning into a per-load trace.
+		if (g_coop_skin_soft <= 5)
+			Msg("! COOP(skin): SOFT skinning for '%s' -- %u KB of vertices copied to system memory "
+			    "on a server that renders nothing.", N, bytes / 1024);
+	}
+}
+
+
+
 void CSkeletonX::_Load(const char* N, IReader* data, u32& dwVertCount)
 {
 	s_bones_array_const = "sbones_array";
@@ -414,6 +470,24 @@ void CSkeletonX::_Load(const char* N, IReader* data, u32& dwVertCount)
 	{
 		crc = crc32(&*bids.begin(), bids.size() * sizeof(u16));
 		BonesUsed.create(crc, bids.size(), &*bids.begin());
+	}
+
+	// COOP §7d — MEASURE BEFORE CUTTING. §7c attributed the server's live-byte growth to base-model
+	// loading and showed the lookup is sound, so the remaining question is one of SCOPE: a renderless
+	// server has no use for render geometry. The four allocation sites symbolicated inside this
+	// function are exactly the four `VerticesNW.create()` calls below, which run ONLY on the
+	// software-skinning branch -- `sw_bones_cnt > hw_bones_cnt`, where hw_bones_cnt is derived from
+	// HW.Caps.geometry.dwRegisters. On a null-D3D9 server nobody knows what that value is, so nobody
+	// knows how many models take the soft path or what it costs. That is the number this prints.
+	//
+	// IT DELIBERATELY CUTS NOTHING. The vertex copies are consumed by _PickBoneSoft*, and PickBone
+	// has two callers: CCF_DynamicMesh (opt-in `[collide] mesh` physics objects) and
+	// ik_foot_collider. Creature hit detection uses CCF_Skeleton BONE SHAPES and does not touch this
+	// data -- but "does not touch" is a claim from reading, and dropping geometry a server turns out
+	// to need is worse than the memory it saves.
+	{
+		const bool soft = (*Vertices1W) || (*Vertices2W) || (*Vertices3W) || (*Vertices4W);
+		coop_skeleton_note_load(N, RenderMode, soft, soft ? size : 0);
 	}
 }
 
