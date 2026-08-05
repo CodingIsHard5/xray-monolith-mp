@@ -46,29 +46,68 @@ IC void CScriptSound::SetMaxDistance(const float fMaxDistance)
 	m_sound.set_range(GetMinDistance(), fMaxDistance);
 }
 
+// COOP §6f — THESE FOUR DEREFERENCED NULL IN EVERY RELEASE BUILD.
+//
+// ref_sound::get_params() RETURNS NULL when the sound has no feedback object (Sound.h:554), and the
+// only thing standing between that and the dereference was VERIFY(), which compiles out in release
+// (see the xray-verify-macros-compile-out note). The symbolicated proof, from CScriptSound::GetVolume
+// in build 30977983541:
+//
+//     14076b446:  xor    %eax,%eax          <- get_params() returned NULL, inlined
+//     14076b448:  movss  0x4c(%rax),%xmm0   <- and it read it anyway; 0x4C is CSound_params::volume
+//
+// That first-chance access violation fires on the dedicated server in six of six recorded runs. It is
+// swallowed downstream and is NOT the crash — but it is undefined behaviour on a path Lua can reach
+// from a physics script condition, and it costs an exception dispatch every time.
+//
+// The handling is not invented here: CScriptSound::GetPosition (script_sound.cpp:39) already
+// null-checks the same pointer, logs, and returns a neutral value. These four are its siblings that
+// never got the same treatment. The log is once-per-getter because a script condition can call these
+// every frame, and a per-call Msg would be its own denial of service.
+#define COOP_SOUND_NO_PARAMS(what, dflt)                                                       \
+	do {                                                                                       \
+		static bool s_reported = false;                                                        \
+		if (!s_reported) {                                                                     \
+			s_reported = true;                                                                 \
+			Msg("! COOP(sound): %s on a sound with no feedback ('%s') -- returning %g. "         \
+			    "Reported once per getter.", what, m_caSoundToPlay.c_str() ? m_caSoundToPlay.c_str() : "?", (double)(dflt)); \
+		}                                                                                      \
+		return (dflt);                                                                         \
+	} while (0)
+
 IC const float CScriptSound::GetFrequency() const
 {
-	VERIFY(m_sound._handle());
-	return (m_sound.get_params()->freq);
+	const CSound_params* p = m_sound.get_params();
+	if (!p)
+		COOP_SOUND_NO_PARAMS("get_frequency", 1.0f); // 1.0 == unmodified pitch
+	return (p->freq);
 }
 
 IC const float CScriptSound::GetMinDistance() const
 {
-	VERIFY(m_sound._handle());
-	return (m_sound.get_params()->min_distance);
+	const CSound_params* p = m_sound.get_params();
+	if (!p)
+		COOP_SOUND_NO_PARAMS("get_min_distance", 0.0f);
+	return (p->min_distance);
 }
 
 IC const float CScriptSound::GetMaxDistance() const
 {
-	VERIFY(m_sound._handle());
-	return (m_sound.get_params()->max_distance);
+	const CSound_params* p = m_sound.get_params();
+	if (!p)
+		COOP_SOUND_NO_PARAMS("get_max_distance", 0.0f);
+	return (p->max_distance);
 }
 
 IC const float CScriptSound::GetVolume() const
 {
-	VERIFY(m_sound._handle());
-	return (m_sound.get_params()->volume);
+	const CSound_params* p = m_sound.get_params();
+	if (!p)
+		COOP_SOUND_NO_PARAMS("get_volume", 0.0f); // a sound that is not playing has no volume
+	return (p->volume);
 }
+
+#undef COOP_SOUND_NO_PARAMS
 
 IC bool CScriptSound::IsPlaying() const
 {

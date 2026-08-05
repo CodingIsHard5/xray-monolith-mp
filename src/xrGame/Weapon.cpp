@@ -1026,18 +1026,55 @@ BOOL CWeapon::net_Spawn(CSE_Abstract* DC)
 	SetState(E->wpn_state);
 	SetNextState(E->wpn_state);
 
-    if (!m_ammoTypes[m_ammoType].c_str())
-    {
-        Msg("![%s] ERROR: CWeapon::net_Spawn: m_ammoTypes[m_ammoType] is invalid, m_ammoTypes.size %d, m_ammoType %d", Name(), m_ammoTypes.size(), m_ammoType);
-        m_ammoType = 0;
-    }
-
-	m_DefaultCartridge.Load(m_ammoTypes[m_ammoType].c_str(), m_ammoType, m_APk);
-	if (iAmmoElapsed)
+	// COOP §6f — THIS IS THE SERVER CRASH, SYMBOLICATED.
+	//
+	// m_ammoType arrives on the spawn packet (E->ammo_type, a u8, set five lines above);
+	// m_ammoTypes is built from the section's `ammo_class` list in CWeapon::Load. Nothing compared
+	// them. The guard that used to stand here read m_ammoTypes[m_ammoType] IN ORDER TO CHECK IT —
+	// out of bounds before the bound was ever tested — and then only asked whether the result was
+	// NULL. An out-of-range index walks past that carrying a wild pointer, and the fault lands one
+	// frame down in CCartridge::Load's `m_ammoSect = section` (an inlined strlen over garbage,
+	// reaching a non-canonical address, which Windows reports as an access violation at -1):
+	//
+	//     CCartridge::Load+0x73  <-  CWeapon::net_Spawn  <-  CLevel::g_sv_Spawn
+	//                            <-  CLevel::cl_Process_Spawn  <-  CLevel::ProcessGameEvents
+	//
+	// Reproduced on builds 30675245817 and 30977983541, three weeks apart, each unhandled and each
+	// taking the dedicated server down with it. Note also that clamping to 0 — the old guard's only
+	// remedy — is no remedy at all against an EMPTY vector, where index 0 is out of bounds too.
+	// Bound the index BEFORE indexing, and if there is nothing to index, load no cartridge.
+	//
+	// The two Msg lines are the instrument for the question §6f left open (WHAT makes the index
+	// bad), so they name the weapon, the index and the size rather than just reporting trouble.
+	if (!m_ammoTypes.empty() && (u32)m_ammoType >= (u32)m_ammoTypes.size())
 	{
-		m_fCurrentCartirdgeDisp = m_DefaultCartridge.param_s.kDisp;
-		for (int i = 0; i < iAmmoElapsed; ++i)
-			m_magazine.push_back(m_DefaultCartridge);
+		Msg("![%s] COOP(wpnspawn): CSE ammo_type %u is OUT OF RANGE for this weapon "
+		    "(m_ammoTypes.size=%u) -- clamping to 0",
+		    Name(), (u32)m_ammoType, (u32)m_ammoTypes.size());
+		m_ammoType = 0;
+	}
+
+	LPCSTR ammo_section = m_ammoTypes.empty() ? NULL : m_ammoTypes[m_ammoType].c_str();
+	if (!ammo_section || !ammo_section[0])
+	{
+		Msg("![%s] COOP(wpnspawn): no usable ammo_class entry (size=%u, ammo_type=%u) -- spawning with "
+		    "no default cartridge and an empty magazine",
+		    Name(), (u32)m_ammoTypes.size(), (u32)m_ammoType);
+		// Keep the invariant asserted at the end of this function: iAmmoElapsed rounds MUST equal
+		// m_magazine.size(). That VERIFY compiles out in release, so leaving them disagreeing would
+		// be a silent divergence rather than a caught one.
+		iAmmoElapsed = 0;
+		m_magazine.clear();
+	}
+	else
+	{
+		m_DefaultCartridge.Load(ammo_section, m_ammoType, m_APk);
+		if (iAmmoElapsed)
+		{
+			m_fCurrentCartirdgeDisp = m_DefaultCartridge.param_s.kDisp;
+			for (int i = 0; i < iAmmoElapsed; ++i)
+				m_magazine.push_back(m_DefaultCartridge);
+		}
 	}
 
 	UpdateAddonsVisibility();
