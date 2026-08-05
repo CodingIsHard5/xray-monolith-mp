@@ -3017,6 +3017,19 @@ void game_sv_Single::Update()
 		// the population it exists for is sub-megabyte. Its cost is paid per allocation, so the
 		// banner says what is armed and the harness compares the run's own work rate against an
 		// unarmed run (§4d: an instrument that costs its own measurement is worse than none).
+		// §8 — suppress IK creation on this dedicated server. Runtime, not compile-time, so the
+		// control and the treatment are one binary one bit apart. Three convergent symptoms point
+		// here: §7g's spawn-time _EnumBoneVertices fault, §7a's ik_anim_state::update fatal, and
+		// §7b's animation faults. Audited in §8 before being offered as a switch.
+		if (coop_param("-coop_no_ik"))
+		{
+			extern BOOL g_coop_no_ik;
+			g_coop_no_ik = TRUE;
+			Msg("* COOP(ik): -coop_no_ik given; IK controller creation will be suppressed on this "
+			    "dedicated server. A run that merely SURVIVES proves little here — §7a/§7b's faults "
+			    "are stochastic, so their absence over one run is weak evidence, not a cure.");
+		}
+
 		// §7g — shared-memory reclamation, three switches so a matched pair runs on one binary:
 		//   -coop_smem <ms>       census only (READ-ONLY; the discriminator)
 		//   -coop_smem_clean      also call smem_container::clean()

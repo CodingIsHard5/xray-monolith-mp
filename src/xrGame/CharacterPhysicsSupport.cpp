@@ -50,6 +50,24 @@ extern	BOOL death_anim_debug;
 #define USE_SMART_HITS
 #define USE_IK
 
+// COOP §8 — RUNTIME gate on IK creation, deliberately NOT a second compile-time #define.
+//
+// USE_IK exists two lines above and would work, but a compile-time switch produces TWO BINARIES and
+// then obliges me to prove they differ only in the intended way -- a second experiment nobody wants.
+// A runtime gate keeps control and treatment one binary, one bit apart, which is what has caught
+// every error on this axis.
+//
+// Audited in §8 before writing this: IK adjusts BONE transforms only (ShiftObject writes
+// LL_GetTransform/LL_GetTransform_R, never m_object->XFORM()), so authoritative position is
+// unaffected; every consumer already handles a null controller, because PhysicsShellHolder returns
+// NULL by design; and the per-frame update is already visibility-gated, so un-IK'd bones are a normal
+// client-side condition for distant entities. Named residual: bone-derived CCF_Skeleton hit shapes
+// lose the foot-planting y-shift.
+//
+// ALSO REQUIRES g_dedicated_server, belt and braces: this must never be able to fire on a machine
+// that renders, whatever flag reaches it.
+BOOL g_coop_no_ik = FALSE;
+
 float IK_CALC_DIST = 100.f;
 float IK_ALWAYS_CALC_DIST = 20.f;
 float IK_CALC_SSA = 0.006f;
@@ -282,9 +300,25 @@ void CCharacterPhysicsSupport::SpawnInitPhysics(CSE_Abstract* e)
 		}
 #endif
 #ifdef	USE_IK
-		if (etStalker == m_eType || etActor == m_eType || (m_EntityAlife.Visual()->dcast_PKinematics()->LL_UserData() &&
-			m_EntityAlife.Visual()->dcast_PKinematics()->LL_UserData()->section_exist("ik")))
+		const bool coop_ik_suppressed = (!!g_coop_no_ik) && g_dedicated_server;
+		if (!coop_ik_suppressed &&
+			(etStalker == m_eType || etActor == m_eType || (m_EntityAlife.Visual()->dcast_PKinematics()->LL_UserData() &&
+			m_EntityAlife.Visual()->dcast_PKinematics()->LL_UserData()->section_exist("ik"))))
 			CreateIKController();
+		else if (coop_ik_suppressed)
+		{
+			// Once, not per spawn: this fires for every stalker and every actor.
+			static bool s_said = false;
+			if (!s_said)
+			{
+				s_said = true;
+				Msg("* COOP(ik): SUPPRESSED — no IK controller is being created on this dedicated "
+				    "server. Removes the spawn-time _EnumBoneVertices consumer (§7g), the "
+				    "CIKLimbsController::Update path (§7a's fatal) and the per-spawn IK setup cost. "
+				    "Bone-derived hit shapes lose the foot-planting y-shift; object position is "
+				    "unaffected (IK never writes XFORM).");
+			}
+		}
 #endif
 		VERIFY(pSettings);
 
