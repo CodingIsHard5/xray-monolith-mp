@@ -3,6 +3,7 @@
 
 #include "xrMemory_align.h"
 #include "xrMemory_pure.h"
+#include "coop_pool.h"		// §6c: the ownership discriminator guarding mem_free/mem_realloc
 
 #ifndef __BORLANDC__
 
@@ -960,6 +961,22 @@ void* xrMemory::mem_alloc(size_t size
 void xrMemory::mem_free(void* P)
 {
 	stat_calls++;
+
+	// §6c SAFETY NET, and it must be the FIRST thing done with P. A pooled block carries no
+	// xrMemory header, so `get_header(P)` below would read the byte in front of it -- which belongs
+	// to another block, or to nothing -- and dispatch on garbage.
+	//
+	// It also closes the one hazard §6b named that the pool cannot close from the luabind side: if
+	// any engine code frees a block that `luabind_new` allocated, it arrives HERE and not at the
+	// luabind free path. The discriminator is exact, so routing it is safe rather than a guess --
+	// and it is COUNTED SEPARATELY, so the run tells us whether cross-allocator frees actually
+	// happen instead of us assuming they do not. `reclaimed > 0` in the stats line is that answer.
+	if (coop_pool_owns(P))
+	{
+		coop_pool_note_reclaimed();
+		coop_pool_free(P);
+		return;
+	}
 #ifdef USE_MEMORY_MONITOR
     memory_monitor::monitor_free(P);
 #endif // USE_MEMORY_MONITOR
@@ -1025,6 +1042,29 @@ void* xrMemory::mem_realloc(void* P, size_t size
 			, _name
 # endif // DEBUG_MEMORY_NAME
 		);
+	}
+
+	// §6c SAFETY NET -- same reason as mem_free, and same placement rule: every path below reads a
+	// header the pooled block does not have. Growing out of the pool means taking a block from
+	// wherever the new size belongs, copying only what the OLD CLASS actually held, and returning
+	// the pooled block. `old` is the class size and never the requested size, because the requested
+	// size is not recorded -- copying `size` bytes from a 16-byte block would read past it.
+	if (coop_pool_owns(P))
+	{
+		coop_pool_note_reclaimed();
+		size_t const old = coop_pool_block_size(P);
+		void* const result = mem_alloc(size
+# ifdef DEBUG_MEMORY_NAME
+			, _name
+# endif // DEBUG_MEMORY_NAME
+		);
+		// old == 0 means an in-region pointer that is not a valid block start. Nothing can be
+		// safely copied from it and coop_pool_free will refuse it and count it, which is the
+		// conservative branch: leak 16 bytes rather than corrupt a free list.
+		if (result && old)
+			memcpy(result, P, (size < old) ? size : old);
+		coop_pool_free(P);
+		return result;
 	}
 
 #ifdef PURE_ALLOC

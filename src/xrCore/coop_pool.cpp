@@ -139,6 +139,10 @@ namespace
 
 	pool_state g_pool;
 
+	// Serving is gated separately from arming: see coop_pool_enable in the header. Until this is
+	// 1 the pool declines every request, so no pointer outside the pool can be inside the region.
+	std::atomic<int> g_serving(0);
+
 	std::atomic<unsigned long long> g_allocs(0);
 	std::atomic<unsigned long long> g_frees(0);
 	std::atomic<unsigned long long> g_fallbacks(0);
@@ -303,7 +307,9 @@ XRCORE_API bool coop_pool_arm(size_t region_mib)
 // ---------------------------------------------------------------------------------------------
 XRCORE_API void* coop_pool_alloc(size_t size)
 {
-	if (size == 0 || size > MAX_POOLED || g_coop_pool_span.load(std::memory_order_acquire) == 0)
+	if (size == 0 || size > MAX_POOLED
+	    || g_coop_pool_span.load(std::memory_order_acquire) == 0
+	    || g_serving.load(std::memory_order_acquire) == 0)
 	{
 		g_fallbacks.fetch_add(1, std::memory_order_relaxed);
 		return 0;
@@ -388,7 +394,12 @@ XRCORE_API size_t coop_pool_block_size(void const* p)
 	return sz;
 }
 
-XRCORE_API void coop_pool_note_foreign_free()
+XRCORE_API void coop_pool_enable()
+{
+	g_serving.store(1, std::memory_order_release);
+}
+
+XRCORE_API void coop_pool_note_reclaimed()
 {
 	g_reclaimed.fetch_add(1, std::memory_order_relaxed);
 }
@@ -448,6 +459,27 @@ XRCORE_API bool coop_pool_selftest(char* out_report, size_t report_bytes)
 			snprintf(out_report, report_bytes, "POOL SELFTEST: FAIL (pool not armed)");
 		return false;
 	}
+
+	// The selftest must allocate, but it runs BEFORE the pool is opened to real callers -- that is
+	// the whole point of the two-phase arm. So it opens the gate for itself and restores whatever
+	// it found on the way out, leaving `coop_pool_enable` as the only thing that can open it for
+	// anyone else.
+	//
+	// This is safe here and nowhere else: arming happens in `xrCore::_initialize`, before a Lua
+	// state exists and before any thread that could call into luabind has been started, so there
+	// is no concurrent allocator to race with. Calling this function later, on a live server,
+	// would not be safe and it is not called later.
+	// BRACE-INITIALISED, and that is not a style choice. This engine has already had a
+	// most-vexing-parse (C4930) silently turn an RAII guard into a function declaration in every
+	// build on record -- the guard simply was not there, and nothing failed loudly. `T g{x};`
+	// cannot be parsed as a declaration, so this one cannot vanish the same way.
+	struct restore_serving
+	{
+		int prev;
+		~restore_serving() { g_serving.store(prev, std::memory_order_release); }
+	};
+	restore_serving const restore_guard{g_serving.exchange(1, std::memory_order_acq_rel)};
+	(void)restore_guard;
 
 	unsigned long long false_pos = 0;   // foreign pointer claimed as ours -- the fatal direction
 	unsigned long long false_neg = 0;   // our own pointer disowned -- the other fatal direction

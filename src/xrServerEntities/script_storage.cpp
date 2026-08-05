@@ -10,6 +10,7 @@
 #include "script_storage.h"
 #include "script_thread.h"
 #include "../xrCore/mezz_stringbuffer.h"
+#include "../xrCore/coop_pool.h"	// §6c: the luabind small-object pool and its ownership test
 #include <stdarg.h>
 #include <unordered_map>
 #include <set>
@@ -166,15 +167,39 @@ static void* __cdecl luabind_allocator(
 	size_t const size
 )
 {
+	// §6c — THE POOL SITS HERE, on the one function every luabind allocation and free passes
+	// through. §6a measured 87% of all 8-15 byte allocations arriving from two `value_converter`
+	// instantiations at ~8,200/second, each one a `luabind_new<T>` that lands on the `!pointer`
+	// branch below.
+	//
+	// The fork on the free path is the dangerous one and it is decided by an EXACT test, not a
+	// guess: `coop_pool_owns` is a range check against a region the OS reserved for us, so a
+	// foreign pointer cannot be inside it. When the pool is disarmed -- which is every run that
+	// does not pass `-coop_pool` -- `owns()` is false for every pointer in the address space and
+	// all three branches behave exactly as they did before this change.
 	if (!size)
 	{
 		void* non_const_pointer = const_cast<void*>(pointer);
+		if (coop_pool_owns(non_const_pointer))
+		{
+			// Deliberately NOT counted as a reclaim: this is the expected route. The reclaim
+			// counter exists to reveal pooled blocks arriving at `xrMemory::mem_free` instead,
+			// and it can only mean that if this path does not inflate it.
+			coop_pool_free(non_const_pointer);
+			return nullptr;
+		}
 		xr_free(non_const_pointer);
 		return nullptr;
 	}
 
 	if (!pointer)
 	{
+		// A decline here is not a failure: the pool declines sizes outside its classes and
+		// declines when the region is exhausted, and the block xrMemory then returns is correctly
+		// identified as foreign for the rest of its life.
+		if (void* const pooled = coop_pool_alloc(size))
+			return pooled;
+
 #ifdef DEBUG
 		return	(Memory.mem_alloc(size, "luabind"));
 #else //!DEBUG
@@ -183,6 +208,26 @@ static void* __cdecl luabind_allocator(
 	}
 
 	void* non_const_pointer = const_cast<void*>(pointer);
+
+	// Realloc of a pooled block. `old` is the CLASS size, never the requested size -- the request
+	// is not recorded, and copying `size` bytes out of a 16-byte block would read past it.
+	if (coop_pool_owns(non_const_pointer))
+	{
+		size_t const old = coop_pool_block_size(non_const_pointer);
+		void* result = coop_pool_alloc(size);
+		if (!result)
+		{
+#ifdef DEBUG
+			result = Memory.mem_alloc(size, "luabind");
+#else //!DEBUG
+			result = Memory.mem_alloc(size);
+#endif //-DEBUG
+		}
+		if (result && old)
+			memcpy(result, non_const_pointer, (size < old) ? size : old);
+		coop_pool_free(non_const_pointer);
+		return result;
+	}
 #ifdef DEBUG
 	return		(Memory.mem_realloc(non_const_pointer, size, "luabind"));
 #else //!DEBUG

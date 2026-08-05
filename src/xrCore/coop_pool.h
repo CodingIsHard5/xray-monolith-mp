@@ -96,9 +96,23 @@ inline bool coop_pool_owns(void const* p)
 // which case the pool stays disarmed and every path falls back to xrMemory unchanged.
 XRCORE_API bool   coop_pool_arm(size_t region_mib);
 
-// Allocation. Returns nullptr when the size is not pooled, the pool is disarmed, or the region is
-// exhausted — in every one of those cases the caller must fall back to the engine allocator, and
-// doing so stays correct because `owns()` will later report false for that block.
+// Open the pool to real callers. SEPARATE FROM ARMING ON PURPOSE, and the separation is what lets
+// a failed selftest be survivable.
+//
+// `arm` reserves the region and makes `owns()` live; it does NOT let the pool serve anybody. Only
+// this does. So the boot sequence is: arm, run the selftest, and call this ONLY if it passed. If
+// it did not, the pool never hands out a block, no pointer outside the pool is ever inside the
+// region, `owns()` is therefore false for every pointer any caller will present, and the server
+// behaves exactly as an unflagged build — with a loud line in the log saying so.
+//
+// This is also why the invariant "never disarm" is not violated by a failing selftest: there is
+// nothing live to strand, because nothing was ever served.
+XRCORE_API void   coop_pool_enable();
+
+// Allocation. Returns nullptr when the size is not pooled, the pool is disarmed, the pool has not
+// been enabled, or the region is exhausted — in every one of those cases the caller must fall back
+// to the engine allocator, and doing so stays correct because `owns()` will report false for that
+// block for the rest of its life.
 XRCORE_API void*  coop_pool_alloc(size_t size);
 
 // Release. PRECONDITION: `coop_pool_owns(p)`. Returns false if p is inside the region but is not a
@@ -143,4 +157,4 @@ struct coop_pool_stats_t
 	unsigned long long reclaimed;      // frees that arrived via the xrMemory safety net
 };
 XRCORE_API void coop_pool_get_stats(coop_pool_stats_t& out);
-XRCORE_API void coop_pool_note_foreign_free();
+XRCORE_API void coop_pool_note_reclaimed();

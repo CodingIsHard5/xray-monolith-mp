@@ -6,6 +6,7 @@
 #include <mmsystem.h>
 #include <objbase.h>
 #include "xrCore.h"
+#include "coop_pool.h"		// §6c: two-phase arm of the luabind pool, gated on its selftest
 
 #pragma comment(lib,"winmm.lib")
 
@@ -158,6 +159,62 @@ void xrCore::_initialize(LPCSTR _ApplicationName, LogCallback cb, BOOL init_fs, 
 				else
 					Msg("! COOP(addrmap): -coop_addrmap needs a positive floor in BYTES (got "
 					    "'%s') -- NOT armed.", pa);
+			}
+		}
+
+		// §6c — ARM THE LUABIND POOL HERE, FOR THE SAME REASON THE ADDRESS MAP IS ARMED HERE, and
+		// one more that is specific to it.
+		//
+		// The shared reason: arming after the level loads leaves every boot allocation outside the
+		// pool. Unlike the address map that is not a CORRECTNESS problem -- the discriminator is
+		// exact, so a block allocated before arming is simply foreign forever and takes the
+		// unchanged path -- but it does mean a large, long-lived population of exactly the objects
+		// the pool exists for never sees it, and GATE B (arena occupancy, mean live block size)
+		// would then be measuring a fraction of the intended change.
+		//
+		// The specific reason: THE SELFTEST GATES THE ARM. It runs here, before a single Lua state
+		// exists and therefore before any pooled block can be live, which is the only point where
+		// "the discriminator is wrong" can still be answered by refusing to arm rather than by
+		// corrupting a heap. If it fails, the pool stays disarmed, `owns()` is false for every
+		// pointer in the address space, and the server runs exactly as an unflagged build does.
+		//
+		// The verdict and its counts go to the log either way. A selftest whose result is not
+		// recorded is a selftest that cannot be cited afterwards, and this run's whole claim rests
+		// on it.
+		{
+			LPCSTR pp = coop_core_param("-coop_pool");
+			if (pp)
+			{
+				const int mib = atoi(pp);
+				if (mib > 0)
+				{
+					if (coop_pool_arm(size_t(mib)))
+					{
+						char report[512];
+						const bool ok = coop_pool_selftest(report, sizeof(report));
+						Msg("* COOP(pool): %s", report);
+						if (ok)
+						{
+							// The ONLY call to this in the engine, and it is downstream of a
+							// passing selftest by construction.
+							coop_pool_enable();
+							Msg("* COOP(pool): ENABLED, region %d MiB, pooling luabind "
+							    "allocations <= %u bytes.",
+							    mib, (unsigned)coop_pool_max_pooled());
+						}
+						else
+							Msg("! COOP(pool): SELFTEST FAILED -- NOT enabled. The region stays "
+							    "reserved and the pool serves nobody, so the server runs exactly "
+							    "as an unflagged build. Do not read a memory result from this "
+							    "run: the flag was passed and the pool did not take effect.");
+					}
+					else
+						Msg("! COOP(pool): could not reserve %d MiB of address space -- NOT "
+						    "armed, the server runs unchanged.", mib);
+				}
+				else
+					Msg("! COOP(pool): -coop_pool needs a positive region size in MiB (got '%s') "
+					    "-- NOT armed.", pp);
 			}
 		}
 
