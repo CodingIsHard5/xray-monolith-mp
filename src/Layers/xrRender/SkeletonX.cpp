@@ -11,6 +11,9 @@
 
 #ifndef _EDITOR
 #include	"../../xrEngine/Render.h"
+// §7d needs g_dedicated_server. Included EXPLICITLY rather than relied on transitively: it is not in
+// this project's PCH chain, and ModelPool.cpp in this same directory already includes it this way.
+#include	"../../xrEngine/IGame_Persistent.h"
 #else
 	#include "../../Include/xrAPI/xrAPI.h"
 #endif
@@ -215,7 +218,24 @@ void CSkeletonX::_Render_soft(ref_geom& hGeom, u32 vCount, u32 iOffset, u32 pCou
 			);
 		}
 		else
-			R_ASSERT2(0, "unsupported soft rendering");
+		{
+			// §7d: all four arrays empty means the copy was deliberately skipped for a renderless
+			// server. R_ASSERT survives release, so leaving the fatal here would turn "a dedicated
+			// server should never render" -- an expectation, not a guarantee -- into a crash. Draw
+			// nothing instead, and say so once.
+			static bool s_said = false;
+			if (!s_said)
+			{
+				s_said = true;
+				Msg("! COOP(skin): _Render_soft reached with no vertex data (geometry skipped for a "
+				    "renderless server). Drawing nothing. If this appears on a CLIENT it is a bug.");
+			}
+			// End() the statistic that Begin() opened above -- the normal path below does it, and an
+			// early return that skips it leaves the timer permanently open.
+			RDEVICE.Statistic->RenderDUMP_SKIN.End();
+			_VS.Unlock(vCount, hGeom->vb_stride);
+			return;
+		}
 
 		RDEVICE.Statistic->RenderDUMP_SKIN.End();
 		_VS.Unlock(vCount, hGeom->vb_stride);
@@ -235,6 +255,39 @@ static u32 g_coop_skin_total = 0;
 static bool g_coop_skin_caps_printed = false;
 static u32 g_coop_skin_last_report = 0;
 
+// §7d THE CUT. A renderless server copies character geometry into system memory for one reason: the
+// stub D3D9 advertises 32 vertex-shader constant registers, so hw_bones_cnt is 2 and every model with
+// more than two bones takes the software-skinning branch. Measured: 41% of skinned models, 23 MB in
+// the first hundred seconds, growing for the life of the process.
+//
+// The copy feeds exactly three consumers, and none of them applies here:
+//   * software-skinning RENDER  -- this machine renders nothing;
+//   * _PickBoneSoft*            -- guarded below to return FALSE on an empty array;
+//   * EnumBoneVertices          -- same data, same guard.
+// Creature and actor hit detection uses CCF_Skeleton BONE SHAPES, not mesh triangles, so hit boxes
+// are unaffected. PickBone's only callers are CCF_DynamicMesh (opt-in `[collide] mesh = true` physics
+// objects) and ik_foot_collider (foot placement) -- both visual-fidelity refinements on a server.
+//
+// GATED ON g_dedicated_server, AND THE GATE ANNOUNCES ITSELF, because a gate that is false yields a
+// silent no-op indistinguishable from a fix that works. If this server does not set the flag, the log
+// says so rather than the saving quietly not happening.
+static bool g_coop_skip_geom_announced = false;
+
+static bool coop_skip_skin_geometry()
+{
+	if (!g_dedicated_server)
+		return false;
+	if (!g_coop_skip_geom_announced)
+	{
+		g_coop_skip_geom_announced = true;
+		Msg("* COOP(skin): SKIPPING software-skinning vertex copies -- g_dedicated_server is set and "
+		    "this process renders nothing. Hit boxes are unaffected (they use CCF_Skeleton bone "
+		    "shapes); exact mesh picking via PickBone will return FALSE, which is what a client with "
+		    "hardware skinning already does.");
+	}
+	return true;
+}
+
 static void coop_skeleton_note_load(LPCSTR N, u32 render_mode, bool soft, u32 bytes)
 {
 	if (!g_coop_skin_caps_printed)
@@ -244,11 +297,12 @@ static void coop_skeleton_note_load(LPCSTR N, u32 render_mode, bool soft, u32 by
 		// here exactly as _Load computes it, so the log carries the number actually used and not a
 		// second derivation that could drift from it.
 		Msg("* COOP(skin): HW.Caps.geometry.dwRegisters=%u -> hw_bones_cnt=%u, "
-		    "ps_r1_SoftwareSkinning=%d. Models whose bone count exceeds hw_bones_cnt copy their whole "
-		    "vertex array into system memory; that copy is what §7c measured.",
+		    "ps_r1_SoftwareSkinning=%d, g_dedicated_server=%d. Models whose bone count exceeds "
+		    "hw_bones_cnt copy their whole vertex array into system memory; that copy is what §7c "
+		    "measured, and g_dedicated_server is the gate that decides whether we skip it.",
 		    HW.Caps.geometry.dwRegisters,
 		    u32(u16((HW.Caps.geometry.dwRegisters - 22 - 3) / 3)),
-		    ps_r1_SoftwareSkinning);
+		    ps_r1_SoftwareSkinning, int(g_dedicated_server));
 	}
 	++g_coop_skin_total;
 	if (render_mode < 8) ++g_coop_skin_by_mode[render_mode];
@@ -351,8 +405,11 @@ void CSkeletonX::_Load(const char* N, IReader* data, u32& dwVertCount)
 			else
 			{
 				// software
-				crc = crc32(data->pointer(), size);
-				Vertices1W.create(crc, dwVertCount, (vertBoned1W*)data->pointer());
+				if (!coop_skip_skin_geometry())   // §7d
+				{
+					crc = crc32(data->pointer(), size);
+					Vertices1W.create(crc, dwVertCount, (vertBoned1W*)data->pointer());
+				}
 				Render->shader_option_skinning(-1);
 			}
 #endif
@@ -387,8 +444,11 @@ void CSkeletonX::_Load(const char* N, IReader* data, u32& dwVertCount)
 			else
 			{
 				// software
-				crc = crc32(data->pointer(), size);
-				Vertices2W.create(crc, dwVertCount, (vertBoned2W*)data->pointer());
+				if (!coop_skip_skin_geometry())   // §7d
+				{
+					crc = crc32(data->pointer(), size);
+					Vertices2W.create(crc, dwVertCount, (vertBoned2W*)data->pointer());
+				}
 				Render->shader_option_skinning(-1);
 			}
 		}
@@ -419,8 +479,11 @@ void CSkeletonX::_Load(const char* N, IReader* data, u32& dwVertCount)
 			}
 			else
 			{
-				crc = crc32(data->pointer(), size);
-				Vertices3W.create(crc, dwVertCount, (vertBoned3W*)data->pointer());
+				if (!coop_skip_skin_geometry())   // §7d
+				{
+					crc = crc32(data->pointer(), size);
+					Vertices3W.create(crc, dwVertCount, (vertBoned3W*)data->pointer());
+				}
 				Render->shader_option_skinning(-1);
 			}
 		}
@@ -452,8 +515,11 @@ void CSkeletonX::_Load(const char* N, IReader* data, u32& dwVertCount)
 			}
 			else
 			{
-				crc = crc32(data->pointer(), size);
-				Vertices4W.create(crc, dwVertCount, (vertBoned4W*)data->pointer());
+				if (!coop_skip_skin_geometry())   // §7d
+				{
+					crc = crc32(data->pointer(), size);
+					Vertices4W.create(crc, dwVertCount, (vertBoned4W*)data->pointer());
+				}
 				Render->shader_option_skinning(-1);
 			}
 		}
@@ -574,24 +640,44 @@ void get_pos_bones(const vertBoned4W& vert, Fvector& p, CKinematics* Parent)
 BOOL CSkeletonX::_PickBoneSoft1W(IKinematics::pick_result& r, float dist, const Fvector& S, const Fvector& D,
                                  u16* indices, CBoneData::FacesVec& faces)
 {
+	// §7d: pick_bone indexes this buffer directly, so an EMPTY array is a wild read rather
+	// than a harmless miss. On a renderless server the copy is deliberately not made, and a
+	// client using hardware skinning has never had it either -- FALSE is the same answer
+	// both of them already give.
+	if (!*Vertices1W) return FALSE;
 	return pick_bone<vertBoned1W>(Vertices1W, Parent, r, dist, S, D, indices, faces);
 }
 
 BOOL CSkeletonX::_PickBoneSoft2W(IKinematics::pick_result& r, float dist, const Fvector& S, const Fvector& D,
                                  u16* indices, CBoneData::FacesVec& faces)
 {
+	// §7d: pick_bone indexes this buffer directly, so an EMPTY array is a wild read rather
+	// than a harmless miss. On a renderless server the copy is deliberately not made, and a
+	// client using hardware skinning has never had it either -- FALSE is the same answer
+	// both of them already give.
+	if (!*Vertices2W) return FALSE;
 	return pick_bone<vertBoned2W>(Vertices2W, Parent, r, dist, S, D, indices, faces);
 }
 
 BOOL CSkeletonX::_PickBoneSoft3W(IKinematics::pick_result& r, float dist, const Fvector& S, const Fvector& D,
                                  u16* indices, CBoneData::FacesVec& faces)
 {
+	// §7d: pick_bone indexes this buffer directly, so an EMPTY array is a wild read rather
+	// than a harmless miss. On a renderless server the copy is deliberately not made, and a
+	// client using hardware skinning has never had it either -- FALSE is the same answer
+	// both of them already give.
+	if (!*Vertices3W) return FALSE;
 	return pick_bone<vertBoned3W>(Vertices3W, Parent, r, dist, S, D, indices, faces);
 }
 
 BOOL CSkeletonX::_PickBoneSoft4W(IKinematics::pick_result& r, float dist, const Fvector& S, const Fvector& D,
                                  u16* indices, CBoneData::FacesVec& faces)
 {
+	// §7d: pick_bone indexes this buffer directly, so an EMPTY array is a wild read rather
+	// than a harmless miss. On a renderless server the copy is deliberately not made, and a
+	// client using hardware skinning has never had it either -- FALSE is the same answer
+	// both of them already give.
+	if (!*Vertices4W) return FALSE;
 	return pick_bone<vertBoned4W>(Vertices4W, Parent, r, dist, S, D, indices, faces);
 }
 
