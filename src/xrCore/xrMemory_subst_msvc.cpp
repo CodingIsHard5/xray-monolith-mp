@@ -878,14 +878,32 @@ static void coop_smem_tick()
 
 	if (g_coop_smem_allow_clean && dead)
 	{
+		// §8d — RSS READ IMMEDIATELY EITHER SIDE OF THE CALL, and the tightness is the point.
+		//
+		// §8c compared two runs end-to-end and could not attribute a 95 MiB difference, because
+		// independently diverged A-Life worlds move memory by more than that on their own (§6d died
+		// on exactly that). More importantly, an end-to-end delta cannot separate "clean() freed
+		// nothing" from "clean() freed something and the process took it back elsewhere" -- and those
+		// have different fixes. A window this tight cannot be crossed by world divergence, and
+		// anything reclaimed but immediately re-taken shows as a small delta rather than a large one.
+		//
+		// vminfo() is already XRCORE_API and walks the VA space with VirtualQuery, so COMMITTED bytes
+		// is a genuine process-level figure. Deliberately NOT mem_usage(), whose _heapwalk visits
+		// every heap entry and would cost more than the operation it measures.
+		size_t f0 = 0, r0 = 0, c0 = 0, f1 = 0, r1 = 0, c1 = 0;
+		vminfo(&f0, &r0, &c0);
 		g_pSharedMemoryContainer->clean();
+		vminfo(&f1, &r1, &c1);
+
 		u32 l2 = 0, d2 = 0, b2 = 0;
 		g_pSharedMemoryContainer->census(l2, d2, b2);
 		// The post-condition is the check: clean() must remove the dead and leave the live alone.
 		// A live count that MOVED means it freed something referenced, which is the failure this
 		// whole staged approach exists to avoid -- so it is reported loudly rather than assumed.
-		Msg("* COOP(smem): clean() ran — dead %u -> %u, live %u -> %u.%s",
-		    dead, d2, live, l2,
+		Msg("* COOP(smem): clean() ran — dead %u -> %u, live %u -> %u; freed %u KB of blocks, "
+		    "committed %u -> %u KB (delta %d KB).%s",
+		    dead, d2, live, l2, dead_bytes / 1024,
+		    u32(c0 / 1024), u32(c1 / 1024), int((LONG64(c1) - LONG64(c0)) / 1024),
 		    (l2 != live) ? "  !! LIVE COUNT MOVED: clean() freed a REFERENCED block. Disarm." : "");
 	}
 }
