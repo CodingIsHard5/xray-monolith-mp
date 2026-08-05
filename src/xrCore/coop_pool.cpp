@@ -152,6 +152,38 @@ namespace
 	std::atomic<unsigned long long> g_allocs(0);
 	std::atomic<unsigned long long> g_frees(0);
 	std::atomic<unsigned long long> g_fallbacks(0);
+
+	// -----------------------------------------------------------------------------------------
+	// WHY THE FALLBACK COUNT IS SPLIT FIVE WAYS instead of being one number.
+	//
+	// The first armed boot declined 222,400 of 815,098 requests -- 27% -- and a single `fallbacks`
+	// counter cannot say whether that is the pool working exactly as designed (luabind's container
+	// allocator asking for sizes no small-object pool would ever take) or the pool failing (the
+	// region exhausted, or never enabled). Those have opposite meanings and identical counters.
+	//
+	// A number that can mean two opposite things is not a measurement, and quoting a GATE A result
+	// while 27% of the population is unexplained would be exactly that. So each cause is counted
+	// separately, and the declined sizes are bucketed -- because "too big" is only an answer if it
+	// also says HOW big, which is what decides whether a third size class is worth adding.
+	std::atomic<unsigned long long> g_fb_zero(0);        // size == 0
+	std::atomic<unsigned long long> g_fb_toobig(0);      // size > MAX_POOLED -- the expected one
+	std::atomic<unsigned long long> g_fb_disarmed(0);    // never armed: no flag, or reservation failed
+	std::atomic<unsigned long long> g_fb_notserving(0);  // armed but the selftest gate is still shut
+	std::atomic<unsigned long long> g_fb_exhausted(0);   // region full -- the one that means TROUBLE
+
+	// Buckets for declined sizes: 33-64, 65-128, 129-256, 257-512, 513-1K, 1K-2K, 2K-4K, >4K.
+	const unsigned NUM_FB_BUCKETS = 8;
+	std::atomic<unsigned long long> g_fb_hist[NUM_FB_BUCKETS];
+
+	inline unsigned fb_bucket(size_t s)
+	{
+		// Only ever called for s > MAX_POOLED, and only on a path that is already about to enter
+		// the engine allocator -- which costs orders of magnitude more than this loop.
+		unsigned b = 0;
+		size_t lim = 64;
+		while (b < NUM_FB_BUCKETS - 1 && s > lim) { lim <<= 1; ++b; }
+		return b;
+	}
 	std::atomic<unsigned long long> g_chunks(0);
 	std::atomic<unsigned long long> g_bad_frees(0);
 	std::atomic<unsigned long long> g_foreign_frees(0);
@@ -313,10 +345,32 @@ XRCORE_API bool coop_pool_arm(size_t region_mib)
 // ---------------------------------------------------------------------------------------------
 XRCORE_API void* coop_pool_alloc(size_t size)
 {
-	if (size == 0 || size > MAX_POOLED
-	    || g_coop_pool_span.load(std::memory_order_acquire) == 0
-	    || g_serving.load(std::memory_order_acquire) == 0)
+	// Each decline is attributed to its cause. The order matters for the reading, not for
+	// correctness: `size` is tested first so a disarmed run still reports the SHAPE of the demand
+	// it would have served, which is what makes a control arm's fallback histogram comparable to
+	// an armed arm's.
+	if (size == 0)
 	{
+		g_fb_zero.fetch_add(1, std::memory_order_relaxed);
+		g_fallbacks.fetch_add(1, std::memory_order_relaxed);
+		return 0;
+	}
+	if (size > MAX_POOLED)
+	{
+		g_fb_toobig.fetch_add(1, std::memory_order_relaxed);
+		g_fb_hist[fb_bucket(size)].fetch_add(1, std::memory_order_relaxed);
+		g_fallbacks.fetch_add(1, std::memory_order_relaxed);
+		return 0;
+	}
+	if (g_coop_pool_span.load(std::memory_order_acquire) == 0)
+	{
+		g_fb_disarmed.fetch_add(1, std::memory_order_relaxed);
+		g_fallbacks.fetch_add(1, std::memory_order_relaxed);
+		return 0;
+	}
+	if (g_serving.load(std::memory_order_acquire) == 0)
+	{
+		g_fb_notserving.fetch_add(1, std::memory_order_relaxed);
 		g_fallbacks.fetch_add(1, std::memory_order_relaxed);
 		return 0;
 	}
@@ -336,6 +390,12 @@ XRCORE_API void* coop_pool_alloc(size_t size)
 		if (g_pool.bump[cls] >= g_pool.bump_end[cls] && !take_chunk(cls))
 		{
 			g_pool.lock.unlock();
+			// THE ONE FALLBACK CAUSE THAT MEANS TROUBLE. The others are the pool declining work it
+			// was never meant to do; this is the pool running out of the work it WAS meant to do,
+			// and from here on the objects §6a named go back to the engine allocator. A non-zero
+			// value invalidates GATE A's premise for the remainder of the run, so it is counted
+			// apart from every other decline and printed even when it is zero.
+			g_fb_exhausted.fetch_add(1, std::memory_order_relaxed);
 			g_fallbacks.fetch_add(1, std::memory_order_relaxed);
 			return 0;                    // region exhausted: caller falls back, and correctly
 		}
@@ -420,6 +480,14 @@ XRCORE_API void coop_pool_get_stats(coop_pool_stats_t& out)
 	out.bad_frees     = g_bad_frees.load(std::memory_order_relaxed);
 	out.foreign_frees = g_foreign_frees.load(std::memory_order_relaxed);
 	out.reclaimed     = g_reclaimed.load(std::memory_order_relaxed);
+
+	out.fb_zero       = g_fb_zero.load(std::memory_order_relaxed);
+	out.fb_toobig     = g_fb_toobig.load(std::memory_order_relaxed);
+	out.fb_disarmed   = g_fb_disarmed.load(std::memory_order_relaxed);
+	out.fb_notserving = g_fb_notserving.load(std::memory_order_relaxed);
+	out.fb_exhausted  = g_fb_exhausted.load(std::memory_order_relaxed);
+	for (unsigned i = 0; i < NUM_FB_BUCKETS; ++i)
+		out.fb_hist[i] = g_fb_hist[i].load(std::memory_order_relaxed);
 }
 
 // =============================================================================================

@@ -155,6 +155,16 @@ struct coop_pool_stats_t
 	unsigned long long bad_frees;      // in-region pointers that were not valid block starts
 	unsigned long long foreign_frees;  // frees routed away because owns() said not ours
 	unsigned long long reclaimed;      // frees that arrived via the xrMemory safety net
+
+	// The fallback total above, attributed. A single count cannot distinguish "the pool declined
+	// work it was never meant to do" from "the pool ran out" — opposite meanings, identical
+	// number — and 27% of the first armed boot's requests were declined for reasons unknown.
+	unsigned long long fb_zero;        // size == 0
+	unsigned long long fb_toobig;      // size > max_pooled: the expected, benign one
+	unsigned long long fb_disarmed;    // no flag, or the reservation failed
+	unsigned long long fb_notserving;  // armed, selftest gate still shut
+	unsigned long long fb_exhausted;   // region full — the ONLY one that invalidates GATE A
+	unsigned long long fb_hist[8];     // declined sizes: 33-64,65-128,...,2K-4K,>4K
 };
 XRCORE_API void coop_pool_get_stats(coop_pool_stats_t& out);
 XRCORE_API void coop_pool_note_reclaimed();

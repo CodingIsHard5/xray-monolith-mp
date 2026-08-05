@@ -825,6 +825,23 @@ static void coop_pool_tick()
         st.live, st.chunks, st.chunks * 64,
         st.reclaimed, st.bad_frees, st.foreign_frees, st.allocs);
 
+    // The fallback total, attributed. `exhausted` is the only one that means trouble -- it says the
+    // region ran out and the objects §6a named have gone back to the engine allocator, which
+    // invalidates GATE A's premise for the rest of the run. It is printed even when zero, because a
+    // number that only appears when it is bad cannot be distinguished from one nobody printed.
+    Msg("* COOP(pool): fallback by cause: too_big=%I64u zero=%I64u disarmed=%I64u not_serving=%I64u "
+        "EXHAUSTED=%I64u",
+        st.fb_toobig, st.fb_zero, st.fb_disarmed, st.fb_notserving, st.fb_exhausted);
+
+    // Declined sizes. "Too big" is only an answer if it also says HOW big: this is what decides
+    // whether a third size class would pay, and it is the difference between "the pool is working
+    // as designed" and "the pool is set too small", which the old single counter could not tell
+    // apart.
+    Msg("* COOP(pool): declined sizes: 33-64=%I64u 65-128=%I64u 129-256=%I64u 257-512=%I64u "
+        "513-1K=%I64u 1-2K=%I64u 2-4K=%I64u >4K=%I64u",
+        st.fb_hist[0], st.fb_hist[1], st.fb_hist[2], st.fb_hist[3],
+        st.fb_hist[4], st.fb_hist[5], st.fb_hist[6], st.fb_hist[7]);
+
     s_pool_prev = st;
 }
 
