@@ -97,6 +97,71 @@ dxRender_Visual* CModelPool::Instance_Duplicate(dxRender_Visual* V)
 	return N;
 }
 
+// COOP §7c — WHICH BRANCH OF THE FORK IS THE LEAK ON?
+//
+// §7a/§7b attributed the server's live-byte growth to CSkeletonX::_Load + CModelPool, 84% of the
+// >=16 KB band, with allocs/frees of 142/0, 202/0, 168/0 -- zero frees across two hours -- and the
+// pre-registered cache discriminator came back FLAT, so it is not a bounded cache still filling.
+// That leaves exactly two branches and no amount of extra RUNTIME separates them:
+//
+//   (a) genuinely NEW visual names keep arriving      -> loads == distinct names
+//   (b) a lookup is FAILING and names reload          -> loads >> distinct names
+//
+// `CModelPool::Create` searches `Models` via `Instance_Find` and, on a miss, calls `Instance_Load`
+// with allow_register=TRUE, which registers the result. `CreateChild` searches the SAME `Models`
+// but calls `Instance_Load(..., FALSE)` -- so a child is looked up in a registry it is never added
+// to. That is a candidate mechanism for (b), and `allow_register` is exactly the bit that
+// distinguishes the two callers, so it is what gets logged.
+//
+// VOLUME IS DELIBERATELY NEAR-ZERO. The instrument measures memory, and this project has already
+// been burned once by its own trace dominating the rate it was measuring, so this does NOT log per
+// load. It logs the FIRST repeat of any name (the headline), then every 10th, plus a summary every
+// 60 s. If the answer is (a) the log stays silent and the summary says loads == distinct.
+// NO LOCK, and the reason is an argument rather than an assumption. `Instance_Load` already mutates
+// `Models` (and its callers mutate `Pool` and `Registry`) with no synchronisation of any kind, so
+// CModelPool is already single-threaded by construction -- if two threads reached here the engine
+// would be corrupting its own containers before it corrupted this one. This map therefore has
+// exactly the thread-safety profile of the data structures beside it, and a lock around only this
+// one would buy nothing while adding a stall. Recorded because "I did not add a lock" and "I
+// checked whether one was needed" look identical in the diff.
+//
+// Its own comparator, because CModelPool::str_pred is a PRIVATE nested type and a file-static map
+// cannot name it. Same semantics, deliberately: ordering a shared_str map on the interned POINTER
+// would still give correct equality but arbitrary order, and this is cheap to get right.
+struct coop_model_name_pred
+{
+	IC bool operator()(const shared_str& x, const shared_str& y) const { return xr_strcmp(x, y) < 0; }
+};
+static xr_map<shared_str, u32, coop_model_name_pred> g_coop_model_loads;
+static u32 g_coop_model_total = 0;
+static u32 g_coop_model_repeats = 0;
+static u32 g_coop_model_last_report = 0;
+
+static void coop_model_note_load(LPCSTR name, BOOL allow_register)
+{
+	const shared_str key(name);
+	const u32 n = ++g_coop_model_loads[key];
+	++g_coop_model_total;
+	if (n > 1)
+	{
+		++g_coop_model_repeats;
+		if (n == 2 || 0 == (n % 10))
+			Msg("! COOP(model): RELOAD '%s' -- load #%u of this NAME (register=%d). A name loaded "
+			    "twice means the lookup that should have found it did not.",
+			    name, n, int(allow_register));
+	}
+	const u32 now = Device.dwTimeGlobal;
+	if (!g_coop_model_last_report) g_coop_model_last_report = now;
+	if (now - g_coop_model_last_report >= 60000)
+	{
+		g_coop_model_last_report = now;
+		// loads == distinct  => branch (a), new names.   loads >> distinct => branch (b), reloads.
+		Msg("* COOP(model): loads=%u distinct=%u repeats=%u. loads==distinct means new names "
+		    "keep arriving; loads>>distinct means a failing lookup.",
+		    g_coop_model_total, u32(g_coop_model_loads.size()), g_coop_model_repeats);
+	}
+}
+
 dxRender_Visual* CModelPool::Instance_Load(const char* N, BOOL allow_register, bool assert)
 {
 	dxRender_Visual* V;
@@ -133,6 +198,10 @@ dxRender_Visual* CModelPool::Instance_Load(const char* N, BOOL allow_register, b
 #ifdef DEBUG
 	if (bLogging)		Msg		("- Uncached model loading: %s",fn);
 #endif // DEBUG
+
+	// COOP §7c: noted HERE, on the path that actually reads the file off disk and builds a new
+	// visual -- not in Create -- because this is the one that costs the memory the census measured.
+	coop_model_note_load(N, allow_register);
 
 	IReader* data = FS.r_open(fn);
 	ogf_header H;
