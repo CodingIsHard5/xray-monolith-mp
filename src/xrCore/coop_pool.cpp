@@ -20,11 +20,17 @@
 //      list is a server that dies on Thursday for a reason nobody can reconstruct.
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef COOP_POOL_STANDALONE
-#	include "stdafx.h"
-#	pragma hdrstop
-#endif
-
+// NO `stdafx.h` HERE, AND THAT IS DELIBERATE -- this file is compiled with precompiled headers
+// turned OFF (see the per-file <PrecompiledHeader> opt-out in xrCore.vcxproj, the same one
+// blackbox\BlackBoxUI.cpp uses).
+//
+// The first attempt wrapped the stdafx include in `#ifndef COOP_POOL_STANDALONE` so the Linux
+// control could skip it, and MSVC rejected the file with `error C1020: unexpected #endif`. Under
+// /Yu the compiler DISCARDS everything ahead of the `#include "stdafx.h"` line, so the `#ifndef`
+// vanished and its `#endif` had nothing to close. Opting out of the PCH removes the conditional
+// entirely rather than working around it, which is better anyway: this module deliberately depends
+// on no engine header, which is exactly what lets the control compile the real file instead of a
+// copy of it.
 #include "coop_pool.h"
 
 #include <string.h>

@@ -465,7 +465,14 @@
     </ClCompile>
     <ClCompile Include="clsid.cpp" />
     <ClCompile Include="coop_av_report.cpp" />
-    <ClCompile Include="coop_pool.cpp" />
+    <ClCompile Include="coop_pool.cpp">
+      <!-- §6c: no precompiled header. This module depends on no engine header, which is what lets
+           dev/harness/pool_control compile THE REAL FILE rather than a copy. Under /Yu, MSVC
+           discards everything before the stdafx include, so a conditional include of it cannot
+           work (error C1020). Empty element = NotUsing, for every configuration. -->
+      <PrecompiledHeader>
+      </PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="cpuid.cpp" />
     <ClCompile Include="crc32.cpp" />
     <ClCompile Include="dump_string.cpp" />
