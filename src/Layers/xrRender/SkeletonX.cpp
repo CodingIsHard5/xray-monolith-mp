@@ -273,9 +273,30 @@ static u32 g_coop_skin_last_report = 0;
 // says so rather than the saving quietly not happening.
 static bool g_coop_skip_geom_announced = false;
 
+// DISABLED 2026-08-05 AFTER IT FAILED IN THE FIRST VERIFYING RUN, and left in place rather than
+// deleted because the analysis is sound and only the CONSUMER LIST was wrong.
+//
+// The run fataled during level load:
+//     FATAL ERROR  Expression: 0  Function: CSkeletonX_ext::_CollectBoneFaces
+//     FSkinned.cpp:889  Description: not implemented yet
+//
+// I enumerated three consumers of the vertex copies -- software-skinning render, _PickBoneSoft*,
+// EnumBoneVertices -- and guarded all three. I MISSED A FOURTH, and it is the one that runs at LOAD
+// time: _CollectBoneFaces walks the vertex arrays to build CBoneData::child_faces, and its
+// software branch ends in R_ASSERT2(0, "not implemented yet") when they are empty. Every consumer I
+// looked for was a RUNTIME consumer; I never asked what reads this data while it is being loaded.
+//
+// Skipping _CollectBoneFaces too would leave child_faces empty, which feeds LL_GetBoneGroups and
+// CKinematics::LL_Validate's breakable check -- a widening blast radius that wants its own audit,
+// not another guard bolted on under time pressure. So the cut is OFF until that audit is done.
+// The guards and the census below are kept: they are correct, independently useful, and cost
+// nothing.
+// THE AUDIT GATE. Flip to true only after the load-time consumer audit described above.
+static const bool g_coop_skin_cut_enabled = false;
+
 static bool coop_skip_skin_geometry()
 {
-	if (!g_dedicated_server)
+	if (!g_coop_skin_cut_enabled || !g_dedicated_server)
 		return false;
 	if (!g_coop_skip_geom_announced)
 	{
