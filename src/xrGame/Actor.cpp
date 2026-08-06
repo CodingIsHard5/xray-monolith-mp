@@ -1021,7 +1021,7 @@ void CActor::Die(CObject* who)
 			Msg("- COOP(death): local player died at (%.1f,%.1f,%.1f), respawning in %.0f s",
 				VPUSH(m_coop_death_pos), m_coop_respawn_timer);
 		}
-		else
+		else if (!coop_thin_client())
 		{
 			// Stock singleplayer death path
 			// demonized: First Person Death
@@ -1047,6 +1047,32 @@ void CActor::Die(CObject* who)
 				CurrentGameUI()->HideShownDialogs();
 
 			start_tutorial("game_over");
+		}
+		else
+		{
+			// CO-OP THIN CLIENT, AND THE DEAD ACTOR IS **NOT** OURS: another player died.
+			// DO NOTHING LOCALLY. Found 2026-08-05 by Caden in the first two-player playtest:
+			// he shot the other player and the red "GAME OVER — PRESS SPACE TO CONTINUE"
+			// appeared on HIS screen, the KILLER's, and his client then crashed.
+			//
+			// The cause was not a broadcast/addressing fault. `Entity.cpp` GE_DIE calls Die()
+			// on the client for EVERY entity, remote actors included, so this function runs on
+			// the killer's client with `this` = the victim. The old condition here was
+			//
+			//     if (coop_thin_client() && this == Actor())   ... co-op death ...
+			//     else                                          ... STOCK SINGLEPLAYER ...
+			//
+			// which collapses THREE cases into two: "I died", "someone else died", and "this is
+			// singleplayer". A remote player's death failed the first test and therefore ran the
+			// SINGLEPLAYER game-over — start_tutorial("game_over") — on a thin client that has no
+			// business entering a game-over state at all, and very likely crashed for that reason.
+			//
+			// The bug was NOT that the condition was wrong; it correctly identifies our own actor.
+			// It was that the `else` had no idea co-op existed. Compare line ~1319, which spells
+			// out all three terms (m_coop_dead && this == Actor() && coop_thin_client()) and is
+			// correct. Same intent, one branch short.
+			Msg("- COOP(death): REMOTE player %s died; suppressing local game-over (we are %s)",
+				cName().c_str(), Actor() ? Actor()->cName().c_str() : "<no local actor>");
 		}
 	}
 	else
