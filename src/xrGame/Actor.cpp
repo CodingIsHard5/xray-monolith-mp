@@ -1389,15 +1389,46 @@ void CActor::UpdateCL()
 			if (s_hit_accum >= s_hit_delay)
 			{
 				s_hit_delay = -1.f;   // once only
+				// SELECT BY NAME, NOT BY EXCLUSION. The first draft took "the first actor that is
+				// not me", which is a DIFFERENT PREDICATE from "the body I mean to shoot": it also
+				// matches a live second client, or the dedicated server's own loopback actor if the
+				// object list carries one. Hitting either produces a perfectly well-formed run that
+				// says nothing about orphans, and nothing in the output would reveal that the target
+				// was the wrong KIND of thing — a silent, plausible false result.
+				//
+				// The client cannot ask "is this body reserved" (m_coop_orphaned is server-side and
+				// never replicated), but it CAN see an actor's name, and the name is what the test
+				// actually means: shoot the body belonging to player <X>, which is what Caden did.
+				// -coop_test_hit_target <name> makes that explicit and REFUSES when absent, exactly
+				// as it refuses when there is no other actor at all.
+				char want[128] = {0};
+				LPCSTR t = strstr(Core.Params, "-coop_test_hit_target");
+				if (t)
+				{
+					t += sizeof("-coop_test_hit_target") - 1;
+					while (*t == ' ') ++t;
+					int n = 0; while (*t && *t != ' ' && n < 127) want[n++] = *t++;
+					want[n] = 0;
+				}
 				CActor* victim = NULL;
 				for (u32 i = 0; i < Level().Objects.o_count(); ++i)
 				{
 					CActor* a = smart_cast<CActor*>(Level().Objects.o_get_by_iterator(i));
-					if (a && a != this) { victim = a; break; }
+					if (!a || a == this) continue;
+					if (want[0]) { if (xr_strcmp(a->cName().c_str(), want) == 0) { victim = a; break; } }
+					else { victim = a; break; }
 				}
-				if (!victim)
+				if (!victim && want[0])
+					Msg("! COOP(test): -coop_test_hit_target '%s' NOT FOUND among %u objects — NOTHING "
+						"WAS HIT. This run says nothing about that body; do not read it as a run in "
+						"which nothing died.", want, Level().Objects.o_count());
+				else if (!victim)
 					Msg("! COOP(test): -coop_test_hit found NO other actor — nothing was hit, and this "
 						"run proves nothing about the hit path");
+				else if (!want[0])
+					Msg("! COOP(test): no -coop_test_hit_target given; falling back to FIRST NON-LOCAL "
+						"actor. That is an EXCLUSION selector and may pick the wrong body — a pass "
+						"from this run means 'something was hit', not 'the intended body was hit'.");
 				else
 				{
 					NET_Packet P;
