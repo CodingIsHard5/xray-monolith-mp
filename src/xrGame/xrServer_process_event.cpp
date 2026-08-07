@@ -160,6 +160,41 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
 	case GE_HIT:
 	case GE_HIT_STATISTIC:
 		{
+			// MP fork (§27 co-op): AN ORPHAN ABSORBS FIRE AND DOES NOT DIE.
+			//
+			// Found by Caden, 2026-08-05: he shot a disconnected player's body, watched it die,
+			// and the server discarded the kill entirely — the player reconnected alive at the
+			// death position with 48 inventory items. THE RULE IS RIGHT. A reserved body is a
+			// RECORD, not a simulation (15f71736): its CSE refuses writeback so an in-absentia
+			// kill cannot cost a disconnected player their state. What was wrong was the
+			// FEEDBACK — the shooter got every confirmation a real kill gives, for an event that
+			// did not happen, and two players could then correctly disagree about whether
+			// something occurred.
+			//
+			// The fix is therefore NOT to make the orphan killable, which would trade a cosmetic
+			// inconsistency for exactly the state loss the discard exists to prevent. It is to
+			// stop the simulation contradicting the record: refuse the hit, so the body visibly
+			// absorbs fire and stays standing. That reads as PROTECTED rather than as dead.
+			//
+			// HERE rather than in the GAME_EVENT_ON_HIT handler because `receiver` is already
+			// resolved above — one authority, one test, and no second place that has to agree
+			// about what "orphaned" means. m_coop_orphaned is server-side only and is never
+			// replicated, so a client-side variant would need a second source of truth for it.
+			//
+			// Only the DAMAGE is refused. The event was already delivered to the CSE above, and
+			// client-side impact effects are predicted locally and will still play — the rounds
+			// land, the body does not fall. If the body still DIES after this, the hit is
+			// reaching the object by another path and this insertion point is wrong.
+			if (receiver && receiver->m_coop_orphaned)
+			{
+				static u32 s_orphan_hits = 0;
+				if ((++s_orphan_hits % 50) == 1)
+					Msg("- COOP(orphan): refusing hit on reserved body id %u (%u so far) — an "
+						"unclaimed body absorbs fire; the record it restores from cannot be shot",
+						destination, s_orphan_hits);
+				break;
+			}
+
 			P.r_pos -= 2;
 			if (type == GE_HIT_STATISTIC)
 			{
