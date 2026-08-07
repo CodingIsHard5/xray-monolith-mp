@@ -1370,6 +1370,17 @@ void CActor::UpdateCL()
 		static float s_hit_delay = -1.f;
 		static bool  s_hit_init  = false;
 		static float s_hit_accum = 0.f;
+		// SHOTS REMAINING. One shot cannot be relied on to kill, and the reason is worth stating
+		// because "turn the power up" is the obvious wrong fix: the server applies
+		// dmg = _min(power, 2.0f) * 0.5f, so damage is CLAMPED AT 1.0 however large power gets.
+		// power 2.0 lands health on exactly 0.00 and the check is `<= 0.f`, so it does kill — but
+		// only down the branch where Hit() left health alone. If Hit() DID lower health, that
+		// direct reduction is skipped entirely (`hp_mid >= hp_pre - EPS_L`) and what lands is the
+		// stock armour-attenuated calculation, which one shot need not finish. Firing several
+		// removes the boundary case, the operator question and the float edge in one move, and it
+		// is also the more faithful fixture: Caden emptied a weapon into that body, he did not
+		// deliver one calibrated point of damage.
+		static int   s_hit_left = -1;
 		if (!s_hit_init)
 		{
 			s_hit_init = true;
@@ -1393,7 +1404,17 @@ void CActor::UpdateCL()
 				while (*p == ' ') ++p;
 				s_hit_delay = (float)atof(p);
 				if (s_hit_delay <= 0.f) s_hit_delay = 20.f;
-				Msg("- COOP(test): will hit the first non-local actor in %.0f seconds", s_hit_delay);
+				s_hit_left = 2;                     // default: enough for the clamped direct path
+				LPCSTR c = strstr(Core.Params, "-coop_test_hit_count");
+				if (c)
+				{
+					c += sizeof("-coop_test_hit_count") - 1;
+					while (*c == ' ') ++c;
+					const int n = atoi(c);
+					if (n > 0) s_hit_left = n;
+				}
+				Msg("- COOP(test): will hit in %.0f seconds, %d shot(s) ~0.5s apart",
+					s_hit_delay, s_hit_left);
 			}
 		}
 		if (s_hit_delay > 0.f)
@@ -1401,7 +1422,7 @@ void CActor::UpdateCL()
 			s_hit_accum += Device.fTimeDelta;
 			if (s_hit_accum >= s_hit_delay)
 			{
-				s_hit_delay = -1.f;   // once only
+				s_hit_delay = -1.f;   // disarm; re-armed below while shots remain
 				// SELECT BY NAME, NOT BY EXCLUSION. The first draft took "the first actor that is
 				// not me", which is a DIFFERENT PREDICATE from "the body I mean to shoot": it also
 				// matches a live second client, or the dedicated server's own loopback actor if the
@@ -1514,8 +1535,16 @@ void CActor::UpdateCL()
 					HS.boneID  = 0;
 					HS.Write_Packet(P);
 					u_EventSend(P);
-					Msg("- COOP(test): sent GE_HIT power=%.2f at actor id=%u (%s)", HS.power,
-						victim->ID(), victim->cName().c_str());
+					Msg("- COOP(test): sent GE_HIT power=%.2f at actor id=%u (%s) [%d shot(s) left]",
+						HS.power, victim->ID(), victim->cName().c_str(), s_hit_left - 1);
+					// RE-ARM WHILE SHOTS REMAIN. Only this branch re-arms: every refusal above
+					// leaves the timer disarmed, so a run that cannot find its target says so once
+					// instead of repeating the same complaint every half second.
+					if (--s_hit_left > 0)
+					{
+						s_hit_accum = 0.f;
+						s_hit_delay = 0.5f;
+					}
 				}
 			}
 		}
