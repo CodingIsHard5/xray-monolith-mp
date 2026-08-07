@@ -1401,6 +1401,36 @@ void CActor::UpdateCL()
 				// actually means: shoot the body belonging to player <X>, which is what Caden did.
 				// -coop_test_hit_target <name> makes that explicit and REFUSES when absent, exactly
 				// as it refuses when there is no other actor at all.
+				// TARGET BY ID, READ AT FIRE TIME. The id cannot be a launch argument: the orphan
+				// does not exist when this client starts — it is created minutes later when the
+				// other player disconnects — so the harness writes the id into a file after the
+				// disconnect, taken from the server's own "co-op actor id N orphaned" record, and
+				// this reads it at the moment it fires.
+				//
+				// A NAME CANNOT WORK HERE and the evidence was in bug 1's own log: "REMOTE player
+				// actor died ... (we are actor)". EVERY actor's cName() is the string "actor" — the
+				// player name lives in game_PlayerState, not on the object. A name is a property of
+				// the PLAYER; an id is a property of the ACTOR; the thing to hit is an actor.
+				u16 want_id = 0;
+				LPCSTR f = strstr(Core.Params, "-coop_test_hit_idfile");
+				if (f)
+				{
+					f += sizeof("-coop_test_hit_idfile") - 1;
+					while (*f == ' ') ++f;
+					char path[256] = {0}; int n = 0;
+					while (*f && *f != ' ' && n < 255) path[n++] = *f++;
+					path[n] = 0;
+					if (FILE* fp = fopen(path, "rb"))
+					{
+						char buf[32] = {0};
+						size_t got = fread(buf, 1, sizeof(buf) - 1, fp);
+						fclose(fp);
+						if (got) want_id = (u16)atoi(buf);
+					}
+					if (!want_id)
+						Msg("! COOP(test): -coop_test_hit_idfile '%s' missing/empty/unparseable — "
+							"NOTHING WAS HIT. Do not read this as a run in which nothing died.", path);
+				}
 				char want[128] = {0};
 				LPCSTR t = strstr(Core.Params, "-coop_test_hit_target");
 				if (t)
@@ -1415,10 +1445,15 @@ void CActor::UpdateCL()
 				{
 					CActor* a = smart_cast<CActor*>(Level().Objects.o_get_by_iterator(i));
 					if (!a || a == this) continue;
-					if (want[0]) { if (xr_strcmp(a->cName().c_str(), want) == 0) { victim = a; break; } }
-					else { victim = a; break; }
+					if (want_id)      { if (a->ID() == want_id) { victim = a; break; } }
+					else if (want[0]) { if (xr_strcmp(a->cName().c_str(), want) == 0) { victim = a; break; } }
+					else              { victim = a; break; }
 				}
-				if (!victim && want[0])
+				if (!victim && want_id)
+					Msg("! COOP(test): -coop_test_hit_idfile named actor id %u, NOT FOUND among %u "
+						"objects — NOTHING WAS HIT. Do not read this as a run in which nothing died.",
+						want_id, Level().Objects.o_count());
+				else if (!victim && want[0])
 					Msg("! COOP(test): -coop_test_hit_target '%s' NOT FOUND among %u objects — NOTHING "
 						"WAS HIT. This run says nothing about that body; do not read it as a run in "
 						"which nothing died.", want, Level().Objects.o_count());
