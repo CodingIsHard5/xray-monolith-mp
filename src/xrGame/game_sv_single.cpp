@@ -826,6 +826,38 @@ void game_sv_Single::coop_cleanup_orphans()
 		return;
 
 	const u32 now = Device.dwTimeGlobal;
+
+	// HEARTBEAT — because "orphans did not expire" has two causes needing opposite fixes and the
+	// log could not tell them apart. On 2026-08-07 a 16-minute run created SEVEN orphans and expired
+	// exactly TWO, while five sat 1-6 minutes PAST the 300 s window. Nothing in the log said whether
+	// this loop was running and declining to act, or not running at all. Two mechanism guesses died
+	// on that ambiguity: a frame-based clock (refuted — rsConstantFPS is set FALSE in
+	// Level_network.cpp:354, so dwTimeGlobal is wall-clock ms) and iterator invalidation during
+	// Perform_destroy (refuted — m_coop_orphans is mutated in four places, none reachable from it).
+	//
+	// So: report what the loop SEES, every 30 s, whenever it holds anything. Count, oldest age, and
+	// the window it is comparing against. If the line appears with an oldest age past the window and
+	// nothing expires, the comparison is wrong; if the line stops appearing, the loop stopped being
+	// called. Those are different bugs and this is the cheapest thing that separates them.
+	{
+		static u32 s_last_hb = 0;
+		if (!m_coop_orphans.empty() && (now - s_last_hb) >= 30000)
+		{
+			s_last_hb = now;
+			u32 oldest = 0, live = 0;
+			for (const coop_orphan& o : m_coop_orphans)
+			{
+				if (o.persistent) continue;
+				++live;
+				const u32 age = now - o.disconnect_time;
+				if (age > oldest) oldest = age;
+			}
+			Msg("- COOP(orphan-hb): holding %u orphan(s), %u expirable, oldest %us, window %us%s",
+				(u32)m_coop_orphans.size(), live, oldest / 1000, RECONNECT_TIMEOUT_MS / 1000,
+				(live && oldest > RECONNECT_TIMEOUT_MS) ? "  <-- PAST THE WINDOW AND STILL HELD" : "");
+		}
+	}
+
 	for (auto it = m_coop_orphans.begin(); it != m_coop_orphans.end(); )
 	{
 		// MP fork (§14 step 7 phase 2 / §9.3): bindings restored from a save never expire —
