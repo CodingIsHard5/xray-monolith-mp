@@ -588,6 +588,21 @@ void game_sv_Single::coop_orphan_actor(xrClientData* CL)
 	m_coop_orphans.push_back(orphan);
 	Msg("- XRNET(dbg): co-op actor id %u orphaned for player '%s' (reconnect window %ds)",
 		orphan.entity_id, orphan.player_name.c_str(), RECONNECT_TIMEOUT_MS / 1000);
+	// INVENTORY, COUNTED FROM THE SERVER'S OWN RECORD, at the two moments §27d compares. A CSE
+	// actor's `children` ARE its carried items — coop_cleanup_orphans and the reclaim both walk
+	// them — so a count here and at reclaim answers "did they come back with their inventory"
+	// without the Lua rpg-census, whose functor lives in untracked gamedata and would put a
+	// dependency nobody can see from this repo into the verdict path.
+	//
+	// Printed as an absolute count and NEVER compared against a remembered number: §27d compares
+	// this line with the reclaim's, from the SAME run. Caden's "48 items" was one session with one
+	// loadout and would be a fixture constant masquerading as an expectation.
+	{
+		CSE_Abstract* const body = m_server->ID_to_entity(orphan.entity_id);
+		Msg("- COOP(inv): orphan id %u for '%s' holds %u item(s) AT DISCONNECT",
+			orphan.entity_id, orphan.player_name.c_str(),
+			body ? (u32)body->children.size() : 0u);
+	}
 
 	// MP fork (§14 step 7 phase 4 D2): this player is no longer in the world, so they no longer
 	// have a recovery position — the binding record written just above is what describes them.
@@ -2386,6 +2401,11 @@ void game_sv_Single::coop_poll_spawns()
 			orphan->owner = CL;
 			CL->owner = orphan;
 			orphan->set_name_replace(client_name);
+			// The other half of the §27d inventory pair. Same counter, same source, at the moment
+			// the body is handed back — so the comparison is within one run and against the
+			// server's own record at both ends.
+			Msg("- COOP(inv): orphan id %u for '%s' holds %u item(s) AT RECLAIM",
+				orphan->ID, client_name, (u32)orphan->children.size());
 
 			// MP fork (§14 step 7 phase 2 / §9.3): a body restored from a save carries the
 			// position it was saved at; make sure that is what the returning player gets.
