@@ -1373,7 +1373,20 @@ void CActor::UpdateCL()
 		if (!s_hit_init)
 		{
 			s_hit_init = true;
-			LPCSTR p = strstr(Core.Params, "-coop_test_hit");
+			// MATCH THE BARE FLAG, NOT ITS PREFIX. "-coop_test_hit" is a prefix of
+			// "-coop_test_hit_idfile" and "-coop_test_hit_target", so a plain strstr can land on a
+			// sibling flag if one is ordered first, atof() the PATH to 0, and silently substitute
+			// the 20 s default — firing before the orphan exists and producing a well-formed run
+			// about a LIVE actor. Require the next character to end the token.
+			LPCSTR p = Core.Params;
+			for (;;)
+			{
+				p = strstr(p, "-coop_test_hit");
+				if (!p) break;
+				LPCSTR after = p + sizeof("-coop_test_hit") - 1;
+				if (*after == ' ' || *after == '\0') break;   // the bare flag
+				p = after;                                    // a sibling: keep looking
+			}
 			if (p)
 			{
 				p += sizeof("-coop_test_hit") - 1;
@@ -1460,12 +1473,25 @@ void CActor::UpdateCL()
 				else if (!victim)
 					Msg("! COOP(test): -coop_test_hit found NO other actor — nothing was hit, and this "
 						"run proves nothing about the hit path");
-				else if (!want[0])
-					Msg("! COOP(test): no -coop_test_hit_target given; falling back to FIRST NON-LOCAL "
-						"actor. That is an EXCLUSION selector and may pick the wrong body — a pass "
-						"from this run means 'something was hit', not 'the intended body was hit'.");
+				else if (!want_id && !want[0])
+					// NEITHER SELECTOR GIVEN — refuse, and say REFUSED. This branch used to read
+					// "falling back to FIRST NON-LOCAL actor" and then not fall back, which was a
+					// second lie of the same family as the bug under test. The selector must be
+					// explicit; an exclusion selector picks the wrong body silently (0930ac7d).
+					// Worded to cover BOTH ways of arriving here — no selector given, and an id file
+					// that was given but could not be read (which logs its own reason above). A
+					// message that asserted "none was given" would be false in the second case.
+					Msg("! COOP(test): no USABLE target selector (none given, or the id file was "
+						"unreadable — see above) — REFUSING to fire. NOTHING WAS HIT; do not read "
+						"this as a run in which nothing died.");
 				else
 				{
+					// REACHED WHENEVER A VICTIM WAS FOUND, by EITHER selector. The guard here was
+					// `!want[0]`, written when the name was the only selector; 3d1ab71a added the
+					// id path to the selection loop and to both not-found messages but left this
+					// one behind, so a victim found BY ID fell into the warning branch and the
+					// GE_HIT was never sent. The idfile is the only selector the orphan test can
+					// use, so the fire path was unreachable for exactly the run it was built for.
 					NET_Packet P;
 					SHit HS;
 					HS.GenHeader(GE_HIT, victim->ID());
