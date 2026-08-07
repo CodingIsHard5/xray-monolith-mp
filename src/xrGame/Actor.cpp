@@ -1349,6 +1349,77 @@ void CActor::UpdateCL()
 			coop_respawn();
 	}
 
+	// MP fork (test harness, §27): DELIVER A HIT TO ANOTHER ACTOR after N seconds.
+	//   Launch with: -coop_test_hit <seconds>
+	//
+	// WHY THIS EXISTS AND WHY IT IS WORTH MORE THAN THE BUG THAT PROMPTED IT. §27's fix — an
+	// orphaned body refuses hits — could not be verified at all, because nothing in this harness can
+	// deliver damage to a chosen actor. `-coop_test_kill` self-kills via KillEntity and raises no
+	// hit; headless clients run -noinput so no weapon can fire. AN ORPHAN IS NOW A FIRST-CLASS
+	// STATE in this design (reconnection, the writeback discard, the feedback fix) and every code
+	// path that touches one was unreachable by test. This is the missing capability, not a
+	// one-off scaffold.
+	//
+	// TARGET SELECTION IS "THE FIRST ACTOR THAT IS NOT ME", deliberately. The client CANNOT know
+	// which body is reserved — m_coop_orphaned is server-side and never replicated — so asking it to
+	// aim at "the orphan" would require inventing exactly the second source of truth §27a rejected.
+	// In the verification scenario the orphan is the only other actor, so "not me" is sufficient and
+	// honest about what the client can see.
+	if (g_Alive() && this == Actor() && coop_thin_client())
+	{
+		static float s_hit_delay = -1.f;
+		static bool  s_hit_init  = false;
+		static float s_hit_accum = 0.f;
+		if (!s_hit_init)
+		{
+			s_hit_init = true;
+			LPCSTR p = strstr(Core.Params, "-coop_test_hit");
+			if (p)
+			{
+				p += sizeof("-coop_test_hit") - 1;
+				while (*p == ' ') ++p;
+				s_hit_delay = (float)atof(p);
+				if (s_hit_delay <= 0.f) s_hit_delay = 20.f;
+				Msg("- COOP(test): will hit the first non-local actor in %.0f seconds", s_hit_delay);
+			}
+		}
+		if (s_hit_delay > 0.f)
+		{
+			s_hit_accum += Device.fTimeDelta;
+			if (s_hit_accum >= s_hit_delay)
+			{
+				s_hit_delay = -1.f;   // once only
+				CActor* victim = NULL;
+				for (u32 i = 0; i < Level().Objects.o_count(); ++i)
+				{
+					CActor* a = smart_cast<CActor*>(Level().Objects.o_get_by_iterator(i));
+					if (a && a != this) { victim = a; break; }
+				}
+				if (!victim)
+					Msg("! COOP(test): -coop_test_hit found NO other actor — nothing was hit, and this "
+						"run proves nothing about the hit path");
+				else
+				{
+					NET_Packet P;
+					SHit HS;
+					HS.GenHeader(GE_HIT, victim->ID());
+					HS.whoID   = ID();
+					HS.weaponID = ID();
+					HS.dir.set(0.f, 0.f, 1.f);
+					HS.power   = 1.0f;            // lethal to a normal actor: the point is that an
+					HS.impulse = 0.f;             // ORPHAN must survive it while a live actor need not
+					HS.p_in_bone_space.set(0.f, 0.f, 0.f);
+					HS.hit_type = ALife::eHitTypeFireWound;
+					HS.boneID  = 0;
+					HS.Write_Packet(P);
+					u_EventSend(P);
+					Msg("- COOP(test): sent GE_HIT power=%.2f at actor id=%u (%s)", HS.power,
+						victim->ID(), victim->cName().c_str());
+				}
+			}
+		}
+	}
+
 	// MP fork (test harness): self-kill after N seconds for automated testing.
 	// Launch with: -coop_test_kill <seconds>
 	// Only fires on a co-op thin client's own actor, once.

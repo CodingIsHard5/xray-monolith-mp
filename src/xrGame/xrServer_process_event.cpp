@@ -185,7 +185,26 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
 			// client-side impact effects are predicted locally and will still play — the rounds
 			// land, the body does not fall. If the body still DIES after this, the hit is
 			// reaching the object by another path and this insertion point is wrong.
-			if (receiver && receiver->m_coop_orphaned)
+			// CONTROL ARM (§27e). `-coop_orphan_hit_allow` restores the OLD behaviour on the SAME
+			// binary, so a test can demonstrate that it OBSERVES a killable-looking orphan before it
+			// claims to observe a protected one. Without it the verification is one-sided: a run
+			// where the orphan survives is equally consistent with the fix working and with the hit
+			// never arriving. Bug 1 took seven runs to learn that; this arm is the lesson applied
+			// before the first run rather than after the sixth.
+			//
+			// Exact-token match, not strstr on a prefix: `-coop_test_rpg` once matched inside
+			// `-coop_test_rpg2` on this project and silently armed the wrong probe.
+			static int s_allow = -1;
+			if (s_allow < 0)
+			{
+				LPCSTR q = strstr(Core.Params, "-coop_orphan_hit_allow");
+				s_allow = (q && (q[sizeof("-coop_orphan_hit_allow") - 1] == 0 ||
+				                 q[sizeof("-coop_orphan_hit_allow") - 1] == ' ')) ? 1 : 0;
+				if (s_allow)
+					Msg("! COOP(orphan): -coop_orphan_hit_allow SET — hits on reserved bodies are "
+						"NOT refused. This is the CONTROL arm; it reproduces the pre-fix behaviour.");
+			}
+			if (receiver && receiver->m_coop_orphaned && !s_allow)
 			{
 				static u32 s_orphan_hits = 0;
 				if ((++s_orphan_hits % 50) == 1)
