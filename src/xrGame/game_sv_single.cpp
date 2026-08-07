@@ -2401,6 +2401,40 @@ void game_sv_Single::coop_poll_spawns()
 			orphan->owner = CL;
 			CL->owner = orphan;
 			orphan->set_name_replace(client_name);
+			// SECOND NEGATIVE CONTROL (§27d) — THE QUIET ONE, and it is the one that matters.
+			// `-coop_break_reclaim` fails LOUDLY: the lookup finds nothing, no reclaim happens, and
+			// the harness catches an ABSENCE. That proves it can detect the breakage it was handed;
+			// it proves nothing about a regression that fails QUIETLY — a reclaim that APPEARS to
+			// succeed while losing something. A harness proven only against the loud case, then run
+			// against a quiet real regression, reports PASS and everybody believes it.
+			//
+			// So this one hands the body back correctly — ownership restored, COOP(resume) logged,
+			// every setup gate satisfied — and drops the player's inventory on the way. The count
+			// below then reports the truth (0), because it reads the same `children` the game reads;
+			// this sabotages the SUBJECT, not the instrument. Faking the number would only prove
+			// that a printf can print a different number.
+			//
+			// SAFE TO MUTATE: autosaves go to COOP_SAVE_SLOT ("coop_world", line 37) while the
+			// harness loads `n1-autosave`, so a sabotage run cannot corrupt the save any arm reads.
+			static int s_break_inv = -1;
+			if (s_break_inv < 0)
+			{
+				LPCSTR q = strstr(Core.Params, "-coop_break_inventory");
+				s_break_inv = (q && (q[sizeof("-coop_break_inventory") - 1] == 0 ||
+				                     q[sizeof("-coop_break_inventory") - 1] == ' ')) ? 1 : 0;
+				if (s_break_inv)
+					Msg("! COOP(orphan): -coop_break_inventory SET — the reclaim SUCCEEDS but the "
+						"returning player's items are DROPPED. This is the §27d QUIET negative "
+						"control; the run MUST report FAIL on the inventory comparison. A run that "
+						"PASSES with this flag set cannot see a silent regression.");
+			}
+			if (s_break_inv)
+			{
+				Msg("! COOP(orphan): dropping %u item(s) from orphan id %u (SABOTAGE)",
+					(u32)orphan->children.size(), orphan->ID);
+				orphan->children.clear();
+			}
+
 			// The other half of the §27d inventory pair. Same counter, same source, at the moment
 			// the body is handed back — so the comparison is within one run and against the
 			// server's own record at both ends.
