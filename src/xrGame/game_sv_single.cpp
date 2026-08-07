@@ -642,6 +642,39 @@ CSE_Abstract* game_sv_Single::coop_find_orphan(LPCSTR name, Fvector* out_pos, bo
 	if (out_damage_age_ms)
 		*out_damage_age_ms = COOP_NO_DAMAGE;
 
+	// NEGATIVE CONTROL (§27d). `-coop_break_reclaim` makes the lookup find nothing, so a returning
+	// player is handed a FRESH SPAWN instead of their reserved body — losing position and
+	// inventory. That is the exact regression §27d exists to rule out, and it is what the harness
+	// must be SEEN reporting as FAIL before either real arm is believed.
+	//
+	// WHY THIS FUNCTION AND NOT coop_is_own_orphan. That one only feeds the connect-time
+	// WITHHOLDING (xrServer_CL_connect.cpp:51); breaking it would trip the harness's
+	// owner-recognised precondition and report FIXTURE FAILURE — a fixture complaint, not a
+	// verdict. The reclaim itself runs through HERE (called once, game_sv_single.cpp:2277), so
+	// sabotaging it leaves every setup precondition satisfied and makes the RESULT come out
+	// negative, which is the only thing that demonstrates the FAIL branch is reachable.
+	//
+	// WHY THE FLAG EXISTS AT ALL. §27d's two real arms are both expected to succeed ("the fix did
+	// not break reconnect"), and a design where every arm passes has no observation that would
+	// have differed had the subject been broken. A regression test never seen to fail cannot be
+	// told apart from one that CANNOT fail — and this one gets re-run by whoever touches reconnect
+	// next. Bug 1 shipped a PASS whose FAIL branch was unreachable and it certified nothing.
+	// Same shape as -coop_orphan_hit_allow: one runtime flag, one binary, exact-token matched,
+	// announced once so a log can never be silently a sabotage run.
+	static int s_break = -1;
+	if (s_break < 0)
+	{
+		LPCSTR q = strstr(Core.Params, "-coop_break_reclaim");
+		s_break = (q && (q[sizeof("-coop_break_reclaim") - 1] == 0 ||
+		                 q[sizeof("-coop_break_reclaim") - 1] == ' ')) ? 1 : 0;
+		if (s_break)
+			Msg("! COOP(orphan): -coop_break_reclaim SET — orphan lookup DISABLED, every returning "
+				"player gets a FRESH SPAWN. This is the §27d NEGATIVE CONTROL and the run MUST "
+				"report FAIL. A run that PASSES with this flag set is measuring nothing.");
+	}
+	if (s_break)
+		return NULL;
+
 	// An unnamed client must never match an (equally unnamed) orphan — that would hand
 	// it whichever body happens to sit first in the list, quite possibly someone else's.
 	if (!name || !xr_strlen(name))
