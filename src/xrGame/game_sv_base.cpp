@@ -839,8 +839,24 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 
 				CGameObject* const target = smart_cast<CGameObject*>(Level().Objects.net_Find(id_dest));
 
+				// NEVER THROTTLE A HIT ON A RESERVED BODY. The two diagnostics on this path are
+				// throttled (first 50 then 1-in-200 above; first 30 here) because a firefight
+				// raises a great many — but ambient A-Life combat exhausts both quotas minutes
+				// before a test fires, so the ONE hit anybody is deliberately measuring is the one
+				// guaranteed to be invisible. §27's control arm returned "the orphan never appeared
+				// to die" and the server log could not say whether the hit had even arrived: the
+				// throttle had swallowed it, leaving "dropped somewhere" and "arrived but not
+				// lethal" indistinguishable from the evidence. They demand opposite fixes.
+				// Orphan-targeted hits are rare by construction, so this costs nothing.
+				CSE_Abstract* const dest_cse = get_entity_from_eid(id_dest);
+				const bool orphan_target = dest_cse && dest_cse->m_coop_orphaned;
 				static u32 s_coop_apply = 0;
-				const bool log = (++s_coop_apply <= 30);
+				const bool log = (++s_coop_apply <= 30) || orphan_target;
+				if (orphan_target)
+					Msg("- COOP(orphan-hit): RESERVED BODY id %u TAKING A HIT — power=%.2f "
+						"htype=%d. This is the damage path, not the refusal path; if the guard "
+						"were active the event would not have reached here.",
+						id_dest, hit.power, int(hit.hit_type));
 				if (log)
 				{
 					CEntityAlive* const ea = target ? smart_cast<CEntityAlive*>(target) : NULL;

@@ -1498,8 +1498,17 @@ void CActor::UpdateCL()
 					HS.whoID   = ID();
 					HS.weaponID = ID();
 					HS.dir.set(0.f, 0.f, 1.f);
-					HS.power   = 1.0f;            // lethal to a normal actor: the point is that an
-					HS.impulse = 0.f;             // ORPHAN must survive it while a live actor need not
+					// POWER 2.0, AND THE NUMBER IS LOAD-BEARING. This was 1.0 with the comment
+					// "lethal to a normal actor", which is FALSE on this path: the co-op server
+					// applies dmg = _min(power, 2.0f) * 0.5f (game_sv_base.cpp), so power 1.0
+					// removes exactly HALF an actor's health, and the kill is gated on health
+					// reaching 0. The control arm therefore could not produce a death whatever the
+					// orphan guard did — it ran clean, the hit landed on the right body, was not
+					// refused, and the body correctly survived at hp 0.5. The run reported "the
+					// fixture cannot reproduce the OLD behaviour" when the truth was "the fixture
+					// never fired a lethal shot". 2.0 is the clamp; higher buys nothing.
+					HS.power   = 2.0f;
+					HS.impulse = 0.f;             // an ORPHAN must survive it; a live actor need not
 					HS.p_in_bone_space.set(0.f, 0.f, 0.f);
 					HS.hit_type = ALife::eHitTypeFireWound;
 					HS.boneID  = 0;
