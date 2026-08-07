@@ -206,8 +206,20 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
 			}
 			if (receiver && receiver->m_coop_orphaned && !s_allow)
 			{
+				// UNTHROTTLED FOR THE FIRST 50, THEN 1-IN-50. This logged only the 1st, 51st, ...
+				// which is why the verified treatment run reads "server refused the hit: 1" against
+				// EIGHT shots: that is a LOG-LINE count of a throttled message, not a refusal count,
+				// and it invited exactly the reading that seven hits went unaccounted for. They did
+				// not — the unthrottled damage-path marker showed 0 of 8 getting through — but the
+				// refusal side could only name one of them, so seven were provable by absence
+				// instead of by attribution.
+				//
+				// This is the same throttle-vs-probe defect found in game_sv_base.cpp on the damage
+				// path, left standing here because only the other side had bitten yet. A refusal on
+				// a reserved body is rare by construction; a firefight cannot raise these, because
+				// an orphan is not a participant in one.
 				static u32 s_orphan_hits = 0;
-				if ((++s_orphan_hits % 50) == 1)
+				if (++s_orphan_hits <= 50 || (s_orphan_hits % 50) == 1)
 					Msg("- COOP(orphan): refusing hit on reserved body id %u (%u so far) — an "
 						"unclaimed body absorbs fire; the record it restores from cannot be shot",
 						destination, s_orphan_hits);
