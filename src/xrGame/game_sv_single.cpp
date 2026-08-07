@@ -840,10 +840,20 @@ void game_sv_Single::coop_cleanup_orphans()
 	// nothing expires, the comparison is wrong; if the line stops appearing, the loop stopped being
 	// called. Those are different bugs and this is the cheapest thing that separates them.
 	{
-		static u32 s_last_hb = 0;
-		if (!m_coop_orphans.empty() && (now - s_last_hb) >= 30000)
+		// GATED ON A CALL COUNT, NOT ON THE CLOCK — because the clock is one of the two suspects.
+		// The first version fired on `now - s_last_hb >= 30000`, which shares `Device.dwTimeGlobal`
+		// with the comparison under investigation: if that value were stuck or wrong, the heartbeat
+		// would ALSO stop, and its silence would be read as "the loop is not being called" when the
+		// loop was running fine and the clock was broken. A discriminator must not depend on the
+		// thing it is discriminating.
+		//
+		// Counting CALLS is independent of it: silence now means the function is genuinely not
+		// reached. And `now` is printed RAW, so a clock that is stuck or moving backwards is visible
+		// as a constant or shrinking number across heartbeats rather than having to be inferred.
+		static u32 s_calls = 0;
+		++s_calls;
+		if (!m_coop_orphans.empty() && (s_calls % 1800) == 1)
 		{
-			s_last_hb = now;
 			u32 oldest = 0, live = 0;
 			for (const coop_orphan& o : m_coop_orphans)
 			{
@@ -852,8 +862,10 @@ void game_sv_Single::coop_cleanup_orphans()
 				const u32 age = now - o.disconnect_time;
 				if (age > oldest) oldest = age;
 			}
-			Msg("- COOP(orphan-hb): holding %u orphan(s), %u expirable, oldest %us, window %us%s",
-				(u32)m_coop_orphans.size(), live, oldest / 1000, RECONNECT_TIMEOUT_MS / 1000,
+			Msg("- COOP(orphan-hb): call #%u, holding %u orphan(s), %u expirable, oldest %us, "
+				"window %us, dwTimeGlobal=%u%s",
+				s_calls, (u32)m_coop_orphans.size(), live, oldest / 1000,
+				RECONNECT_TIMEOUT_MS / 1000, now,
 				(live && oldest > RECONNECT_TIMEOUT_MS) ? "  <-- PAST THE WINDOW AND STILL HELD" : "");
 		}
 	}
