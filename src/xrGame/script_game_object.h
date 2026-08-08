@@ -1276,6 +1276,7 @@ extern BOOL lua_busy_hands_debug;
 // MP fork: gates SafeWrap REFUSING a call with an invalid object-typed argument. FALSE by default;
 // see console_commands.cpp for why it must stay that way until the handle_invalid strategy is settled.
 extern BOOL coop_safewrap_block_bad_args;
+extern BOOL coop_safewrap_block_bad_receiver;   // DEFAULT ON — see console_commands.cpp for why the two defaults differ
 extern u32 g_coop_arg_log_budget;   // re-armed at the orphan expiry; see console_commands.cpp
 extern xr_vector<xr_string> get_lua_stack(lua_State* L);
 
@@ -1479,7 +1480,12 @@ struct SafeWrapBase
             if (!is_valid)
             {
                 log_and_callback("Accessing destroyed object");
-                return handle_invalid<decltype((instance->*memFunc)(std::forward<Args>(args)...))>();
+                // Gated so BOTH halves of this guard are switchable rather than one being invisible.
+                // Default ON: it is what makes the server survive the destroy. The residual hazard
+                // (the returned nil reaching an unguarded script site) is real and documented, but
+                // turning this off restores a RELIABLE crash in place of an occasional one.
+                if (coop_safewrap_block_bad_receiver)
+                    return handle_invalid<decltype((instance->*memFunc)(std::forward<Args>(args)...))>();
             }
 
             // A live receiver can still be handed a dead ARGUMENT.

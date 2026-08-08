@@ -103,6 +103,26 @@ BOOL lua_busy_hands_debug = TRUE;
 // See dev/ORPHAN_DESTROY_CRASH.md.
 BOOL coop_safewrap_block_bad_args = FALSE;
 
+// MP fork: the RECEIVER half of the same guard. DEFAULT **ON**, and the asymmetry is deliberate and
+// evidence-based rather than an oversight:
+//
+//   ON  (current) - the server SURVIVES destroying an expired orphan (build 31234649782 PASSED),
+//                   because the refusal stops the *(CGameObject*)NULL member read. Residual hazard:
+//                   the nil it returns can reach an UNGUARDED script site and raise a script error,
+//                   which this engine treats as fatal for an unprotected luabind call. Measured once:
+//                   lc_extra_transitions.script:64 feeds lc:section() straight to SYS_GetParam.
+//   OFF           - restores the access violation at the destroy, which killed the server RELIABLY
+//                   in three separate runs.
+//
+// So OFF is not "safer", it is a different and more frequent death. This is exposed as a flag so the
+// trade is visible and switchable, NOT because the default is in doubt.
+//
+// DO NOT "fix" this by returning "" instead of nullptr for LPCSTR. Measured over 974 GAMMA scripts:
+// 125 call sites use the `obj and obj:section() or <fallback>` idiom, whose fallback nil triggers
+// CORRECTLY and "" would bypass, because "" is truthy in Lua. That change breaks 125 working sites to
+// rescue a handful of unguarded ones. See dev/ORPHAN_DESTROY_CRASH.md.
+BOOL coop_safewrap_block_bad_receiver = TRUE;
+
 // MP fork: budget for SafeWrap's ARG decision log, and the reason it is a BUDGET rather than a cap.
 //
 // The log fires for EVERY object-typed argument on every wrapped call — hundreds per second during
@@ -2836,6 +2856,7 @@ void CCC_RegisterCommands()
 	CMD4(CCC_Integer, "lua_debug", &lua_debug, 0, 1);
 	CMD4(CCC_Integer, "lua_busy_hands_debug", &lua_busy_hands_debug, 0, 1);
 	CMD4(CCC_Integer, "coop_safewrap_block_bad_args", &coop_safewrap_block_bad_args, 0, 1);
+	CMD4(CCC_Integer, "coop_safewrap_block_bad_receiver", &coop_safewrap_block_bad_receiver, 0, 1);
 
 #ifdef DEBUG
 	CMD3(CCC_Mask, "ai_debug", &psAI_Flags, aiDebug);
