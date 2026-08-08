@@ -348,6 +348,23 @@ void CScriptGameObject::VisDbg(const CScriptGameObject* tpLuaGameObject)
 {
 	// This is bound plainly (not via SAFE_WRAP, which would validate for us), so guard both
 	// wrappers explicitly — a Lua call with a cleared/stale object must not crash the server.
+	//
+	// *** CORRECTION 2026-08-08: "SAFE_WRAP ... would validate for us" IS FALSE, AND WAS FALSE WHEN
+	// WRITTEN. SAFE_WRAP validates the RECEIVER ONLY — it never looked at arguments — and before
+	// 22d258b4 it did not even skip the call after detecting a bad receiver; it logged and called
+	// anyway. So wrapping this would NOT have covered `tpLuaGameObject`. The guard below was right;
+	// the reason given for needing it was not.
+	//
+	// Left in place rather than deleted, because the mistake is the useful part. That exact belief —
+	// "the wrapper covers arguments" — was independently rediscovered on 2026-08-07 and a guard
+	// (argument-check v1) was built on it, checking only `backing != nullptr`. It fired 3729 times
+	// and changed nothing, because the fault takes the OTHER disjunct of object()'s test. The line
+	// below already had the correct predicate, `->is_valid()`, sitting in this file the whole time.
+	//
+	// Two people reached the same wrong assumption about SAFE_WRAP from opposite directions. If you
+	// are about to rely on the wrapper for anything, read SafeWrap::execute in script_game_object.h
+	// and confirm it does what you think — this comment is the evidence that it does not.
+	// Full account: dev/ORPHAN_DESTROY_CRASH.md.
 	if (!is_valid() || !tpLuaGameObject || !tpLuaGameObject->is_valid())
 		return;
 	CCustomMonster* monster = smart_cast<CCustomMonster*>(&object());
