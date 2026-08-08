@@ -187,8 +187,8 @@ class_<CScriptGameObject> script_register_game_object1(class_<CScriptGameObject>
 		.def("set_ammo_elapsed", &CScriptGameObject::SetAmmoElapsed)
 		//Alundaio
 		.def("use", SAFE_WRAP(&CScriptGameObject::Use))
-		.def("start_trade", &CScriptGameObject::StartTrade)
-		.def("start_upgrade", &CScriptGameObject::StartUpgrade)
+		.def("start_trade", SAFE_WRAP(&CScriptGameObject::StartTrade))
+		.def("start_upgrade", SAFE_WRAP(&CScriptGameObject::StartUpgrade))
 		.def("set_ammo_type", &CScriptGameObject::SetAmmoType)
 		.def("get_ammo_type", &CScriptGameObject::GetAmmoType)
 		.def("get_ammo_count_for_type", &CScriptGameObject::GetAmmoCount)

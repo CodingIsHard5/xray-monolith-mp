@@ -244,8 +244,8 @@ class_<CScriptGameObject> script_register_game_object2(class_<CScriptGameObject>
 
 		.def("disable_show_hide_sounds", SAFE_WRAP(&CScriptGameObject::SetPlayShHdRldSounds))
 		.def("inventory_for_each", &CScriptGameObject::ForEachInventoryItems)
-		.def("drop_item", &CScriptGameObject::DropItem)
-		.def("drop_item_and_teleport", &CScriptGameObject::DropItemAndTeleport)
+		.def("drop_item", SAFE_WRAP(&CScriptGameObject::DropItem))
+		.def("drop_item_and_teleport", SAFE_WRAP(&CScriptGameObject::DropItemAndTeleport))
 		.def("transfer_item", SAFE_WRAP(&CScriptGameObject::TransferItem))
 		.def("take_item", SAFE_WRAP(&CScriptGameObject::TakeItem))
 		.def("transfer_money", SAFE_WRAP(&CScriptGameObject::TransferMoney))
@@ -258,20 +258,20 @@ class_<CScriptGameObject> script_register_game_object2(class_<CScriptGameObject>
 		.def("iterate_belt", &CScriptGameObject::IterateBelt)
 		.def("iterate_inventory_box", &CScriptGameObject::IterateInventoryBox)
 		.def("make_item_active", SAFE_WRAP(&CScriptGameObject::MakeItemActive))
-		.def("move_to_ruck", &CScriptGameObject::MoveItemToRuck)
-		.def("move_to_slot", &CScriptGameObject::MoveItemToSlot)
-		.def("move_to_belt", &CScriptGameObject::MoveItemToBelt)
+		.def("move_to_ruck", SAFE_WRAP(&CScriptGameObject::MoveItemToRuck))
+		.def("move_to_slot", SAFE_WRAP(&CScriptGameObject::MoveItemToSlot))
+		.def("move_to_belt", SAFE_WRAP(&CScriptGameObject::MoveItemToBelt))
 		.def("is_on_belt", SAFE_WRAP(&CScriptGameObject::IsOnBelt))
 		.def("item_on_belt", SAFE_WRAP(&CScriptGameObject::ItemOnBelt))
 		.def("belt_count", SAFE_WRAP(&CScriptGameObject::BeltSize))
 
-		.def("item_allow_trade", &CScriptGameObject::ItemAllowTrade)
-		.def("item_deny_trade", &CScriptGameObject::ItemDenyTrade)
+		.def("item_allow_trade", SAFE_WRAP(&CScriptGameObject::ItemAllowTrade))
+		.def("item_deny_trade", SAFE_WRAP(&CScriptGameObject::ItemDenyTrade))
 	
 		.def("switch_to_trade", &CScriptGameObject::SwitchToTrade)
 		.def("switch_to_upgrade", &CScriptGameObject::SwitchToUpgrade)
 		.def("switch_to_talk", &CScriptGameObject::SwitchToTalk)
-		.def("run_talk_dialog", &CScriptGameObject::RunTalkDialog)
+		.def("run_talk_dialog", SAFE_WRAP(&CScriptGameObject::RunTalkDialog))
 		.def("allow_break_talk_dialog", SAFE_WRAP(&CScriptGameObject::AllowBreakTalkDialog))
 
 		.def("hide_weapon", &CScriptGameObject::HideWeapon)
@@ -291,13 +291,13 @@ class_<CScriptGameObject> script_register_game_object2(class_<CScriptGameObject>
 		.def("get_start_dialog", &CScriptGameObject::GetStartDialog)
 		.def("restore_default_start_dialog", &CScriptGameObject::RestoreDefaultStartDialog)
 
-		.def("goodwill", &CScriptGameObject::GetGoodwill)
-		.def("set_goodwill", &CScriptGameObject::SetGoodwill)
-		.def("force_set_goodwill", &CScriptGameObject::ForceSetGoodwill)
-		.def("change_goodwill", &CScriptGameObject::ChangeGoodwill)
+		.def("goodwill", SAFE_WRAP(&CScriptGameObject::GetGoodwill))
+		.def("set_goodwill", SAFE_WRAP(&CScriptGameObject::SetGoodwill))
+		.def("force_set_goodwill", SAFE_WRAP(&CScriptGameObject::ForceSetGoodwill))
+		.def("change_goodwill", SAFE_WRAP(&CScriptGameObject::ChangeGoodwill))
 
 		.def("general_goodwill", SAFE_WRAP(&CScriptGameObject::GetAttitude))
-		.def("set_relation", &CScriptGameObject::SetRelation)
+		.def("set_relation", SAFE_WRAP(&CScriptGameObject::SetRelation))
 
 		.def("community_goodwill", &CScriptGameObject::GetCommunityGoodwill_obj)
 		.def("set_community_goodwill", &CScriptGameObject::SetCommunityGoodwill_obj)
@@ -430,8 +430,8 @@ class_<CScriptGameObject> script_register_game_object2(class_<CScriptGameObject>
 		// demonized: Toggle movement collision for stalker NPCs
 		.def("set_enable_movement_collision", &CScriptGameObject::set_enable_movement_collision)
 
-		.def("mark_item_dropped", &CScriptGameObject::MarkItemDropped)
-		.def("marked_dropped", &CScriptGameObject::MarkedDropped)
+		.def("mark_item_dropped", SAFE_WRAP(&CScriptGameObject::MarkItemDropped))
+		.def("marked_dropped", SAFE_WRAP(&CScriptGameObject::MarkedDropped))
 		.def("unload_magazine", &CScriptGameObject::UnloadMagazine)
 		.def("force_unload_magazine", &CScriptGameObject::ForceUnloadMagazine)
 
@@ -476,7 +476,7 @@ class_<CScriptGameObject> script_register_game_object2(class_<CScriptGameObject>
 		//Alundaio: Extended exports
 #ifdef ENABLE_CAR
 		//For Car
-		.def("attach_vehicle", &CScriptGameObject::AttachVehicle)
+		.def("attach_vehicle", SAFE_WRAP(&CScriptGameObject::AttachVehicle))
 		.def("detach_vehicle", &CScriptGameObject::DetachVehicle)
 		.def("get_attached_vehicle", &CScriptGameObject::GetAttachedVehicle)
 #endif
