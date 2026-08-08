@@ -1369,7 +1369,24 @@ struct SafeWrapBase
         ai().script_engine().lua_error_not_crash(ai().script_engine().lua());
     }
 
-    // This generic function accepts ANY instance type (const or non-const) 
+    // MP fork — ARGUMENT validation. SafeWrap guarded the RECEIVER and forwarded args... untouched,
+    // so a dead object arriving as an ARGUMENT walked straight past a guard built for a dead object
+    // arriving as `this`. Measured live: build 31234649782 survived its receiver checks and still
+    // faulted at 0xE4 inside GetRelationType, on `&who->object()`
+    // (script_game_object_use.cpp:200) — a SAFE_WRAP'd binding, guard passed, dead argument.
+    //
+    // This is a strictly easier question than the receiver one was. is_valid() was impossible
+    // because it asked an object about itself from inside itself; here we ask the CALLER about a
+    // pointer it is holding, before the callee runs. And it is only answerable at all because
+    // coop_abandon() leaves retired proxies READABLE with a NULL backing — validating an argument
+    // against a freed block would have been the same undefined behaviour as before.
+    //
+    // Overloads, not `if constexpr`, so any argument type that is not a game object compiles to a
+    // literal `true` and costs nothing.
+    static bool coop_arg_ok(const CScriptGameObject* p) { return !p || p->coop_raw_backing() != nullptr; }
+    template <typename T> static bool coop_arg_ok(const T&) { return true; }
+
+    // This generic function accepts ANY instance type (const or non-const)
     // and ANY member function pointer type.
     template <typename InstanceT, typename FuncT, typename... Args>
     static auto execute(InstanceT instance, FuncT memFunc, Args&&... args)
@@ -1417,6 +1434,14 @@ struct SafeWrapBase
             if (!is_valid)
             {
                 log_and_callback("Accessing destroyed object");
+                return handle_invalid<decltype((instance->*memFunc)(std::forward<Args>(args)...))>();
+            }
+
+            // A live receiver can still be handed a dead ARGUMENT. Fold over every argument; the
+            // non-object overload above makes this `true` for anything that is not a game object.
+            if (!(... && coop_arg_ok(args)))
+            {
+                log_and_callback("Passing a destroyed object as an argument");
                 return handle_invalid<decltype((instance->*memFunc)(std::forward<Args>(args)...))>();
             }
         }
