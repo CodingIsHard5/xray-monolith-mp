@@ -1468,10 +1468,18 @@ struct SafeWrapBase
     // And CONSTRAIN the template so no cv/ref spelling can ever pull a game-object pointer back into it.
     // Belt and braces on purpose: the overload above fixes the case we measured; this removes the whole
     // class of case, including ones nobody has instantiated yet.
+    // The constraint must exclude ONLY POINTERS to CScriptGameObject. v1 of it used remove_pointer_t
+    // without an is_pointer_v guard — and remove_pointer_t is a NO-OP on a non-pointer, so
+    // `const CScriptGameObject&` (a by-reference binding argument, which several methods take) also
+    // matched, was excluded from the template, and matched neither pointer overload either. Result:
+    // C2665, no viable overload, an 11 KB stub instead of a binary. Caught by artifact size, not by
+    // job status.
     template <typename T>
-    static std::enable_if_t<!std::is_same_v<
-        std::remove_cv_t<std::remove_pointer_t<std::remove_cv_t<std::remove_reference_t<T>>>>,
-        CScriptGameObject>, bool> coop_arg_ok(const T&)
+    static std::enable_if_t<!(
+        std::is_pointer_v<std::remove_cv_t<std::remove_reference_t<T>>> &&
+        std::is_same_v<
+            std::remove_cv_t<std::remove_pointer_t<std::remove_cv_t<std::remove_reference_t<T>>>>,
+            CScriptGameObject>), bool> coop_arg_ok(const T&)
     {
         static bool s_witness = false;      // per-instantiation
         if (!s_witness)
