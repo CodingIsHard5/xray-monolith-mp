@@ -1273,6 +1273,9 @@ DECLARE_SCRIPT_REGISTER_FUNCTION
 };
 
 extern BOOL lua_busy_hands_debug;
+// MP fork: gates SafeWrap REFUSING a call with an invalid object-typed argument. FALSE by default;
+// see console_commands.cpp for why it must stay that way until the handle_invalid strategy is settled.
+extern BOOL coop_safewrap_block_bad_args;
 extern xr_vector<xr_string> get_lua_stack(lua_State* L);
 
 // Default: Assume the class DOES NOT have is_valid()
@@ -1402,7 +1405,22 @@ struct SafeWrapBase
     // The lesson, for the next person tempted to hand-roll a cheaper check: I wrote a weaker
     // predicate than the one already sitting next to it, out of caution about a dereference that
     // was going to happen anyway one line later.
-    static bool coop_arg_ok(const CScriptGameObject* p) { return !p || p->is_valid(); }
+    // Logs EVERY object-typed argument and what was seen of it — on the good branch as well as the
+    // bad one. The previous version printed the RECEIVER's pointers on both branches, so an
+    // argument-branch line said nothing about the argument, and this run could not separate
+    // "is_valid() said VALID here and object() disagreed a moment later" (TOCTOU) from "this call
+    // never went through execute()" (a second path). Those want opposite work, so the log has to
+    // make them look different: TOCTOU shows an ARG line with valid=1 immediately before the fault;
+    // a second path shows NO ARG line for the faulting call at all.
+    static bool coop_arg_ok(const CScriptGameObject* p)
+    {
+        const bool ok = !p || p->is_valid();
+        static u32 s_n = 0;
+        if (++s_n <= 300)
+            Msg("%c COOP(safewrap): ARG #%u arg=%p backing=%p valid=%d", ok ? '-' : '!', s_n,
+                (const void*)p, p ? p->coop_raw_backing() : nullptr, ok ? 1 : 0);
+        return ok;
+    }
     template <typename T> static bool coop_arg_ok(const T&) { return true; }
 
     // This generic function accepts ANY instance type (const or non-const)
@@ -1456,9 +1474,25 @@ struct SafeWrapBase
                 return handle_invalid<decltype((instance->*memFunc)(std::forward<Args>(args)...))>();
             }
 
-            // A live receiver can still be handed a dead ARGUMENT. Fold over every argument; the
-            // non-object overload above makes this `true` for anything that is not a game object.
-            if (!(... && coop_arg_ok(args)))
+            // A live receiver can still be handed a dead ARGUMENT.
+            //
+            // COMMA fold, not `&&`: `&&` short-circuits, so the first bad argument would suppress
+            // the log line for every argument after it — and the log is the whole point of this
+            // pass. Every argument is evaluated and reported.
+            bool args_ok = true;
+            ((args_ok = coop_arg_ok(args) && args_ok), ...);
+
+            // REFUSING THE CALL IS GATED OFF BY DEFAULT — this is the v2 regression, contained.
+            // Returning handle_invalid<Ret>() here hands Lua nil; on build 31239986429 that nil
+            // reached a GAMMA script, which raised a script error, which our own handler
+            // (script_engine.cpp:327) treats as FATAL for an unprotected luabind call. A single
+            // recoverable AV became a truncated process death with NO AV — quieter and harder to
+            // diagnose than the defect it was meant to fix.
+            //
+            // With the flag off, behaviour is identical to build 31234649782, the best-known
+            // configuration (PASS: server survived the destroy, one post-expiry AV). Detection and
+            // logging above still run, so the next run yields the evidence without the regression.
+            if (!args_ok && coop_safewrap_block_bad_args)
             {
                 log_and_callback("Passing a destroyed object as an argument");
                 return handle_invalid<decltype((instance->*memFunc)(std::forward<Args>(args)...))>();

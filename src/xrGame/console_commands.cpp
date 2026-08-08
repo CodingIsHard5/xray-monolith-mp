@@ -92,6 +92,16 @@ extern BOOL psLua_ParallelGC_debug;
 extern BOOL psLua_ParallelGC;
 extern BOOL lua_debug;
 BOOL lua_busy_hands_debug = TRUE;
+// MP fork: OFF BY DEFAULT AND MUST STAY THAT WAY UNTIL THE handle_invalid STRATEGY IS DECIDED.
+// When TRUE, SafeWrap REFUSES a call whose object-typed argument is invalid and returns
+// handle_invalid<Ret>() instead. Build 31239986429 showed that is a REGRESSION: the nil it hands
+// Lua reaches a GAMMA script (lc_extra_transitions.script:65 did arithmetic on it), which raises a
+// script error, which our own handler at script_engine.cpp:327 treats as FATAL for an unprotected
+// luabind call. Net effect: one recoverable access violation became a truncated process death with
+// no AV at all - quieter and harder to diagnose than the bug it replaced.
+// Detection and LOGGING of bad arguments stay unconditional; only the refusal is gated.
+// See dev/ORPHAN_DESTROY_CRASH.md.
+BOOL coop_safewrap_block_bad_args = FALSE;
 
 float g_end_modif = 0.f;
 
@@ -2809,6 +2819,7 @@ void CCC_RegisterCommands()
 
 	CMD4(CCC_Integer, "lua_debug", &lua_debug, 0, 1);
 	CMD4(CCC_Integer, "lua_busy_hands_debug", &lua_busy_hands_debug, 0, 1);
+	CMD4(CCC_Integer, "coop_safewrap_block_bad_args", &coop_safewrap_block_bad_args, 0, 1);
 
 #ifdef DEBUG
 	CMD3(CCC_Mask, "ai_debug", &psAI_Flags, aiDebug);
