@@ -1276,6 +1276,7 @@ extern BOOL lua_busy_hands_debug;
 // MP fork: gates SafeWrap REFUSING a call with an invalid object-typed argument. FALSE by default;
 // see console_commands.cpp for why it must stay that way until the handle_invalid strategy is settled.
 extern BOOL coop_safewrap_block_bad_args;
+extern u32 g_coop_arg_log_budget;   // re-armed at the orphan expiry; see console_commands.cpp
 extern xr_vector<xr_string> get_lua_stack(lua_State* L);
 
 // Default: Assume the class DOES NOT have is_valid()
@@ -1416,9 +1417,16 @@ struct SafeWrapBase
     {
         const bool ok = !p || p->is_valid();
         static u32 s_n = 0;
-        if (++s_n <= 300)
+        ++s_n;
+        if (g_coop_arg_log_budget > 0)
+        {
+            --g_coop_arg_log_budget;
             Msg("%c COOP(safewrap): ARG #%u arg=%p backing=%p valid=%d", ok ? '-' : '!', s_n,
                 (const void*)p, p ? p->coop_raw_backing() : nullptr, ok ? 1 : 0);
+            if (g_coop_arg_log_budget == 0)
+                Msg("! COOP(safewrap): ARG LOG BUDGET EXHAUSTED at #%u — any ABSENCE of ARG lines "
+                    "after this point is THIS CEILING, not evidence the guard was absent", s_n);
+        }
         return ok;
     }
     template <typename T> static bool coop_arg_ok(const T&) { return true; }

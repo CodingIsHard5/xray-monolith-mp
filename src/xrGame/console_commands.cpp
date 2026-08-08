@@ -103,6 +103,22 @@ BOOL lua_busy_hands_debug = TRUE;
 // See dev/ORPHAN_DESTROY_CRASH.md.
 BOOL coop_safewrap_block_bad_args = FALSE;
 
+// MP fork: budget for SafeWrap's ARG decision log, and the reason it is a BUDGET rather than a cap.
+//
+// The log fires for EVERY object-typed argument on every wrapped call — hundreds per second during
+// normal play — so it must be bounded or it buries the log it exists to make readable. But a fixed
+// cap made the BOUND decide the answer: the run that matters reads "the nearest ARG line before the
+// fault", and if the ceiling was reached earlier, an ABSENCE of lines means THE LOG STOPPED while
+// looking exactly like "the guard was never on this path". That is the same shape as a bound quietly
+// deciding a result, twice already on this project.
+//
+// Two fixes, so the ambiguity cannot arise rather than being detected afterwards:
+//   1. RE-ARMED at the orphan expiry (game_sv_single.cpp), which guarantees a full budget for the
+//      window the question is actually about.
+//   2. Exhaustion announces itself once, loudly, so "no ARG lines" is never ambiguous: if the
+//      EXHAUSTED line is present the absence is a ceiling, and if it is not, the absence is real.
+u32 g_coop_arg_log_budget = 4000;
+
 float g_end_modif = 0.f;
 
 extern int x_m_x;

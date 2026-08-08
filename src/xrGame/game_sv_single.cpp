@@ -886,6 +886,15 @@ void game_sv_Single::coop_cleanup_orphans()
 			Msg("- XRNET(dbg): co-op orphan expired for player '%s' (entity id %u) — destroying",
 				it->player_name.c_str(), eid);
 
+			// MP fork: RE-ARM SafeWrap's ARG decision log here, so the window this question is
+			// actually about always has a full budget. Without this, the log could be exhausted
+			// during the ~5 minutes of normal play before the expiry, and its silence afterwards
+			// would read as "the guard was never on this path" — a bound deciding the answer.
+			// See console_commands.cpp and dev/ORPHAN_DESTROY_CRASH.md.
+			extern u32 g_coop_arg_log_budget;
+			g_coop_arg_log_budget = 4000;
+			Msg("- COOP(safewrap): ARG log RE-ARMED to %u at the expiry", g_coop_arg_log_budget);
+
 			CSE_Abstract* entity = m_server->ID_to_entity(eid);
 			if (entity)
 			{
