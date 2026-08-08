@@ -188,6 +188,24 @@ public:
     // A pointer VALUE is safe to read and print no matter what it points at.
     IC const void* coop_raw_backing() const { return (const void*)m_game_object; }
 
+    // MP fork (orphan-destroy crash): retire this proxy WITHOUT freeing it.
+    //
+    // CGameObject::net_Destroy used to `xr_delete(m_lua_game_object)`, which nulls only the OWNER's
+    // pointer — every luabind userdata in Lua still held a raw pointer to the freed block. So
+    // `instance->is_valid()` inside SafeWrap was a member call on freed memory, reading
+    // m_game_object out of a dead 24-byte allocation before it could decide anything. An object
+    // cannot validate its own existence from inside itself.
+    //
+    // Abandoning it instead keeps every Lua-held pointer pointing at readable memory whose
+    // m_game_object is genuinely NULL, so is_valid()'s FIRST check — `if (!m_game_object)` — is
+    // reached with NO dereference of anything. That is the only check in the chain that was ever
+    // safe, and it is now the one that fires.
+    //
+    // Deliberate leak: 24 bytes (two pointers + vtable) per destroyed object, ~24 KB per 1000.
+    // Recorded in dev/ORPHAN_DESTROY_CRASH.md so the leak axis does not rediscover it and
+    // misattribute it. A freelist is the obvious refinement and is deliberately not in v1.
+    void coop_abandon();
+
     // MP fork — READ THIS BEFORE TRUSTING is_valid().
     //
     // It detects an UNSPAWNED object. It does NOT reliably detect a FREED one, and the two are

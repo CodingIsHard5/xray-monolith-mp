@@ -75,6 +75,21 @@ CScriptGameObject::~CScriptGameObject()
 	unregister_door();
 }
 
+// MP fork (orphan-destroy crash) — see the comment on the declaration in script_game_object.h.
+//
+// This does exactly what ~CScriptGameObject did, at exactly the point xr_delete used to run it, and
+// then nulls the backing instead of releasing the block. Running unregister_door() here rather than
+// leaking the door registration is the whole reason this is a function and not two lines inline:
+// the destructor had real work, and abandoning the object without doing it would trade a crash for
+// a quieter defect.
+void CScriptGameObject::coop_abandon()
+{
+	if (m_door)
+		unregister_door();      // nulls m_door itself; does not touch m_game_object
+
+	m_game_object = nullptr;    // the load-bearing line: is_valid()'s first check now fires
+}
+
 CScriptGameObject* CScriptGameObject::Parent() const
 {
 	CGameObject* l_tpGameObject = smart_cast<CGameObject*>(object().H_Parent());

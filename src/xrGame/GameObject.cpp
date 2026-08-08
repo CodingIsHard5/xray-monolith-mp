@@ -163,7 +163,21 @@ void CGameObject::net_Destroy()
 
 	CScriptBinder::net_Destroy();
 
-	xr_delete(m_lua_game_object);
+	// MP fork (orphan-destroy crash, 2026-08-07): was `xr_delete(m_lua_game_object)`.
+	//
+	// That freed the proxy while luabind userdata all over Lua still held raw pointers to it —
+	// xr_delete nulls only the pointer below, not the copies Lua is holding. Every subsequent Lua
+	// touch of a destroyed object was then a member call on a freed 24-byte block, which is why
+	// SafeWrap's is_valid() could not help: it reads m_game_object out of that dead allocation
+	// before it can form an opinion. Destroying a co-op orphan at expiry killed the dedicated
+	// server this way, twice, on the same stack.
+	//
+	// Abandon it instead: run the destructor's real work (unregister_door) at this exact point,
+	// null the backing so is_valid()'s first and only safe check fires, and let the 24 bytes go.
+	// The deliberate leak is documented in dev/ORPHAN_DESTROY_CRASH.md.
+	if (m_lua_game_object)
+		m_lua_game_object->coop_abandon();
+	m_lua_game_object = nullptr;
 	m_spawned = false;
 }
 
