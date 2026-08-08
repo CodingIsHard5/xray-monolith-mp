@@ -1245,17 +1245,28 @@ struct has_is_valid<T, std::void_t<decltype(std::declval<T>()->is_valid())>> : s
 
 struct SafeWrapBase
 {
+    // MP fork: this is now REACHED. Upstream defined it, commented it "never reached because we
+    // crash the game", and never called it from anywhere — `execute()` detected the invalid
+    // instance, logged, and then made the call regardless. See the note on execute() below.
     template <typename Ret>
     static Ret handle_invalid()
     {
-        // This part is never reached because we crash the game,
-        // but we need to satisfy the compiler.
         if constexpr (std::is_reference_v<Ret>)
         {
-            return *static_cast<std::remove_reference_t<Ret>*>(nullptr);
+            // A reference return has nothing honest to bind to. Bind it to a shared
+            // default-constructed referent rather than to NULL: every SAFE_WRAP'd reference
+            // return today is a `const xr_vector<...>&` memory list, for which "empty" is the
+            // right answer for an object that no longer exists. A referent that cannot be
+            // default-constructed fails to COMPILE here, which is the loud failure we want
+            // rather than a silent null reference.
+            static std::remove_const_t<std::remove_reference_t<Ret>> s_empty{};
+            return s_empty;
         }
         else
         {
+            // Scalars, pointers and void. For the LPCSTR returns (Name/Section/...) this is
+            // nullptr, and LuaJIT's lua_pushstring maps a NULL const char* to nil
+            // ("3rd party/luajit-2/src/lj_api.c":594) — so Lua sees nil, not a fault.
             return Ret();
         }
     }
@@ -1291,12 +1302,28 @@ struct SafeWrapBase
                     is_valid = true;
             }
 
-            // Send one last call to Lua to warn users that Lua is about to die
+            // MP fork (orphan-destroy crash, 2026-08-07): upstream logged here and then FELL
+            // THROUGH to the call. `is_valid()` is exactly right — it caught our case seven
+            // times in the run that died — but detecting is not preventing, and the call it
+            // then made was the crash.
+            //
+            // CScriptGameObject::object() returns `*(CGameObject*)NULL` for a destroyed object
+            // in a RELEASE build (the THROW2 that would stop it is #ifdef DEBUG), so the
+            // member read that follows faults at a small offset off zero. Measured: Name()
+            // faulted at 0x00E4 and Section() at 0x00EC — a delta of exactly 8, matching the
+            // adjacent `shared_str NameObject; shared_str NameSection;` pair declared in that
+            // order in xrEngine/xr_object.h. That killed the dedicated server when the fault
+            // landed on a path with no handler above it (coop_autosave -> ALife save -> Lua).
+            //
+            // So: return the invalid-instance value instead of making the call. Lua gets nil /
+            // 0 / an empty list and can be wrong; the process stays up and says why.
             if (!is_valid)
+            {
                 log_and_callback("Accessing destroyed object");
+                return handle_invalid<decltype((instance->*memFunc)(std::forward<Args>(args)...))>();
+            }
         }
 
-        // Sayonara
         return (instance->*memFunc)(std::forward<Args>(args)...);
     }
 };
