@@ -183,6 +183,28 @@ public:
 	virtual ~CScriptGameObject();
 	operator CObject*();
 
+    // MP fork: the raw backing pointer, for the guard's decision log. DELIBERATELY DOES NOT
+    // DEREFERENCE — printing what is_valid() saw must not repeat the fault it is diagnosing.
+    // A pointer VALUE is safe to read and print no matter what it points at.
+    IC const void* coop_raw_backing() const { return (const void*)m_game_object; }
+
+    // MP fork — READ THIS BEFORE TRUSTING is_valid().
+    //
+    // It detects an UNSPAWNED object. It does NOT reliably detect a FREED one, and the two are
+    // different states with the same name in conversation:
+    //
+    //   still allocated, m_spawned == false -> lua_game_object() returns NULL -> caught. This is
+    //     the state that printed "you are trying to use a destroyed object" 8 times on 2026-08-07.
+    //   FREED -> m_game_object dangles -> reading m_spawned reads freed memory. If that garbage is
+    //     nonzero it falls through and returns m_lua_game_object, which — while the allocation has
+    //     not been reused — STILL EQUALS `this`. So the back-reference check passes and this
+    //     returns TRUE for an object that no longer exists.
+    //
+    // The comment below claims the back-reference catches a dangling pointer. It only does so once
+    // something has OVERWRITTEN the freed block; on not-yet-reused memory it reads back the old,
+    // self-consistent values and passes. Measured: build 31232366798 crashed reading
+    // 0xFFFFFFFFFFFFFFFF — a read through freed memory, not the *(CGameObject*)NULL path — which
+    // means object() took `return (*m_game_object)`, which means this returned TRUE.
     IC bool is_valid() const
     {
         // If the pointer was never set, it's obviously invalid.
@@ -1243,6 +1265,13 @@ struct has_is_valid : std::false_type {};
 template <typename T>
 struct has_is_valid<T, std::void_t<decltype(std::declval<T>()->is_valid())>> : std::true_type {};
 
+// MP fork: same trait for the guard's decision log, so instances without a backing pointer to
+// report still compile.
+template <typename T, typename = void>
+struct has_coop_raw_backing : std::false_type {};
+template <typename T>
+struct has_coop_raw_backing<T, std::void_t<decltype(std::declval<T>()->coop_raw_backing())>> : std::true_type {};
+
 struct SafeWrapBase
 {
     // MP fork: this is now REACHED. Upstream defined it, commented it "never reached because we
@@ -1273,7 +1302,47 @@ struct SafeWrapBase
 
     static void log(LPCSTR error)
     {
+        // MP fork: ALSO emit through Msg. This message routed only through script_log, and no
+        // "[BusyHandsDebug]" line has ever been observed in a dedicated-server log — while
+        // "you are trying to use a destroyed object", which uses plain Msg, appears reliably in
+        // the same logs. So a guard reporting only through script_log is indistinguishable from a
+        // guard that never fired, which is exactly the ambiguity that made run 31232366798
+        // uninterpretable. Same channel as the message we know arrives.
+        Msg("! COOP(safewrap): %s", error);
         ai().script_engine().script_log(ScriptStorage::eLuaMessageTypeError, "[BusyHandsDebug] Error: %s", error);
+    }
+
+    // MP fork — THE DECISION LOG. Emit WHAT THE GUARD SAW, not whether it passed.
+    //
+    // A booleanised "guard OK" cannot separate the three states that demand opposite work:
+    //
+    //   no REACHED line at all  -> execute() is not on this path. The call came through one of the
+    //                              ~279 CScriptGameObject bindings bound RAW rather than SAFE_WRAP'd,
+    //                              or lua_busy_hands_debug is off. Fix = coverage.
+    //   REACHED but never SKIP  -> the guard runs and is_valid() keeps saying VALID. Detection is
+    //                              failing, not coverage. Wrapping more bindings would change
+    //                              NOTHING. Fix = make is_valid able to see a freed object.
+    //   SKIP lines present      -> the guard fires and returns. Any remaining crash is on some
+    //                              other path. Fix = coverage, and now with evidence.
+    //
+    // Bounded on purpose: these bindings are called thousands of times a second, so an unbounded
+    // Msg would bury the log it is meant to make readable (and this project has already measured
+    // its own trace dominating a memory-rate reading). The REACHED cap only has to prove the code
+    // is live, so it is small; SKIP is the interesting one, so it gets more.
+    static void log_decision(const void* instance, const void* backing, bool valid)
+    {
+        if (valid)
+        {
+            static u32 s_reached = 0;
+            if (++s_reached <= 20)
+                Msg("- COOP(safewrap): REACHED #%u instance=%p backing=%p decision=CALL "
+                    "(is_valid said VALID)", s_reached, instance, backing);
+            return;
+        }
+        static u32 s_skipped = 0;
+        if (++s_skipped <= 200)
+            Msg("! COOP(safewrap): SKIP #%u instance=%p backing=%p decision=RETURN-WITHOUT-CALLING "
+                "(is_valid said INVALID)", s_skipped, instance, backing);
     }
 
     static void log_and_callback(LPCSTR error)
@@ -1317,6 +1386,16 @@ struct SafeWrapBase
             //
             // So: return the invalid-instance value instead of making the call. Lua gets nil /
             // 0 / an empty list and can be wrong; the process stays up and says why.
+            // Report the DECISION before acting on it, so "the guard never ran" and "the guard ran
+            // and said VALID" stop being the same silence. See log_decision() for the three states.
+            {
+                const void* backing = nullptr;
+                if constexpr (has_coop_raw_backing<InstanceT>::value)
+                    if (instance != nullptr)
+                        backing = instance->coop_raw_backing();
+                log_decision((const void*)instance, backing, is_valid);
+            }
+
             if (!is_valid)
             {
                 log_and_callback("Accessing destroyed object");
