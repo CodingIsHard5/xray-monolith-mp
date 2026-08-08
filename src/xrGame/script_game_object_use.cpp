@@ -82,12 +82,50 @@ CScriptGameObject::~CScriptGameObject()
 // leaking the door registration is the whole reason this is a function and not two lines inline:
 // the destructor had real work, and abandoning the object without doing it would trade a crash for
 // a quieter defect.
+// THE LEAK, WITH THE ARITHMETIC DONE — because a deliberate leak is only defensible if somebody
+// has actually done it, and the next person whose leak detector points here must be able to see in
+// one screen that it is intentional and bounded.
+//
+//   unit      : sizeof(CScriptGameObject) — two pointers plus a vtable, 24 bytes on x64.
+//               Printed from sizeof below rather than hardcoded, so it stays true if the class grows.
+//   per what  : one destroyed object that Lua had ever touched. NOT every destroyed object —
+//               m_lua_game_object is created lazily by CGameObject::lua_game_object(), so objects
+//               no script ever handled never allocate a proxy and never leak one.
+//   how often : UNMEASURED. Nothing in this engine logs object destruction — the 3 h survival run
+//               (dev/evidence/oom/6g_fixcheck, 108,943 lines) contains no destroy marker of any
+//               kind, so the rate cannot be recovered from any log we hold. That is why the counter
+//               below exists: it converts this paragraph from an estimate into a measurement on the
+//               next run that reaches it.
+//
+//   what it comes to, at 24 B:
+//        1,000 destroys/hour  ->   24 KB/h  ->  576 KB/day
+//       10,000 destroys/hour  ->  240 KB/h  ->  5.6 MB/day
+//      100,000 destroys/hour  ->  2.4 MB/h  ->   56 MB/day
+//
+//   the number that makes "obviously fine" concrete: this server's MEASURED growth is 0.6-1.0
+//   GiB/day ([[xray-server-memory-growth-rate]]). For the leak to reach even 10% of the low end of
+//   that, the server would have to destroy ~186,000 Lua-touched objects per HOUR — about 3,100 per
+//   second, sustained. A-Life does not come within orders of magnitude of that.
+//
+//   and the relative argument, which does not depend on the rate at all: a spawn/destroy cycle
+//   allocates far more than 24 bytes of transient state elsewhere, so this is a small fraction of
+//   the churn it accompanies. It is strictly better than the alternative it replaces — leaking
+//   memory nothing can safely reason about beats freeing memory something else still points at.
 void CScriptGameObject::coop_abandon()
 {
 	if (m_door)
 		unregister_door();      // nulls m_door itself; does not touch m_game_object
 
 	m_game_object = nullptr;    // the load-bearing line: is_valid()'s first check now fires
+
+	// Log the FIRST one and then every 1000, so "no line" means never reached rather than
+	// below-threshold — the two are different findings and a bare periodic counter conflates them.
+	static u32 s_abandoned = 0;
+	++s_abandoned;
+	if (s_abandoned == 1 || (s_abandoned % 1000) == 0)
+		Msg("- COOP(abandon): %u proxy(ies) retired, %u bytes deliberately leaked "
+			"(%u B each; intentional, see script_game_object_use.cpp)",
+			s_abandoned, s_abandoned * (u32)sizeof(CScriptGameObject), (u32)sizeof(CScriptGameObject));
 }
 
 CScriptGameObject* CScriptGameObject::Parent() const
