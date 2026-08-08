@@ -1295,6 +1295,12 @@ struct has_coop_raw_backing : std::false_type {};
 template <typename T>
 struct has_coop_raw_backing<T, std::void_t<decltype(std::declval<T>()->coop_raw_backing())>> : std::true_type {};
 
+#ifdef _MSC_VER
+#   define COOP_FUNCSIG __FUNCSIG__
+#else
+#   define COOP_FUNCSIG __PRETTY_FUNCTION__
+#endif
+
 struct SafeWrapBase
 {
     // MP fork: this is now REACHED. Upstream defined it, commented it "never reached because we
@@ -1414,8 +1420,27 @@ struct SafeWrapBase
     // never went through execute()" (a second path). Those want opposite work, so the log has to
     // make them look different: TOCTOU shows an ARG line with valid=1 immediately before the fault;
     // a second path shows NO ARG line for the faulting call at all.
+    // ARGWITNESS — a compile-time question with a runtime witness.
+    //
+    // Overload resolution cannot be observed by reading the source; it can be observed by making each
+    // INSTANTIATION announce itself once. Statics in a template are per-instantiation, so each distinct
+    // argument type reports exactly one line, and __FUNCSIG__ names the signature actually chosen.
+    //
+    // ABSENCE IS MADE INTERPRETABLE, which is the requirement this instrument had to meet:
+    //   * The DANGEROUS case is POSITIVE, not silent. If the template catch-all is selected for a
+    //     CScriptGameObject* — the state that would leave an object argument unchecked — it prints a
+    //     `!!` line saying so. We are never reasoning from a missing line to conclude the bad thing.
+    //   * NO witness lines at all is separable from "the witness is broken" by an INDEPENDENT existing
+    //     signal: the `ARG #n` log. ARG lines present + no witness line = the witness itself failed.
+    //     ARG lines absent too = coop_arg_ok was never called, i.e. never reached first use.
     static bool coop_arg_ok(const CScriptGameObject* p)
     {
+        static bool s_witness = false;
+        if (!s_witness)
+        {
+            s_witness = true;
+            Msg("- COOP(safewrap): ARGWITNESS[CHECKED] pointer overload selected: %s", COOP_FUNCSIG);
+        }
         const bool ok = !p || p->is_valid();
         static u32 s_n = 0;
         ++s_n;
@@ -1430,7 +1455,24 @@ struct SafeWrapBase
         }
         return ok;
     }
-    template <typename T> static bool coop_arg_ok(const T&) { return true; }
+    template <typename T> static bool coop_arg_ok(const T&)
+    {
+        static bool s_witness = false;      // per-instantiation
+        if (!s_witness)
+        {
+            s_witness = true;
+            using bare = std::remove_cv_t<std::remove_pointer_t<std::remove_cv_t<std::remove_reference_t<T>>>>;
+            if constexpr (std::is_pointer_v<std::remove_cv_t<std::remove_reference_t<T>>>
+                          && std::is_same_v<bare, CScriptGameObject>)
+                // THE DEFECT, ANNOUNCED RATHER THAN INFERRED FROM SILENCE.
+                Msg("!! COOP(safewrap): ARGWITNESS[UNCHECKED-OBJECT-ARG] the TEMPLATE catch-all was "
+                    "selected for a CScriptGameObject* argument — THIS ARGUMENT IS NOT BEING CHECKED: %s",
+                    COOP_FUNCSIG);
+            else
+                Msg("- COOP(safewrap): ARGWITNESS[not-an-object] template catch-all: %s", COOP_FUNCSIG);
+        }
+        return true;
+    }
 
     // This generic function accepts ANY instance type (const or non-const)
     // and ANY member function pointer type.
