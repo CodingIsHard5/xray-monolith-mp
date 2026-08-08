@@ -1383,7 +1383,26 @@ struct SafeWrapBase
     //
     // Overloads, not `if constexpr`, so any argument type that is not a game object compiles to a
     // literal `true` and costs nothing.
-    static bool coop_arg_ok(const CScriptGameObject* p) { return !p || p->coop_raw_backing() != nullptr; }
+    // UNTESTED AS OF 2026-08-07 23:50 — built, not yet run. See dev/ORPHAN_DESTROY_CRASH.md.
+    //
+    // v1 of this was `p->coop_raw_backing() != nullptr` and it MEASURABLY DID NOTHING: build
+    // 31236417639 fired this guard 3729 times and still faulted at the identical address as the
+    // build before it (GetRelationType+0x311, 0xE4, same stack, same single SAFE_WRAP'd binding).
+    //
+    // The reason is that a non-null backing is a WEAKER condition than the one object() requires.
+    // object() returns *(CGameObject*)NULL when EITHER `!m_game_object` OR
+    // `m_game_object->lua_game_object() != this` — and v1 only tested the first. A proxy whose
+    // backing is live but no longer points back at it sailed through the guard and faulted anyway.
+    //
+    // is_valid() tests exactly the pair object() tests, so use it. It is no more dangerous than the
+    // call it prevents: is_valid() dereferences m_game_object once, and object() performs that SAME
+    // read before going on to the second, fatal one. Strictly dominating — same exposure, stops
+    // earlier.
+    //
+    // The lesson, for the next person tempted to hand-roll a cheaper check: I wrote a weaker
+    // predicate than the one already sitting next to it, out of caution about a dereference that
+    // was going to happen anyway one line later.
+    static bool coop_arg_ok(const CScriptGameObject* p) { return !p || p->is_valid(); }
     template <typename T> static bool coop_arg_ok(const T&) { return true; }
 
     // This generic function accepts ANY instance type (const or non-const)
