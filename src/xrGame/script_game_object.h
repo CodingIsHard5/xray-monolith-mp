@@ -1455,7 +1455,23 @@ struct SafeWrapBase
         }
         return ok;
     }
-    template <typename T> static bool coop_arg_ok(const T&)
+    // NON-CONST pointer overload. WITHOUT THIS THE GUARD WAS INERT for exactly the calls that matter.
+    // Measured by ARGWITNESS on build 31259733381:
+    //   template chosen: coop_arg_ok<CScriptGameObject*>(CScriptGameObject *const &)
+    //   pointer chosen : coop_arg_ok(const CScriptGameObject *)
+    // A `CScriptGameObject*` lvalue binds to the template's `const T&` by IDENTITY, which OUTRANKS the
+    // qualification conversion (`CScriptGameObject*` -> `const CScriptGameObject*`) the const overload
+    // needed. There is no non-template tiebreak, because the conversion sequences are not equal — I
+    // asserted they were, from reading, and was wrong. Overload resolution is not observable by reading.
+    static bool coop_arg_ok(CScriptGameObject* p) { return coop_arg_ok(static_cast<const CScriptGameObject*>(p)); }
+
+    // And CONSTRAIN the template so no cv/ref spelling can ever pull a game-object pointer back into it.
+    // Belt and braces on purpose: the overload above fixes the case we measured; this removes the whole
+    // class of case, including ones nobody has instantiated yet.
+    template <typename T>
+    static std::enable_if_t<!std::is_same_v<
+        std::remove_cv_t<std::remove_pointer_t<std::remove_cv_t<std::remove_reference_t<T>>>>,
+        CScriptGameObject>, bool> coop_arg_ok(const T&)
     {
         static bool s_witness = false;      // per-instantiation
         if (!s_witness)
