@@ -101,7 +101,14 @@ BOOL lua_busy_hands_debug = TRUE;
 // no AV at all - quieter and harder to diagnose than the bug it replaced.
 // Detection and LOGGING of bad arguments stay unconditional; only the refusal is gated.
 // See dev/ORPHAN_DESTROY_CRASH.md.
-BOOL coop_safewrap_block_bad_args = FALSE;
+// FLIPPED TO TRUE 2026-08-08, and only after option (c) was verified — see the order note below.
+// With it FALSE the shipped build still took the 0xE4 fault at every orphan destroy; with it TRUE and
+// the xr_conditions pcall guard installed, post-expiry access violations measure ZERO
+// (dev/evidence/orphan_expiry_test/optionc: cond-guard installed over 346 conditions, refusal fired
+// 6758x, orphan destroyed, 0 post-expiry AVs, server alive).
+// It was NOT flipped before (c), because the nil this returns can reach an unguarded script site and
+// raise a script error this engine treats as fatal — which is exactly what (c) now catches.
+BOOL coop_safewrap_block_bad_args = TRUE;
 
 // MP fork: the RECEIVER half of the same guard. DEFAULT **ON**, and the asymmetry is deliberate and
 // evidence-based rather than an oversight:
