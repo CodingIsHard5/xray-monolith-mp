@@ -141,6 +141,13 @@ public:
 	// the shedule_Update/UpdateCL/AI-call gates land in increment B. So this is a pure no-op.
 	bool  m_coop_locally_driven;
 	u32   m_coop_locally_driven_ts;   // §14 step 3 (D): time of the last decision that (re)set the flag
+	// §14 step 4 (correction diagnosis): state carried BETWEEN UpdateCL calls so the witness can
+	// answer the one question the A/B could not -- is the applied nudge OUT-PULLED by the local AI,
+	// or DISCARDED outright? Those imply different fixes, so guessing costs a build either way.
+	Fvector m_coop_corr_last_post;    // position we WROTE at the end of the previous call
+	Fvector m_coop_corr_last_dir;     // unit direction we pushed in
+	float   m_coop_corr_last_applied; // metres we pushed
+	bool    m_coop_corr_has_last;
 	enum { COOP_LOCALLY_DRIVEN_TTL_MS = 5000 }; // auto-clear if no decision refresh within this (see .cpp)
 	IC bool coop_locally_driven() const { return m_coop_locally_driven; }
 	// §14 step 3 (increment D): stamp the refresh time on set-true so UpdateCL can auto-clear the flag

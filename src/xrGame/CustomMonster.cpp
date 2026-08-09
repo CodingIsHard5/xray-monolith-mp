@@ -102,6 +102,27 @@ float g_coop_corr_max_speed  = 1.2f;    // m/s: the subject's OWN walk speed (an
 float g_coop_corr_gain       = 0.4f;    // 1/s: closes the measured 3.24 m mean in 2-3 s
 float g_coop_corr_snap       = 10.0f;   // m: above the measured max; a jump beats a long slide
 float g_coop_corr_max_age_ms = 250.0f;  // ms: older than this is not an authority (30 Hz => 33 ms)
+int   g_coop_corr_debug      = 0;       // -coop_correction_debug: per-call witness (see the A/B)
+
+// strstr(Core.Params, "-coop_correction") ALSO MATCHES "-coop_correction_probe" and
+// "-coop_correction_debug" -- so the earlier diagnostic probe flag would have silently switched the
+// correction ON, and a run meant to observe would have been a run that intervened. That is the
+// prefix-collision form of the same silent-null family this file already carries scars from, and it
+// is invisible until a result is inexplicable. Require the flag to END at the match: the next
+// character must not continue the token.
+static bool coop_flag_exact(const char* params, const char* flag)
+{
+	if (!params || !flag)
+		return false;
+	const size_t n = xr_strlen(flag);
+	for (const char* p = strstr(params, flag); p; p = strstr(p + 1, flag))
+	{
+		const char c = p[n];
+		if (c != '_' && c != '-' && !isalnum(static_cast<unsigned char>(c)))
+			return true;
+	}
+	return false;
+}
 
 CCustomMonster::CCustomMonster() :
 	// this is non-polymorphic call of the virtual function cast_entity_alive
@@ -120,6 +141,10 @@ CCustomMonster::CCustomMonster() :
 	m_coop_net_moving = false;
 	m_coop_locally_driven = false; // §14 step 3: default = dense streaming (coop_puppet)
 	m_coop_locally_driven_ts = 0;
+	m_coop_corr_last_post.set(0.f, 0.f, 0.f);
+	m_coop_corr_last_dir.set(0.f, 0.f, 0.f);
+	m_coop_corr_last_applied = 0.f;
+	m_coop_corr_has_last = false;
 }
 
 // §14 step 3 (increment D): setter stamps the refresh time on set-true so UpdateCL can auto-clear the
@@ -1067,7 +1092,17 @@ void CCustomMonster::UpdateCL()
 			{
 				static int s_corr = -1;
 				if (s_corr < 0)
-					s_corr = strstr(Core.Params, "-coop_correction") ? 1 : 0;
+				{
+					s_corr = coop_flag_exact(Core.Params, "-coop_correction") ? 1 : 0;
+					// Parsed HERE, beside the flag it accompanies. A debug flag that is declared and
+					// never read is the silent null this project keeps catching -- the witness would
+					// print nothing and the run would look like it answered the question.
+					g_coop_corr_debug = coop_flag_exact(Core.Params, "-coop_correction_debug") ? 1 : 0;
+					Msg("~ MP_COOP_CORR: armed correction=%d debug=%d (deadzone=%.2f max_speed=%.2f "
+					    "gain=%.2f snap=%.2f max_age=%.0fms)", s_corr, g_coop_corr_debug,
+					    g_coop_corr_deadzone, g_coop_corr_max_speed, g_coop_corr_gain,
+					    g_coop_corr_snap, g_coop_corr_max_age_ms);
+				}
 				if (s_corr)
 				{
 					const net_update& auth = NET.back();
@@ -1093,7 +1128,40 @@ void CCustomMonster::UpdateCL()
 							{
 								Fvector dir;
 								dir.sub(auth.p_pos, NET_Last.p_pos).normalize_safe();
+
+								// §14 step 4 DIAGNOSIS. The paired A/B showed the correction is
+								// applied and then UNDONE (a 10 m snap moved the puppet ~7 m and it
+								// returned within ~12 s), but SNAP was the only thing logged, so it
+								// could not say WHICH undoing:
+								//   OUT-PULLED  the nudge persists and the local AI walks it back at
+								//               its own pace -> fix = reduce divergence at source
+								//   DISCARDED   the nudge never survives to the next call, i.e.
+								//               something re-derives the position from a source we
+								//               did not correct -> fix = correct that source instead
+								// The discriminator is `back`: how far the puppet moved AGAINST the
+								// previous push, measured from the position we actually WROTE. Near
+								// the full previous push, within one call, means DISCARDED; a small
+								// fraction accumulating over many calls means OUT-PULLED.
+								if (g_coop_corr_debug && m_coop_corr_has_last)
+								{
+									Fvector d;
+									d.sub(NET_Last.p_pos, m_coop_corr_last_post);
+									const float back = -d.dotproduct(m_coop_corr_last_dir);
+									static u32 s_cdbg = 0;
+									if ((s_cdbg++ % 20) == 0)
+										Msg("~ MP_COOP_CORRDBG: id=%u err=%.2f applied=%.3f "
+										    "prev_applied=%.3f back=%.3f frac=%.2f dt=%.3f",
+										    ID(), err, move, m_coop_corr_last_applied, back,
+										    m_coop_corr_last_applied > EPS_S
+										        ? back / m_coop_corr_last_applied : 0.f,
+										    Device.fTimeDelta);
+								}
+
 								NET_Last.p_pos.mad(dir, move);
+								m_coop_corr_last_post    = NET_Last.p_pos;
+								m_coop_corr_last_dir     = dir;
+								m_coop_corr_last_applied = move;
+								m_coop_corr_has_last     = true;
 							}
 						}
 					}
