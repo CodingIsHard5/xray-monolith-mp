@@ -3442,6 +3442,18 @@ void CCC_RegisterCommands()
 	CMD3(CCC_DiscordStatus, "discord_status", &psDeviceFlags2, rsDiscord);
 	CMD4(CCC_Float, "discord_update_rate", &discord_update_rate, .5f, 5.f);
 
+	// §14 step 4 — soft position correction (locally-driven co-op puppets only, -coop_correction).
+	// Registered so the acceptance A/B can vary them without a 21-minute rebuild.
+	{
+		extern float g_coop_corr_deadzone, g_coop_corr_max_speed, g_coop_corr_gain,
+			g_coop_corr_snap, g_coop_corr_max_age_ms;
+		CMD4(CCC_Float, "coop_corr_deadzone",   &g_coop_corr_deadzone,   0.0f,  20.0f);
+		CMD4(CCC_Float, "coop_corr_max_speed",  &g_coop_corr_max_speed,  0.0f,  20.0f);
+		CMD4(CCC_Float, "coop_corr_gain",       &g_coop_corr_gain,       0.0f,  10.0f);
+		CMD4(CCC_Float, "coop_corr_snap",       &g_coop_corr_snap,       0.5f, 200.0f);
+		CMD4(CCC_Float, "coop_corr_max_age_ms", &g_coop_corr_max_age_ms, 0.0f, 5000.0f);
+	}
+
 	psActorFlags.set(rsCODPickup, TRUE);
 	CMD3(CCC_Mask, "cl_cod_pickup_mode", &psDeviceFlags2, rsCODPickup);
 	psActorFlags.set(AF_MULTI_ITEM_PICKUP, TRUE);

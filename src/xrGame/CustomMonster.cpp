@@ -92,6 +92,17 @@ void CCustomMonster::SAnimState::Create(IKinematicsAnimated* K, LPCSTR base)
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 
+// §14 step 4 — soft position correction parameters. EVERY ONE IS DERIVED FROM A MEASUREMENT
+// (run 4 and the probe run: drift mean 3.24/3.01 m, p95 6.66/6.32, max 7.92/8.05; net-stream floor
+// 0.15 m; subject locomotion ~1.16 m/s). They are console variables so an A/B needs no rebuild --
+// the point of the acceptance run is to test these values, and a value you cannot vary is a guess
+// you cannot check. See dev/CORRECTION_PLAN.md.
+float g_coop_corr_deadzone   = 1.0f;    // m: below this nothing is player-visible
+float g_coop_corr_max_speed  = 1.2f;    // m/s: the subject's OWN walk speed (anti-sliding rule)
+float g_coop_corr_gain       = 0.4f;    // 1/s: closes the measured 3.24 m mean in 2-3 s
+float g_coop_corr_snap       = 10.0f;   // m: above the measured max; a jump beats a long slide
+float g_coop_corr_max_age_ms = 250.0f;  // ms: older than this is not an authority (30 Hz => 33 ms)
+
 CCustomMonster::CCustomMonster() :
 	// this is non-polymorphic call of the virtual function cast_entity_alive
 	// just to remove warning C4355 if we use this instead
@@ -1025,6 +1036,69 @@ void CCustomMonster::UpdateCL()
 						FlushLog();
 					}
 				}
+			// §14 step 4 — SOFT POSITION CORRECTION for a locally-driven puppet.
+			//
+			// WHY HERE, AND NOWHERE ELSE: for a locally-driven monster UpdatePositionAnimation()
+			// has just filled NET_Last.p_pos BY REFERENCE with the LOCAL-AI-computed position, and
+			// translate_over below is the ONLY writer of the visible XFORM (CPHMovementControl::
+			// SetPosition moves the physics box only). Correcting the value between those two lines
+			// means animation, physics and render all see one consistent position -- there is no
+			// second place that could disagree.
+			//
+			// It also explains the probe: NET_Last read dist=0.00 from the local position on all 59
+			// samples BECAUSE IT IS the local position on this path. The authority is NET.back(),
+			// which net_Import fills unconditionally and which measured 15-48 ms old, i.e. one
+			// packet interval at the server's 30 Hz.
+			//
+			// MEASURED, NOT TUNED (run 4 and the probe run, two builds, two spawns):
+			//   drift mean 3.24 / 3.01 m, p95 6.66 / 6.32, max 7.92 / 8.05; net-stream floor 0.15 m;
+			//   subject locomotion ~1.16 m/s.
+			// deadzone 1.0 m   : below this nothing is player-visible and the 0.15 m floor says
+			//                    sub-metre error is normal even when everything works.
+			// max speed 1.2 m/s: the subject's OWN walking speed. THE ANTI-SLIDING RULE -- a
+			//                    correction that outruns the legs reads as a glide, and no drift
+			//                    number would ever have told us that.
+			// gain 0.4 /s      : closes the measured 3.24 m mean in 2-3 s, proportional.
+			// snap 10.0 m      : above the measured 7.92/8.05 max; past that a jump beats a slide.
+			//
+			// NET-STREAMED PUPPETS ARE NOT TOUCHED. They measured 0.15 m; correcting them would ADD
+			// error. That is why this is gated on m_coop_locally_driven and not merely on Remote().
+			if (!animation_movement_controlled() && Remote() && m_coop_locally_driven && !NET.empty())
+			{
+				static int s_corr = -1;
+				if (s_corr < 0)
+					s_corr = strstr(Core.Params, "-coop_correction") ? 1 : 0;
+				if (s_corr)
+				{
+					const net_update& auth = NET.back();
+					const u32 age = Level().timeServer() - auth.dwTimeStamp;
+					// STALE AUTHORITY IS NOT AN AUTHORITY. The queue is culled on a 600 ms window,
+					// so a sample can sit here after the stream has stopped. Correcting toward it
+					// would drag the puppet to where the server had it a second ago -- adding error
+					// while looking like a fix.
+					if (age <= u32(g_coop_corr_max_age_ms) && _valid(auth.p_pos))
+					{
+						const float err = NET_Last.p_pos.distance_to(auth.p_pos);
+						if (err >= g_coop_corr_snap)
+						{
+							NET_Last.p_pos = auth.p_pos;   // hopeless: a jump beats a long slide
+							Msg("~ MP_COOP_CORR: id=%u SNAP err=%.2f age=%ums", ID(), err, age);
+						}
+						else if (err > g_coop_corr_deadzone)
+						{
+							const float step = _min(g_coop_corr_gain * err, g_coop_corr_max_speed)
+							                   * Device.fTimeDelta;
+							const float move = _min(step, err - g_coop_corr_deadzone);
+							if (move > EPS_S)
+							{
+								Fvector dir;
+								dir.sub(auth.p_pos, NET_Last.p_pos).normalize_safe();
+								NET_Last.p_pos.mad(dir, move);
+							}
+						}
+					}
+				}
+			}
 			if (!animation_movement_controlled())
 				XFORM().translate_over(NET_Last.p_pos);
 
