@@ -219,7 +219,7 @@ class_<CScriptGameObject> script_register_game_object2(class_<CScriptGameObject>
 		.def("give_talk_message2",
 		     (void (CScriptGameObject::*)(LPCSTR, LPCSTR, LPCSTR, LPCSTR))(&CScriptGameObject::AddIconedTalkMessage))
 
-		.def("has_info", &CScriptGameObject::HasInfo)
+		.def("has_info", SAFE_WRAP(&CScriptGameObject::HasInfo))
 		.def("dont_has_info", &CScriptGameObject::DontHasInfo)
 
 		.def("get_task_state", &CScriptGameObject::GetGameTaskState)
@@ -300,7 +300,7 @@ class_<CScriptGameObject> script_register_game_object2(class_<CScriptGameObject>
 		.def("set_relation", SAFE_WRAP(&CScriptGameObject::SetRelation))
 
 		.def("community_goodwill", &CScriptGameObject::GetCommunityGoodwill_obj)
-		.def("set_community_goodwill", &CScriptGameObject::SetCommunityGoodwill_obj)
+		.def("set_community_goodwill", SAFE_WRAP(&CScriptGameObject::SetCommunityGoodwill_obj))
 
 		.def("sympathy", &CScriptGameObject::GetSympathy)
 		.def("set_sympathy", &CScriptGameObject::SetSympathy)
@@ -316,7 +316,7 @@ class_<CScriptGameObject> script_register_game_object2(class_<CScriptGameObject>
 		.def("character_reputation", &CScriptGameObject::CharacterReputation)
 		.def("set_character_reputation", &CScriptGameObject::SetCharacterReputation)
 		.def("change_character_reputation", &CScriptGameObject::ChangeCharacterReputation)
-		.def("character_community", &CScriptGameObject::CharacterCommunity)
+		.def("character_community", SAFE_WRAP(&CScriptGameObject::CharacterCommunity))
 		.def("set_character_community", &CScriptGameObject::SetCharacterCommunity)
 
 		.def("get_actor_relation_flags", SAFE_WRAP(&CScriptGameObject::get_actor_relation_flags))
@@ -576,7 +576,7 @@ class_<CScriptGameObject> script_register_game_object2(class_<CScriptGameObject>
 		.def("is_entity_alive", &CScriptGameObject::IsEntityAlive)
 		.def("is_inventory_item", &CScriptGameObject::IsInventoryItem)
 		.def("is_inventory_owner", &CScriptGameObject::IsInventoryOwner)
-		.def("is_actor", &CScriptGameObject::IsActor)
+		.def("is_actor", SAFE_WRAP(&CScriptGameObject::IsActor))
 		.def("is_custom_monster", &CScriptGameObject::IsCustomMonster)
 		.def("is_weapon", &CScriptGameObject::IsWeapon)
 		//.def("is_medkit", &CScriptGameObject::IsMedkit)

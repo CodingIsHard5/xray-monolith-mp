@@ -94,10 +94,10 @@ class_<CScriptGameObject> script_register_game_object1(class_<CScriptGameObject>
 		.def("bounding_box", SAFE_WRAP(&CScriptGameObject::bounding_box))
 
 		.def("center", SAFE_WRAP(&CScriptGameObject::Center))
-		.def("position", &CScriptGameObject::Position)
-		.def("direction", &CScriptGameObject::Direction)
+		.def("position", SAFE_WRAP(&CScriptGameObject::Position))
+		.def("direction", SAFE_WRAP(&CScriptGameObject::Direction))
 		.def("clsid", SAFE_WRAP(&CScriptGameObject::clsid))
-		.def("id", &CScriptGameObject::ID)
+		.def("id", SAFE_WRAP(&CScriptGameObject::ID))
 		.def("story_id", &CScriptGameObject::story_id)
 		.def("section", SAFE_WRAP(&CScriptGameObject::Section))
 		.def("name", SAFE_WRAP(&CScriptGameObject::Name))
@@ -131,8 +131,8 @@ class_<CScriptGameObject> script_register_game_object1(class_<CScriptGameObject>
 		.def("fov", &CScriptGameObject::GetFOV)
 		.def("range", &CScriptGameObject::GetRange)
 		.def("relation", SAFE_WRAP(&CScriptGameObject::GetRelationType))
-		.def("script", &CScriptGameObject::SetScriptControl)
-		.def("get_script", &CScriptGameObject::GetScriptControl)
+		.def("script", SAFE_WRAP(&CScriptGameObject::SetScriptControl))
+		.def("get_script", SAFE_WRAP(&CScriptGameObject::GetScriptControl))
 		.def("get_script_name", &CScriptGameObject::GetScriptControlName)
 		.def("reset_action_queue", SAFE_WRAP(&CScriptGameObject::ResetActionQueue))
 		.def("see", SAFE_WRAP(&CScriptGameObject::CheckObjectVisibility))
@@ -204,7 +204,7 @@ class_<CScriptGameObject> script_register_game_object1(class_<CScriptGameObject>
 		//		.def("best_hit",					&CScriptGameObject::GetBestHit)
 		//		.def("best_sound",					&CScriptGameObject::GetBestSound)
 		.def("best_danger", &CScriptGameObject::GetBestDanger)
-		.def("best_enemy", &CScriptGameObject::GetBestEnemy)
+		.def("best_enemy", SAFE_WRAP(&CScriptGameObject::GetBestEnemy))
 		.def("best_item", &CScriptGameObject::GetBestItem)
 		.def("action_count", &CScriptGameObject::GetActionCount)
 		.def("action_by_index", SAFE_WRAP(&CScriptGameObject::GetActionByIndex))
@@ -463,8 +463,8 @@ class_<CScriptGameObject> script_register_game_object1(class_<CScriptGameObject>
 
 		.def("reload_weapon", &CScriptGameObject::reload_weapon)
 
-		.def("coop_is_dead", &CScriptGameObject::coop_is_dead)
-		.def("coop_respawn_timer", &CScriptGameObject::coop_respawn_timer)
-		.def("coop_locally_driven", &CScriptGameObject::coop_locally_driven)
-		.def("coop_set_locally_driven", &CScriptGameObject::coop_set_locally_driven);
+		.def("coop_is_dead", SAFE_WRAP(&CScriptGameObject::coop_is_dead))
+		.def("coop_respawn_timer", SAFE_WRAP(&CScriptGameObject::coop_respawn_timer))
+		.def("coop_locally_driven", SAFE_WRAP(&CScriptGameObject::coop_locally_driven))
+		.def("coop_set_locally_driven", SAFE_WRAP(&CScriptGameObject::coop_set_locally_driven));
 }
