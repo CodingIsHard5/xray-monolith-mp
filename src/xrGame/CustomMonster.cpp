@@ -581,6 +581,52 @@ void CCustomMonster::shedule_Update(u32 DT)
 				FlushLog();
 			}
 		}
+
+		// §14 step 4 — THE LOAD-BEARING PROOF FOR SOFT POSITION CORRECTION, AND NOTHING MORE.
+		//
+		// Run 4 measured a locally-driven puppet sitting mean 3.24 m / p95 6.66 / max 7.92 from the
+		// server's authoritative position, while a net-streamed one sits at 0.15 m. Correction is
+		// worth building for the locally-driven case -- but ONLY if this client actually HAS a fresh
+		// authoritative position to correct toward. A lerp written on top of an unverified source is
+		// how a feature comes to LOOK implemented while correcting toward something stale, which is
+		// worse than not building it: it retires the problem in everyone's head.
+		//
+		// So this prints the candidates and their AGE, and applies nothing.
+		//
+		// TWO CANDIDATES, because the scope named the wrong one and the code says so:
+		//   NET.back()  -- net_Import pushes every accepted sample here unconditionally (it is
+		//                  guarded only by _valid() and a monotonic timestamp), so it should be
+		//                  fresh on this path.
+		//   NET_Last    -- only assigned inside the interpolation branch below, which a
+		//                  locally-driven puppet SKIPS. Expected to be stale; printed so that
+		//                  expectation is tested rather than assumed.
+		// Whichever is fresh is the source correction must read. If NEITHER is, the approach is
+		// dead and the fix is to re-issue the order more often instead.
+		{
+			static int s_corr_probe = -1;
+			if (s_corr_probe < 0)
+				s_corr_probe = strstr(Core.Params, "-coop_correction_probe") ? 1 : 0;
+			// The else-branch this sits in also covers non-Remote entities, so re-assert the
+			// population explicitly rather than relying on where the block happens to be nested.
+			if (s_corr_probe && Remote() && m_coop_locally_driven && !NET.empty())
+			{
+				static u32 s_corr_log = 0;
+				if ((s_corr_log++ % 60) == 0)   // throttled; a single subject in the harness
+				{
+					const u32 now = Level().timeServer();
+					const net_update& back = NET.back();
+					const Fvector local = Position();
+					Msg("~ MP_COOP_CORR_PROBE: id=%u local %.2f,%.2f,%.2f | NET.back %.2f,%.2f,%.2f "
+					    "age=%dms dist=%.2f | NET_Last %.2f,%.2f,%.2f dist=%.2f | queue=%u",
+					    ID(), local.x, local.y, local.z,
+					    back.p_pos.x, back.p_pos.y, back.p_pos.z,
+					    int(now - back.dwTimeStamp), local.distance_to(back.p_pos),
+					    NET_Last.p_pos.x, NET_Last.p_pos.y, NET_Last.p_pos.z,
+					    local.distance_to(NET_Last.p_pos), u32(NET.size()));
+					FlushLog();
+				}
+			}
+		}
 		// here is monster AI call
 		m_fTimeUpdateDelta = dt;
 		Device.Statistic->AI_Think.Begin();
