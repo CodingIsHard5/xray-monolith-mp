@@ -98,8 +98,16 @@ void CCustomMonster::SAnimState::Create(IKinematicsAnimated* K, LPCSTR base)
 // the point of the acceptance run is to test these values, and a value you cannot vary is a guess
 // you cannot check. See dev/CORRECTION_PLAN.md.
 float g_coop_corr_deadzone   = 1.0f;    // m: below this nothing is player-visible
-float g_coop_corr_max_speed  = 1.2f;    // m/s: the subject's OWN walk speed (anti-sliding rule)
-float g_coop_corr_gain       = 0.4f;    // 1/s: closes the measured 3.24 m mean in 2-3 s
+// max_speed/gain SHIPPED at the measured winning arm (2026-08-11 playtest, dev/PLAYTEST_RESULT.md).
+// The original anti-sliding values (max_speed 1.2 = the subject's own walk speed, gain 0.4) were
+// the arm that measurably LOSES: the local AI out-pulls a walking-speed correction (error 1.04 ->
+// 3.49 m, climbing). At gain 3.0 / max_speed 8.0 the error pins at the deadzone (1.0-1.3 m over
+// ~1260 calls) and the human playtest could not tell corrected from uncorrected on a flesh or a
+// dog ("no difference in position or speed or anything") -- the 3.2 m/s correction the anti-slide
+// rule feared does not read as gliding. The cap stays at 8 (not unbounded): above the measured
+// error regime it is the snap's job, not the smooth corrector's.
+float g_coop_corr_max_speed  = 8.0f;    // m/s: winning-arm cap (was 1.2, the losing anti-sliding cap)
+float g_coop_corr_gain       = 3.0f;    // 1/s: winning-arm gain (was 0.4, out-pulled by the local AI)
 float g_coop_corr_snap       = 10.0f;   // m: above the measured max; a jump beats a long slide
 float g_coop_corr_max_age_ms = 250.0f;  // ms: older than this is not an authority (30 Hz => 33 ms)
 int   g_coop_corr_debug      = 0;       // -coop_correction_debug: per-call witness (see the A/B)
