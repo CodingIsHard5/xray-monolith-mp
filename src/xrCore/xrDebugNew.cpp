@@ -211,7 +211,26 @@ void xrDebug::gather_info(const char* expression, const char* description, const
 		if (shared_str_initialized)
 			Msg("stack trace:\n");
 
+#ifdef DEDICATED_SERVER
+		// The SEH filter below already refuses in-process symbolication under DEDICATED_SERVER
+		// (dbghelp parses the full PDB under wine: measured 2026-08-11 as a 2 -> 11.9 GiB
+		// allocation runaway at ~1.6 GiB/s that the 12G cgroup cap then kills MID-DUMP — every
+		// archived death log ends at "SymInit:" for exactly this reason, and the truncation has
+		// hidden every fault's identity). But THIS is the fatal()/assert entrance, and a gate in
+		// one entrance protects only the path someone remembered to route through it: the Lua
+		// "not enough memory" deaths come through HERE. Print the cheap Lua stack (it demonstrably
+		// completes -- it precedes the SymInit line in every archived death), skip the walker, and
+		// say where the symbols come from instead. Raw addresses in the log + the CI artifact PDB
+		// + tools/pdb_symbols.py is this project's working symbolication path; the in-process
+		// walker has never once completed on this server.
+		printLuaStack();
+		Msg("(dedicated server: native stack walk SKIPPED -- symbolicate the raw addresses "
+		    "offline against the CI artifact PDB; in-process dbghelp under wine is the recorded "
+		    "crash-handler memory runaway)");
+		FlushLog();
+#else
         LogStackTrace(nullptr, true);
+#endif
 
 #ifdef USE_OWN_ERROR_MESSAGE_WINDOW
 		buffer += xr_sprintf(buffer, assertion_size - u32(buffer - buffer_base), "stack trace:%s%s", endline, endline);
