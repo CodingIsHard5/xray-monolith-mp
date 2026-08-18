@@ -15,6 +15,7 @@
 #include "GameTaskManager.h"                        // MP fork (§19): coop_broadcast_tasks on connect
 #include "GameTask.h"                               // MP fork (test): -coop_test_quest synthetic task
 #include "ai_space.h"                              // MP fork: ai().alife()
+#include "level_graph.h"                           // MP fork (§14 step 7 phase 4 follow-up 4): nav-mesh validation of banked positions
 #include "script_engine.h"                         // MP fork: server-side Lua init hook
 #include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
 #include "mp_anchors.h"                            // MP fork: A-Life attention anchors
@@ -86,6 +87,61 @@ static bool coop_plausible_pos(const Fvector& p)
 {
 	const float LIMIT = 32768.f;   // ~16x the largest real level extent
 	return !!_valid(p) && _abs(p.x) < LIMIT && _abs(p.y) < LIMIT && _abs(p.z) < LIMIT;
+}
+
+// MP fork (§14 step 7 phase 4 follow-up 4 / doc §9.4): "finite, and inside a 32 km box" is not the
+// same thing as "somewhere a player can stand", and the difference cost a real playtest. On
+// 2026-08-11 the balloon killed a join mid-process; the position banked out of that half-finished
+// join passed coop_plausible_pos above and was still not on the level's nav mesh — the join window
+// logged `Invalid position for CLevelGraph::vertex_id` at the moment it was sampled — and the
+// rejoin dropped Caden inside a level-changer volume, prompting him to travel to Darkscape. He had
+// to decline the prompt and walk clear of it. A position you cannot be put back at is worse than
+// no position, so a banked one now has to lie inside the level the graph actually describes.
+// This is the same question the engine asks about its own CSEs
+// (CSE_ALifeDynamicObject::synchronize_location).
+//
+// This is NOT the expiry that D3.1 decided against. D3.1 refuses to demote a player for the age of
+// their record; this refuses a record that names a place that does not exist. A record stays good
+// however old it is — it just has to point somewhere.
+//
+// The no-graph case returns TRUE, deliberately. A server with no level graph loaded cannot judge
+// the position, and a validator that fails closed when it cannot see would stop every player from
+// ever banking a recovery record for a reason that has nothing to do with them. Absence of
+// evidence is not evidence of a bad position; the plausibility gate above still applies.
+static bool coop_recoverable_pos(const Fvector& p, u32* out_vertex = NULL)
+{
+	if (out_vertex)
+		*out_vertex = u32(-1);
+
+	if (!coop_plausible_pos(p))
+		return false;
+
+	const CLevelGraph* graph = ai().get_level_graph();
+	if (!graph)
+		return true;                                  // cannot judge -> do not reject
+
+	// THIS is the test, and it is the one the evidence names. `Invalid position for
+	// CLevelGraph::vertex_id` — the line the interrupted join logged — is emitted from exactly one
+	// place: vertex_id() finding !valid_vertex_position(). The banked garbage was OUTSIDE THE
+	// LEVEL BOX, and this rejects it.
+	if (!graph->valid_vertex_position(p))
+		return false;
+
+	// The vertex lookup is deliberately ADVISORY — resolved for the caller's node id, never a
+	// reason to refuse. It was load-bearing in the first draft of this function and that was a
+	// bug waiting to happen: vertex_id() answers by exact xz cell, so it returns u32(-1) for a
+	// player standing somewhere with no AI node directly beneath them (on a rock, on a ladder,
+	// inside geometry the mesh does not cover) — all real places a real player really stands.
+	// Rejecting on it would quietly demote such a player to their logged-off position, which is
+	// the same class of surprise this whole check exists to prevent, and it would do it to
+	// somebody who did nothing wrong. Fix what the log names.
+	if (out_vertex)
+	{
+		const u32 vertex = graph->vertex_id(p);
+		if (graph->valid_vertex_id(vertex))
+			*out_vertex = vertex;
+	}
+	return true;
 }
 
 // MP fork (§14 step 8 phase 1 / doc §6): the two ownership tiers. See mp_coop_owner.h for why
@@ -1078,10 +1134,14 @@ void game_sv_Single::coop_sample_recoveries()
 			// hypothetical — a body whose reclaim delivery failed reads as finite garbage
 			// (114688, -4.4e17, -3128 measured 2026-07-26), and sampling it would overwrite the
 			// good record the player's own crash recovery depends on. Keep the last good one.
-			if (!coop_plausible_pos(actor->o_Position))
+			// follow-up 4: and it must be a place, not just a number — see coop_recoverable_pos().
+			// The magnitude gate above catches garbage; this catches the interrupted join that
+			// banked an out-of-bounds position and put the returning player in a level-changer volume.
+			u32 nav_vertex = u32(-1);
+			if (!coop_recoverable_pos(actor->o_Position, &nav_vertex))
 			{
-				Msg("! COOP(recovery): '%s' has an implausible actor position %.1f,%.1f,%.1f — NOT "
-					"sampled (keeping any earlier record)", nm,
+				Msg("! COOP(recovery): '%s' has an unusable actor position %.1f,%.1f,%.1f (outside the "
+					"level bounds or implausible) — NOT sampled (keeping any earlier record)", nm,
 					actor->o_Position.x, actor->o_Position.y, actor->o_Position.z);
 				return;
 			}
@@ -1104,6 +1164,12 @@ void game_sv_Single::coop_sample_recoveries()
 				r.node_id = dyn->m_tNodeID;
 				r.graph_id = dyn->m_tGraphID;
 			}
+			// Prefer the vertex resolved from the position we are ACTUALLY banking. m_tNodeID is
+			// only as fresh as the last synchronize_location(), so it can name a vertex the banked
+			// position has since walked away from — and a record whose position and node disagree
+			// is exactly the shape that strands somebody. Same source, one answer.
+			if (nav_vertex != u32(-1))
+				r.node_id = nav_vertex;
 
 			if (coop_recovery* existing = self->coop_find_recovery(nm))
 				*existing = r;
@@ -2417,7 +2483,20 @@ void game_sv_Single::coop_poll_spawns()
 			LPCSTR pos_source = have_saved_pos ? "LOGGED-OFF" : "none";
 			if (coop_recovery* rec = coop_find_recovery(client_name))
 			{
-				if (rec->persisted && coop_plausible_pos(rec->pos))
+				// follow-up 4: the sampler refuses to BANK an out-of-bounds position, but records
+				// written before it did are already on disk, and a sidecar outlives the build that
+				// wrote it. Check here too, and the check is cheap next to stranding somebody.
+				// Refusing costs the player nothing they can measure: they fall through to the
+				// LOGGED-OFF position below, which is the same place the four-case argument sends
+				// anyone without a usable record.
+				const bool rec_usable = rec->persisted && coop_recoverable_pos(rec->pos);
+				if (rec->persisted && !rec_usable)
+					Msg("! COOP(resume): '%s' has a recovery position %.1f,%.1f,%.1f that is outside the "
+						"level bounds — REFUSED, falling back to the logged-off position (a position "
+						"nobody can stand at is worse than none: it strands them in geometry)",
+						client_name, rec->pos.x, rec->pos.y, rec->pos.z);
+
+				if (rec_usable)
 				{
 					saved_pos = rec->pos;
 					have_saved_pos = true;
