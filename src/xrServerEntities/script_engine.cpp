@@ -516,6 +516,54 @@ extern void export_classes(lua_State* L);
 extern xr_unordered_map<std::string, std::set<std::string>> unlocalizers;
 extern bool unlocalizerPassed;
 
+// ---------------------------------------------------------------------------------------------
+// Balloon campaign step 1b (2026-08-19): name the requester of a failed LuaJIT arena allocation.
+//
+// The witness run answered "how full was the arena" and immediately raised "who asked for 256 MiB
+// out of 512". The engine already dumps a Lua stack on script errors, but not one of those dumps
+// survives an out-of-memory: get_lua_stack() builds xr_strings, and allocation is the thing that
+// just failed. This walker therefore touches NO allocator at all — lua_getstack and
+// lua_getinfo("Sl") only read existing call frames and copy a chunk name into the caller's
+// lua_Debug, both of which are already-owned memory.
+//
+// Three deliberate restrictions, because this runs from INSIDE the allocator:
+//   * a re-entry flag, since anything this function did that allocated would arrive back here;
+//   * a saved lua_State captured at init rather than a call through ai(), which may not exist
+//     yet (and asking a manager for a pointer is more machinery than reading one);
+//   * a fixed frame budget, so a deep stack cannot turn one log line into a page.
+//
+// KNOWN LIMIT, stated rather than discovered later: the saved state is the MAIN state. A failure
+// raised inside a coroutine reports the main stack, which will name the resume site instead of
+// the running frame. That is still the right neighbourhood, and it is the honest thing this can
+// deliver without tracking every state the VM creates.
+static lua_State* s_arena_ctx_L = NULL;
+static bool       s_arena_ctx_busy = false;
+
+static void coop_arena_lua_context(char* out, size_t n)
+{
+	if (!out || n == 0) return;
+	out[0] = 0;
+	lua_State* const L = s_arena_ctx_L;
+	if (!L || s_arena_ctx_busy) return;
+	s_arena_ctx_busy = true;
+
+	size_t off = 0;
+	lua_Debug ar;
+	for (int lvl = 0; lvl < 8; ++lvl)
+	{
+		if (!lua_getstack(L, lvl, &ar)) break;
+		if (!lua_getinfo(L, "Sl", &ar)) break;
+		const char* src = ar.short_src[0] ? ar.short_src : "?";
+		const int wrote = _snprintf(out + off, n - off - 1, "%s%s:%d",
+			off ? " <- " : "", src, ar.currentline);
+		if (wrote <= 0) break;
+		off += (size_t)wrote;
+		if (off + 16 >= n) break;
+	}
+	out[n - 1] = 0;
+	s_arena_ctx_busy = false;
+}
+
 void CScriptEngine::init()
 {
 #ifdef USE_LUA_STUDIO
@@ -525,6 +573,12 @@ void CScriptEngine::init()
 #endif // #ifdef USE_LUA_STUDIO
 
 	CScriptStorage::reinit();
+
+	// Step 1b: (re)publish the state the arena allocator will describe. Done here rather than once
+	// at startup because reinit() replaces the VM, and a stale lua_State read from inside the
+	// allocator is far worse than no context at all.
+	s_arena_ctx_L = lua();
+	xr_alloc_set_lua_context_fn(&coop_arena_lua_context);
 
 #ifdef USE_LUA_STUDIO
     if (m_lua_studio_world || strstr(Core.Params, "-lua_studio")) {

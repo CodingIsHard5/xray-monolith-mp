@@ -333,6 +333,23 @@ extern "C" XRCORE_API void __cdecl xr_alloc_msg(const char* s)
 	if (s && *s) Log(s);
 }
 
+// Step 1b: see log.h for why this is a setter and not an exported pointer. Null until the script
+// engine registers, which means an arena failure before the VM exists prints no context rather
+// than inventing one.
+static xr_alloc_lua_ctx_fn s_xr_alloc_lua_ctx = NULL;
+
+extern "C" XRCORE_API void xr_alloc_set_lua_context_fn(xr_alloc_lua_ctx_fn fn)
+{
+	s_xr_alloc_lua_ctx = fn;
+}
+
+extern "C" XRCORE_API void __cdecl xr_alloc_lua_context(char* out, size_t out_size)
+{
+	if (!out || !out_size) return;
+	out[0] = 0;
+	if (s_xr_alloc_lua_ctx) s_xr_alloc_lua_ctx(out, out_size);
+}
+
 void Log(const char* msg, const char* dop)
 {
 	if (!dop)

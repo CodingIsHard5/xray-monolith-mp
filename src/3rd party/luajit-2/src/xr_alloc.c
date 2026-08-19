@@ -18,6 +18,9 @@
 // For the same reason every line carries &g_heap — two different addresses in one log is the
 // direct evidence of a second arena, and one address is the direct evidence against it.
 extern void __cdecl xr_alloc_msg(const char* s);
+// Step 1b: fills `out` with a Lua call-site chain, or leaves it empty when no VM has registered
+// one yet. Guaranteed not to allocate — see xrCore/log.h and the walker in script_engine.cpp.
+extern void __cdecl xr_alloc_lua_context(char* out, size_t out_size);
 
 typedef long (*PNTAVM)(HANDLE handle, void **addr, ULONG zbits,
 		       size_t *size, ULONG alloctype, ULONG prot);
@@ -47,7 +50,8 @@ static long g_initStatus = 0;        /* NTSTATUS from the one reservation, was i
 static size_t g_initSize = 0;        /* what the kernel actually handed back                    */
 static unsigned int g_failCount = 0; /* allocation failures since process start                 */
 static int g_reported = 0;           /* has the arena been described once, post log-init?       */
-static char g_msgBuf[512];
+static char g_msgBuf[1024];
+static char g_ctxBuf[384];
 
 /* Occupancy of the arena right now: free chunks, and the longest contiguous free run — the run
 ** is the number that decides an allocation, because find_free wants one unbroken stretch. */
@@ -82,15 +86,21 @@ static void arena_report(const char* why, int wantChunks, size_t wantBytes)
 	/* One line, self-contained, greppable on "COOP(luajit-arena)". The largest contiguous run is
 	** the number that actually decides an allocation — a big free total next to a small run is
 	** fragmentation, a small free total is exhaustion, and the two want different fixes. */
+	/* Who asked. Only on a failure: the boot report runs before any VM exists, and asking then
+	** would print an empty field on every single launch for no reason. */
+	g_ctxBuf[0] = 0;
+	if (wantChunks > 0)
+		xr_alloc_lua_context(g_ctxBuf, sizeof(g_ctxBuf));
 	snprintf(g_msgBuf, sizeof(g_msgBuf),
 		"%s COOP(luajit-arena): %s |%s free %d/%d chunk(s) (%d KiB), largest contiguous run "
-		"%d chunk(s) (%d KiB) | base %p size %llu status 0x%08lx | map@%p failures %u",
+		"%d chunk(s) (%d KiB) | base %p size %llu status 0x%08lx | map@%p failures %u%s%s",
 		(fc == 0 || (wantChunks > 0 && run < wantChunks)) ? "!" : "-",
 		why, want,
 		fc, (int)CHUNK_COUNT, (int)((long long)fc * CHUNK_SIZE / 1024),
 		run, (int)((long long)run * CHUNK_SIZE / 1024),
 		g_heap, (unsigned long long)g_initSize, (unsigned long)g_initStatus,
-		(void*)&g_heap, g_failCount);
+		(void*)&g_heap, g_failCount,
+		g_ctxBuf[0] ? " | lua " : "", g_ctxBuf);
 	g_msgBuf[sizeof(g_msgBuf) - 1] = 0;
 	xr_alloc_msg(g_msgBuf);
 }
