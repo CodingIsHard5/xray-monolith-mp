@@ -1660,6 +1660,23 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 			continue;
 		}
 
+		// Campaign pre-item (Overseer, 2026-08-18): entity 0 is not a body, it is the GRAPH
+		// ACTOR. A sidecar naming it makes the restore below reserve, freeze and detach the
+		// level's actor, and the next client connect AVs at 0x14039C5C4 (+0x3D0 off null) —
+		// a server-killer that is indistinguishable from a real crash at triage time. The fu4
+		// harness produced it live from a minted fixture. Refuse it here, loudly, and take the
+		// same fresh-actor path a stale binding takes.
+		// Scope note: the strictly stronger guard ("refuse whatever ai().alife().graph().actor()
+		// currently points at") is NOT taken — that pointer follows the last spawned player, so
+		// after a co-op autosave it can legitimately be a real player body.
+		if (eid == 0)
+		{
+			Msg("! COOP(bindings): '%s' -> entity id 0 is the GRAPH ACTOR, not a body — REFUSED, "
+				"this player will get a fresh actor", name.c_str());
+			++stale;
+			continue;
+		}
+
 		CSE_Abstract* entity = ai().alife().objects().object(eid, true);
 		if (!entity)
 		{

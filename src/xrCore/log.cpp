@@ -323,6 +323,16 @@ void __cdecl Msg(const char* format, ...)
 	if (sz) Log(buf);
 }
 
+// Balloon campaign step 1 (2026-08-18): the C-linkage log entrance for the LuaJIT low-address
+// arena allocator ("src/3rd party/luajit-2/src/xr_alloc.c"). That file is C, and it is compiled
+// into a static lib that is pulled into more than one module, so it can neither name the
+// C++-mangled Msg nor rely on a function pointer some other module happened to set. One export,
+// no formatting of its own — the caller has already built the line.
+extern "C" XRCORE_API void __cdecl xr_alloc_msg(const char* s)
+{
+	if (s && *s) Log(s);
+}
+
 void Log(const char* msg, const char* dop)
 {
 	if (!dop)

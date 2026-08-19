@@ -34,6 +34,7 @@
 #include "MonitorList.h"
 
 extern "C" void XR_EARLY_INIT();
+extern "C" void XR_ARENA_REPORT();
 
 //#include "securom_api.h"
 
@@ -1149,6 +1150,12 @@ int APIENTRY WinMain_impl(HINSTANCE hInstance,
 		ignore_verify = !strstr(Core.Params, "-dbgdev");
 
 		Msg("command line %s", Core.Params);
+
+		// Balloon campaign step 1: the LuaJIT low arena was reserved ~200 lines ago, at the very
+		// top of WinMain, and until now nothing has ever said whether that succeeded — XR_INIT
+		// dropped the NTSTATUS on the floor. This is the first point in the process where a log
+		// exists to say it in.
+		XR_ARENA_REPORT();
 		LPCSTR sashName = "-openautomate ";
 		if (strstr(lpCmdLine, sashName))
 		{

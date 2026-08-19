@@ -11,4 +11,8 @@ void XR_DESTROY(void* p, size_t size);
 
 void XR_EARLY_INIT();
 
+// Balloon campaign step 1: describe the reserved arena once, from a place where the log exists.
+// XR_INIT runs at the top of WinMain, before xrCore is initialised, so it cannot report itself.
+void XR_ARENA_REPORT();
+
 #endif
