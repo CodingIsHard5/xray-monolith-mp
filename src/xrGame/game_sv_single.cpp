@@ -144,6 +144,190 @@ static bool coop_recoverable_pos(const Fvector& p, u32* out_vertex = NULL)
 	return true;
 }
 
+// MP fork (2026-09-07) — A FRESH PLAYER MUST NOT BE PLACED INSIDE A LEVEL-CHANGER VOLUME.
+//
+// Found by the boot-and-click-through run ordered for Caden's playtest: a joining player on
+// n1-autosave enters INSIDE the Darkscape level changer and is handed a modal "Move to the
+// Darkscape?" before touching anything — 3 of 3 runs that reached the world. It is not a crash,
+// and answering No costs two seconds; but the prompt is MODAL, so until it is answered the game
+// swallows every key, and a player's first second in the world is spent dismissing a question
+// they did not ask.
+//
+// THIS IS NOT FOLLOW-UP 4, and the difference decides where the fix goes. Follow-up 4 refuses a
+// BANKED position that names a place outside the level: it protects a RETURNING player from a bad
+// record. This is the opposite case — a player with no record at all, placed by us, at a position
+// we compute from the save actor. Banked positions are deliberately untouched here: a returning
+// player goes exactly where they were, level changer or not, because that is where they chose to
+// stand and moving them would be the surprise D2's negative gate forbids.
+//
+// The test is the restrictor's own shape, which is the same question the client asks when it
+// raises the prompt (CSpaceRestrictor::prepared_inside). The relocation walks the LEVEL GRAPH
+// outward from the wanted position and takes the first vertex that is outside every changer —
+// nearest in graph hops, which is nearest in walkable distance, not nearest in a straight line
+// through a wall.
+static bool coop_point_inside_restrictor(CSE_ALifeSpaceRestrictor* sr, const Fvector& p)
+{
+	if (!sr)
+		return false;
+
+	Fmatrix xform;
+	xform.setXYZ(sr->o_Angle.x, sr->o_Angle.y, sr->o_Angle.z);
+	xform.c = sr->o_Position;
+
+	// A space restrictor IS a CSE_Shape (SERVER_ENTITY_DECLARE_BEGIN2 in xrServer_Objects_ALife.h),
+	// so this is a plain upcast — no smart_cast, nothing to fail at runtime.
+	CSE_Shape* shape = sr;
+	for (u32 i = 0; i < shape->shapes.size(); ++i)
+	{
+		const CShapeData::shape_def& sd = shape->shapes[i];
+		if (sd.type == 0)
+		{
+			// sphere, in the object's frame
+			Fvector centre;
+			xform.transform_tiny(centre, sd.data.sphere.P);
+			if (p.distance_to(centre) <= sd.data.sphere.R)
+				return true;
+		}
+		else
+		{
+			// Box. The engine's own version builds six planes from the transformed unit cube and
+			// classifies the point against each; inverting the transform and testing the point
+			// against [-0.5, 0.5]^3 is the same test with less arithmetic and no plane winding to
+			// get wrong. Kept explicit because a silent disagreement with the client's idea of
+			// "inside" would put the player back where the prompt is.
+			Fmatrix box;
+			box.mul_43(xform, sd.data.box);
+			Fmatrix inv;
+			inv.invert(box);
+			Fvector local;
+			inv.transform_tiny(local, p);
+			if (_abs(local.x) <= .5f && _abs(local.y) <= .5f && _abs(local.z) <= .5f)
+				return true;
+		}
+	}
+	return false;
+}
+
+// The level changer whose volume contains p, or NULL. ONLY changers on the CURRENT level are
+// considered: X-Ray level coordinates are per-level and overlap freely between levels, so a
+// registry-wide test without this filter would relocate players away from positions that are
+// perfectly fine because some other map has a changer at the same numbers.
+static CSE_ALifeLevelChanger* coop_level_changer_at(const Fvector& p)
+{
+	if (!ai().get_alife())
+		return NULL;
+
+	const GameGraph::_LEVEL_ID here = ai().alife().graph().level().level_id();
+	const CALifeObjectRegistry::OBJECT_REGISTRY& objects = ai().alife().objects().objects();
+	CALifeObjectRegistry::OBJECT_REGISTRY::const_iterator I = objects.begin();
+	CALifeObjectRegistry::OBJECT_REGISTRY::const_iterator E = objects.end();
+	for (; I != E; ++I)
+	{
+		CSE_ALifeLevelChanger* lc = smart_cast<CSE_ALifeLevelChanger*>((*I).second);
+		if (!lc)
+			continue;
+		if (!ai().game_graph().valid_vertex_id(lc->m_tGraphID))
+			continue;
+		if (ai().game_graph().vertex(lc->m_tGraphID)->level_id() != here)
+			continue;
+		if (coop_point_inside_restrictor(lc, p))
+			return lc;
+	}
+	return NULL;
+}
+
+// Returns a position for a FRESH player that is not inside a level changer. Fails OPEN in every
+// case where it cannot judge — no A-Life, no level graph, no vertex under the wanted position, no
+// clear vertex within the search bound — because a guard that cannot see must not start moving
+// players around on a guess. Every outcome says which one it was: a placement decision that is
+// silent is one nobody can audit afterwards.
+static Fvector coop_safe_fresh_spawn(const Fvector& wanted, u32* out_vertex)
+{
+	if (out_vertex)
+		*out_vertex = u32(-1);
+
+	// THE CONTROL ARM. `-coop_no_spawn_guard` turns the relocation off while leaving everything
+	// else identical, so the verification can show the SAME save producing the prompt with the
+	// guard off and not producing it with the guard on. Without it, "no modal appeared" is a
+	// claim about one run with nothing to compare it to — and the run that matters is the one
+	// where the fixture is shown able to produce the other answer.
+	if (coop_param("-coop_no_spawn_guard"))
+	{
+		Msg("- COOP(spawn): guard DISABLED by -coop_no_spawn_guard — placing at %.1f,%.1f,%.1f "
+			"whatever is there (control arm)", wanted.x, wanted.y, wanted.z);
+		return wanted;
+	}
+
+	CSE_ALifeLevelChanger* lc = coop_level_changer_at(wanted);
+	if (!lc)
+	{
+		Msg("- COOP(spawn): fresh spawn %.1f,%.1f,%.1f is clear of every level changer on this "
+			"level — placed unchanged", wanted.x, wanted.y, wanted.z);
+		return wanted;
+	}
+
+	Msg("! COOP(spawn): the fresh spawn position %.1f,%.1f,%.1f is INSIDE level changer '%s' "
+		"(to '%s') — relocating, because the prompt it raises is modal and eats the player's first "
+		"seconds", wanted.x, wanted.y, wanted.z, lc->name_replace(),
+		lc->m_caLevelToChange.size() ? lc->m_caLevelToChange.c_str() : "?");
+
+	const CLevelGraph* graph = ai().get_level_graph();
+	if (!graph)
+	{
+		Msg("! COOP(spawn): no level graph loaded — cannot relocate, leaving the position alone");
+		return wanted;
+	}
+
+	const u32 start = graph->valid_vertex_position(wanted) ? graph->vertex_id(wanted) : u32(-1);
+	if (!graph->valid_vertex_id(start))
+	{
+		Msg("! COOP(spawn): no nav vertex under the spawn position — cannot relocate, leaving it alone");
+		return wanted;
+	}
+
+	// Breadth-first over the nav mesh: the first vertex outside every changer is the nearest one
+	// a player could actually WALK to, which is the property that matters. The bound is a real
+	// limit, not a formality — a changer volume is a few dozen vertices across, so a search that
+	// runs past thousands is looking for something that is not there.
+	const u32 MAX_VISIT = 4096;
+	xr_vector<bool> visited;
+	visited.assign(graph->header().vertex_count(), false);
+	xr_vector<u32> queue;
+	queue.push_back(start);
+	visited[start] = true;
+	u32 head = 0, seen = 1;
+	while (head < queue.size() && seen < MAX_VISIT)
+	{
+		const u32 v = queue[head++];
+		Fvector vp = graph->vertex_position(graph->vertex(v)->position());
+		if (!coop_level_changer_at(vp))
+		{
+			if (out_vertex)
+				*out_vertex = v;
+			Msg("- COOP(spawn): relocated to %.1f,%.1f,%.1f (nav vertex %u, %u vertices searched) — "
+				"outside every level changer on this level", vp.x, vp.y, vp.z, v, seen);
+			return vp;
+		}
+		CLevelGraph::const_iterator i, e;
+		graph->begin(v, i, e);
+		for (; i != e; ++i)
+		{
+			const u32 n = graph->value(v, i);
+			if (!graph->valid_vertex_id(n))
+				continue;
+			if (visited[n])
+				continue;
+			visited[n] = true;
+			++seen;
+			queue.push_back(n);
+		}
+	}
+
+	Msg("! COOP(spawn): no changer-free nav vertex within %u vertices — leaving the spawn where it "
+		"is. The player will get the prompt; answering No is harmless.", MAX_VISIT);
+	return wanted;
+}
+
 // MP fork (§14 step 8 phase 1 / doc §6): the two ownership tiers. See mp_coop_owner.h for why
 // the world tier is the base actor entity rather than a spawned stand-in.
 namespace mp_coop_owner
@@ -495,11 +679,16 @@ void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
 	E->o_Position = base->o_Position;
 	E->o_Position.x += 1.5f * float(s_coop_actor_seq);
 	E->o_Angle = base->o_Angle;
+	// ... and not inside a level changer, whatever the save actor's own spot happens to be. The
+	// 1.5 m per-player offset above is exactly the kind of nudge that walks somebody over a
+	// volume boundary, so the check goes AFTER it and judges the position we are really using.
+	u32 spawn_vertex = u32(-1);
+	E->o_Position = coop_safe_fresh_spawn(E->o_Position, &spawn_vertex);
 
 	CSE_ALifeCreatureActor* na = smart_cast<CSE_ALifeCreatureActor*>(E);
 	if (na)
 	{
-		na->m_tNodeID = base->m_tNodeID;
+		na->m_tNodeID = (spawn_vertex != u32(-1)) ? spawn_vertex : base->m_tNodeID;
 		na->m_tGraphID = base->m_tGraphID;
 		na->m_bALifeControl = false; // client-driven, not A-Life
 	}
