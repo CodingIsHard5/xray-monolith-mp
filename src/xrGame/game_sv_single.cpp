@@ -208,14 +208,23 @@ static bool coop_point_inside_restrictor(CSE_ALifeSpaceRestrictor* sr, const Fve
 	return false;
 }
 
-// The level changer whose volume contains p, or NULL. ONLY changers on the CURRENT level are
-// considered: X-Ray level coordinates are per-level and overlap freely between levels, so a
-// registry-wide test without this filter would relocate players away from positions that are
-// perfectly fine because some other map has a changer at the same numbers.
-static CSE_ALifeLevelChanger* coop_level_changer_at(const Fvector& p)
+// The level changers ON THIS LEVEL, collected once. ONLY this level's: X-Ray level coordinates
+// are per-level and overlap freely between levels, so a registry-wide test would relocate players
+// away from positions that are perfectly fine because some other map has a changer at the same
+// numbers.
+//
+// COLLECTED ONCE ON PURPOSE. The first version asked the registry on every candidate position,
+// and the search below asks about up to 4096 of them — that is thousands of walks over every
+// A-Life object in the game, inside a join, on the server's own thread. The list is a handful of
+// entries; the registry is tens of thousands. Nobody would have seen this as a bug, only as a
+// join that took a few seconds and a shrug about wine.
+typedef xr_vector<CSE_ALifeLevelChanger*> COOP_CHANGERS;
+
+static void coop_collect_level_changers(COOP_CHANGERS& out)
 {
+	out.clear();
 	if (!ai().get_alife())
-		return NULL;
+		return;
 
 	const GameGraph::_LEVEL_ID here = ai().alife().graph().level().level_id();
 	const CALifeObjectRegistry::OBJECT_REGISTRY& objects = ai().alife().objects().objects();
@@ -230,9 +239,15 @@ static CSE_ALifeLevelChanger* coop_level_changer_at(const Fvector& p)
 			continue;
 		if (ai().game_graph().vertex(lc->m_tGraphID)->level_id() != here)
 			continue;
-		if (coop_point_inside_restrictor(lc, p))
-			return lc;
+		out.push_back(lc);
 	}
+}
+
+static CSE_ALifeLevelChanger* coop_changer_at(const COOP_CHANGERS& changers, const Fvector& p)
+{
+	for (u32 i = 0; i < changers.size(); ++i)
+		if (coop_point_inside_restrictor(changers[i], p))
+			return changers[i];
 	return NULL;
 }
 
@@ -258,7 +273,9 @@ static Fvector coop_safe_fresh_spawn(const Fvector& wanted, u32* out_vertex)
 		return wanted;
 	}
 
-	CSE_ALifeLevelChanger* lc = coop_level_changer_at(wanted);
+	COOP_CHANGERS changers;
+	coop_collect_level_changers(changers);
+	CSE_ALifeLevelChanger* lc = coop_changer_at(changers, wanted);
 	if (!lc)
 	{
 		Msg("- COOP(spawn): fresh spawn %.1f,%.1f,%.1f is clear of every level changer on this "
@@ -300,7 +317,7 @@ static Fvector coop_safe_fresh_spawn(const Fvector& wanted, u32* out_vertex)
 	{
 		const u32 v = queue[head++];
 		Fvector vp = graph->vertex_position(graph->vertex(v)->position());
-		if (!coop_level_changer_at(vp))
+		if (!coop_changer_at(changers, vp))
 		{
 			if (out_vertex)
 				*out_vertex = v;
