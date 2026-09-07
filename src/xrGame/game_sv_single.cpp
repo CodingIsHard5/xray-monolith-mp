@@ -275,11 +275,40 @@ static Fvector coop_safe_fresh_spawn(const Fvector& wanted, u32* out_vertex)
 
 	COOP_CHANGERS changers;
 	coop_collect_level_changers(changers);
+
+	// SAY WHAT WAS ACTUALLY LOOKED AT. The first live verification reported "clear of every level
+	// changer" for a spawn that then raised the Darkscape prompt — and "clear" is the same word
+	// whether the test ran against eleven changers and matched none, or against ZERO because the
+	// collection found nothing. Those are different bugs with different fixes, and the log has to
+	// tell them apart without another build.
+	Msg("- COOP(spawn): %u level changer(s) on this level; testing %.1f,%.1f,%.1f",
+		(u32)changers.size(), wanted.x, wanted.y, wanted.z);
+	for (u32 ci = 0; ci < changers.size() && ci < 12; ++ci)
+	{
+		CSE_ALifeLevelChanger* c = changers[ci];
+		CSE_Shape* sh = c;
+		Msg("-   changer '%s' -> '%s' at %.1f,%.1f,%.1f, %u shape(s), %.1f m from the spawn",
+			c->name_replace(), c->m_caLevelToChange.size() ? c->m_caLevelToChange.c_str() : "?",
+			c->o_Position.x, c->o_Position.y, c->o_Position.z, (u32)sh->shapes.size(),
+			c->o_Position.distance_to(wanted));
+		for (u32 si = 0; si < sh->shapes.size() && si < 4; ++si)
+		{
+			const CShapeData::shape_def& sd = sh->shapes[si];
+			if (sd.type == 0)
+				Msg("-     shape %u: sphere r=%.1f offset %.1f,%.1f,%.1f", si, sd.data.sphere.R,
+					sd.data.sphere.P.x, sd.data.sphere.P.y, sd.data.sphere.P.z);
+			else
+				Msg("-     shape %u: box centre %.1f,%.1f,%.1f scale %.1f,%.1f,%.1f", si,
+					sd.data.box.c.x, sd.data.box.c.y, sd.data.box.c.z,
+					sd.data.box.i.magnitude(), sd.data.box.j.magnitude(), sd.data.box.k.magnitude());
+		}
+	}
+
 	CSE_ALifeLevelChanger* lc = coop_changer_at(changers, wanted);
 	if (!lc)
 	{
-		Msg("- COOP(spawn): fresh spawn %.1f,%.1f,%.1f is clear of every level changer on this "
-			"level — placed unchanged", wanted.x, wanted.y, wanted.z);
+		Msg("- COOP(spawn): fresh spawn %.1f,%.1f,%.1f is inside NONE of those %u changer(s) — "
+			"placed unchanged", wanted.x, wanted.y, wanted.z, (u32)changers.size());
 		return wanted;
 	}
 
