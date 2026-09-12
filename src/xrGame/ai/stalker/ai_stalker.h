@@ -203,6 +203,11 @@ public:
 	// so a replicated stalker animates instead of sliding in an idle loop — see net_Export.
 	u8 coop_pack_animation_state() const;
 	void coop_apply_animation_state(u8 packed);
+	// MP fork (bug 3 instrument, -coop_animdiag): one line per stalker per second, on BOTH sides,
+	// carrying the animation-selection inputs and (client) what the legs are actually playing.
+	void coop_animdiag_sample();
+	u32 m_coop_animdiag_last = 0;
+	Fvector m_coop_animdiag_pos = {0.f, 0.f, 0.f};
 	virtual void net_Destroy();
 	virtual void net_Save(NET_Packet& P);
 	virtual BOOL net_SaveRelevant();

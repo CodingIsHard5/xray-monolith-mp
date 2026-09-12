@@ -972,6 +972,44 @@ void CAI_Stalker::net_Export(NET_Packet& P)
 	P.w_u8(u8(inventory().GetActiveSlot()));
 }
 
+// MP fork (bug 3 instrument, -coop_animdiag). Caden's 2026-08-05 playtest: "stationary NPCs play
+// the WALK anim; all crouch in combat". Both are statements about numbers this line carries:
+//   moved/dt  ground truth for "stationary" (metres in the XZ plane since the last sample)
+//   body/move/mental  the selector inputs (on the client: what net_Import applied)
+//   legs=b/k/s  (client) what the legs channel is PLAYING: body 0 crouch 1 stand; kind 1 in-place,
+//               2 locomotion, 3 other; for locomotion s is the gait (0 walk 1 run 2 escape)
+// The server prints the same fields for the same ids, so a client crouch can be compared with the
+// server's own body state at the same second instead of with an assumption about it.
+void CAI_Stalker::coop_animdiag_sample()
+{
+	static int s_on = -1;
+	if (s_on < 0) s_on = strstr(Core.Params, "-coop_animdiag") ? 1 : 0;
+	if (!s_on || !xr_enet::enabled() || !g_Alive())
+		return;
+	const u32 now = Device.dwTimeGlobal;
+	if (m_coop_animdiag_last && (now - m_coop_animdiag_last) < 1000)
+		return;
+	const bool server = !!ai().get_alife();
+	if (!server)
+	{
+		CObject* viewer = Level().CurrentEntity();
+		if (!viewer || viewer->Position().distance_to(Position()) > 100.f)
+			return;
+	}
+	const float moved = m_coop_animdiag_last ? Position().distance_to_xz(m_coop_animdiag_pos) : -1.f;
+	const u32 dt = m_coop_animdiag_last ? (now - m_coop_animdiag_last) : 0;
+	m_coop_animdiag_last = now;
+	m_coop_animdiag_pos = Position();
+	stalker_movement_manager_smart_cover& mv = movement();
+	int lb = -1, lk = 0, ls = -1;
+	animation().coop_classify_legs(lb, lk, ls);
+	Msg("~ COOP_ANIM: [%s] id=%u t=%u pos=%.2f,%.2f,%.2f moved=%.2f dt=%u body=%d move=%d mental=%d "
+		"rep=%d nspd=%.2f enemy=%d legs=%d/%d/%d",
+		server ? "SV" : "CL", ID(), now, Position().x, Position().y, Position().z, moved, dt,
+		int(mv.body_state()), int(mv.movement_type()), int(mv.mental_state()),
+		mv.replicated_state() ? 1 : 0, coop_net_speed(), memory().enemy().selected() ? 1 : 0, lb, lk, ls);
+}
+
 void CAI_Stalker::net_Import(NET_Packet& P)
 {
 	R_ASSERT(Remote());
@@ -1170,6 +1208,8 @@ void CAI_Stalker::UpdateCL()
 	START_PROFILE("stalker")
 		START_PROFILE("stalker/client_update")
 			VERIFY2(PPhysicsShell()||getEnabled(), *cName());
+
+			coop_animdiag_sample(); // MP fork (bug 3 instrument): no-op without -coop_animdiag
 
 			if (g_Alive())
 			{

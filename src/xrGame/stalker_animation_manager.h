@@ -189,6 +189,14 @@ private:
 	static void script_play_callback(CBlend* blend);
 
 public:
+	// MP fork (bug 3 instrument, -coop_animdiag): what the LEGS channel is playing, named by the
+	// table it came from rather than by string — motion names are DEBUG-only in release builds.
+	//   body: 0 crouch, 1 stand, -1 not a part animation
+	//   kind: 0 none, 1 in-place (idle/turn), 2 locomotion, 3 other (global/script/unknown)
+	//   sub : locomotion gait (0 walk, 1 run, 2 escape) or in-place index
+	void coop_classify_legs(int& body, int& kind, int& sub) const;
+
+public:
 	CStalkerAnimationManager(CAI_Stalker* object);
 	virtual void reinit();
 	virtual void reload();

@@ -161,3 +161,28 @@ bool CStalkerAnimationManager::standing() const
 
 	return (false);
 }
+
+// MP fork (bug 3 instrument): see the header.
+void CStalkerAnimationManager::coop_classify_legs(int& body, int& kind, int& sub) const
+{
+	body = -1; kind = 0; sub = -1;
+	const MotionID& m = m_legs.animation();
+	if (!m.valid() || !m_data_storage)
+		return;
+	kind = 3;
+	const CStalkerAnimationData::PART_ANIMATIONS& parts = m_data_storage->m_part_animations;
+	for (u32 b = 0; b < parts.A.size(); ++b)
+	{
+		const CStalkerAnimationState& st = parts.A[b];
+		if (st.m_in_place)
+			for (u32 i = 0; i < st.m_in_place->A.size(); ++i)
+				if (st.m_in_place->A[i] == m) { body = int(b); kind = 1; sub = int(i); return; }
+		for (u32 g = 0; g < st.m_movement.A.size(); ++g)
+			for (u32 d = 0; d < st.m_movement.A[g].A.size(); ++d)
+			{
+				const ANIM_VECTOR& v = st.m_movement.A[g].A[d].A;
+				for (u32 k = 0; k < v.size(); ++k)
+					if (v[k] == m) { body = int(b); kind = 2; sub = int(g); return; }
+			}
+	}
+}
