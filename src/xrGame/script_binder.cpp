@@ -34,6 +34,50 @@ CScriptBinder::~CScriptBinder()
 void CScriptBinder::init()
 {
 	m_object = 0;
+	m_faulted = false;
+}
+
+// MP fork (autosave join crash, 2026-09-12). THE ROOT CAUSE of "about one join in eight the server
+// dies in its autosave".
+//
+// Every CScriptBinder entry point wraps its Lua call in try/catch(...) and, on ANY raise, calls
+// clear(): the Lua binder object is deleted there and then. That is survivable for the tick that
+// raised, and silently catastrophic for the object's END: net_Destroy() only calls into Lua
+// `if (m_object)`, so a binder that faulted once never receives net_destroy. Everything its reinit
+// and net_spawn registered stays registered — for the actor binder that is
+// RegisterScriptCallback("save_state", self), db.actor and db.storage[id] — pointing at a game
+// object that is about to be destroyed.
+//
+// Measured on the dedicated server (dev/evidence/autosave-stale-trace5): a co-op player's
+// actor_binder:reinit and :net_spawn ENTER and LEAVE ok; five minutes after the player leaves, the
+// orphaned body is destroyed and actor_binder:net_destroy is NEVER ENTERED. From that instant every
+// autosave runs actor_binder:save_state on the dead object (plus itms_manager and actor_effects via
+// the stale db.actor), ~1000 "Accessing destroyed object" touches per two saves. SafeWrap catches
+// the ones it can see; the one it cannot is the AV in SafeWrap<CScriptGameObject::ID> inside
+// CALifeStorageManager::save (dev/evidence/new_specimen_autosave_av_20260818).
+//
+// So in co-op a faulted binder is RETIRED, not deleted: no more ticks, saves, loads or relcases —
+// exactly what clear() stopped — but net_Destroy still delivers net_destroy, so the script can
+// unregister what it registered. Single player keeps stock behaviour.
+void CScriptBinder::fault(LPCSTR where)
+{
+	if (!xr_enet::enabled())
+	{
+		clear();
+		return;
+	}
+	if (m_faulted)
+		return;
+	m_faulted = true;
+	static u32 s_reported = 0;
+	if (++s_reported <= 32)
+	{
+		CGameObject* const go = smart_cast<CGameObject*>(this);
+		Msg("! COOP(binder): %s raised for [%s] id=%u — binder RETIRED (no further ticks), "
+			"net_destroy will still be delivered%s",
+			where, go ? go->cName().c_str() : "?", go ? go->ID() : 0,
+			(s_reported == 32) ? " [report budget spent: later retirements are silent]" : "");
+	}
 }
 
 void CScriptBinder::clear()
@@ -56,7 +100,7 @@ void CScriptBinder::reinit()
 	if (g_bMEMO)
 		start							= Memory.mem_usage();
 #endif // DEBUG_MEMORY_MANAGER
-	if (m_object)
+	if (m_object && !m_faulted)
 	{
 		try
 		{
@@ -64,7 +108,7 @@ void CScriptBinder::reinit()
 		}
 		catch (...)
 		{
-			clear();
+			fault("reinit");
 		}
 	}
 #ifdef DEBUG_MEMORY_MANAGER
@@ -130,7 +174,7 @@ void CScriptBinder::reload(LPCSTR section)
 		return;
 	}
 
-	if (m_object)
+	if (m_object && !m_faulted)
 	{
 		try
 		{
@@ -138,7 +182,7 @@ void CScriptBinder::reload(LPCSTR section)
 		}
 		catch (...)
 		{
-			clear();
+			fault("reload");
 		}
 	}
 #endif
@@ -218,7 +262,7 @@ void CScriptBinder::net_Destroy()
 #endif // _DEBUG
 		try
 		{
-			m_object->net_Destroy();
+			m_object->net_Destroy();   // delivered to a RETIRED binder too — see fault()
 		}
 		catch (...)
 		{
@@ -226,6 +270,7 @@ void CScriptBinder::net_Destroy()
 		}
 	}
 	xr_delete(m_object);
+	m_faulted = false;
 }
 
 void CScriptBinder::set_object(CScriptBinderObject* object)
@@ -246,7 +291,7 @@ void CScriptBinder::set_object(CScriptBinderObject* object)
 
 void CScriptBinder::shedule_Update(u32 time_delta)
 {
-	if (m_object)
+	if (m_object && !m_faulted)
 	{
 		try
 		{
@@ -254,14 +299,14 @@ void CScriptBinder::shedule_Update(u32 time_delta)
 		}
 		catch (...)
 		{
-			clear();
+			fault("shedule_Update");
 		}
 	}
 }
 
 void CScriptBinder::save(NET_Packet& output_packet)
 {
-	if (m_object)
+	if (m_object && !m_faulted)
 	{
 		try
 		{
@@ -269,14 +314,14 @@ void CScriptBinder::save(NET_Packet& output_packet)
 		}
 		catch (...)
 		{
-			clear();
+			fault("save");
 		}
 	}
 }
 
 void CScriptBinder::load(IReader& input_packet)
 {
-	if (m_object)
+	if (m_object && !m_faulted)
 	{
 		try
 		{
@@ -284,14 +329,14 @@ void CScriptBinder::load(IReader& input_packet)
 		}
 		catch (...)
 		{
-			clear();
+			fault("load");
 		}
 	}
 }
 
 BOOL CScriptBinder::net_SaveRelevant()
 {
-	if (m_object)
+	if (m_object && !m_faulted)
 	{
 		try
 		{
@@ -299,7 +344,7 @@ BOOL CScriptBinder::net_SaveRelevant()
 		}
 		catch (...)
 		{
-			clear();
+			fault("net_SaveRelevant");
 		}
 	}
 	return (FALSE);
@@ -308,7 +353,7 @@ BOOL CScriptBinder::net_SaveRelevant()
 void CScriptBinder::net_Relcase(CObject* object)
 {
 	CGameObject* game_object = smart_cast<CGameObject*>(object);
-	if (m_object && game_object)
+	if (m_object && !m_faulted && game_object)
 	{
 		try
 		{
@@ -316,7 +361,7 @@ void CScriptBinder::net_Relcase(CObject* object)
 		}
 		catch (...)
 		{
-			clear();
+			fault("net_Relcase");
 		}
 	}
 }

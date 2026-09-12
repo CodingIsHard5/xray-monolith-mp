@@ -16,6 +16,11 @@ class CScriptBinder
 {
 protected:
 	CScriptBinderObject* m_object;
+	// MP fork (autosave join crash): a binder whose callback RAISED. Stock code deleted the Lua
+	// binder on the spot (clear()), which also meant its net_destroy was never delivered — so every
+	// registration it had made (save_state, db.actor, db.storage) outlived the object. See fault().
+	bool m_faulted;
+	void fault(LPCSTR where);
 
 public:
 	CScriptBinder();
