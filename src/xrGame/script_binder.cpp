@@ -126,6 +126,11 @@ void CScriptBinder::Load(LPCSTR section)
 
 void CScriptBinder::reload(LPCSTR section)
 {
+	// MP fork: a RETIRED binder still owns m_object (see fault()); binding a second one over it
+	// would leak the first and skip its net_destroy. Nothing reloads a live object in practice —
+	// net_Destroy resets the flag before any respawn — so this is a guard, not a path.
+	if (m_faulted)
+		return;
 #ifdef DEBUG_MEMORY_MANAGER
 	size_t									start = 0;
 	if (g_bMEMO)
