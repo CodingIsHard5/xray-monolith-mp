@@ -685,11 +685,49 @@ void game_sv_Single::coop_clone_inventory_for(CSE_ALifeCreatureActor* base, CSE_
 	}
 	Msg("- XRNET(dbg): coop_clone_inventory: cloned %d item(s) onto actor id %u for client 0x%08x",
 		cloned, owner->ID, CL->ID.value());
+	// §9.6 evidence: WHAT was cloned, so a harness can see whether another player's items came along
+	{
+		string4096 secs;
+		secs[0] = 0;
+		for (u16 child_id : item_ids)
+			if (CSE_ALifeDynamicObject* src = ai().alife().objects().object(child_id, true))
+				if (src->cast_inventory_item())
+				{
+					xr_strcat(secs, sizeof(secs), src->s_name.c_str());
+					xr_strcat(secs, sizeof(secs), " ");
+				}
+		Msg("- XRNET(dbg): coop_clone_inventory: source id %u sections for actor %u: %s", base->ID, owner->ID, secs);
+	}
 }
 
 void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
 {
-	CSE_ALifeCreatureActor* base = ai().alife().graph().actor();
+	// MP fork (design doc §9.6 "a new player spawns in at a default start"): the CLONE SOURCE. graph().actor() follows the
+	// last actor spawned, so the SECOND player to join was cloned from the FIRST player's live body, their inventory
+	// included (RPG_LAYER_PLAN.md 3c). The host's save actor is owned by the server client and nobody plays it, so it
+	// keeps the save's starting state: clone from that. -coop_clone_from_graph_actor restores the old source (the control).
+	static int s_old_source = -1;
+	if (s_old_source < 0) s_old_source = strstr(Core.Params, "-coop_clone_from_graph_actor") ? 1 : 0;
+	CSE_ALifeCreatureActor* base = NULL;
+	LPCSTR source = "graph().actor()";
+	if (!s_old_source)
+	{
+		if (xrClientData* sc = static_cast<xrClientData*>(m_server->GetServerClient()))
+			if ((base = smart_cast<CSE_ALifeCreatureActor*>(sc->owner)) != NULL)
+				source = "the host save actor (server client's body)";
+		if (!base && (base = smart_cast<CSE_ALifeCreatureActor*>(m_server->ID_to_entity(0))) != NULL)
+			source = "entity 0 (the save actor)";
+	}
+	if (!base)
+	{
+		base = ai().alife().graph().actor();
+		if (!s_old_source)
+			Msg("! XRNET(dbg): coop_spawn_actor_for: no host save actor found — falling back to graph().actor(), which may be another player");
+	}
+	if (base)
+		Msg("- XRNET(dbg): coop_spawn_actor_for: clone source %s id %u (graph().actor() is %u)%s", source, base->ID,
+			ai().alife().graph().actor() ? ai().alife().graph().actor()->ID : u16(-1),
+			s_old_source ? " [CONTROL: -coop_clone_from_graph_actor]" : "");
 	if (!base)
 	{
 		Msg("! XRNET(dbg): coop_spawn_actor_for: no base actor to clone spawn from");
