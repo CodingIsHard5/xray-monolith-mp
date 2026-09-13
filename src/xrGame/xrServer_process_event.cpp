@@ -327,6 +327,20 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
 
 			xrClientData* c_src = e_src->owner; // клиент, чей юнит убил
 
+			// MP fork (co-op, found by the §10.2 emission control arm): the killer can be an ORPHANED player body — its client
+			// crashed or left while the GE_DIE waited in the delayed-packet queue — and then e_src->owner is NULL. The stock
+			// code read c_src->owner unconditionally (server AV at Process_event+0xd31, NULL+0x8190, from
+			// ProceedDelayedPackets). With no owning client there is nobody to credit or notify: broadcast the death as is.
+			if (!c_src || !c_src->owner)
+			{
+				static u32 s_orphan_killer = 0;
+				if (++s_orphan_killer <= 20)
+					Msg("- COOP(die): [%u] killed by [%u] whose client is gone — death broadcast without killer credit",
+						u32(id_dest), u32(id_src));
+				SendBroadcast(BroadcastCID, P, MODE);
+				break;
+			}
+
 			if (c_src->owner->ID == id_src)
 			{
 				// Main unit
