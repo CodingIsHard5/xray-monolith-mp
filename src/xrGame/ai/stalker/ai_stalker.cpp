@@ -878,21 +878,36 @@ BOOL CAI_Stalker::net_SaveRelevant()
 //   bits 0-1  mental state  (danger / free / panic)
 //   bits 2-3  body state    (crouch / stand)
 //   bits 4-5  movement type (walk / run / stand)
+//   bit  6    the server's own standing() answer (bug 3, see below)
+//   bit  7    bit 6 is present (so an older server that never set it is not read as "moving")
+//
+// Bug 3 (StalkerMPMod npc-anim-bug5 / npc-anim-fixed1): a client that INFERS "standing" from replicated
+// positions gets it wrong both ways. Two-sample speed turned jitter into walking pace, and a 300 ms window
+// still reads NPCs that shuffle or turn in place on root-motion idle animations as moving (both sides'
+// 1 Hz samples said 0.00 m while the window said ~1 m/s). The server's own animation manager decides
+// from its movement manager's speed, which is zero for those. So send the decision instead of the
+// evidence.
 enum
 {
 	coop_anim_mental_shift = 0,
 	coop_anim_body_shift = 2,
 	coop_anim_movement_shift = 4,
-	coop_anim_field_mask = 0x03
+	coop_anim_field_mask = 0x03,
+	coop_anim_standing_bit = 0x40,
+	coop_anim_standing_valid_bit = 0x80
 };
 
 u8 CAI_Stalker::coop_pack_animation_state() const
 {
 	stalker_movement_manager_smart_cover& m = movement();
+	// the stock CStalkerAnimationManager::standing() test, evaluated where the movement manager runs
+	const bool standing = (m.movement_type() == MonsterSpace::eMovementTypeStand) ||
+		(m.speed(const_cast<CAI_Stalker*>(this)->character_physics_support()->movement()) < EPS_L);
 	return u8(
 		((u8(m.mental_state()) & coop_anim_field_mask) << coop_anim_mental_shift) |
 		((u8(m.body_state()) & coop_anim_field_mask) << coop_anim_body_shift) |
-		((u8(m.movement_type()) & coop_anim_field_mask) << coop_anim_movement_shift)
+		((u8(m.movement_type()) & coop_anim_field_mask) << coop_anim_movement_shift) |
+		(standing ? coop_anim_standing_bit : 0) | coop_anim_standing_valid_bit
 	);
 }
 
@@ -905,6 +920,7 @@ void CAI_Stalker::coop_apply_animation_state(u8 packed)
 	const u8 mental = (packed >> coop_anim_mental_shift) & coop_anim_field_mask;
 	const u8 body = (packed >> coop_anim_body_shift) & coop_anim_field_mask;
 	const u8 move = (packed >> coop_anim_movement_shift) & coop_anim_field_mask;
+	m_coop_net_standing = (packed & coop_anim_standing_valid_bit) ? ((packed & coop_anim_standing_bit) ? 1 : 0) : -1;
 
 	movement().set_replicated_state(
 		(body == u8(eBodyStateCrouch)) ? eBodyStateCrouch : eBodyStateStand,
@@ -1019,12 +1035,13 @@ void CAI_Stalker::coop_animdiag_sample()
 	const u32 imp = m_coop_imports;
 	m_coop_imports = 0;
 	Msg("~ COOP_ANIM: [%s] id=%u t=%u pos=%.2f,%.2f,%.2f moved=%.2f dt=%u body=%d move=%d mental=%d "
-		"rep=%d nspd=%.2f enemy=%d legs=%d/%d/%d cse_ts=%u cse_move=%d imp=%u age=%u nts=%u",
+		"rep=%d nspd=%.2f enemy=%d legs=%d/%d/%d cse_ts=%u cse_move=%d imp=%u age=%u nts=%u nst=%d",
 		server ? "SV" : "CL", ID(), now, Position().x, Position().y, Position().z, moved, dt,
 		int(mv.body_state()), int(mv.movement_type()), int(mv.mental_state()),
 		mv.replicated_state() ? 1 : 0, coop_net_speed(), memory().enemy().selected() ? 1 : 0, lb, lk, ls,
 		cse_ts, cse_move, imp, m_coop_last_import ? (now - m_coop_last_import) : 0,
-		NET.empty() ? 0 : NET.back().dwTimeStamp);
+		NET.empty() ? 0 : NET.back().dwTimeStamp,
+		server ? ((coop_pack_animation_state() & coop_anim_standing_bit) ? 1 : 0) : int(m_coop_net_standing));
 }
 
 void CAI_Stalker::net_Import(NET_Packet& P)
