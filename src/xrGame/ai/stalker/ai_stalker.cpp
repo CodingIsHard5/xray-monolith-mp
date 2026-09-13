@@ -900,9 +900,15 @@ enum
 u8 CAI_Stalker::coop_pack_animation_state() const
 {
 	stalker_movement_manager_smart_cover& m = movement();
-	// the stock CStalkerAnimationManager::standing() test, evaluated where the movement manager runs
-	const bool standing = (m.movement_type() == MonsterSpace::eMovementTypeStand) ||
-		(m.speed(const_cast<CAI_Stalker*>(this)->character_physics_support()->movement()) < EPS_L);
+	// The stock CStalkerAnimationManager::standing() test, LATCHED at the top of UpdateCL. Fix-arm 2
+	// (npc-anim-fixed2) evaluated it here, at export time, and 205 of 2274 server-STAND pairs still walked:
+	// the client received standing=0 / WALK while the server's own sample at the top of UpdateCL said
+	// standing=1 / STAND every time, with ~30 packets a second. At export time these NPCs are
+	// mid-update (movement type WALK, speed > 0) and settle back before the next frame. Export the
+	// settled answer. Before the first latch (-1), fall back to evaluating it here.
+	const bool standing = (m_coop_sv_standing >= 0) ? (m_coop_sv_standing == 1) :
+		((m.movement_type() == MonsterSpace::eMovementTypeStand) ||
+		 (m.speed(const_cast<CAI_Stalker*>(this)->character_physics_support()->movement()) < EPS_L));
 	return u8(
 		((u8(m.mental_state()) & coop_anim_field_mask) << coop_anim_mental_shift) |
 		((u8(m.body_state()) & coop_anim_field_mask) << coop_anim_body_shift) |
@@ -1245,6 +1251,14 @@ void CAI_Stalker::UpdateCL()
 		START_PROFILE("stalker/client_update")
 			VERIFY2(PPhysicsShell()||getEnabled(), *cName());
 
+			// MP fork (bug 3): latch the server's standing() answer at the settled point of the frame, for
+			// coop_pack_animation_state. Server only: a client's movement manager does not run.
+			if (xr_enet::enabled() && ai().get_alife() && g_Alive())
+			{
+				stalker_movement_manager_smart_cover& lm = movement();
+				m_coop_sv_standing = ((lm.movement_type() == MonsterSpace::eMovementTypeStand) ||
+					(lm.speed(character_physics_support()->movement()) < EPS_L)) ? 1 : 0;
+			}
 			coop_animdiag_sample(); // MP fork (bug 3 instrument): no-op without -coop_animdiag
 
 			if (g_Alive())
