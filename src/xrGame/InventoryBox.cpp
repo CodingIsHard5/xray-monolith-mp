@@ -34,6 +34,17 @@ void CInventoryBox::OnEvent(NET_Packet& P, u16 type)
 			P.r_u16(id);
 			CObject* itm = Level().Objects.net_Find(id);
 			VERIFY(itm);
+			// MP fork (co-op): VERIFY is compiled out in release, so a take of an item this co-op client
+			// never spawned (relevance cull) dereferenced null on the next line. Same class as the
+			// CAI_Stalker::OnEvent R_ASSERT (ai_stalker_events.cpp).
+			if (!itm)
+			{
+				static u32 s_missing = 0;
+				if (++s_missing <= 32)
+					Msg("! COOP(own): inventory box [%d] GE_OWNERSHIP_TAKE of object [%d] not present on this side, ignored (%u so far)",
+					    ID(), id, s_missing);
+				break;
+			}
 			m_items.push_back(id);
 			itm->H_SetParent(this);
 			itm->setVisible(FALSE);

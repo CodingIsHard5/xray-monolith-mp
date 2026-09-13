@@ -37,7 +37,19 @@ void CAI_Stalker::OnEvent(NET_Packet& P, u16 type)
 			P.r_u16(id);
 			CObject* O = Level().Objects.net_Find(id);
 
-			R_ASSERT(O);
+			// MP fork (co-op): a co-op client never spawns items outside its relevance set, so an NPC
+			// can take an item this client does not have. The release R_ASSERT killed a display
+			// client mid-dwell (dev/evidence/npc-anim-bug1, 2026-09-12). Same handling as stock
+			// CActor::OnEvent (Actor_Events.cpp): say so and drop the event; the server stays
+			// authoritative and the item arrives already parented if it is ever spawned here.
+			if (!O)
+			{
+				static u32 s_missing = 0;
+				if (++s_missing <= 32)
+					Msg("! COOP(own): stalker [%d] %s of object [%d] not present on this side — ignored (%u so far)",
+					    ID(), type == GE_TRADE_BUY ? "GE_TRADE_BUY" : "GE_OWNERSHIP_TAKE", id, s_missing);
+				break;
+			}
 
 #ifndef SILENCE
 			Msg("Trying to take - %s (%d)", *O->cName(),O->ID());
