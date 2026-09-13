@@ -1041,15 +1041,16 @@ void CAI_Stalker::coop_animdiag_sample()
 	const u32 imp = m_coop_imports;
 	m_coop_imports = 0;
 	Msg("~ COOP_ANIM: [%s] id=%u t=%u pos=%.2f,%.2f,%.2f moved=%.2f dt=%u body=%d move=%d mental=%d "
-		"rep=%d nspd=%.2f enemy=%d legs=%d/%d/%d cse_ts=%u cse_move=%d imp=%u age=%u nts=%u nst=%d stale=%u",
+		"rep=%d nspd=%.2f enemy=%d legs=%d/%d/%d cse_ts=%u cse_move=%d imp=%u age=%u nts=%u nst=%d stale=%u flips=%u",
 		server ? "SV" : "CL", ID(), now, Position().x, Position().y, Position().z, moved, dt,
 		int(mv.body_state()), int(mv.movement_type()), int(mv.mental_state()),
 		mv.replicated_state() ? 1 : 0, coop_net_speed(), memory().enemy().selected() ? 1 : 0, lb, lk, ls,
 		cse_ts, cse_move, imp, m_coop_last_import ? (now - m_coop_last_import) : 0,
 		NET.empty() ? 0 : NET.back().dwTimeStamp,
 		server ? ((coop_pack_animation_state() & coop_anim_standing_bit) ? 1 : 0) : int(m_coop_net_standing),
-		m_coop_stale_imports);
+		m_coop_stale_imports, m_coop_raw_flips);
 	m_coop_stale_imports = 0;
+	m_coop_raw_flips = 0;
 }
 
 void CAI_Stalker::net_Import(NET_Packet& P)
@@ -1267,8 +1268,24 @@ void CAI_Stalker::UpdateCL()
 			if (xr_enet::enabled() && ai().get_alife() && g_Alive())
 			{
 				stalker_movement_manager_smart_cover& lm = movement();
-				m_coop_sv_standing = ((lm.movement_type() == MonsterSpace::eMovementTypeStand) ||
+				const s8 raw = ((lm.movement_type() == MonsterSpace::eMovementTypeStand) ||
 					(lm.speed(character_physics_support()->movement()) < EPS_L)) ? 1 : 0;
+				// Bug 3 fix 5 (StalkerMPMod npc-anim-fixed4): for an idle NPC this test flickers frame to frame
+				// (movement type WALK with a momentary speed), which the renderless server never shows but a
+				// client replays packet by packet: its standing bit flipped between consecutive 1 Hz samples of
+				// an NPC that did not move. Export a value that changes only after the raw test has held for
+				// 200 ms. A real start or stop is late by 200 ms, well inside the position interpolation delay.
+				const u32 now_ms = Device.dwTimeGlobal;
+				if (raw != m_coop_raw_standing)
+				{
+					m_coop_raw_standing = raw;
+					m_coop_raw_since = now_ms;
+					++m_coop_raw_flips;
+				}
+				if (m_coop_sv_standing < 0)
+					m_coop_sv_standing = raw;
+				else if ((raw != m_coop_sv_standing) && ((now_ms - m_coop_raw_since) >= 200))
+					m_coop_sv_standing = raw;
 			}
 			coop_animdiag_sample(); // MP fork (bug 3 instrument): no-op without -coop_animdiag
 
