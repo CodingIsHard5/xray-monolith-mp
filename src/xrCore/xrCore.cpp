@@ -7,6 +7,8 @@
 #include <objbase.h>
 #include "xrCore.h"
 #include "coop_pool.h"		// §6c: two-phase arm of the luabind pool, gated on its selftest
+#include "coop_server_config.h"        // design doc App. B: one server config merged into Params
+#include "coop_server_config_keys.h"
 
 #pragma comment(lib,"winmm.lib")
 
@@ -59,6 +61,62 @@ static LPCSTR coop_core_param(LPCSTR flag)
 		p += n;
 	}
 	return NULL;
+}
+
+// Design doc Appendix B: merge [coop_server] from the config file into Params (see coop_server_config.h). Runs
+// right after the filesystem is up, before anything in xrGame or xrNetServer has read a co-op flag. The file is
+// $app_data_root$/coop_server.ltx, or the path after -coop_config. No file is not an error: the command line alone.
+static void coop_apply_server_config()
+{
+	string_path path;
+	const LPCSTR explicit_path = coop_core_param("-coop_config");
+	if (explicit_path && *explicit_path)
+	{
+		size_t i = 0;
+		while (explicit_path[i] && explicit_path[i] != ' ' && explicit_path[i] != '\t' && i + 1 < sizeof(path))
+		{
+			path[i] = explicit_path[i];
+			++i;
+		}
+		path[i] = 0;
+	}
+	else
+	{
+		if (!FS.path_exist("$app_data_root$"))
+			return;
+		FS.update_path(path, "$app_data_root$", "coop_server.ltx");
+	}
+	if (!FS.exist(path))
+	{
+		if (explicit_path)
+			Msg("! COOP(config): -coop_config '%s' does not exist — command line only", path);
+		return;
+	}
+	CInifile ini(path, TRUE, TRUE, FALSE);
+	if (!ini.section_exist("coop_server"))
+	{
+		Msg("! COOP(config): '%s' has no [coop_server] section — command line only", path);
+		return;
+	}
+	std::vector<std::pair<std::string, std::string> > entries;
+	CInifile::Sect& S = ini.r_section("coop_server");
+	for (CInifile::Items::const_iterator it = S.Data.begin(); it != S.Data.end(); ++it)
+		entries.push_back(std::make_pair(std::string(it->first.c_str() ? it->first.c_str() : ""),
+			std::string(it->second.c_str() ? it->second.c_str() : "")));
+	std::vector<std::string> log;
+	unsigned applied = 0;
+	const std::string merged = coop_cfg_merge(Core.Params, entries, coop_server_config_keys,
+		sizeof(coop_server_config_keys) / sizeof(coop_server_config_keys[0]), log, applied);
+	Msg("- COOP(config): %s: %u key(s), %u applied", path, u32(entries.size()), applied);
+	for (size_t i = 0; i < log.size(); ++i)
+		Msg("  COOP(config) %s", log[i].c_str());
+	if (applied)
+	{
+		// The old string is deliberately not freed: it was allocated before Memory._initialize armed the co-op
+		// allocator instruments, and the commandline.txt merge in _initialize replaces it the same way. A few hundred bytes, once.
+		Core.Params = xr_strdup(merged.c_str());
+		Msg("- COOP(config): effective command line: %s", Core.Params);
+	}
 }
 
 void xrCore::_initialize(LPCSTR _ApplicationName, LogCallback cb, BOOL init_fs, LPCSTR fs_fname)
@@ -290,6 +348,7 @@ void xrCore::_initialize(LPCSTR _ApplicationName, LogCallback cb, BOOL init_fs, 
 		Msg("%s version %s\n", get_modded_exes_name(), get_modded_exes_version_string().c_str());
 		Msg("Game started: %s\n", timeInDMYHMSMMM().c_str());
 		EFS._initialize();
+		coop_apply_server_config();   // design doc App. B
 #ifdef DEBUG
 #ifndef _EDITOR
         Msg("Process heap 0x%08x", GetProcessHeap());
