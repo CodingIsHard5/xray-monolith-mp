@@ -3608,6 +3608,43 @@ void game_sv_Single::Update()
 			m_coop_autosave_last = Device.dwTimeGlobal;
 			coop_autosave();
 		}
+
+		// MP fork (design doc §9.5 "save ... when the LAST player leaves"): the interval save alone leaves
+		// up to a whole interval of the last player's session unsaved once the server is empty, and nothing
+		// changes after that to trigger one. Counted HERE, on the game thread, not in the disconnect callback:
+		// that runs on the ENet pump thread, and a save fires Lua callbacks that must not race the game thread
+		// ([[xray-pump-thread-runs-lua]]). An edge from >=1 connected player to 0 saves once.
+		// -coop_no_empty_save disables it (the control arm of test_coop_save_on_empty_live.sh).
+		{
+			struct live_counter
+			{
+				game_sv_Single* self;
+				u32 n;
+				void operator()(IClient* client)
+				{
+					xrClientData* cd = static_cast<xrClientData*>(client);
+					if (cd == self->m_server->GetServerClient()) return; // the host save-actor is not a player
+					if (!cd->flags.bConnected || !cd->owner) return;
+					++n;
+				}
+			};
+			live_counter lc; lc.self = this; lc.n = 0;
+			m_server->ForEachClientDo(lc);
+			static int s_no_empty_save = -1;
+			if (s_no_empty_save < 0) s_no_empty_save = strstr(Core.Params, "-coop_no_empty_save") ? 1 : 0;
+			if (m_coop_had_players && lc.n == 0)
+			{
+				if (s_no_empty_save)
+					Msg("- COOP(autosave): last player left; the save on empty is DISABLED (-coop_no_empty_save)");
+				else
+				{
+					Msg("- COOP(autosave): last player left; saving the world now (design doc §9.5)");
+					m_coop_autosave_last = Device.dwTimeGlobal;
+					coop_autosave();
+				}
+			}
+			m_coop_had_players = (lc.n > 0);
+		}
 	}
 
 	// MP fork (§14 step 7 phase 3, test harness): -coop_test_checkpoint <seconds> banks a
