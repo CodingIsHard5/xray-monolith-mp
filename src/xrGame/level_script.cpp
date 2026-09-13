@@ -342,6 +342,17 @@ u32 get_time_minutes()
 
 void change_game_time(u32 days, u32 hours, u32 mins)
 {
+	// MP fork (design doc §10.1 "No time-pass on sleep ... you cannot yank everyone else's clock"): a thin co-op client
+	// has no server, and the stock line below dereferenced Level().Server unconditionally, so sleeping or GAMMA's Wait on a
+	// client would crash it. The server owns time. Refuse, and say so.
+	if (!Level().Server)
+	{
+		static u32 s_refused = 0;
+		if (++s_refused <= 20)
+			Msg("- COOP(time): change_game_time(%u d, %u h, %u min) refused on a client — the server owns the world clock",
+				days, hours, mins);
+		return;
+	}
 	game_sv_Single* tpGame = smart_cast<game_sv_Single *>(Level().Server->game);
 	if (tpGame && ai().get_alife())
 	{
