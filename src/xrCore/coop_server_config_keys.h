@@ -32,6 +32,8 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"mp_trusted", coop_cfg_switch, coop_cfg_tunable},   // off | server | Accepts a client level-geometry checksum mismatch anyway (trusted-peer debugging only, not a default).
 	{"xrnet_udp", coop_cfg_switch, coop_cfg_tunable},   // off (DirectPlay/stock transport) | both | Selects the ENet UDP transport; xr_enet::enabled() gates almost every co-op path.
 	// ---- control
+	{"coop_no_server_drive", coop_cfg_switch, coop_cfg_control},   // off | server | Gamedata mp_coop_decision_server: the server tick does not drive decisions (control).
+	{"coop_emission_stock", coop_cfg_switch, coop_cfg_control},   // off | server | Gamedata mp_coop_emission: surges judge the save actor only, as before §10.2.
 	{"coop_allow_time_skip", coop_cfg_switch, coop_cfg_control},   // off | server | Lets scripts on the co-op server skip world time (change_game_time); the fix refuses it (§10.1/§10.6).
 	{"coop_break_inventory", coop_cfg_switch, coop_cfg_control},   // off | server | Negative control: orphan reclaim succeeds but the returning player's items are dropped (run must FAIL); exact-token match.
 	{"coop_break_reclaim", coop_cfg_switch, coop_cfg_control},   // off | server | Negative control: disables orphan lookup so every returning player gets a fresh spawn (run must FAIL); exact-token match.
@@ -45,6 +47,7 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_orphan_hit_allow", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: hits on reserved (orphaned) player bodies are not refused; exact-token match.
 	{"coop_test_widelock", coop_cfg_switch, coop_cfg_control},   // off | server | Restores the old wide delayed-packet lock held across the Lua handler (A/B vs the pop-a-copy fix).
 	// ---- diag
+	{"coop_inv_census", coop_cfg_switch, coop_cfg_diag},   // off | server | Gamedata mp_coop_decision_server: inventory census logging.
 	{"coop_animdiag", coop_cfg_switch, coop_cfg_diag},   // off | both | Bug-3 animation/clock diagnostics: COOP_CLOCK every 10 s and COOP_ANIMX flag-change lines (ai_stalker.cpp:1014).
 	{"coop_correction_debug", coop_cfg_switch, coop_cfg_diag},   // off | client | Per-call witness logging for -coop_correction (exact-token match).
 	{"coop_correction_probe", coop_cfg_switch, coop_cfg_diag},   // off | client | Logs correction source candidates (NET.back vs NET_Last) and their age for locally-driven puppets; applies nothing.
@@ -71,6 +74,21 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_smem", coop_cfg_value, coop_cfg_diag},   // off | server | Read-only shared-memory (smem_container) census every N ms.
 	{"coop_smem_clean", coop_cfg_switch, coop_cfg_diag},   // off | server | Also calls smem_container::clean() during the census; refused unless -coop_smem is also given.
 	// ---- test
+	{"coop_squad_move", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (squad move).
+	{"coop_real_move", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (real move).
+	{"coop_real_combat", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (real combat).
+	{"coop_populate", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (populate).
+	{"coop_patrol", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (patrol).
+	{"coop_move_obj", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (move to object).
+	{"coop_monster_combat", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (monster combat).
+	{"coop_flee", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (flee).
+	{"coop_enum_squads", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (enumerate squads).
+	{"coop_dog", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (spawn a dog instead of a flesh).
+	{"coop_decision_burst", coop_cfg_value, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (burst of N decisions).
+	{"coop_combat", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (combat).
+	{"coop_autolocal_n", coop_cfg_value, coop_cfg_test},   // off | server | Gamedata mp_coop_scenario_autolocal: how many creatures to hand to local AI.
+	{"coop_autolocal", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (autolocal).
+	{"coop_test_surge", coop_cfg_value, coop_cfg_test},   // off | server | Gamedata mp_coop_emission: start a surge <s> seconds after boot (§10.2 harness).
 	{"coop_test_server_timeskip", coop_cfg_value, coop_cfg_test},   // off | server | Calls change_game_time(0, 5 h, 0) on the server <s> seconds after boot and logs the clock (§10.6 harness).
 	{"coop_rep32_resume", coop_cfg_switch, coop_cfg_test},   // off | server | Resume leg (second boot) of -coop_test_rep32: reads restored pressure stamp instead of killing.
 	{"coop_repro_gamelua", coop_cfg_switch, coop_cfg_test},   // off | server | Regression control: enters the Lua VM as bait from the game-thread decision tick (§3c reproduction).

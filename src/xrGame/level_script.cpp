@@ -166,6 +166,37 @@ bool coop_send_chat(LPCSTR text)
 	return true;
 }
 
+// MP fork (design doc §10.2): server side. The entity ids of the connected players' bodies, as "id,id,...", so server
+// gamedata can apply per-player world events (an emission's shelter check and damage) to players instead of to db.actor,
+// which on the dedicated server is the host save actor. Empty on a client or with nobody connected.
+LPCSTR coop_player_actor_ids()
+{
+	static string4096 s_out;
+	s_out[0] = 0;
+	if (!xr_enet::enabled() || !g_pGameLevel || !Level().Server)
+		return s_out;
+	struct collect
+	{
+		xrServer* server;
+		u32 n;
+		void operator()(IClient* client)
+		{
+			xrClientData* const cd = static_cast<xrClientData*>(client);
+			if (cd == server->GetServerClient() || !cd->flags.bConnected || !cd->owner)
+				return;
+			string16 id;
+			xr_sprintf(id, n ? ",%u" : "%u", u32(cd->owner->ID));
+			xr_strcat(s_out, sizeof(s_out), id);
+			++n;
+		}
+	};
+	collect c;
+	c.server = Level().Server;
+	c.n = 0;
+	Level().Server->ForEachClientDo(c);
+	return s_out;
+}
+
 CScriptGameObject *coop_controlled_actor()
 {
 	CActor *l_tpActor = smart_cast<CActor*>(Level().CurrentEntity());
@@ -2834,6 +2865,7 @@ void CLevel::script_register(lua_State* L)
 			def("coop_controlled_actor", &coop_controlled_actor),
 			def("coop_request_checkpoint", &coop_request_checkpoint),
 			def("coop_send_chat", &coop_send_chat),
+			def("coop_player_actor_ids", &coop_player_actor_ids),
 #ifdef DEBUG
 		def("debug_object",						get_object_by_name),
 		def("debug_actor",						tpfGetActor),
