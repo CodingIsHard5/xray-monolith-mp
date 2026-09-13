@@ -2380,7 +2380,10 @@ bool game_sv_Single::coop_checkpoint_respawn(u16 actor_id, xrClientData* CL, Fve
 	// by instance; a checkpoint banked without ids matches by section, which cannot tell two medkits apart but never
 	// loses an item either.
 	const bool by_id = !cp->items.empty() && cp->items[0].id != 0xffff;
-	xr_vector<bool> carried_entry(cp->items.size(), false);
+	xr_vector<u8> carried_entry;              // per bank entry: 1 = matched to a child on the body (xr_vector has no (n, value) ctor)
+	carried_entry.resize(cp->items.size());
+	for (u32 k = 0; k < carried_entry.size(); ++k)
+		carried_entry[k] = 0;
 	xr_vector<u16> current = actor->children;   // snapshot: Perform_destroy and the reject mutate the vector
 	xr_vector<u16> carried, gains;
 	string4096 at_death;
@@ -2403,7 +2406,7 @@ bool game_sv_Single::coop_checkpoint_respawn(u16 actor_id, xrClientData* CL, Fve
 		if (s_no_pile || match >= 0)
 		{
 			if (match >= 0)
-				carried_entry[match] = true;
+				carried_entry[match] = 1;
 			carried.push_back(child_id);
 		}
 		else
