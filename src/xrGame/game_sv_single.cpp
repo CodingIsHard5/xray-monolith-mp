@@ -2186,6 +2186,7 @@ void game_sv_Single::coop_request_checkpoint(xrClientData* CL)
 	float best = flt_max;
 	LPCSTR best_name = "";
 	Fvector best_pos = {0.f, 0.f, 0.f};
+	Fvector best_node_pos = {0.f, 0.f, 0.f};   // the walkable vertex beside the nearest campfire
 	// the level the chosen campfire BELONGS to, printed so a harness can check it instead of trusting a name
 	LPCSTR best_level = "?";
 	u32 n_named = 0, n_level = 0, n_graph = 0;   // how many "campfire" objects survived each filter (the refusal prints them)
@@ -2214,26 +2215,25 @@ void game_sv_Single::coop_request_checkpoint(xrClientData* CL)
 			if (n_level <= 3)
 				Msg("- COOP(checkpoint):   same-level candidate %s [%s] at %.1f %.1f %.1f node=%u", o->name_replace(),
 					o->s_name.c_str(), o->o_Position.x, o->o_Position.y, o->o_Position.z, o->m_tNodeID);
-			if (ai().get_level_graph())
-			{
-				const u32 v = ai().level_graph().vertex_id(o->o_Position);
-				if (!ai().level_graph().valid_vertex_id(v) ||
-				    ai().level_graph().vertex_position(v).distance_to(o->o_Position) > 3.f)
-					continue;
-			}
+			// Its OWN nav node must be valid. Looking a vertex up AT the fire's centre (attempt 5) rejected all 48
+			// Cordon campfires, because the flame itself is not walkable ground; the node the object carries is the
+			// walkable spot beside it, and it is where a harness should send a player.
+			if (!ai().level_graph().valid_vertex_id(o->m_tNodeID))
+				continue;
 			++n_graph;
 			const float d = o->o_Position.distance_to(at);
 			if (d < best)
 			{
 				best = d; best_name = o->name_replace(); best_pos = o->o_Position;
+				best_node_pos = ai().level_graph().vertex_position(o->m_tNodeID);
 				best_level = ai().game_graph().header().level(ai().game_graph().vertex(o->m_tGraphID)->level_id()).name().c_str();
 			}
 		}
 		if (best > s_radius)
 		{
-			Msg("- COOP(checkpoint): request from '%s' at %.1f,%.1f,%.1f refused: nearest campfire %s (level %s) at %.1f %.1f %.1f is %.1f m away (need %.1f); candidates named=%u same_level=%u on_graph=%u",
+			Msg("- COOP(checkpoint): request from '%s' at %.1f,%.1f,%.1f refused: nearest campfire %s (level %s) at %.1f %.1f %.1f is %.1f m away (need %.1f), walkable at %.1f %.1f %.1f; candidates named=%u same_level=%u on_graph=%u",
 				nm, at.x, at.y, at.z, best_name[0] ? best_name : "<none>", best_level, best_pos.x, best_pos.y, best_pos.z,
-				best < flt_max ? best : -1.f, s_radius, n_named, n_level, n_graph);
+				best < flt_max ? best : -1.f, s_radius, best_node_pos.x, best_node_pos.y, best_node_pos.z, n_named, n_level, n_graph);
 			coop_send_notice(CL, 11, "Checkpoint refused: rest at a campfire to set your checkpoint.");
 			return;
 		}
