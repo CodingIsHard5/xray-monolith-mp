@@ -2188,6 +2188,7 @@ void game_sv_Single::coop_request_checkpoint(xrClientData* CL)
 	Fvector best_pos = {0.f, 0.f, 0.f};
 	// the level the chosen campfire BELONGS to, printed so a harness can check it instead of trusting a name
 	LPCSTR best_level = "?";
+	u32 n_named = 0, n_level = 0, n_graph = 0;   // how many "campfire" objects survived each filter (the refusal prints them)
 	if (!s_anywhere)
 	{
 		CALifeObjectRegistry::OBJECT_REGISTRY::const_iterator I = ai().alife().objects().objects().begin();
@@ -2195,8 +2196,9 @@ void game_sv_Single::coop_request_checkpoint(xrClientData* CL)
 		for (; I != E; ++I)
 		{
 			CSE_ALifeDynamicObject* const o = (*I).second;
-			if (!o || !strstr(o->name_replace(), "_campfire"))
+			if (!o || (!strstr(o->name_replace(), "campfire") && !strstr(o->s_name.c_str(), "campfire")))
 				continue;
+			++n_named;
 			// A campfire nobody can stand at is not a rest point. The first live NEAR run chose
 			// level_prefix_campfire_0037 at y -21.7, 50 m below the ground 30 m from the spawn, and the client sent
 			// there fell through the world (goto landed on vertex 4294967295). Require a valid level vertex whose
@@ -2208,6 +2210,10 @@ void game_sv_Single::coop_request_checkpoint(xrClientData* CL)
 			if (!ai().get_level_graph() || !ai().game_graph().valid_vertex_id(o->m_tGraphID) ||
 			    ai().game_graph().vertex(o->m_tGraphID)->level_id() != ai().level_graph().level_id())
 				continue;
+			++n_level;
+			if (n_level <= 3)
+				Msg("- COOP(checkpoint):   same-level candidate %s [%s] at %.1f %.1f %.1f node=%u", o->name_replace(),
+					o->s_name.c_str(), o->o_Position.x, o->o_Position.y, o->o_Position.z, o->m_tNodeID);
 			if (ai().get_level_graph())
 			{
 				const u32 v = ai().level_graph().vertex_id(o->o_Position);
@@ -2215,6 +2221,7 @@ void game_sv_Single::coop_request_checkpoint(xrClientData* CL)
 				    ai().level_graph().vertex_position(v).distance_to(o->o_Position) > 3.f)
 					continue;
 			}
+			++n_graph;
 			const float d = o->o_Position.distance_to(at);
 			if (d < best)
 			{
@@ -2224,9 +2231,9 @@ void game_sv_Single::coop_request_checkpoint(xrClientData* CL)
 		}
 		if (best > s_radius)
 		{
-			Msg("- COOP(checkpoint): request from '%s' at %.1f,%.1f,%.1f refused: nearest campfire %s (level %s) at %.1f %.1f %.1f is %.1f m away (need %.1f)",
+			Msg("- COOP(checkpoint): request from '%s' at %.1f,%.1f,%.1f refused: nearest campfire %s (level %s) at %.1f %.1f %.1f is %.1f m away (need %.1f); candidates named=%u same_level=%u on_graph=%u",
 				nm, at.x, at.y, at.z, best_name[0] ? best_name : "<none>", best_level, best_pos.x, best_pos.y, best_pos.z,
-				best < flt_max ? best : -1.f, s_radius);
+				best < flt_max ? best : -1.f, s_radius, n_named, n_level, n_graph);
 			coop_send_notice(CL, 11, "Checkpoint refused: rest at a campfire to set your checkpoint.");
 			return;
 		}
