@@ -208,6 +208,8 @@ public:
 	void coop_animdiag_sample();
 	u32 m_coop_animdiag_last = 0;
 	Fvector m_coop_animdiag_pos = {0.f, 0.f, 0.f};
+	u32 m_coop_last_import = 0;     // bug 3 instrument: Device.dwTimeGlobal of the last net_Import
+	u32 m_coop_imports = 0;         // bug 3 instrument: net_Import calls since the last animdiag sample
 	virtual void net_Destroy();
 	virtual void net_Save(NET_Packet& P);
 	virtual BOOL net_SaveRelevant();

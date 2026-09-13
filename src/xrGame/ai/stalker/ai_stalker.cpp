@@ -1003,16 +1003,35 @@ void CAI_Stalker::coop_animdiag_sample()
 	stalker_movement_manager_smart_cover& mv = movement();
 	int lb = -1, lk = 0, ls = -1;
 	animation().coop_classify_legs(lb, lk, ls);
+	// Bug 3 arm 4 localisation (walk-in-place = client movement type WALK while the server says STAND, with
+	// a replicated speed frozen near walking pace). Where does the stand get lost?
+	//   SV  cse_ts/cse_move: the timestamp and movement type the server's OWN CSE will broadcast. A stale
+	//       cse_ts means the object stopped refreshing its entity; a cse_move != move means stale flags.
+	//   CL  imp: net_Import calls in the last second; age: ms since the last one; nts: newest NET sample's
+	//       timestamp. imp=0 means the updates never arrive; imp>0 with a frozen nts means they are dropped.
+	u32 cse_ts = 0; int cse_move = -1;
+	if (server && Level().Server)
+		if (CSE_ALifeCreatureAbstract* ce = smart_cast<CSE_ALifeCreatureAbstract*>(Level().Server->ID_to_entity(ID())))
+		{
+			cse_ts = ce->timestamp;
+			cse_move = (ce->flags >> 4) & 0x03;
+		}
+	const u32 imp = m_coop_imports;
+	m_coop_imports = 0;
 	Msg("~ COOP_ANIM: [%s] id=%u t=%u pos=%.2f,%.2f,%.2f moved=%.2f dt=%u body=%d move=%d mental=%d "
-		"rep=%d nspd=%.2f enemy=%d legs=%d/%d/%d",
+		"rep=%d nspd=%.2f enemy=%d legs=%d/%d/%d cse_ts=%u cse_move=%d imp=%u age=%u nts=%u",
 		server ? "SV" : "CL", ID(), now, Position().x, Position().y, Position().z, moved, dt,
 		int(mv.body_state()), int(mv.movement_type()), int(mv.mental_state()),
-		mv.replicated_state() ? 1 : 0, coop_net_speed(), memory().enemy().selected() ? 1 : 0, lb, lk, ls);
+		mv.replicated_state() ? 1 : 0, coop_net_speed(), memory().enemy().selected() ? 1 : 0, lb, lk, ls,
+		cse_ts, cse_move, imp, m_coop_last_import ? (now - m_coop_last_import) : 0,
+		NET.empty() ? 0 : NET.back().dwTimeStamp);
 }
 
 void CAI_Stalker::net_Import(NET_Packet& P)
 {
 	R_ASSERT(Remote());
+	m_coop_last_import = Device.dwTimeGlobal; // bug 3 instrument (coop_animdiag_sample)
+	++m_coop_imports;
 	net_update N;
 
 	u8 flags;
