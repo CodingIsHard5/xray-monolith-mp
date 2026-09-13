@@ -182,6 +182,10 @@ public:
 	virtual bool ApplyInfluence(const SMedicineInfluenceValues& V, const shared_str& sect);
 	virtual bool ApplyBooster(const SBooster& B, const shared_str& sect);
 	void ClearWounds();
+	// MP fork (co-op revive): UpdateCondition returns early while health <= 0, so every delta queued during the death
+	// (hits, bleeding, psy, radiation) waits and lands on the first frame of the new life — which killed a revived player
+	// again at once, self-credited, five times in a row (psi control runs). Drop the backlog and reset what kills.
+	void coop_reset_for_revive();
 
 	IC float GetBoostRadiationImmunity() const { return m_fBoostRadiationImmunity; };
 

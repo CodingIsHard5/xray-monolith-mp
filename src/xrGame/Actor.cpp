@@ -2592,10 +2592,10 @@ void CActor::coop_respawn()
 	// killing them — lethal radiation, a drained psy health (psi storm), open wounds — and a revived body died again in
 	// the next frame, self-credited, five times in one run. A death is a fresh life: clear the conditions that kill.
 	// (Deltas, not absolute sets: UpdateCondition applies and clamps them next frame, the same path every change takes.)
-	conditions().ChangeRadiation(-conditions().GetRadiation());
-	conditions().ChangePsyHealth(1.0f - conditions().GetPsyHealth());
-	conditions().ClearWounds();
-	Msg("- COOP(respawn): conditions cleared on revive (radiation, psy health, wounds)");
+	// (The first version queued negating deltas, which sat BEHIND the death's backlog of deltas that UpdateCondition had
+	// not applied while health was 0 — the player still died on the first frame. The reset drops the backlog itself.)
+	conditions().coop_reset_for_revive();
+	Msg("- COOP(respawn): conditions reset on revive (pending deltas dropped; radiation 0, psy health 1, wounds cleared)");
 	// Mods keep per-life state of their own in Lua (GAMMA's arszi_psy has a psy-health meter that kills at 0 every second,
 	// and it killed a revived player again after every revive in the §10.2 psi control — conditions() never sees it).
 	// Gamedata resets that in _G.mp_coop_on_respawn; no handler is not an error.

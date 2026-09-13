@@ -826,3 +826,16 @@ void SBooster::Load(const shared_str& sect, EBoostParams type)
 	default: NODEFAULT;
 	}
 }
+
+void CEntityCondition::coop_reset_for_revive()
+{
+	m_fDeltaHealth = 0;
+	m_fDeltaPower = 0;
+	m_fDeltaRadiation = 0;
+	m_fDeltaPsyHealth = 0;
+	m_fDeltaCircumspection = 0;
+	m_fDeltaEntityMorale = 0;
+	m_fRadiation = 0;
+	m_fPsyHealth = 1.0f;
+	ClearWounds();
+}
