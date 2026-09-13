@@ -1064,14 +1064,20 @@ void CAI_Stalker::coop_animdiag_sample()
 	const u32 imp = m_coop_imports;
 	m_coop_imports = 0;
 	Msg("~ COOP_ANIM: [%s] id=%u t=%u pos=%.2f,%.2f,%.2f moved=%.2f dt=%u body=%d move=%d mental=%d "
-		"rep=%d nspd=%.2f enemy=%d legs=%d/%d/%d cse_ts=%u cse_move=%d imp=%u age=%u nts=%u nst=%d stale=%u flips=%u",
+		"rep=%d nspd=%.2f enemy=%d legs=%d/%d/%d cse_ts=%u cse_move=%d imp=%u age=%u nts=%u nst=%d stale=%u flips=%u "
+		"lag=%d dpos=%.2f nsz=%u",
 		server ? "SV" : "CL", ID(), now, Position().x, Position().y, Position().z, moved, dt,
 		int(mv.body_state()), int(mv.movement_type()), int(mv.mental_state()),
 		mv.replicated_state() ? 1 : 0, coop_net_speed(), memory().enemy().selected() ? 1 : 0, lb, lk, ls,
 		cse_ts, cse_move, imp, m_coop_last_import ? (now - m_coop_last_import) : 0,
 		NET.empty() ? 0 : NET.back().dwTimeStamp,
 		server ? ((coop_pack_animation_state() & coop_anim_standing_bit) ? 1 : 0) : int(m_coop_net_standing),
-		m_coop_stale_imports, m_coop_raw_flips);
+		m_coop_stale_imports, m_coop_raw_flips,
+		// bug 3, one clock, one frame: newest packet's server timestamp minus this side's own timeServer(),
+		// the XZ distance from the displayed position to the newest packet's position, and the buffer size.
+		// A client that renders positions seconds behind the packets it has shows lag >> 0 and a large dpos.
+		NET.empty() ? 0 : int(NET.back().dwTimeStamp) - int(Level().timeServer()),
+		NET.empty() ? -1.f : Position().distance_to_xz(NET.back().p_pos), u32(NET.size()));
 	m_coop_stale_imports = 0;
 	m_coop_raw_flips = 0;
 }
