@@ -205,6 +205,36 @@ void CLevel::ClientReceive()
 					f(text);
 			}
 			break;
+		case M_XRNET_COOP_CHAT:
+			{
+				// MP fork (design doc §13.4): one PDA zone-chat line, already sanitised by the server. Read bounded
+				// anyway (r_stringZ_s R_ASSERTs on an over-long string), logged through %s, handed to gamedata.
+				const u16 sender = P->r_u16();
+				string128 name;
+				string512 text;
+				char* const bufs[2] = {name, text};
+				const u32 caps[2] = {sizeof(name), sizeof(text)};
+				for (int k = 0; k < 2; ++k)
+				{
+					u32 i = 0;
+					while (P->r_pos < P->B.count)
+					{
+						const char c = char(P->B.data[P->r_pos++]);
+						if (!c)
+							break;
+						if (i + 1 < caps[k])
+							bufs[k][i++] = c;
+					}
+					bufs[k][i] = 0;
+				}
+				static u32 s_logged = 0;
+				if (++s_logged <= 500 || (s_logged % 100) == 1)
+					Msg("* COOP(chat): %s: %s", name, text);
+				luabind::functor<void> f;
+				if (ai().script_engine().functor("_G.mp_coop_on_chat", f))
+					f(name, text, u32(sender));
+			}
+			break;
 		case M_XRNET_OPEN_MENU:
 			{
 				// MP fork (§19 co-op): the server ran a dialogue action that wanted to open a

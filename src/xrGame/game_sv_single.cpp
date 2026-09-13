@@ -19,6 +19,7 @@
 #include "script_engine.h"                         // MP fork: server-side Lua init hook
 #include "../xrNetServer/xr_enet_transport.h"      // MP fork: xr_enet::enabled()
 #include "mp_anchors.h"                            // MP fork: A-Life attention anchors
+#include "mp_coop_chat.h"                          // MP fork (§13.4): chat sanitise + rate limit
 #include "mp_coop_owner.h"                         // MP fork (§14 step 8 P1 / §6): the two ownership tiers
 #include "InventoryOwner.h"                        // MP fork (§14 step 8 Q4): HasInfo / CharacterInfo
 #include "character_info.h"                        // MP fork (§14 step 8 Q4): the player's community
@@ -2297,6 +2298,51 @@ void game_sv_Single::coop_request_checkpoint(xrClientData* CL)
 	}
 	else
 		coop_send_notice(CL, 13, "Checkpoint could not be set.");
+}
+
+// MP fork (design doc §13.4): PDA zone chat. Zone-wide, no range, no item: the server's only jobs are that the line
+// is clean (no forged second line), that one player cannot flood everyone, and that the NAME is the server's record of
+// who sent it. The text is logged through %s only (Msg is printf-style) and capped in how often it is logged, because
+// the engine log keeps every line in memory.
+void game_sv_Single::coop_request_chat(xrClientData* CL, LPCSTR raw)
+{
+	if (!m_server || !CL)
+		return;
+	LPCSTR nm = coop_player_name(CL);
+	if (!nm || !xr_strlen(nm))
+		return;
+	static u32 s_logged = 0;
+	const bool log = (++s_logged <= 500) || ((s_logged % 100) == 1);
+	const size_t raw_len = raw ? xr_strlen(raw) : 0;
+	string256 text;
+	const size_t n = coop_chat_sanitize(raw, text, sizeof(text));
+	if (!n)
+	{
+		if (log)
+			Msg("- COOP(chat): '%s' sent an empty line (%u raw bytes) — refused", nm, u32(raw_len));
+		coop_send_notice(CL, 14, "Message not sent: it was empty.");
+		return;
+	}
+	static xr_map<u32, coop_chat_bucket> s_buckets;
+	if (!coop_chat_allow(s_buckets[CL->ID.value()], Device.dwTimeGlobal))
+	{
+		if (log)
+			Msg("- COOP(chat): '%s' is over %d lines per %d s — refused", nm, int(COOP_CHAT_PER_WINDOW),
+				int(COOP_CHAT_WINDOW_MS / 1000));
+		coop_send_notice(CL, 15, "Message not sent: you are sending too fast.");
+		return;
+	}
+	string128 name;
+	coop_chat_sanitize(nm, name, sizeof(name));
+	NET_Packet P;
+	P.w_begin(M_XRNET_COOP_CHAT);
+	P.w_u16(CL->owner ? CL->owner->ID : u16(0xffff));
+	P.w_stringZ(name);
+	P.w_stringZ(text);
+	m_server->SendBroadcast(BroadcastCID, P, net_flags(TRUE, TRUE));
+	if (log)
+		Msg("- COOP(chat): relayed from '%s' (entity %u, %u raw bytes -> %u): %s", name,
+			CL->owner ? u32(CL->owner->ID) : 0xffffu, u32(raw_len), u32(n), text);
 }
 
 bool game_sv_Single::coop_bank_checkpoint(LPCSTR player_name)

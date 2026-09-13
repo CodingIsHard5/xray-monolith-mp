@@ -5,6 +5,7 @@
 #include "pch_script.h"
 #include "xrServer.h"
 #include "game_sv_single.h"   // MP fork (§9.1): coop_request_checkpoint
+#include "mp_coop_chat.h"     // MP fork (§13.4): COOP_CHAT_REQUEST_KIND
 #include "../xrNetServer/xr_enet_transport.h"
 #include "xrMessages.h"
 #include "xrServer_Objects_ALife_All.h"
@@ -1132,6 +1133,24 @@ void xrServer::coop_run_request(NET_Packet& P, ClientID sender)
 	{
 	case 1:
 		single->coop_request_checkpoint(CL);
+		break;
+	case COOP_CHAT_REQUEST_KIND:
+		{
+			// §13.4: the text is untrusted. r_stringZ_s R_ASSERTs (live in release) on a string longer than its
+			// buffer, so one long line from a client would stop the server: read it bounded by hand instead.
+			string512 raw;
+			u32 i = 0;
+			while (P.r_pos < P.B.count)
+			{
+				const char c = char(P.B.data[P.r_pos++]);
+				if (!c)
+					break;
+				if (i + 1 < sizeof(raw))
+					raw[i++] = c;
+			}
+			raw[i] = 0;
+			single->coop_request_chat(CL, raw);
+		}
 		break;
 	default:
 		Msg("! COOP(request): unknown request kind %u from client %u — ignored", u32(kind), sender.value());

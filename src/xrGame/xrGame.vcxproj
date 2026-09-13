@@ -1338,6 +1338,7 @@
     <ClInclude Include="MPPlayersBag.h" />
     <ClInclude Include="mp_config_sections.h" />
     <ClInclude Include="mp_coop_ff.h" />
+    <ClInclude Include="mp_coop_chat.h" />
     <ClInclude Include="mt_config.h" />
     <ClInclude Include="Needles.h" />
     <ClInclude Include="NET_Queue.h" />

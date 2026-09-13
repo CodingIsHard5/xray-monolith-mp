@@ -135,10 +135,16 @@ enum
 	M_XRNET_COOP_ROSTER,
 
 	// MP fork (design doc §9.1): client -> server. A player ASKS for something the server alone may grant.
-	// Payload: u8 kind. Kind 1 = "set my checkpoint here" (sent where a co-op client would have saved, i.e. at a
+	// Payload: u8 kind. Kind 2 (§13.4) = zone chat, + stringZ text. Kind 1 = "set my checkpoint here" (sent where a co-op client would have saved, i.e. at a
 	// campfire). Queued to the game thread like M_XRNET_DIALOG_ACTION; the server validates and answers with
 	// M_XRNET_COOP_NOTICE. Nothing the client says is trusted beyond "this player asked".
 	M_XRNET_COOP_REQUEST,
+
+	// MP fork (design doc §13.4): server -> ALL clients. One PDA zone-chat line, relayed after the server
+	// sanitised and rate-limited it (mp_coop_chat.h). Payload: u16 sender entity (0xffff = none), stringZ sender
+	// name (the server's record of the connection, never the client's say-so), stringZ text. The engine logs it
+	// and hands it to gamedata (_G.mp_coop_on_chat) for the PDA news feed.
+	M_XRNET_COOP_CHAT,
 
 	MSG_FORCEDWORD = u32(-1)
 };

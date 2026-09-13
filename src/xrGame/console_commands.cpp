@@ -455,6 +455,20 @@ static void full_memory_stats()
 #endif // DEBUG
 }
 
+// MP fork (design doc §13.4): "coop_chat <text>" sends a PDA zone-chat line from a co-op client. The PDA feed shows
+// what comes back; this is the text input until the feed grows its own box.
+bool coop_send_chat(LPCSTR text);   // level_script.cpp
+class CCC_CoopChat : public IConsole_Command
+{
+public:
+	CCC_CoopChat(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = FALSE; }
+	virtual void Execute(LPCSTR args)
+	{
+		if (!coop_send_chat(args))
+			Msg("! coop_chat: only a connected co-op client can send zone chat");
+	}
+};
+
 class CCC_MemStats : public IConsole_Command
 {
 public:
@@ -2743,6 +2757,7 @@ void CCC_RegisterCommands()
 	//g_OptConCom.Init();
 
 	CMD1(CCC_MemStats, "stat_memory");
+	CMD1(CCC_CoopChat, "coop_chat");
 
 	// MP fork (§19 co-op): deliberately OUTSIDE #ifdef DEBUG. It first went in next to
 	// dump_infos, which is DEBUG-only, so the release build reported "Unknown command" and

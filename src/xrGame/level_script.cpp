@@ -10,6 +10,7 @@
 #include "mp_coop_ff.h"
 #include "../xrNetServer/xr_enet_transport.h"   // MP fork (§9.1): xr_enet::enabled()
 #include "../xrServerEntities/xrMessages.h"        // MP fork (§9.1): M_XRNET_COOP_REQUEST
+#include "mp_coop_chat.h"                           // MP fork (§13.4): COOP_CHAT_REQUEST_KIND
 #include "level.h"
 #include "actor.h"
 #include "script_game_object.h"
@@ -145,6 +146,23 @@ bool coop_request_checkpoint()
 	P.w_u8(1);
 	Level().Send(P, net_flags(TRUE, TRUE));
 	Msg("- COOP(checkpoint): requested from the server");
+	return true;
+}
+
+// MP fork (design doc §13.4): client side. Send one PDA zone-chat line; the server sanitises, rate-limits and
+// broadcasts it (M_XRNET_COOP_CHAT), and answers a refusal with a notice. The text goes up raw (the server is the
+// authority on what a line may contain); only its size is capped here so it fits one packet.
+bool coop_send_chat(LPCSTR text)
+{
+	if (!xr_enet::enabled() || ai().get_alife() || !g_pGameLevel || !text)
+		return false;
+	string1024 raw;
+	strncpy_s(raw, sizeof(raw), text, _TRUNCATE);
+	NET_Packet P;
+	P.w_begin(M_XRNET_COOP_REQUEST);
+	P.w_u8(COOP_CHAT_REQUEST_KIND);
+	P.w_stringZ(raw);
+	Level().Send(P, net_flags(TRUE, TRUE));
 	return true;
 }
 
@@ -2800,6 +2818,7 @@ void CLevel::script_register(lua_State* L)
 			def("object_by_id", ((CScriptGameObject* (*)(const ::luabind::object&)) & get_object_by_id)),
 			def("coop_controlled_actor", &coop_controlled_actor),
 			def("coop_request_checkpoint", &coop_request_checkpoint),
+			def("coop_send_chat", &coop_send_chat),
 #ifdef DEBUG
 		def("debug_object",						get_object_by_name),
 		def("debug_actor",						tpfGetActor),
