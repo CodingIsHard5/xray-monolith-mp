@@ -32,6 +32,7 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"mp_trusted", coop_cfg_switch, coop_cfg_tunable},   // off | server | Accepts a client level-geometry checksum mismatch anyway (trusted-peer debugging only, not a default).
 	{"xrnet_udp", coop_cfg_switch, coop_cfg_tunable},   // off (DirectPlay/stock transport) | both | Selects the ENet UDP transport; xr_enet::enabled() gates almost every co-op path.
 	// ---- control
+	{"coop_allow_time_skip", coop_cfg_switch, coop_cfg_control},   // off | server | Lets scripts on the co-op server skip world time (change_game_time); the fix refuses it (§10.1/§10.6).
 	{"coop_break_inventory", coop_cfg_switch, coop_cfg_control},   // off | server | Negative control: orphan reclaim succeeds but the returning player's items are dropped (run must FAIL); exact-token match.
 	{"coop_break_reclaim", coop_cfg_switch, coop_cfg_control},   // off | server | Negative control: disables orphan lookup so every returning player gets a fresh spawn (run must FAIL); exact-token match.
 	{"coop_clone_from_graph_actor", coop_cfg_switch, coop_cfg_control},   // off | server | Restores the old new-player clone source (graph().actor(), i.e. the last spawned player) instead of the host save actor.
@@ -70,6 +71,7 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_smem", coop_cfg_value, coop_cfg_diag},   // off | server | Read-only shared-memory (smem_container) census every N ms.
 	{"coop_smem_clean", coop_cfg_switch, coop_cfg_diag},   // off | server | Also calls smem_container::clean() during the census; refused unless -coop_smem is also given.
 	// ---- test
+	{"coop_test_server_timeskip", coop_cfg_value, coop_cfg_test},   // off | server | Calls change_game_time(0, 5 h, 0) on the server <s> seconds after boot and logs the clock (§10.6 harness).
 	{"coop_rep32_resume", coop_cfg_switch, coop_cfg_test},   // off | server | Resume leg (second boot) of -coop_test_rep32: reads restored pressure stamp instead of killing.
 	{"coop_repro_gamelua", coop_cfg_switch, coop_cfg_test},   // off | server | Regression control: enters the Lua VM as bait from the game-thread decision tick (§3c reproduction).
 	{"coop_repro_pumplua", coop_cfg_switch, coop_cfg_test},   // off | server | Regression control: enters the Lua VM from the ENet pump thread in OnMessage; must still kill the server.

@@ -371,6 +371,21 @@ void change_game_time(u32 days, u32 hours, u32 mins)
 				days, hours, mins);
 		return;
 	}
+	// MP fork (design doc §10.1/§10.6: one continuous clock, crafting and repair in real time, no time skip): the co-op
+	// SERVER refuses too. The client paths are refused above, but a dialogue action runs on the server (xr_effects
+	// set_game_time / forward_game_time), as can soulslike's dream and drx_da's time-shift anomaly — any of them would
+	// yank every player's clock at once. -coop_allow_time_skip restores the stock skip (control).
+	static int s_allow = -1;
+	if (s_allow < 0)
+		s_allow = strstr(Core.Params, "-coop_allow_time_skip") ? 1 : 0;
+	if (xr_enet::enabled() && s_allow == 0)
+	{
+		static u32 s_refused_sv = 0;
+		if (++s_refused_sv <= 20 || (s_refused_sv % 100) == 1)
+			Msg("- COOP(time): change_game_time(%u d, %u h, %u min) refused on the co-op server — one continuous clock for "
+				"every player (-coop_allow_time_skip restores it)", days, hours, mins);
+		return;
+	}
 	game_sv_Single* tpGame = smart_cast<game_sv_Single *>(Level().Server->game);
 	if (tpGame && ai().get_alife())
 	{

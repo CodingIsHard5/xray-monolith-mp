@@ -4154,6 +4154,35 @@ void game_sv_Single::Update()
 						now_n ? "a player is connected" : "no players connected", u32(GetGameTime() / 1000), GetGameTimeFactor());
 				}
 			}
+			// §10.6 harness seam: -coop_test_server_timeskip <s> calls the script-facing change_game_time(0, 5, 0) once, <s>
+			// seconds after boot, and logs the game clock before and after.
+			{
+				static int s_ts = -1;
+				static u32 s_ts_at = 0;
+				if (s_ts < 0)
+				{
+					s_ts = 0;
+					if (LPCSTR p = strstr(Core.Params, "-coop_test_server_timeskip "))
+					{
+						const int sec = atoi(p + sizeof("-coop_test_server_timeskip ") - 1);
+						if (sec > 0)
+						{
+							s_ts = 1;
+							s_ts_at = Device.dwTimeGlobal + u32(sec) * 1000;
+						}
+					}
+				}
+				if (s_ts == 1 && Device.dwTimeGlobal >= s_ts_at && ai().get_alife() && ai().alife().initialized())
+				{
+					s_ts = 2;
+					extern void change_game_time(u32 days, u32 hours, u32 mins);
+					const u64 before = GetGameTime();
+					change_game_time(0, 5, 0);
+					const u64 after = GetGameTime();
+					Msg("- COOP(time-test): server change_game_time(0, 5 h, 0): game time %us -> %us (delta %ds)",
+						u32(before / 1000), u32(after / 1000), int((s64(after) - s64(before)) / 1000));
+				}
+			}
 			if (!s_no_halt && ai().get_alife() && ai().alife().initialized())
 			{
 				if (lc.n == 0 && !m_coop_time_halted)
