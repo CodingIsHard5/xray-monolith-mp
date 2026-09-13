@@ -1262,6 +1262,23 @@ u32 g_coop_vm_audit = 0;
 
 void CLevel::OnFrame()
 {
+	// MP fork (bug 3 clock probe, -coop_animdiag): the client renders NPC positions ~18.5 s behind the packets
+	// it holds (StalkerMPMod npc-anim-lag1: lag=newest ts - own timeServer() median 18540 ms, 552 buffered
+	// samples, moving NPCs drawn 14 m from their newest position). Its CLOCK_SYNC delta and the server's
+	// packet stamps disagree by that much. Every 10 s, print each side's clocks so the wrong delta is named.
+	{
+		static int s_clk = -1;
+		if (s_clk < 0) s_clk = strstr(Core.Params, "-coop_animdiag") ? 1 : 0;
+		static u32 s_clk_last = 0;
+		if (s_clk && ((Device.dwTimeGlobal - s_clk_last) >= 10000))
+		{
+			s_clk_last = Device.dwTimeGlobal;
+			Msg("~ COOP_CLOCK: [%s] dwTimeGlobal=%u timer=%u timeServer=%u net_TimeDelta=%d server_obj=%d",
+				ai().get_alife() ? "SV" : "CL", Device.dwTimeGlobal, Device.GetTimerGlobal()->GetElapsed_ms(),
+				timeServer(), int(timeServer_Delta()), Server ? 1 : 0);
+		}
+	}
+
 	PROF_EVENT("CLevel::OnFrame()");
 
 	// Every frame rather than once: a cached answer cannot go stale, but it also cannot notice
