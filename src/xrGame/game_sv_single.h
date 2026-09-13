@@ -305,6 +305,9 @@ public:
 	// Server-side bank path. Exposed so gamedata can trigger it at a campfire/base via the
 	// `game.mp_set_checkpoint(name)` luabind export; the engine does not care what triggered it.
 	bool coop_bank_checkpoint(LPCSTR player_name);
+	// §9.1: a player asked for a checkpoint where they stand. Granted at a campfire (A-Life object named *_campfire*
+	// within -coop_checkpoint_radius, default 8 m; -coop_checkpoint_anywhere lifts the rule). Answers with a notice.
+	void coop_request_checkpoint(xrClientData* CL);
 
 	// MP fork (§14 step 7 phase 3 C3 / §9.1-9.2): death rollback. Restores the PERSON —
 	// checkpoint position, health and banked inventory — and leaves the WORLD untouched.

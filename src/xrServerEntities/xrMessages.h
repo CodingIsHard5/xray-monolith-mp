@@ -134,6 +134,12 @@ enum
 	// The engine logs the first few and hands the text to gamedata (_G.mp_coop_on_roster); nothing decides on it.
 	M_XRNET_COOP_ROSTER,
 
+	// MP fork (design doc §9.1): client -> server. A player ASKS for something the server alone may grant.
+	// Payload: u8 kind. Kind 1 = "set my checkpoint here" (sent where a co-op client would have saved, i.e. at a
+	// campfire). Queued to the game thread like M_XRNET_DIALOG_ACTION; the server validates and answers with
+	// M_XRNET_COOP_NOTICE. Nothing the client says is trusted beyond "this player asked".
+	M_XRNET_COOP_REQUEST,
+
 	MSG_FORCEDWORD = u32(-1)
 };
 

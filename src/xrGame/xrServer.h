@@ -126,6 +126,7 @@ private:
 
 	// MP fork (§19 co-op): run a dialogue action a thin client asked us to perform.
 	void coop_run_dialog_action(NET_Packet& P);
+	void coop_run_request(NET_Packet& P, ClientID sender); // §9.1: M_XRNET_COOP_REQUEST, on the game thread
 
 	// §3 win #2b inc3 (per-client update packets): when target_client != nullptr, build the update stream
 	// for JUST that client — ambient creatures are filtered to its relevance set (m_coop_rel_known), while

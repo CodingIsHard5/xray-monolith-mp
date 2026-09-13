@@ -2148,6 +2148,75 @@ game_sv_Single::coop_checkpoint* game_sv_Single::coop_find_checkpoint(LPCSTR pla
 // item entities for the inventory. Deliberately NOT via the GAMMA script save-manager (P1
 // §3a: firing per-object Lua save callbacks on the dedicated server corrupts the LuaJIT VM).
 // Re-banking replaces the player's previous checkpoint. Returns true if a snapshot was taken.
+// MP fork (design doc §9.1): "A player sets a respawn point at a safe faction base or campfire — a deliberate,
+// player-chosen checkpoint, like choosing when to save in GAMMA." The client sends this where GAMMA would have saved;
+// the server decides. Only campfires are recognised: a base check needs the smart-terrain ownership the server has
+// but the rule for "friendly base" is GAMMA script logic (ish_campfire_saving.is_within_friendly_base) not worth
+// re-deriving here yet. Whether the fire is LIT is not checked (the server does not track the flame).
+void game_sv_Single::coop_request_checkpoint(xrClientData* CL)
+{
+	if (!CL || !CL->owner || !ai().get_alife())
+		return;
+	LPCSTR nm = coop_player_name(CL);
+	if (!nm || !xr_strlen(nm))
+		return;
+	CSE_Abstract* const actor = CL->owner;
+	CSE_ALifeCreatureAbstract* const creature = smart_cast<CSE_ALifeCreatureAbstract*>(actor);
+	if (!creature || creature->get_health() <= 0.f)
+	{
+		Msg("- COOP(checkpoint): request from '%s' refused: not alive", nm);
+		coop_send_notice(CL, 10, "Checkpoint refused: you are not alive.");
+		return;
+	}
+	static float s_radius = -1.f;
+	static int s_anywhere = -1;
+	if (s_radius < 0.f)
+	{
+		s_radius = 8.f;
+		if (LPCSTR r = strstr(Core.Params, "-coop_checkpoint_radius "))
+		{
+			const float v = (float)atof(r + sizeof("-coop_checkpoint_radius ") - 1);
+			if (v > 0.f && v <= 500.f) s_radius = v;
+		}
+		s_anywhere = strstr(Core.Params, "-coop_checkpoint_anywhere") ? 1 : 0;
+		Msg("- COOP(checkpoint): player requests need a campfire within %.1f m%s", s_radius,
+			s_anywhere ? " (DISABLED by -coop_checkpoint_anywhere)" : "");
+	}
+	const Fvector at = actor->o_Position;
+	float best = flt_max;
+	LPCSTR best_name = "";
+	Fvector best_pos = {0.f, 0.f, 0.f};
+	if (!s_anywhere)
+	{
+		CALifeObjectRegistry::OBJECT_REGISTRY::const_iterator I = ai().alife().objects().objects().begin();
+		CALifeObjectRegistry::OBJECT_REGISTRY::const_iterator E = ai().alife().objects().objects().end();
+		for (; I != E; ++I)
+		{
+			CSE_ALifeDynamicObject* const o = (*I).second;
+			if (!o || !strstr(o->name_replace(), "_campfire"))
+				continue;
+			const float d = o->o_Position.distance_to(at);
+			if (d < best) { best = d; best_name = o->name_replace(); best_pos = o->o_Position; }
+		}
+		if (best > s_radius)
+		{
+			Msg("- COOP(checkpoint): request from '%s' at %.1f,%.1f,%.1f refused: nearest campfire %s at %.1f %.1f %.1f is %.1f m away (need %.1f)",
+				nm, at.x, at.y, at.z, best_name[0] ? best_name : "<none>", best_pos.x, best_pos.y, best_pos.z,
+				best < flt_max ? best : -1.f, s_radius);
+			coop_send_notice(CL, 11, "Checkpoint refused: rest at a campfire to set your checkpoint.");
+			return;
+		}
+	}
+	if (coop_bank_checkpoint(nm))
+	{
+		Msg("- COOP(checkpoint): request from '%s' GRANTED at %s (%.1f m)", nm, s_anywhere ? "<anywhere>" : best_name,
+			s_anywhere ? 0.f : best);
+		coop_send_notice(CL, 12, "Checkpoint set. If you die, you return here with what you carry now.");
+	}
+	else
+		coop_send_notice(CL, 13, "Checkpoint could not be set.");
+}
+
 bool game_sv_Single::coop_bank_checkpoint(LPCSTR player_name)
 {
 	if (!xr_enet::enabled() || !ai().get_alife())

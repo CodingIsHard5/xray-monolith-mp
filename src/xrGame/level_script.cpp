@@ -8,6 +8,8 @@
 
 #include "pch_script.h"
 #include "mp_coop_ff.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§9.1): xr_enet::enabled()
+#include "../xrServerEntities/xrMessages.h"        // MP fork (§9.1): M_XRNET_COOP_REQUEST
 #include "level.h"
 #include "actor.h"
 #include "script_game_object.h"
@@ -132,6 +134,20 @@ CScriptGameObject *get_object_by_name(LPCSTR caObjectName)
 // on a co-op thin client db.actor is object 0 (the client's copy of the save actor), not the player:
 // a client-side teleport through db.actor moved the wrong object (StalkerMPMod npc-anim-bug2), and one
 // through debug_actor found nothing (npc-anim-bug3). No "do not use" log: this is the intended accessor.
+// MP fork (design doc §9.1): client side. Ask the server for a checkpoint where this player stands; the answer
+// comes back as an M_XRNET_COOP_NOTICE. Returns false on anything but a co-op client.
+bool coop_request_checkpoint()
+{
+	if (!xr_enet::enabled() || ai().get_alife() || !g_pGameLevel)
+		return false;
+	NET_Packet P;
+	P.w_begin(M_XRNET_COOP_REQUEST);
+	P.w_u8(1);
+	Level().Send(P, net_flags(TRUE, TRUE));
+	Msg("- COOP(checkpoint): requested from the server");
+	return true;
+}
+
 CScriptGameObject *coop_controlled_actor()
 {
 	CActor *l_tpActor = smart_cast<CActor*>(Level().CurrentEntity());
@@ -2772,6 +2788,7 @@ void CLevel::script_register(lua_State* L)
 			def("object_by_id", ((CScriptGameObject* (*)()) & get_object_by_id)),
 			def("object_by_id", ((CScriptGameObject* (*)(const ::luabind::object&)) & get_object_by_id)),
 			def("coop_controlled_actor", &coop_controlled_actor),
+			def("coop_request_checkpoint", &coop_request_checkpoint),
 #ifdef DEBUG
 		def("debug_object",						get_object_by_name),
 		def("debug_actor",						tpfGetActor),

@@ -4,6 +4,7 @@
 
 #include "pch_script.h"
 #include "xrServer.h"
+#include "game_sv_single.h"   // MP fork (§9.1): coop_request_checkpoint
 #include "../xrNetServer/xr_enet_transport.h"
 #include "xrMessages.h"
 #include "xrServer_Objects_ALife_All.h"
@@ -1057,6 +1058,11 @@ u32 xrServer::OnDelayedMessage(NET_Packet& P, ClientID sender) // Non-Zero means
 			coop_run_dialog_action(P);
 		}
 		break;
+	case M_XRNET_COOP_REQUEST:   // §9.1, deferred for the same reason
+		{
+			coop_run_request(P, sender);
+		}
+		break;
 	// MP fork (§4r FIX, second attempt): the DEFERRED GE_DIE lands here. Without this case the
 	// packet was queued and then silently DROPPED — the switch had four cases and no default, so
 	// the death simply stopped happening: rollback 0, respawn 0, and an audit reporting zero
@@ -1114,6 +1120,25 @@ extern float g_fCatchObjectTime;
 // script needs is addressable from the wire: the two speakers by object id, and the phrase by
 // (dialog id, phrase id). CPhraseDialog::Load shares the already-parsed dialog data, so this
 // is a lookup rather than a parse.
+// MP fork (design doc §9.1): a player's request, on the game thread (ProceedDelayedPackets).
+void xrServer::coop_run_request(NET_Packet& P, ClientID sender)
+{
+	const u8 kind = P.r_u8();
+	xrClientData* const CL = ID_to_client(sender);
+	game_sv_Single* const single = smart_cast<game_sv_Single*>(game);
+	if (!CL || !single)
+		return;
+	switch (kind)
+	{
+	case 1:
+		single->coop_request_checkpoint(CL);
+		break;
+	default:
+		Msg("! COOP(request): unknown request kind %u from client %u — ignored", u32(kind), sender.value());
+		break;
+	}
+}
+
 void xrServer::coop_run_dialog_action(NET_Packet& P)
 {
 	const u16 speaker_id = P.r_u16();
@@ -1353,6 +1378,13 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 			// about the action changes — same packet, same handler, same acting scope — only
 			// which thread is holding the VM when it runs. It also inherits the queue's existing
 			// correctness: a client that disconnects has its queued packets purged.
+			AddDelayedPacket(P, sender);
+		}
+		break;
+	case M_XRNET_COOP_REQUEST:
+		{
+			// MP fork (design doc §9.1): a player's request (set checkpoint). It banks through the checkpoint code,
+			// which walks CSEs the game thread mutates, so it is deferred exactly like the dialogue action above.
 			AddDelayedPacket(P, sender);
 		}
 		break;
