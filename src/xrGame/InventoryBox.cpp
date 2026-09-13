@@ -33,8 +33,7 @@ void CInventoryBox::OnEvent(NET_Packet& P, u16 type)
 			u16 id;
 			P.r_u16(id);
 			CObject* itm = Level().Objects.net_Find(id);
-			VERIFY(itm);
-			// MP fork (co-op): VERIFY is compiled out in release, so a take of an item this co-op client
+			// MP fork (co-op): VERIFY(itm) was compiled out in release, so a take of an item this co-op client
 			// never spawned (relevance cull) dereferenced null on the next line. Same class as the
 			// CAI_Stalker::OnEvent R_ASSERT (ai_stalker_events.cpp).
 			if (!itm)
