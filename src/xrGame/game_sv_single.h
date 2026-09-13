@@ -101,6 +101,8 @@ private:
 	u32  m_coop_autosave_last;                    // Device.dwTimeGlobal of last save (0 = never)
 	bool m_coop_autosave_init;                    // one-shot flag parse
 	bool m_coop_had_players = false; // MP fork (§9.5): a player was connected on the previous tick
+	bool  m_coop_time_halted = false;   // MP fork (§10.1): world time is stopped because nobody is connected
+	float m_coop_time_factor_saved = 0.f;
 	bool m_coop_bigalloc_init;                    // §5g: one-shot -coop_bigalloc parse
 
 	// MP fork (§14 step 7 phase 2): player identity persistence. The actor ENTITY already

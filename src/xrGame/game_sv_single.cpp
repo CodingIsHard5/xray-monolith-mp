@@ -3982,6 +3982,50 @@ void game_sv_Single::Update()
 				}
 			}
 			m_coop_had_players = (lc.n > 0);
+
+			// MP fork (design doc §10.1 / §9.5): "When the last player leaves, world time halts until someone rejoins."
+			// Also true from boot: an empty server has nobody for time to pass for. The factor goes to 0 AFTER the save
+			// on empty above has run, so that save records the real factor. set_time_factor rebases the clock, so a
+			// halt and a resume never jump time. -coop_no_time_halt is the control arm.
+			static int s_no_halt = -1;
+			if (s_no_halt < 0) s_no_halt = strstr(Core.Params, "-coop_no_time_halt") ? 1 : 0;
+			if (s_no_halt && ai().get_alife() && ai().alife().initialized())
+			{
+				// control arm: report the same edges without touching the clock, so a harness can read game time at each
+				static int s_last_n = -1;
+				const int now_n = (lc.n > 0) ? 1 : 0;
+				if (now_n != s_last_n)
+				{
+					s_last_n = now_n;
+					Msg("- COOP(time): %s — world time NOT halted (-coop_no_time_halt) at game time %us (factor %.2f)",
+						now_n ? "a player is connected" : "no players connected", u32(GetGameTime() / 1000), GetGameTimeFactor());
+				}
+			}
+			if (!s_no_halt && ai().get_alife() && ai().alife().initialized())
+			{
+				if (lc.n == 0 && !m_coop_time_halted)
+				{
+					m_coop_time_factor_saved = GetGameTimeFactor();
+					SetGameTimeFactor(0.f);
+					m_coop_time_halted = true;
+					Msg("- COOP(time): no players connected — world time HALTED at game time %us (factor was %.2f)",
+						u32(GetGameTime() / 1000), m_coop_time_factor_saved);
+				}
+				else if (lc.n > 0 && m_coop_time_halted)
+				{
+					// a save taken while halted stores factor 0; a restart would then restore 0 forever, so fall back to
+					// the configured normal rate when the remembered one is not a running clock
+					float f = m_coop_time_factor_saved;
+					if (!(f > 0.f))
+						f = ai().alife().time_manager().normal_time_factor();
+					if (!(f > 0.f))
+						f = 1.f;
+					SetGameTimeFactor(f);
+					m_coop_time_halted = false;
+					Msg("- COOP(time): a player is connected — world time RESUMED at game time %us (factor %.2f)",
+						u32(GetGameTime() / 1000), f);
+				}
+			}
 		}
 	}
 
