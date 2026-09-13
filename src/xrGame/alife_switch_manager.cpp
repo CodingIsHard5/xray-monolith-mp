@@ -23,54 +23,26 @@
 // avoid a new translation unit in the vcxproj.
 namespace mp_anchors
 {
-	struct anchor { Fvector position; bool used; };
-	static anchor s_anchors[max_anchors] = {};
-	static u32 s_count = 0;
-
-	void set(u32 idx, const Fvector& position)
+	static registry<Fvector>& reg()
 	{
-		if (idx >= max_anchors) return;
-		if (!s_anchors[idx].used) ++s_count;
-		s_anchors[idx].position = position;
-		s_anchors[idx].used = true;
+		static registry<Fvector> r;
+		return r;
 	}
 
-	void clear(u32 idx)
-	{
-		if (idx >= max_anchors || !s_anchors[idx].used) return;
-		s_anchors[idx].used = false;
-		--s_count;
-	}
-
-	void clear_all()
-	{
-		for (u32 i = 0; i < max_anchors; ++i)
-			s_anchors[i].used = false;
-		s_count = 0;
-	}
-
+	void set(u32 idx, const Fvector& position) { reg().set(idx, position); }
+	void clear(u32 idx) { reg().clear(idx); }
+	void clear_all() { reg().clear_all(); }
 	// MP fork (§4): clear only the per-actor range [0, n), leaving persistent gamedata anchors [n, max).
-	void clear_below(u32 n)
-	{
-		if (n > max_anchors) n = max_anchors;
-		for (u32 i = 0; i < n; ++i)
-			if (s_anchors[i].used) { s_anchors[i].used = false; --s_count; }
-	}
-
-	u32 count() { return s_count; }
+	void clear_below(u32 n) { reg().clear_below(n); }
+	void clear_range(u32 from, u32 to) { reg().clear_range(from, to); }
+	u32 count() { return reg().n; }
+	u32 player_count() { return reg().player_count(); }
+	bool emptied() { return reg().emptied(); }
+	void set_empty_offline(bool on) { reg().empty_offline = on; }
 
 	float min_distance_to(const Fvector& pos, const Fvector& fallback_pos)
 	{
-		if (!s_count)
-			return fallback_pos.distance_to(pos);
-		float best = flt_max;
-		for (u32 i = 0; i < max_anchors; ++i)
-			if (s_anchors[i].used)
-			{
-				float d = s_anchors[i].position.distance_to(pos);
-				if (d < best) best = d;
-			}
-		return best;
+		return reg().min_distance_to(pos, fallback_pos, flt_max);
 	}
 }
 

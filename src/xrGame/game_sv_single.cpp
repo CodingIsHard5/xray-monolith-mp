@@ -3507,11 +3507,54 @@ void game_sv_Single::coop_update_anchors()
 		}
 	};
 
-	// MP fork (§4): clear only the per-actor range so PERSISTENT gamedata anchors ([base, max), e.g. a
+	// §5.2 policy, resolved once: an emptied region falls back to offline simulation unless the control flag
+	// keeps the stock fallback (the save actor's spot stays live with no player anywhere).
+	static int s_policy = -1;
+	if (s_policy < 0)
+	{
+		s_policy = strstr(Core.Params, "-coop_empty_keeps_actor_region") ? 0 : 1;
+		mp_anchors::set_empty_offline(s_policy == 1);
+		Msg("- COOP(anchors): an emptied region %s", s_policy ? "falls back to offline simulation (§5.2)"
+			: "keeps the save actor's region live (-coop_empty_keeps_actor_region, the pre-§5.2 behaviour)");
+	}
+
+	// MP fork (§4): only the per-actor range is rebuilt, so PERSISTENT gamedata anchors ([base, max), e.g. a
 	// populated smart pinned online for the decision system) survive across frames.
-	mp_anchors::clear_below(mp_anchors::gamedata_anchor_base);
+	// §5.2: overwrite in place and THEN drop the slots nobody rewrote. Clearing first opened a window with no
+	// anchor at all, which the A-Life switch reads as "emptied" and would send objects offline mid-play.
 	anchor_feeder f; f.idx = 0; f.self = this;
 	m_server->ForEachClientDo(f);
+	mp_anchors::clear_range(f.idx, mp_anchors::gamedata_anchor_base);
+
+	static u32 s_prev_players = 0;
+	const u32 players = mp_anchors::player_count();
+	if (players != s_prev_players)
+	{
+		Msg("- COOP(anchors): player anchors %u -> %u%s", s_prev_players, players,
+			mp_anchors::emptied() ? " — the last one is gone: the emptied region falls back to offline simulation"
+			: (players < s_prev_players ? " — the remaining players keep their regions live" : ""));
+		s_prev_players = players;
+	}
+
+	// §5.2 harness seam: -coop_dbg_online_count logs how many A-Life objects are online, every 5 s.
+	static int s_count_dbg = -1;
+	if (s_count_dbg < 0)
+		s_count_dbg = strstr(Core.Params, "-coop_dbg_online_count") ? 1 : 0;
+	static u32 s_next_count_ms = 0;
+	if (s_count_dbg == 1 && Device.dwTimeGlobal >= s_next_count_ms)
+	{
+		s_next_count_ms = Device.dwTimeGlobal + 5000;
+		u32 online = 0, total = 0;
+		const CALifeObjectRegistry::OBJECT_REGISTRY& objs = ai().alife().objects().objects();
+		for (CALifeObjectRegistry::OBJECT_REGISTRY::const_iterator it = objs.begin(); it != objs.end(); ++it)
+		{
+			++total;
+			if (it->second->m_bOnline)
+				++online;
+		}
+		Msg("- COOP(anchors): online %u of %u A-Life objects (player anchors %u, anchors %u, emptied %d)", online,
+			total, players, mp_anchors::count(), mp_anchors::emptied() ? 1 : 0);
+	}
 }
 
 // MP fork (§14 step 8 phase 1 / doc §6): one-shot boot check of the world tier's key.
