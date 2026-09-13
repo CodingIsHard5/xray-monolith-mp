@@ -2195,6 +2195,17 @@ void game_sv_Single::coop_request_checkpoint(xrClientData* CL)
 			CSE_ALifeDynamicObject* const o = (*I).second;
 			if (!o || !strstr(o->name_replace(), "_campfire"))
 				continue;
+			// A campfire nobody can stand at is not a rest point. The first live NEAR run chose
+			// level_prefix_campfire_0037 at y -21.7, 50 m below the ground 30 m from the spawn, and the client sent
+			// there fell through the world (goto landed on vertex 4294967295). Require a valid level vertex whose
+			// position is within 3 m of the object.
+			if (ai().get_level_graph())
+			{
+				const u32 v = ai().level_graph().vertex_id(o->o_Position);
+				if (!ai().level_graph().valid_vertex_id(v) ||
+				    ai().level_graph().vertex_position(v).distance_to(o->o_Position) > 3.f)
+					continue;
+			}
 			const float d = o->o_Position.distance_to(at);
 			if (d < best) { best = d; best_name = o->name_replace(); best_pos = o->o_Position; }
 		}
