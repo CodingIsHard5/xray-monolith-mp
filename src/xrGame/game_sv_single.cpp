@@ -2153,6 +2153,19 @@ game_sv_Single::coop_checkpoint* game_sv_Single::coop_find_checkpoint(LPCSTR pla
 // the server decides. Only campfires are recognised: a base check needs the smart-terrain ownership the server has
 // but the rule for "friendly base" is GAMMA script logic (ish_campfire_saving.is_within_friendly_base) not worth
 // re-deriving here yet. Whether the fire is LIT is not checked (the server does not track the flame).
+bool game_sv_Single::coop_absorb_time_factor(float f)
+{
+	if (!m_coop_time_halted)
+		return false;
+	if (f > 0.f)
+		m_coop_time_factor_saved = f;
+	static u32 s_logged = 0;
+	if (++s_logged <= 10)
+		Msg("- COOP(time): a script asked for time factor %.2f while the world clock is halted — kept at 0, will resume at %.2f",
+			f, m_coop_time_factor_saved);
+	return true;
+}
+
 void game_sv_Single::coop_request_checkpoint(xrClientData* CL)
 {
 	if (!CL || !CL->owner || !ai().get_alife())
@@ -4020,8 +4033,8 @@ void game_sv_Single::Update()
 						f = ai().alife().time_manager().normal_time_factor();
 					if (!(f > 0.f))
 						f = 1.f;
+					m_coop_time_halted = false;   // before the call, or the absorber would swallow the resume itself
 					SetGameTimeFactor(f);
-					m_coop_time_halted = false;
 					Msg("- COOP(time): a player is connected — world time RESUMED at game time %us (factor %.2f)",
 						u32(GetGameTime() / 1000), f);
 				}
@@ -6375,6 +6388,11 @@ float game_sv_Single::GetGameTimeFactor()
 
 void game_sv_Single::SetGameTimeFactor(const float fTimeFactor)
 {
+	// MP fork (§10.1): while the clock is halted for an empty server, any caller that restarts it (GAMMA scripts through
+	// level.set_time_factor, the time_factor console command) is absorbed and remembered for the resume. Attempt 1 of the
+	// live test: halted at boot, yet game time advanced ~315 s before the first join at the configured factor 6.
+	if (fTimeFactor != 0.f && coop_absorb_time_factor(fTimeFactor))
+		return;
 	if (ai().get_alife() && ai().alife().initialized())
 		return (alife().time_manager().set_time_factor(fTimeFactor));
 	else

@@ -310,6 +310,9 @@ public:
 	// §9.1: a player asked for a checkpoint where they stand. Granted at a campfire (A-Life object named *_campfire*
 	// within -coop_checkpoint_radius, default 8 m; -coop_checkpoint_anywhere lifts the rule). Answers with a notice.
 	void coop_request_checkpoint(xrClientData* CL);
+	// §10.1: while the world clock is halted (nobody connected), a script's time-factor change is remembered for the
+	// resume instead of restarting the clock. Returns true when the request was absorbed.
+	bool coop_absorb_time_factor(float f);
 
 	// MP fork (§14 step 7 phase 3 C3 / §9.1-9.2): death rollback. Restores the PERSON —
 	// checkpoint position, health and banked inventory — and leaves the WORLD untouched.
