@@ -79,7 +79,7 @@ inline std::string coop_cfg_trim_lower(const std::string& s)
 // Merge config entries into a command line. Returns the new command line; one log line per entry in `log`.
 // `applied` counts what was appended.
 inline std::string coop_cfg_merge(const std::string& params, const std::vector<std::pair<std::string, std::string> >& entries,
-	const coop_cfg_key* known, size_t nknown, std::vector<std::string>& log, unsigned& applied)
+	const coop_cfg_key* known, size_t nknown, std::vector<std::string>& log, unsigned& applied, std::string* appended_names = 0)
 {
 	std::string out = params;
 	applied = 0;
@@ -114,6 +114,13 @@ inline std::string coop_cfg_merge(const std::string& params, const std::vector<s
 			log.push_back("- " + key + ": on the command line, which wins over the file");
 			continue;
 		}
+		// a value that is itself a flag ("coop_ff = -coop_test_kill") would put that flag on the command line as a
+		// bare switch, past every rule above; negative numbers stay allowed
+		if (val.size() >= 2 && val[0] == '-' && !std::isdigit((unsigned char)val[1]) && val[1] != '.')
+		{
+			log.push_back("! " + key + ": value '" + val + "' looks like a flag — REFUSED");
+			continue;
+		}
 		for (size_t c = 0; c < val.size(); ++c)
 			if (std::isspace((unsigned char)val[c]))
 			{
@@ -126,6 +133,7 @@ inline std::string coop_cfg_merge(const std::string& params, const std::vector<s
 			{
 				out += " " + flag;
 				++applied;
+				if (appended_names) *appended_names += " " + flag;
 				log.push_back(std::string("- ") + key + ": on" + (k->cls == coop_cfg_control ? " (a CONTROL flag: this turns a fix off)" : ""));
 			}
 			else if (val == "off" || val == "0" || val == "false" || val == "no")
@@ -142,6 +150,7 @@ inline std::string coop_cfg_merge(const std::string& params, const std::vector<s
 			}
 			out += " " + flag + " " + val;
 			++applied;
+			if (appended_names) *appended_names += " " + flag;
 			log.push_back("- " + key + " = " + val);
 		}
 	next:;

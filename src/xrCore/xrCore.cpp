@@ -105,8 +105,9 @@ static void coop_apply_server_config()
 			std::string(it->second.c_str() ? it->second.c_str() : "")));
 	std::vector<std::string> log;
 	unsigned applied = 0;
+	std::string names;
 	const std::string merged = coop_cfg_merge(Core.Params, entries, coop_server_config_keys,
-		sizeof(coop_server_config_keys) / sizeof(coop_server_config_keys[0]), log, applied);
+		sizeof(coop_server_config_keys) / sizeof(coop_server_config_keys[0]), log, applied, &names);
 	Msg("- COOP(config): %s: %u key(s), %u applied", path, u32(entries.size()), applied);
 	for (size_t i = 0; i < log.size(); ++i)
 		Msg("  COOP(config) %s", log[i].c_str());
@@ -115,7 +116,8 @@ static void coop_apply_server_config()
 		// The old string is deliberately not freed: it was allocated before Memory._initialize armed the co-op
 		// allocator instruments, and the commandline.txt merge in _initialize replaces it the same way. A few hundred bytes, once.
 		Core.Params = xr_strdup(merged.c_str());
-		Msg("- COOP(config): effective command line: %s", Core.Params);
+		// names only: the command line can carry things that do not belong in a log a player may be asked for
+		Msg("- COOP(config): appended to the command line:%s", names.c_str());
 	}
 }
 
