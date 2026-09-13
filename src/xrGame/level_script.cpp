@@ -127,6 +127,16 @@ CScriptGameObject *get_object_by_name(LPCSTR caObjectName)
 }
 #endif
 
+// MP fork (co-op): the actor THIS process controls, in release builds. debug_actor is #ifdef DEBUG, and
+// on a co-op thin client db.actor is object 0 (the client's copy of the save actor), not the player:
+// a client-side teleport through db.actor moved the wrong object (StalkerMPMod npc-anim-bug2), and one
+// through debug_actor found nothing (npc-anim-bug3). No "do not use" log: this is the intended accessor.
+CScriptGameObject *coop_controlled_actor()
+{
+	CActor *l_tpActor = smart_cast<CActor*>(Level().CurrentEntity());
+	return l_tpActor ? smart_cast<CGameObject*>(l_tpActor)->lua_game_object() : 0;
+}
+
 // demonized: add u16 id version of function to improve performance
 CScriptGameObject* get_object_by_id(u16 id)
 {
@@ -2743,6 +2753,7 @@ void CLevel::script_register(lua_State* L)
 			def("object_by_id", ((CScriptGameObject * (*)(u16)) & get_object_by_id)),
 			def("object_by_id", ((CScriptGameObject* (*)()) & get_object_by_id)),
 			def("object_by_id", ((CScriptGameObject* (*)(const ::luabind::object&)) & get_object_by_id)),
+			def("coop_controlled_actor", &coop_controlled_actor),
 #ifdef DEBUG
 		def("debug_object",						get_object_by_name),
 		def("debug_actor",						tpfGetActor),
