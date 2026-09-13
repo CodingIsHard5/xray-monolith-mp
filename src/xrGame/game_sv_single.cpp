@@ -4165,7 +4165,7 @@ void game_sv_Single::Update()
 					if (LPCSTR p = strstr(Core.Params, "-coop_test_server_timeskip "))
 					{
 						const int sec = atoi(p + sizeof("-coop_test_server_timeskip ") - 1);
-						if (sec > 0)
+						if (sec > 0 && sec <= 86400)   // a day at most: keeps the ms deadline far from u32 wrap
 						{
 							s_ts = 1;
 							s_ts_at = Device.dwTimeGlobal + u32(sec) * 1000;
