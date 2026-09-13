@@ -898,6 +898,19 @@ void CActor::Die(CObject* who)
 	use_HolderEx(NULL, true);
 #endif
 
+	// MP fork (diag, §10.2 psi runs): a co-op player dying "killed by self" with nothing logged is a script calling
+	// actor:kill(actor) / set_health_ex(0). Name it: dump the Lua stack for the first few such deaths.
+	if (coop_thin_client() && who && who->ID() == ID())
+	{
+		static u32 s_self_deaths = 0;
+		if (++s_self_deaths <= 10)
+		{
+			Msg("- COOP(death-diag): self-credited death #%u of actor %u — Lua stack follows (empty = engine-side)",
+				s_self_deaths, ID());
+			ai().script_engine().print_stack();
+		}
+	}
+
 #ifdef DEBUG
     Msg("--- Actor [%s] dies !", this->Name());
 #endif // #ifdef DEBUG
