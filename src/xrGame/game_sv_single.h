@@ -116,7 +116,7 @@ private:
 	// v3 (phase 4 D1/E) widens each binding record with the logged-off position and appends
 	// the recovery block. The loader still accepts v1 and v2 — an older sidecar just means
 	// nobody has a checkpoint / recovery record yet, never a load failure.
-	static const u32 COOP_BINDINGS_VERSION = 3;
+	static const u32 COOP_BINDINGS_VERSION = 4; // v4 (§9.2): checkpoint items carry their entity id
 
 	// MP fork (§14 step 7 phase 3, gap C): per-player CHECKPOINT — the doc's §9.1/9.2
 	// person-state snapshot that death rolls back to. Three constraints from phases 1-2
@@ -132,6 +132,9 @@ private:
 		u16        ammo_elapsed; // weapons: rounds left in the magazine
 		u8         ammo_type;    // weapons: which ammo section that magazine holds
 		u8         slot;         // weapons: inventory slot
+		u16        id = 0xffff;  // §9.2 (sidecar v4): the entity id banked, so a death can tell the instance carried
+		                         // through from a like-sectioned gain, and a banked item left in the world from one
+		                         // consumed. 0xffff = not recorded (a v1-v3 sidecar): the rollback matches by section.
 	};
 	struct coop_checkpoint
 	{
@@ -217,6 +220,12 @@ private:
 	bool coop_spawn_checkpoint_item(CSE_Abstract* owner, xrClientData* CL,
 	                                const coop_checkpoint_item& rec);
 	void coop_test_drop_world_item();    // harness: §9.2 negative case (see below)
+	CSE_Abstract* coop_spawn_checkpoint_item_e(CSE_Abstract* owner, xrClientData* CL, const coop_checkpoint_item& rec);
+	// §9.2 corpse pile: detach an item from its parent into the world at pos (a GE_OWNERSHIP_REJECT from the server)
+	bool coop_drop_to_world(CSE_Abstract* item, CSE_Abstract* parent, const Fvector& pos);
+	void coop_test_post_bank_items();    // harness: -coop_test_gain <section> / -coop_test_drop_banked, after the bank
+	u16  m_coop_test_gain_id = 0xffff;
+	u16  m_coop_test_dropbanked_id = 0xffff;
 	// MP fork (§14 step 7 phase 3 C3, harness): -coop_test_worlditem drops one item into the
 	// WORLD (unparented) right after the auto-bank. §9.2's whole point is that a death
 	// rewinds the PERSON and leaves the WORLD alone, so the rollback re-checks this entity

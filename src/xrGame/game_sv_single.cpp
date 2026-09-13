@@ -1751,6 +1751,7 @@ void game_sv_Single::coop_save_bindings(LPCSTR save_name)
 			writer->w_u16(it.ammo_elapsed);
 			writer->w_u8(it.ammo_type);
 			writer->w_u8(it.slot);
+			writer->w_u16(it.id);   // v4
 		}
 	}
 
@@ -2024,7 +2025,7 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 					truncated = true;
 					break;
 				}
-				const int item_tail = (int)(sizeof(float) + sizeof(u16) + 2 * sizeof(u8));
+				const int item_tail = (int)(sizeof(float) + sizeof(u16) + 2 * sizeof(u8) + (version >= 4 ? sizeof(u16) : 0));
 				if (reader->elapsed() < item_tail)
 				{
 					Msg("! COOP(bindings): '%s' checkpoint %u item %u is truncated — rest ignored",
@@ -2036,6 +2037,7 @@ void game_sv_Single::coop_load_bindings(LPCSTR save_name)
 				it.ammo_elapsed = reader->r_u16();
 				it.ammo_type = reader->r_u8();
 				it.slot = reader->r_u8();
+				it.id = (version >= 4) ? reader->r_u16() : u16(0xffff);
 				c.items.push_back(it);
 			}
 
@@ -2219,6 +2221,7 @@ bool game_sv_Single::coop_bank_checkpoint(LPCSTR player_name)
 
 		coop_checkpoint_item it;
 		it.section = child->s_name;
+		it.id = child_id;
 		it.condition = 1.f;
 		it.ammo_elapsed = 0;
 		it.ammo_type = 0;
@@ -2359,6 +2362,74 @@ bool game_sv_Single::coop_checkpoint_respawn(u16 actor_id, xrClientData* CL, Fve
 		return false;
 	}
 
+	// §9.2 corpse pile, decided BEFORE anything moves: the death position is where the gains land, and the actor's
+	// CSE position is overwritten with the checkpoint's below.
+	const Fvector death_pos = actor->o_Position;
+	static int s_no_pile = -1;
+	if (s_no_pile < 0)
+	{
+		s_no_pile = strstr(Core.Params, "-coop_no_corpse_pile") ? 1 : 0;
+		if (s_no_pile)
+			Msg("! COOP(corpse): -coop_no_corpse_pile SET — a death destroys everything carried and restores every banked "
+				"item (the pre-§9.2 rollback). This is the CONTROL arm.");
+	}
+
+	// --- classify what is on the body against the bank ---
+	// A child that matches an unused bank entry was CARRIED THROUGH the checkpoint: it rolls back to its banked state.
+	// Anything else was GAINED since the checkpoint and goes to the corpse pile. With ids (sidecar v4+) the match is
+	// by instance; a checkpoint banked without ids matches by section, which cannot tell two medkits apart but never
+	// loses an item either.
+	const bool by_id = !cp->items.empty() && cp->items[0].id != 0xffff;
+	xr_vector<bool> carried_entry(cp->items.size(), false);
+	xr_vector<u16> current = actor->children;   // snapshot: Perform_destroy and the reject mutate the vector
+	xr_vector<u16> carried, gains;
+	string4096 at_death;
+	at_death[0] = 0;
+	for (u16 child_id : current)
+	{
+		CSE_Abstract* c = m_server->ID_to_entity(child_id);
+		if (!c)
+			c = ai().alife().objects().object(child_id, true);
+		xr_strcat(at_death, sizeof(at_death), c ? c->s_name.c_str() : "<unknown>");
+		xr_strcat(at_death, sizeof(at_death), " ");
+		int match = -1;
+		for (u32 k = 0; k < cp->items.size() && match < 0; ++k)
+		{
+			if (carried_entry[k])
+				continue;
+			if (by_id ? (cp->items[k].id == child_id) : (c && cp->items[k].section == c->s_name))
+				match = int(k);
+		}
+		if (s_no_pile || match >= 0)
+		{
+			if (match >= 0)
+				carried_entry[match] = true;
+			carried.push_back(child_id);
+		}
+		else
+			gains.push_back(child_id);
+	}
+
+	// --- gains -> the corpse pile at the death position (nothing vanishes: conservation of items) ---
+	u32 dropped_gains = 0, drop_failed = 0;
+	for (u16 gid : gains)
+	{
+		CSE_Abstract* g = m_server->ID_to_entity(gid);
+		if (g && coop_drop_to_world(g, actor, death_pos))
+		{
+			++dropped_gains;
+			Msg("- COOP(corpse): '%s' gained id=%u '%s' since the checkpoint -> dropped at the death position %.1f,%.1f,%.1f",
+				nm, gid, g->s_name.c_str(), death_pos.x, death_pos.y, death_pos.z);
+		}
+		else
+		{
+			++drop_failed;
+			Msg("! COOP(corpse): could not drop gained id=%u (%s) — it stays on the body and is destroyed with it", gid,
+				g ? g->s_name.c_str() : "not in the server ID map");
+			carried.push_back(gid);
+		}
+	}
+
 	// --- position + health (the CSE is authoritative; the client is told separately) ---
 	io_pos = cp->pos;
 	io_health = (cp->health > 0.f) ? cp->health : 1.f;
@@ -2370,24 +2441,10 @@ bool game_sv_Single::coop_checkpoint_respawn(u16 actor_id, xrClientData* CL, Fve
 		dyn->m_tGraphID = cp->graph_id;
 	}
 
-	// --- inventory rollback: destroy what they are carrying now, restore what they banked ---
-	// Snapshot the child ids first: Perform_destroy mutates the children vector as it goes.
-	xr_vector<u16> current = actor->children;
-	// Name what is on the body BEFORE destroying it — after the loop these entities are gone
-	// from both the server map and A-Life, so the sections are unreadable.
-	string4096 at_death;
-	at_death[0] = 0;
-	for (u16 child_id : current)
-	{
-		CSE_Abstract* c = m_server->ID_to_entity(child_id);
-		if (!c)
-			c = ai().alife().objects().object(child_id, true);
-		xr_strcat(at_death, sizeof(at_death), c ? c->s_name.c_str() : "<unknown>");
-		xr_strcat(at_death, sizeof(at_death), " ");
-	}
+	// --- carried-through items: destroy, and re-create below from the bank at their checkpoint state ---
 	u32 destroyed = 0;
 	u32 skipped = 0;
-	for (u16 child_id : current)
+	for (u16 child_id : carried)
 	{
 		CSE_Abstract* child = m_server->ID_to_entity(child_id);
 		if (!child)
@@ -2404,12 +2461,10 @@ bool game_sv_Single::coop_checkpoint_respawn(u16 actor_id, xrClientData* CL, Fve
 		m_server->Perform_destroy(child, net_flags(TRUE, TRUE));
 		++destroyed;
 	}
-	// The counts that matter for the duplication question: how many children the actor had at
-	// death vs how many the checkpoint banked. Measured: the list SHRINKS by one across the
-	// death itself (9 banked, 8 present) and not with elapsed time, so the death detaches or
-	// consumes exactly one item. These two section lists name it.
-	Msg("- COOP(checkpoint): rollback children at death=%u (destroyed %u, skipped %u), banked=%u",
-		(u32)current.size(), destroyed, skipped, (u32)cp->items.size());
+	Msg("- COOP(checkpoint): rollback children at death=%u (carried through %u, gains %u -> pile %u, failed %u, "
+		"destroyed %u, skipped %u), banked=%u, matched by %s",
+		(u32)current.size(), (u32)(carried.size() - drop_failed), (u32)gains.size(), dropped_gains, drop_failed,
+		destroyed, skipped, (u32)cp->items.size(), by_id ? "instance id" : "section");
 	{
 		string4096 at_bank;
 		at_bank[0] = 0;
@@ -2422,18 +2477,54 @@ bool game_sv_Single::coop_checkpoint_respawn(u16 actor_id, xrClientData* CL, Fve
 		Msg("- COOP(checkpoint):   at death: %s", at_death);
 	}
 
-	u32 restored = 0;
-	for (const coop_checkpoint_item& it : cp->items)
+	// --- the bank: carried through -> restore; consumed (the instance is gone) -> refund; left in the WORLD -> stays ---
+	u32 restored = 0, kept_in_world = 0, refunded = 0;
+	for (u32 k = 0; k < cp->items.size(); ++k)
 	{
+		const coop_checkpoint_item& it = cp->items[k];
 		if (!it.section.size())
 			continue;
+		if (!s_no_pile && !carried_entry[k] && it.id != 0xffff)
+		{
+			CSE_Abstract* e = m_server->ID_to_entity(it.id);
+			if (!e)
+				e = ai().alife().objects().object(it.id, true);
+			if (e && e->s_name == it.section && e->ID_Parent != actor->ID)
+			{
+				// "Anything you put in a stash, dropped, sold ... BEFORE dying stays there" (§9.2): restoring it too
+				// would duplicate it.
+				++kept_in_world;
+				Msg("- COOP(corpse): banked id=%u '%s' is in the world (parent %u) — it stays there and is NOT restored",
+					it.id, it.section.c_str(), u32(e->ID_Parent));
+				continue;
+			}
+		}
+		if (!s_no_pile && !carried_entry[k])
+			++refunded;   // consumed or destroyed since the checkpoint: the rollback gives it back
 		if (coop_spawn_checkpoint_item(actor, CL, it))
 			++restored;
 	}
 
 	Msg("- COOP(checkpoint): ROLLBACK '%s' -> pos %.1f,%.1f,%.1f hp=%.2f "
-		"(dropped %u carried item(s), restored %u of %u banked)",
-		nm, cp->pos.x, cp->pos.y, cp->pos.z, io_health, destroyed, restored, (u32)cp->items.size());
+		"(dropped %u carried item(s), restored %u of %u banked; corpse pile %u, kept in world %u, refunded %u)",
+		nm, cp->pos.x, cp->pos.y, cp->pos.z, io_health, destroyed, restored, (u32)cp->items.size(), dropped_gains,
+		kept_in_world, refunded);
+
+	// harness (-coop_test_gain / -coop_test_drop_banked): where did the two seeded items end up?
+	for (int t = 0; t < 2; ++t)
+	{
+		const u16 tid = t ? m_coop_test_dropbanked_id : m_coop_test_gain_id;
+		if (tid == 0xffff)
+			continue;
+		CSE_Abstract* e = m_server->ID_to_entity(tid);
+		u32 on_body = 0;
+		if (e)
+			for (u16 cid : actor->children)
+				if (cid == tid) ++on_body;
+		Msg("- COOP(corpse-test): %s id=%u %s parent=%u pos %.1f,%.1f,%.1f dist_to_death=%.2f on_body=%u", t ? "dropped-banked" : "gain",
+			tid, e ? "PRESENT" : "MISSING", e ? u32(e->ID_Parent) : 0u, e ? e->o_Position.x : 0.f, e ? e->o_Position.y : 0.f,
+			e ? e->o_Position.z : 0.f, e ? e->o_Position.distance_to(death_pos) : -1.f, on_body);
+	}
 
 	// §9.2: the rollback must NOT have touched the world. Report the harness's world item.
 	if (m_coop_test_worlditem_id != 0xffff)
@@ -2458,15 +2549,21 @@ bool game_sv_Single::coop_checkpoint_respawn(u16 actor_id, xrClientData* CL, Fve
 bool game_sv_Single::coop_spawn_checkpoint_item(CSE_Abstract* owner, xrClientData* CL,
                                                 const coop_checkpoint_item& rec)
 {
+	return coop_spawn_checkpoint_item_e(owner, CL, rec) != NULL;
+}
+
+CSE_Abstract* game_sv_Single::coop_spawn_checkpoint_item_e(CSE_Abstract* owner, xrClientData* CL,
+                                                          const coop_checkpoint_item& rec)
+{
 	if (!owner || !CL)
-		return false;
+		return NULL;
 
 	LPCSTR sec = rec.section.c_str();
 	CSE_Abstract* it = F_entity_Create(sec);
 	if (!it)
 	{
 		Msg("! COOP(checkpoint): rollback section '%s' invalid (skipped)", sec);
-		return false;
+		return NULL;
 	}
 	it->s_name = sec;
 	it->set_name_replace("");
@@ -2500,7 +2597,97 @@ bool game_sv_Single::coop_spawn_checkpoint_item(CSE_Abstract* owner, xrClientDat
 		if (rec.ammo_elapsed)
 			ammo->a_elapsed = rec.ammo_elapsed;
 
-	return spawn_end(it, CL->ID) != NULL;
+	return spawn_end(it, CL->ID);
+}
+
+// MP fork (design doc §9.2 corpse pile): detach an item from the actor into the world at pos. The same shape as the
+// server's own Perform_reject (a GE_OWNERSHIP_REJECT through Process_event_reject, broadcast so clients drop it too), but
+// with the trailing "just before destroy" byte 0: a gain that lands in the pile must get a physics shell and stay.
+bool game_sv_Single::coop_drop_to_world(CSE_Abstract* item, CSE_Abstract* parent, const Fvector& pos)
+{
+	if (!m_server || !item || !parent || item->ID_Parent != parent->ID)
+		return false;
+	NET_Packet P;
+	const u32 time = Device.dwTimeGlobal;
+	P.w_begin(M_EVENT);
+	P.w_u32(time);
+	P.w_u16(GE_OWNERSHIP_REJECT);
+	P.w_u16(parent->ID);
+	P.w_u16(item->ID);
+	P.w_u8(0);
+	item->o_Position = pos;
+	return m_server->Process_event_reject(P, BroadcastCID, time, parent->ID, item->ID);
+}
+
+// MP fork (§9.2, harness): right after the test auto-bank, give every connected player one GAIN (-coop_test_gain <section>)
+// and put one BANKED item into the world beside them (-coop_test_drop_banked). The rollback then has to pile the gain,
+// leave the dropped banked item where it is, and restore the rest; its corpse-test lines say where both ended up.
+void game_sv_Single::coop_test_post_bank_items()
+{
+	string128 gain_sec;
+	gain_sec[0] = 0;
+	if (LPCSTR g = strstr(Core.Params, "-coop_test_gain "))
+	{
+		g += sizeof("-coop_test_gain ") - 1;
+		while (*g == ' ') ++g;
+		int n = 0;
+		while (*g && *g != ' ' && n < 127) gain_sec[n++] = *g++;
+		gain_sec[n] = 0;
+	}
+	const bool drop_banked = strstr(Core.Params, "-coop_test_drop_banked") != NULL;
+	if (!gain_sec[0] && !drop_banked)
+		return;
+
+	struct each
+	{
+		game_sv_Single* self;
+		LPCSTR gain;
+		bool drop;
+		void operator()(IClient* client)
+		{
+			xrClientData* cd = static_cast<xrClientData*>(client);
+			if (cd == self->m_server->GetServerClient() || !cd->owner)
+				return;
+			CSE_Abstract* actor = cd->owner;
+			if (drop && self->m_coop_test_dropbanked_id == 0xffff)
+			{
+				for (u16 cid : actor->children)
+				{
+					CSE_Abstract* c = self->m_server->ID_to_entity(cid);
+					if (!c || smart_cast<CSE_ALifeItemWeapon*>(c) || !smart_cast<CSE_ALifeInventoryItem*>(c))
+						continue;
+					Fvector at = actor->o_Position;
+					at.x += 1.5f;
+					const shared_str sec = c->s_name;
+					if (self->coop_drop_to_world(c, actor, at))
+					{
+						self->m_coop_test_dropbanked_id = cid;
+						Msg("- COOP(corpse-test): dropped BANKED id=%u '%s' into the world at %.1f,%.1f,%.1f", cid,
+							sec.c_str(), at.x, at.y, at.z);
+					}
+					break;
+				}
+			}
+			if (gain && gain[0] && self->m_coop_test_gain_id == 0xffff)
+			{
+				coop_checkpoint_item rec;
+				rec.section = gain;
+				rec.condition = 1.f;
+				rec.ammo_elapsed = 0;
+				rec.ammo_type = 0;
+				rec.slot = 0xff;
+				if (CSE_Abstract* e = self->coop_spawn_checkpoint_item_e(actor, cd, rec))
+				{
+					self->m_coop_test_gain_id = e->ID;
+					Msg("- COOP(corpse-test): GAIN id=%u '%s' given to actor %u after the bank", e->ID, gain, actor->ID);
+				}
+				else
+					Msg("! COOP(corpse-test): could not give GAIN '%s'", gain);
+			}
+		}
+	};
+	each e; e.self = this; e.gain = gain_sec; e.drop = drop_banked;
+	m_server->ForEachClientDo(e);
 }
 
 // ============================================================================================
@@ -3698,6 +3885,7 @@ void game_sv_Single::Update()
 				m_coop_test_checkpoint_done = true;   // one-shot, only once someone was banked
 				Msg("- COOP(checkpoint): test auto-bank done (%u player(s))", b.banked);
 				coop_test_drop_world_item();          // harness: §9.2 negative case (see header)
+				coop_test_post_bank_items();          // harness: §9.2 corpse pile (gain + a banked item left in the world)
 			}
 		}
 	}
