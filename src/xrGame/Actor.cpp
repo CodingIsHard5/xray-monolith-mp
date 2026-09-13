@@ -2583,6 +2583,14 @@ void CActor::coop_respawn()
 	conditions().ChangePsyHealth(1.0f - conditions().GetPsyHealth());
 	conditions().ClearWounds();
 	Msg("- COOP(respawn): conditions cleared on revive (radiation, psy health, wounds)");
+	// Mods keep per-life state of their own in Lua (GAMMA's arszi_psy has a psy-health meter that kills at 0 every second,
+	// and it killed a revived player again after every revive in the §10.2 psi control — conditions() never sees it).
+	// Gamedata resets that in _G.mp_coop_on_respawn; no handler is not an error.
+	{
+		luabind::functor<void> f;
+		if (ai().script_engine().functor("_G.mp_coop_on_respawn", f))
+			f(u32(ID()));
+	}
 
 	// --- Clear death bookkeeping ---
 	// m_level_death_time != 0  =>  AlreadyDie() == true, which blocks future deaths.
