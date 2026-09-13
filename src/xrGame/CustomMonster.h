@@ -130,6 +130,8 @@ public:
 	// two newest network samples. The leg-animation direction picker uses this instead of the
 	// undriven sight so the legs match the body - see stalker_animation_legs.cpp.
 	float m_coop_net_heading;
+	u32 m_coop_speed_anchor_ts;      // bug 3: speed is measured over >= 300 ms of samples, not the newest two
+	Fvector m_coop_speed_anchor_pos;
 	bool  m_coop_net_moving;
 	IC float coop_net_heading() const { return m_coop_net_heading; }
 	IC bool  coop_net_moving()  const { return m_coop_net_moving; }

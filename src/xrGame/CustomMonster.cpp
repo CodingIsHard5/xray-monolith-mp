@@ -147,6 +147,8 @@ CCustomMonster::CCustomMonster() :
 	m_coop_net_speed = 0.f;
 	m_coop_net_heading = 0.f;
 	m_coop_net_moving = false;
+	m_coop_speed_anchor_ts = 0;
+	m_coop_speed_anchor_pos.set(0.f, 0.f, 0.f);
 	m_coop_locally_driven = false; // §14 step 3: default = dense streaming (coop_puppet)
 	m_coop_locally_driven_ts = 0;
 	m_coop_corr_last_post.set(0.f, 0.f, 0.f);
@@ -858,26 +860,47 @@ void CCustomMonster::UpdateCL()
 			if (coop_puppet && (dwTime < NET.front().dwTimeStamp))
 				dwTime = NET.front().dwTimeStamp;
 
-			// MP fork (§19 co-op): the puppet's real ground speed, from the two newest samples.
-			// This is the number CStalkerAnimationManager::standing() actually needs. Computed
-			// here rather than inside the interpolation branch: that branch is skipped whenever
-			// a packet is late, and a stale speed left an NPC that had stopped still playing a
-			// walk cycle.
-			if (coop_puppet && (NET.size() >= 2))
+			// MP fork (§19 co-op): the puppet's real ground speed. This is the number
+			// CStalkerAnimationManager::standing() actually needs. Computed here rather than inside the
+			// interpolation branch: that branch is skipped whenever a packet is late, and a stale speed
+			// left an NPC that had stopped still playing a walk cycle.
+			//
+			// Bug 3 (StalkerMPMod dev/evidence/npc-anim-bug5): it used to come from the two NEWEST samples,
+			// ~33 ms apart at 30 Hz, so a few centimetres of positional jitter on a standing NPC read as
+			// 0.6-4.4 m/s. That beat the 0.15 m/s standing threshold, the replicated movement type decided
+			// instead, and 343 of 1865 server-STAND pairs walked on the spot while the NPC moved 0.00 m in
+			// the second. Now the displacement is measured from an anchor sample at least 300 ms older, so
+			// jitter averages out and real gaits (>= ~1 m/s) are unaffected. A stream that has gone quiet
+			// for a second reads as stopped instead of holding its last value.
+			if (coop_puppet && !NET.empty())
 			{
-				const net_update& prev = NET[NET.size() - 2];
 				const net_update& last = NET.back();
-				const u32 gap = last.dwTimeStamp - prev.dwTimeStamp;
-				Fvector d; d.sub(last.p_pos, prev.p_pos); d.y = 0.f;
-				const float dist = d.magnitude();
-				m_coop_net_speed = gap ? (dist / (float(gap) / 1000.f)) : 0.f;
-				// Heading of travel. Keep the last real heading when nearly stationary so a
-				// momentarily-still NPC does not snap its legs to a random direction.
-				m_coop_net_moving = (dist > 0.03f);
-				if (m_coop_net_moving)
+				if (!m_coop_speed_anchor_ts || (last.dwTimeStamp < m_coop_speed_anchor_ts))
 				{
-					float h, pch; d.getHP(h, pch);
-					m_coop_net_heading = angle_normalize(-h); // getHP returns -a for rotateY(a)
+					m_coop_speed_anchor_ts = last.dwTimeStamp;
+					m_coop_speed_anchor_pos = last.p_pos;
+				}
+				else if ((last.dwTimeStamp - m_coop_speed_anchor_ts) >= 300)
+				{
+					const u32 gap = last.dwTimeStamp - m_coop_speed_anchor_ts;
+					Fvector d; d.sub(last.p_pos, m_coop_speed_anchor_pos); d.y = 0.f;
+					const float dist = d.magnitude();
+					m_coop_net_speed = dist / (float(gap) / 1000.f);
+					// Heading of travel. Keep the last real heading when nearly stationary so a
+					// momentarily-still NPC does not snap its legs to a random direction.
+					m_coop_net_moving = (m_coop_net_speed >= 0.15f);
+					if (m_coop_net_moving)
+					{
+						float h, pch; d.getHP(h, pch);
+						m_coop_net_heading = angle_normalize(-h); // getHP returns -a for rotateY(a)
+					}
+					m_coop_speed_anchor_ts = last.dwTimeStamp;
+					m_coop_speed_anchor_pos = last.p_pos;
+				}
+				if ((Level().timeServer() > last.dwTimeStamp) && ((Level().timeServer() - last.dwTimeStamp) > 1000))
+				{
+					m_coop_net_speed = 0.f;
+					m_coop_net_moving = false;
 				}
 			}
 
