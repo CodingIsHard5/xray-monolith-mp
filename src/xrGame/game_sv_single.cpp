@@ -2186,6 +2186,8 @@ void game_sv_Single::coop_request_checkpoint(xrClientData* CL)
 	float best = flt_max;
 	LPCSTR best_name = "";
 	Fvector best_pos = {0.f, 0.f, 0.f};
+	// the level the chosen campfire BELONGS to, printed so a harness can check it instead of trusting a name
+	LPCSTR best_level = "?";
 	if (!s_anywhere)
 	{
 		CALifeObjectRegistry::OBJECT_REGISTRY::const_iterator I = ai().alife().objects().objects().begin();
@@ -2214,12 +2216,16 @@ void game_sv_Single::coop_request_checkpoint(xrClientData* CL)
 					continue;
 			}
 			const float d = o->o_Position.distance_to(at);
-			if (d < best) { best = d; best_name = o->name_replace(); best_pos = o->o_Position; }
+			if (d < best)
+			{
+				best = d; best_name = o->name_replace(); best_pos = o->o_Position;
+				best_level = ai().game_graph().header().level(ai().game_graph().vertex(o->m_tGraphID)->level_id()).name().c_str();
+			}
 		}
 		if (best > s_radius)
 		{
-			Msg("- COOP(checkpoint): request from '%s' at %.1f,%.1f,%.1f refused: nearest campfire %s at %.1f %.1f %.1f is %.1f m away (need %.1f)",
-				nm, at.x, at.y, at.z, best_name[0] ? best_name : "<none>", best_pos.x, best_pos.y, best_pos.z,
+			Msg("- COOP(checkpoint): request from '%s' at %.1f,%.1f,%.1f refused: nearest campfire %s (level %s) at %.1f %.1f %.1f is %.1f m away (need %.1f)",
+				nm, at.x, at.y, at.z, best_name[0] ? best_name : "<none>", best_level, best_pos.x, best_pos.y, best_pos.z,
 				best < flt_max ? best : -1.f, s_radius);
 			coop_send_notice(CL, 11, "Checkpoint refused: rest at a campfire to set your checkpoint.");
 			return;
@@ -2227,8 +2233,8 @@ void game_sv_Single::coop_request_checkpoint(xrClientData* CL)
 	}
 	if (coop_bank_checkpoint(nm))
 	{
-		Msg("- COOP(checkpoint): request from '%s' GRANTED at %s (%.1f m)", nm, s_anywhere ? "<anywhere>" : best_name,
-			s_anywhere ? 0.f : best);
+		Msg("- COOP(checkpoint): request from '%s' GRANTED at %s (level %s) (%.1f m)", nm, s_anywhere ? "<anywhere>" : best_name,
+			s_anywhere ? "-" : best_level, s_anywhere ? 0.f : best);
 		coop_send_notice(CL, 12, "Checkpoint set. If you die, you return here with what you carry now.");
 	}
 	else
