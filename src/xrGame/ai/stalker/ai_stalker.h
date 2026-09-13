@@ -203,6 +203,7 @@ public:
 	// so a replicated stalker animates instead of sliding in an idle loop — see net_Export.
 	u8 coop_pack_animation_state() const;
 	void coop_apply_animation_state(u8 packed);
+	void coop_animx_log(bool server_side, u32 ts, u8 packed);
 	IC s8 coop_net_standing() const { return m_coop_net_standing; }
 	// MP fork (bug 3 instrument, -coop_animdiag): one line per stalker per second, on BOTH sides,
 	// carrying the animation-selection inputs and (client) what the legs are actually playing.
@@ -215,6 +216,7 @@ public:
 	u32 m_coop_raw_flips = 0;       // raw changes since the last animdiag sample     // bug 3: the server's standing() test latched at the top of UpdateCL (settled state)
 	s8 m_coop_net_standing = -1;    // bug 3: the SERVER's standing() answer from the flags byte; -1 = not sent
 	u32 m_coop_last_import = 0;     // bug 3 instrument: Device.dwTimeGlobal of the last net_Import
+	u16 m_coop_last_packed = 0xFFFF;  // bug 3 transition log: last flags byte exported (SV) / applied (CL)
 	u32 m_coop_stale_imports = 0;   // bug 3: imports whose flags were NOT applied (not newer than NET.back()) since the last sample
 	u32 m_coop_imports = 0;         // bug 3 instrument: net_Import calls since the last animdiag sample
 	virtual void net_Destroy();

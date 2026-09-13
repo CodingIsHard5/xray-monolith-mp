@@ -956,7 +956,9 @@ void CAI_Stalker::net_Export(NET_Packet& P)
 	P.w_float(GetfHealth());
 
 	P.w_u32(N.dwTimeStamp);
-	P.w_u8(coop_pack_animation_state());
+	const u8 coop_packed = coop_pack_animation_state();
+	P.w_u8(coop_packed);
+	coop_animx_log(true, N.dwTimeStamp, coop_packed);
 	P.w_vec3(N.p_pos);
 	P.w_float /*w_angle8*/(N.o_model);
 	P.w_float /*w_angle8*/(N.o_torso.yaw);
@@ -1002,6 +1004,27 @@ void CAI_Stalker::net_Export(NET_Packet& P)
 //               2 locomotion, 3 other; for locomotion s is the gait (0 walk 1 run 2 escape)
 // The server prints the same fields for the same ids, so a client crouch can be compared with the
 // server's own body state at the same second instead of with an assumption about it.
+// Bug 3 transition log (-coop_animdiag): one line per CHANGE of the flags byte, exported on the server and
+// applied on the client, keyed by the packet's server timestamp. Joining the two on (id, ts) answers the
+// question fix-arm 5 left: the client applied standing=0 while the server's debounced export read standing=1
+// with zero raw flips in that second. Which packets carried the 0, and did this server object send them?
+void CAI_Stalker::coop_animx_log(bool server_side, u32 ts, u8 packed)
+{
+	static int s_on = -1;
+	if (s_on < 0) s_on = strstr(Core.Params, "-coop_animdiag") ? 1 : 0;
+	if (!s_on || !xr_enet::enabled())
+		return;
+	if (m_coop_last_packed == u16(packed))
+		return;
+	m_coop_last_packed = u16(packed);
+	static u32 s_lines = 0;
+	if (++s_lines > 60000)
+		return;
+	Msg("~ COOP_ANIMX: [%s] id=%u ts=%u now=%u packed=0x%02x move=%d nst=%d valid=%d local=%d",
+		server_side ? "SV" : "CL", ID(), ts, Device.dwTimeGlobal, packed, (packed >> 4) & 3,
+		(packed & 0x40) ? 1 : 0, (packed & 0x80) ? 1 : 0, Local() ? 1 : 0);
+}
+
 void CAI_Stalker::coop_animdiag_sample()
 {
 	static int s_on = -1;
@@ -1120,7 +1143,10 @@ void CAI_Stalker::net_Import(NET_Packet& P)
 	// the legs walked on the spot for ~3 s (server CSE STAND and fresh throughout).
 	const bool coop_newest = NET.empty() || (NET.back().dwTimeStamp < N.dwTimeStamp);
 	if (coop_newest)
+	{
 		coop_apply_animation_state(flags);
+		coop_animx_log(false, N.dwTimeStamp, flags);
+	}
 	else
 		++m_coop_stale_imports;
 	P.r_vec3(N.p_pos);
