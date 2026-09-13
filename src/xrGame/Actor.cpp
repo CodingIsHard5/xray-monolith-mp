@@ -2575,6 +2575,15 @@ void CActor::coop_respawn()
 	// SetfHealth clamps to [0,max]; a positive value makes g_Alive() true again.
 	SetfHealth(GetMaxHealth());
 
+	// MP fork (found by the §10.2 psi/emission runs): health alone was restored, so whatever killed the player kept
+	// killing them — lethal radiation, a drained psy health (psi storm), open wounds — and a revived body died again in
+	// the next frame, self-credited, five times in one run. A death is a fresh life: clear the conditions that kill.
+	// (Deltas, not absolute sets: UpdateCondition applies and clamps them next frame, the same path every change takes.)
+	conditions().ChangeRadiation(-conditions().GetRadiation());
+	conditions().ChangePsyHealth(1.0f - conditions().GetPsyHealth());
+	conditions().ClearWounds();
+	Msg("- COOP(respawn): conditions cleared on revive (radiation, psy health, wounds)");
+
 	// --- Clear death bookkeeping ---
 	// m_level_death_time != 0  =>  AlreadyDie() == true, which blocks future deaths.
 	// m_killer_id persists the killer reference; clear it for a fresh life.
