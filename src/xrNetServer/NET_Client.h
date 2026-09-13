@@ -75,6 +75,16 @@ protected:
 	s32 net_TimeDelta;
 	s32 net_TimeDelta_Calculated;
 	s32 net_TimeDelta_User;
+	// MP fork (bug 3): server-time offset observed from the update stream itself. The ping sync above came out
+	// ~17.5 s LOW on the co-op client, stable for the whole session (StalkerMPMod npc-anim-clock1: the server's
+	// clocks agree with each other, the client's CLOCK_SYNC delta is 40.77 s, packet stamps say 58.3 s), and
+	// every buffered-position consumer played the world that far in the past. A packet cannot arrive before
+	// it was stamped, so (stamp - receive time) is a lower bound on the true offset. Its maximum over a short
+	// window is within one transit time of it. 0 means nothing has been observed yet.
+	s32 net_TimeDelta_Stream = 0;
+	s32 net_StreamWinMax = 0;
+	u32 net_StreamWinStart = 0;
+	bool net_StreamWinAny = false;
 
 	void Sync_Thread();
 	void Sync_Average();
@@ -135,9 +145,35 @@ public:
 	bool GetServerAddress(ip_address& pAddress, DWORD* pPort);
 
 	// time management
-	IC u32 timeServer() { return TimeGlobal(device_timer) + net_TimeDelta + net_TimeDelta_User; }
-	IC u32 timeServer_Async() { return TimerAsync(device_timer) + net_TimeDelta + net_TimeDelta_User; }
+	IC s32 timeServer_EffectiveDelta() const
+	{
+		return (net_TimeDelta_Stream && (net_TimeDelta_Stream > net_TimeDelta)) ? net_TimeDelta_Stream : net_TimeDelta;
+	}
+	IC u32 timeServer() { return TimeGlobal(device_timer) + timeServer_EffectiveDelta() + net_TimeDelta_User; }
+	IC u32 timeServer_Async() { return TimerAsync(device_timer) + timeServer_EffectiveDelta() + net_TimeDelta_User; }
 	IC u32 timeServer_Delta() { return net_TimeDelta; }
+	IC s32 timeServer_StreamDelta() const { return net_TimeDelta_Stream; }
+	// MP fork (bug 3): feed a server-stamped update's timestamp. Game thread only (creature net_Import).
+	IC void timeServer_Observe(u32 server_stamp)
+	{
+		const u32 now = TimerAsync(device_timer);
+		const s32 cand = s32(server_stamp - now);
+		if (!net_StreamWinAny)
+		{
+			net_StreamWinAny = true;
+			net_StreamWinStart = now;
+			net_StreamWinMax = cand;
+			return;
+		}
+		if (cand > net_StreamWinMax)
+			net_StreamWinMax = cand;
+		if ((now - net_StreamWinStart) >= 2000)
+		{
+			net_TimeDelta_Stream = net_StreamWinMax ? net_StreamWinMax : 1; // 0 is the "unset" sentinel
+			net_StreamWinStart = now;
+			net_StreamWinMax = cand;
+		}
+	}
 	IC void timeServer_UserDelta(s32 d) { net_TimeDelta_User = d; }
 	IC void timeServer_Correct(u32 sv_time, u32 cl_time);
 

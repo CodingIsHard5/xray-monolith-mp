@@ -1141,6 +1141,8 @@ void CAI_Stalker::net_Import(NET_Packet& P)
 	//	fEntityHealth = health;
 
 	P.r_u32(N.dwTimeStamp);
+	if (xr_enet::enabled() && !ai().get_alife()) // MP fork (bug 3): the stream clock (NET_Client.h timeServer_Observe)
+		Level().timeServer_Observe(N.dwTimeStamp);
 	P.r_u8(flags);
 	// MP fork (§19 co-op): see net_Export. Bug 3 fix 4 (StalkerMPMod npc-anim-fixed3): applied ONLY from a
 	// packet newer than the newest buffered sample, which is the same test that already guards the position

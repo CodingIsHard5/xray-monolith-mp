@@ -495,6 +495,8 @@ void CCustomMonster::net_Import(NET_Packet& P)
 	SetfHealth(health);
 
 	P.r_u32(N.dwTimeStamp);
+	if (xr_enet::enabled() && !ai().get_alife()) // MP fork (bug 3): the stream clock (NET_Client.h timeServer_Observe)
+		Level().timeServer_Observe(N.dwTimeStamp);
 	P.r_u8(flags);
 	P.r_vec3(N.p_pos);
 	P.r_float /*r_angle8*/(N.o_model);

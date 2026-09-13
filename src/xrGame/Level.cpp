@@ -1273,9 +1273,9 @@ void CLevel::OnFrame()
 		if (s_clk && ((Device.dwTimeGlobal - s_clk_last) >= 10000))
 		{
 			s_clk_last = Device.dwTimeGlobal;
-			Msg("~ COOP_CLOCK: [%s] dwTimeGlobal=%u timer=%u timeServer=%u net_TimeDelta=%d server_obj=%d",
+			Msg("~ COOP_CLOCK: [%s] dwTimeGlobal=%u timer=%u timeServer=%u net_TimeDelta=%d stream_delta=%d server_obj=%d",
 				ai().get_alife() ? "SV" : "CL", Device.dwTimeGlobal, Device.GetTimerGlobal()->GetElapsed_ms(),
-				timeServer(), int(timeServer_Delta()), Server ? 1 : 0);
+				timeServer(), int(timeServer_Delta()), int(timeServer_StreamDelta()), Server ? 1 : 0);
 		}
 	}
 
