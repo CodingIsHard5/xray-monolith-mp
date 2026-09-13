@@ -3590,16 +3590,29 @@ void game_sv_Single::coop_update_anchors()
 	if (s_count_dbg == 1 && Device.dwTimeGlobal >= s_next_count_ms)
 	{
 		s_next_count_ms = Device.dwTimeGlobal + 5000;
-		u32 online = 0, total = 0;
+		// "switchable" is what §5.2 governs: a top-level object A-Life controls and may switch both ways. The rest of the
+		// online set (items held by someone, actors, objects outside A-Life control) never follows the anchors, and in
+		// the first live run it was ~820 of ~835 online objects, so the plain total could not see §5.2 at all.
+		u32 online = 0, total = 0, switchable = 0, near_anchor = 0;
+		const float off_d = ai().alife().offline_distance();
+		const Fvector& fallback = ai().alife().graph().actor()->o_Position;
 		const CALifeObjectRegistry::OBJECT_REGISTRY& objs = ai().alife().objects().objects();
 		for (CALifeObjectRegistry::OBJECT_REGISTRY::const_iterator it = objs.begin(); it != objs.end(); ++it)
 		{
 			++total;
-			if (it->second->m_bOnline)
-				++online;
+			CSE_ALifeDynamicObject* const o = it->second;
+			if (!o->m_bOnline)
+				continue;
+			++online;
+			if (o->ID_Parent != 0xffff || !o->m_bALifeControl || !o->can_switch_offline() || !o->can_switch_online())
+				continue;
+			++switchable;
+			if (mp_anchors::min_distance_to(o->o_Position, fallback) <= off_d)
+				++near_anchor;
 		}
-		Msg("- COOP(anchors): online %u of %u A-Life objects (player anchors %u, anchors %u, emptied %d)", online,
-			total, players, mp_anchors::count(), mp_anchors::emptied() ? 1 : 0);
+		Msg("- COOP(anchors): online %u of %u A-Life objects, switchable %u (%u within offline distance) (player anchors %u, "
+			"anchors %u, emptied %d)", online, total, switchable, near_anchor, players, mp_anchors::count(),
+			mp_anchors::emptied() ? 1 : 0);
 	}
 }
 
