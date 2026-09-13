@@ -74,6 +74,7 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_smem", coop_cfg_value, coop_cfg_diag},   // off | server | Read-only shared-memory (smem_container) census every N ms.
 	{"coop_smem_clean", coop_cfg_switch, coop_cfg_diag},   // off | server | Also calls smem_container::clean() during the census; refused unless -coop_smem is also given.
 	// ---- test
+	{"coop_test_psi_storm", coop_cfg_value, coop_cfg_test},   // off | server | Gamedata mp_coop_emission: start a psi storm <s> seconds after boot (§10.2 harness).
 	{"coop_squad_move", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (squad move).
 	{"coop_real_move", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (real move).
 	{"coop_real_combat", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (real combat).
