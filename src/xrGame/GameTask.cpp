@@ -91,7 +91,13 @@ void CGameTask::CreateMapLocation(bool on_load)
 		}
 		//.		m_linked_map_location =	Level().MapManager().GetMapLocation(m_map_location, m_map_object_id);
 	}
-	else
+	// MP fork (co-op, found by the §10.2 emission test): a task replicated to a thin client goes through load_task, i.e. the
+	// on_load path, which expects the map location to already exist from the same savegame. On a client it never does, so
+	// m_linked_map_location stayed NULL and the complex_spot() read below faulted (VERIFY is compiled out) — the surge's
+	// "hide" task, whose target is a cover, crashed the client the moment it arrived. Nothing found on load: create it.
+	if (on_load && !m_linked_map_location)
+		on_load = false;
+	if (!on_load)
 	{
 		m_linked_map_location = Level().MapManager().AddMapLocation(m_map_location, m_map_object_id);
 		m_linked_map_location->m_owner_task_id = m_ID;
@@ -106,6 +112,8 @@ void CGameTask::CreateMapLocation(bool on_load)
 	}
 
 	VERIFY(m_linked_map_location);
+	if (!m_linked_map_location)
+		return;
 
 	if (m_linked_map_location->complex_spot())
 	{
