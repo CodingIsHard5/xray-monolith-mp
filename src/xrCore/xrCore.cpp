@@ -92,18 +92,22 @@ static void coop_apply_server_config()
 			Msg("! COOP(config): -coop_config '%s' does not exist — command line only", path);
 		return;
 	}
-	CInifile ini(path, TRUE, TRUE, FALSE);
-	if (!ini.section_exist("coop_server"))
+	IReader* F = FS.r_open(path);
+	if (!F)
 	{
-		Msg("! COOP(config): '%s' has no [coop_server] section — command line only", path);
+		Msg("! COOP(config): '%s' could not be opened — command line only", path);
 		return;
 	}
+	const std::string text(static_cast<const char*>(F->pointer()), F->length());
+	FS.r_close(F);
 	std::vector<std::pair<std::string, std::string> > entries;
-	CInifile::Sect& S = ini.r_section("coop_server");
-	for (CInifile::Items::const_iterator it = S.Data.begin(); it != S.Data.end(); ++it)
-		entries.push_back(std::make_pair(std::string(it->first.c_str() ? it->first.c_str() : ""),
-			std::string(it->second.c_str() ? it->second.c_str() : "")));
 	std::vector<std::string> log;
+	coop_cfg_parse_ltx(text, entries, log);
+	if (entries.empty() && log.empty())
+	{
+		Msg("! COOP(config): '%s' has no keys in a [coop_server] section — command line only", path);
+		return;
+	}
 	unsigned applied = 0;
 	std::string names;
 	const std::string merged = coop_cfg_merge(Core.Params, entries, coop_server_config_keys,

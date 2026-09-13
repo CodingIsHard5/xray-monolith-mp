@@ -76,6 +76,47 @@ inline std::string coop_cfg_trim_lower(const std::string& s)
 	return out;
 }
 
+// Read [coop_server] from the file's text. Our own reader, not CInifile: CInifile strips whitespace INSIDE values, which
+// turned "12 34" into "1234" in the first live run — a malformed value silently became a different, valid-looking one
+// and the whitespace rule could never fire. Rules: ';' starts a comment, section names are case-insensitive, only
+// "key = value" lines inside [coop_server] count, a line without '=' there is logged and skipped, CR/LF both end a line.
+inline void coop_cfg_parse_ltx(const std::string& text, std::vector<std::pair<std::string, std::string> >& entries,
+	std::vector<std::string>& log)
+{
+	bool in_section = false;
+	size_t pos = 0;
+	while (pos <= text.size())
+	{
+		size_t eol = text.find_first_of("\r\n", pos);
+		if (eol == std::string::npos)
+			eol = text.size();
+		std::string line = text.substr(pos, eol - pos);
+		pos = eol + 1;
+		const size_t sc = line.find(';');
+		if (sc != std::string::npos)
+			line.erase(sc);
+		const std::string t = coop_cfg_trim_lower(line);
+		if (t.empty())
+			continue;
+		if (t[0] == '[')
+		{
+			const size_t close = t.find(']');
+			in_section = (close != std::string::npos) && coop_cfg_trim_lower(t.substr(1, close - 1)) == "coop_server";
+			continue;
+		}
+		if (!in_section)
+			continue;
+		const size_t eq = line.find('=');
+		if (eq == std::string::npos)
+		{
+			log.push_back("! line '" + t + "' has no '=' — skipped");
+			continue;
+		}
+		// keep the value's inner characters exactly as written; coop_cfg_merge trims the ends and judges the rest
+		entries.push_back(std::make_pair(line.substr(0, eq), line.substr(eq + 1)));
+	}
+}
+
 // Merge config entries into a command line. Returns the new command line; one log line per entry in `log`.
 // `applied` counts what was appended.
 inline std::string coop_cfg_merge(const std::string& params, const std::vector<std::pair<std::string, std::string> >& entries,
