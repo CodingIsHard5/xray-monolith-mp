@@ -212,6 +212,7 @@ public:
 	s8 m_coop_sv_standing = -1;     // bug 3: the server's standing() test latched at the top of UpdateCL (settled state)
 	s8 m_coop_net_standing = -1;    // bug 3: the SERVER's standing() answer from the flags byte; -1 = not sent
 	u32 m_coop_last_import = 0;     // bug 3 instrument: Device.dwTimeGlobal of the last net_Import
+	u32 m_coop_stale_imports = 0;   // bug 3: imports whose flags were NOT applied (not newer than NET.back()) since the last sample
 	u32 m_coop_imports = 0;         // bug 3 instrument: net_Import calls since the last animdiag sample
 	virtual void net_Destroy();
 	virtual void net_Save(NET_Packet& P);

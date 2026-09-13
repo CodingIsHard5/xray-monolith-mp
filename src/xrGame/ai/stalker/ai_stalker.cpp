@@ -1041,13 +1041,15 @@ void CAI_Stalker::coop_animdiag_sample()
 	const u32 imp = m_coop_imports;
 	m_coop_imports = 0;
 	Msg("~ COOP_ANIM: [%s] id=%u t=%u pos=%.2f,%.2f,%.2f moved=%.2f dt=%u body=%d move=%d mental=%d "
-		"rep=%d nspd=%.2f enemy=%d legs=%d/%d/%d cse_ts=%u cse_move=%d imp=%u age=%u nts=%u nst=%d",
+		"rep=%d nspd=%.2f enemy=%d legs=%d/%d/%d cse_ts=%u cse_move=%d imp=%u age=%u nts=%u nst=%d stale=%u",
 		server ? "SV" : "CL", ID(), now, Position().x, Position().y, Position().z, moved, dt,
 		int(mv.body_state()), int(mv.movement_type()), int(mv.mental_state()),
 		mv.replicated_state() ? 1 : 0, coop_net_speed(), memory().enemy().selected() ? 1 : 0, lb, lk, ls,
 		cse_ts, cse_move, imp, m_coop_last_import ? (now - m_coop_last_import) : 0,
 		NET.empty() ? 0 : NET.back().dwTimeStamp,
-		server ? ((coop_pack_animation_state() & coop_anim_standing_bit) ? 1 : 0) : int(m_coop_net_standing));
+		server ? ((coop_pack_animation_state() & coop_anim_standing_bit) ? 1 : 0) : int(m_coop_net_standing),
+		m_coop_stale_imports);
+	m_coop_stale_imports = 0;
 }
 
 void CAI_Stalker::net_Import(NET_Packet& P)
@@ -1110,7 +1112,16 @@ void CAI_Stalker::net_Import(NET_Packet& P)
 
 	P.r_u32(N.dwTimeStamp);
 	P.r_u8(flags);
-	coop_apply_animation_state(flags); // MP fork (§19 co-op): see net_Export
+	// MP fork (§19 co-op): see net_Export. Bug 3 fix 4 (StalkerMPMod npc-anim-fixed3): applied ONLY from a
+	// packet newer than the newest buffered sample, which is the same test that already guards the position
+	// below. It used to be applied from every packet, so a delayed or out-of-order older update could not
+	// move the puppet but DID restore its old WALK/not-standing state. The position stopped on time and
+	// the legs walked on the spot for ~3 s (server CSE STAND and fresh throughout).
+	const bool coop_newest = NET.empty() || (NET.back().dwTimeStamp < N.dwTimeStamp);
+	if (coop_newest)
+		coop_apply_animation_state(flags);
+	else
+		++m_coop_stale_imports;
 	P.r_vec3(N.p_pos);
 	P.r_float /*r_angle8*/(N.o_model);
 	P.r_float /*r_angle8*/(N.o_torso.yaw);
