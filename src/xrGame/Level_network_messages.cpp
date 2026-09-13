@@ -191,6 +191,20 @@ void CLevel::ClientReceive()
 					f(u32(code), text);
 			}
 			break;
+		case M_XRNET_COOP_ROSTER:
+			{
+				// MP fork (design doc §13.1): the connected players by name. Handed to gamedata's mp_api
+				// (_G.mp_coop_on_roster); no handler registered is not an error on a stock client.
+				string4096 text;
+				P->r_stringZ_s(text);
+				static u32 s_logged = 0;
+				if (++s_logged <= 3)
+					Msg("* COOP(roster): %s", text);
+				luabind::functor<void> f;
+				if (ai().script_engine().functor("_G.mp_coop_on_roster", f))
+					f(text);
+			}
+			break;
 		case M_XRNET_OPEN_MENU:
 			{
 				// MP fork (§19 co-op): the server ran a dialogue action that wanted to open a

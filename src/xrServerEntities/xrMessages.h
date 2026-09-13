@@ -128,6 +128,12 @@ enum
 	// so gamedata can localise without parsing the text.
 	M_XRNET_COOP_NOTICE,
 
+	// MP fork (design doc §13.1): server -> ALL clients, every 2 s. The connected players, as one stringZ of
+	// "<entity id>=<player name>" lines. A thin client can see other players' bodies but has no other way to
+	// learn their NAMES, and mp_api (the read-only surface a voice-chat companion mod reads) is keyed by them.
+	// The engine logs the first few and hands the text to gamedata (_G.mp_coop_on_roster); nothing decides on it.
+	M_XRNET_COOP_ROSTER,
+
 	MSG_FORCEDWORD = u32(-1)
 };
 

@@ -2606,6 +2606,53 @@ CSE_Abstract* game_sv_Single::coop_spawn_checkpoint_item_e(CSE_Abstract* owner, 
 // MP fork (design doc §9.2 corpse pile): detach an item from the actor into the world at pos. The same shape as the
 // server's own Perform_reject (a GE_OWNERSHIP_REJECT through Process_event_reject, broadcast so clients drop it too), but
 // with the trailing "just before destroy" byte 0: a gain that lands in the pile must get a physics shell and stay.
+// MP fork (design doc §13.1): broadcast the connected players, so every client's mp_api can name them. 2 s is
+// well inside what a voice mod needs (it reads positions live from the objects; only NAMES come from here).
+void game_sv_Single::coop_broadcast_roster()
+{
+	if (!xr_enet::enabled() || !m_server)
+		return;
+	if (m_coop_roster_last && (Device.dwTimeGlobal - m_coop_roster_last) < 2000)
+		return;
+	m_coop_roster_last = Device.dwTimeGlobal;
+
+	struct collect
+	{
+		game_sv_Single* self;
+		xr_string text;
+		u32 n;
+		void operator()(IClient* client)
+		{
+			xrClientData* cd = static_cast<xrClientData*>(client);
+			if (cd == self->m_server->GetServerClient() || !cd->flags.bConnected || !cd->owner)
+				return;
+			LPCSTR nm = coop_player_name(cd);
+			if (!nm || !xr_strlen(nm))
+				return;
+			string32 id;
+			xr_sprintf(id, "%u=", u32(cd->owner->ID));
+			text += id;
+			for (LPCSTR c = nm; *c; ++c)
+				text += (*c == '\n' || *c == '\r') ? ' ' : *c;   // one line per player, always
+			text += "\n";
+			++n;
+		}
+	};
+	collect c; c.self = this; c.n = 0;
+	m_server->ForEachClientDo(c);
+	if (!c.n)
+		return;
+
+	NET_Packet P;
+	P.w_begin(M_XRNET_COOP_ROSTER);
+	P.w_stringZ(c.text.c_str());
+	m_server->SendBroadcast(BroadcastCID, P, net_flags(TRUE, TRUE));
+
+	static u32 s_logged = 0;
+	if (++s_logged <= 3)
+		Msg("- COOP(roster): broadcast %u player(s)", c.n);
+}
+
 bool game_sv_Single::coop_drop_to_world(CSE_Abstract* item, CSE_Abstract* parent, const Fvector& pos)
 {
 	if (!m_server || !item || !parent || item->ID_Parent != parent->ID)
@@ -3762,6 +3809,7 @@ void game_sv_Single::Update()
 	coop_bigalloc_tick();
 	coop_poll_spawns();    // MP fork (§14 co-op): give ready clients their own actor + reconnection
 	coop_update_anchors(); // MP fork (§15 co-op): re-centre A-Life on the players
+	coop_broadcast_roster(); // MP fork (design doc §13.1): who is connected, by name, for mp_api
 	// MP fork (§14 step 7 phase 4 D2): an operator/harness stop request. Does not return if one
 	// is pending — the clean stop flushes the world and exits from inside it.
 	coop_check_stop_request();

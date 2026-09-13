@@ -223,7 +223,9 @@ private:
 	CSE_Abstract* coop_spawn_checkpoint_item_e(CSE_Abstract* owner, xrClientData* CL, const coop_checkpoint_item& rec);
 	// §9.2 corpse pile: detach an item from its parent into the world at pos (a GE_OWNERSHIP_REJECT from the server)
 	bool coop_drop_to_world(CSE_Abstract* item, CSE_Abstract* parent, const Fvector& pos);
-	void coop_test_post_bank_items();    // harness: -coop_test_gain <section> / -coop_test_drop_banked, after the bank
+	void coop_test_post_bank_items();
+	void coop_broadcast_roster();        // §13.1: M_XRNET_COOP_ROSTER every 2 s
+	u32  m_coop_roster_last = 0;    // harness: -coop_test_gain <section> / -coop_test_drop_banked, after the bank
 	u16  m_coop_test_gain_id = 0xffff;
 	u16  m_coop_test_dropbanked_id = 0xffff;
 	// MP fork (§14 step 7 phase 3 C3, harness): -coop_test_worlditem drops one item into the
