@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include "mp_coop_ff.h"
 #include "level.h"
 #include "actor.h"
 #include "script_game_object.h"
@@ -2099,6 +2100,23 @@ u32 mp_coop_task_faction(LPCSTR task_id, u32 community)
 
 // Returns the coop_claim_result: 0 = claimed, 1 = somebody else has it, 2 = not on offer,
 // 3 = no acting player (an autonomous world context cannot own a personal errand).
+// MP fork (design doc §12.2): runtime friendly-fire control, SERVER side. mode is a name
+// (UNIVERSAL_ON / UNIVERSAL_OFF / FRIENDLY_FACTIONS / OWN_FACTION_ONLY) or "" / "INHERIT" to drop the override.
+bool mp_coop_ff_set(LPCSTR level_name, LPCSTR mode)
+{
+	if (!mode || !*mode || !xr_strcmp(mode, "INHERIT") || !xr_strcmp(mode, "inherit"))
+		return coop_ff_set_zone(level_name, eCoopFF_Invalid);
+	const int m = coop_ff_parse(mode);
+	if (m == eCoopFF_Invalid)
+	{
+		Msg("! COOP(ff): game.mp_coop_ff_set: '%s' is not a mode", mode);
+		return false;
+	}
+	return coop_ff_set_zone(level_name, m);
+}
+
+LPCSTR mp_coop_ff_mode(LPCSTR level_name) { return coop_ff_name(coop_ff_mode_for(level_name)); }
+
 u32 mp_coop_task_claim(LPCSTR task_id)
 {
 	if (!task_id || !*task_id || !ai().get_alife())
@@ -3107,6 +3125,8 @@ void CLevel::script_register(lua_State* L)
         def("mp_coop_task_offer", &mp_coop_task_offer),
         def("mp_coop_task_deliver", &mp_coop_task_deliver),
         def("mp_coop_task_faction", &mp_coop_task_faction),
+        def("mp_coop_ff_set", &mp_coop_ff_set),
+        def("mp_coop_ff_mode", &mp_coop_ff_mode),
         def("mp_coop_task_claim", &mp_coop_task_claim),
         def("mp_coop_task_turn_in", &mp_coop_task_turn_in),
         def("mp_coop_task_offered", &mp_coop_task_offered),

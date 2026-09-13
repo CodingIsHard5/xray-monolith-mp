@@ -8,6 +8,8 @@
 #include "ai_space.h"
 #include "alife_object_registry.h"
 #include "xrServer_Objects_ALife_Items.h"
+#include "mp_coop_ff.h"
+#include "Level.h"
 #include "xrServer_Objects_ALife_Monsters.h"
 #include "../xrNetServer/xr_enet_transport.h"   // MP fork (§20): xr_enet::enabled()
 
@@ -224,6 +226,21 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
 						"unclaimed body absorbs fire; the record it restores from cannot be shot",
 						destination, s_orphan_hits);
 				break;
+			}
+
+			// MP fork (design doc §12): friendly-fire / PvP modes. Only a PLAYER body shooting another PLAYER body is
+			// ever filtered; the host's save actor (owned by the server client) is not a player, and orphans were
+			// refused just above. The shooter is SHit::whoID, the first field after the destination the dispatcher
+			// already read, so peek it without moving the cursor the delayed event re-reads from.
+			if (xr_enet::enabled() && receiver && (P.r_pos + sizeof(u16) <= P.B.count))
+			{
+				u16 who = 0;
+				CopyMemory(&who, &P.B.data[P.r_pos], sizeof(u16));
+				CSE_Abstract* const shooter = game->get_entity_from_eid(who);
+				if (shooter && shooter->owner && receiver->owner &&
+				    shooter->owner != GetServerClient() && receiver->owner != GetServerClient() &&
+				    coop_ff_refuse_hit(shooter, receiver, (g_pGameLevel ? Level().name().c_str() : "")))
+					break;
 			}
 
 			P.r_pos -= 2;

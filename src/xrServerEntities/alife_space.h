@@ -33,6 +33,7 @@
 // Its own chunk for the same reason as the quest one: a save without it must read back as "no
 // co-op faction state" instead of desynchronising the chunks behind it.
 #define COOP_REP_CHUNK_DATA			0x00C1
+#define COOP_FF_CHUNK_DATA			0x00C2 // MP fork (design doc §12): per-zone friendly-fire overrides
 #define SECTION_HEADER				"location_"
 #define SAVE_EXTENSION				".scop"
 #define SPAWN_NAME					"game.spawn"

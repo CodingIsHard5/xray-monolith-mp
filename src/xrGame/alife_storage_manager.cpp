@@ -25,6 +25,7 @@
 // MP fork (§14 step 8 phase 3 Q2 / doc §7.2): coop_task_state_save/load — the offer pool and the
 // ownership tags ride the .scop, in the same write as the task list they annotate.
 #include "GametaskManager.h"
+#include "mp_coop_ff.h"
 // MP fork (§14 step 8 phase 4 R2 / doc §8.1): coop_rep_state_save/load — the FACTION tier of
 // reputation, which R1 measured as the one part of this layer that nothing persisted.
 #include "relation_registry.h"
@@ -101,6 +102,8 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
 		// reason and in the same write — a faction war that moved during play is world state,
 		// and until this chunk existed the next restart put every point back.
 		coop_rep_state_save(stream);
+		// MP fork (design doc §12.2): per-zone friendly-fire overrides are world state too.
+		coop_ff_state_save(stream);
 
 		source_count = stream.tell();
 		void* source_data = stream.pointer();
@@ -176,6 +179,8 @@ void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR fil
 	// no such chunk — the loader RESETS the static relation table to its config baseline before
 	// it looks, so booting an older world cannot leave the previous world's faction war standing.
 	coop_rep_state_load(source);
+	// MP fork (design doc §12.2): always called; clears the previous world's overrides before it looks.
+	coop_ff_state_load(source);
 
 	can_register_objects(true);
 
