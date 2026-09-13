@@ -2199,6 +2199,13 @@ void game_sv_Single::coop_request_checkpoint(xrClientData* CL)
 			// level_prefix_campfire_0037 at y -21.7, 50 m below the ground 30 m from the spawn, and the client sent
 			// there fell through the world (goto landed on vertex 4294967295). Require a valid level vertex whose
 			// position is within 3 m of the object.
+			// SAME LEVEL FIRST. The A-Life registry holds every level's objects, each positioned in ITS level's
+			// coordinates. Attempt 3 "granted" at pri_monolith_campfire_12 on l01_escape: a Pripyat campfire whose
+			// coordinates happen to land on a Cordon vertex. That was a false pass, and level_prefix_campfire_0037 in
+			// attempt 2 was almost certainly the same kind of ghost.
+			if (!ai().get_level_graph() || !ai().game_graph().valid_vertex_id(o->m_tGraphID) ||
+			    ai().game_graph().vertex(o->m_tGraphID)->level_id() != ai().level_graph().level_id())
+				continue;
 			if (ai().get_level_graph())
 			{
 				const u32 v = ai().level_graph().vertex_id(o->o_Position);
