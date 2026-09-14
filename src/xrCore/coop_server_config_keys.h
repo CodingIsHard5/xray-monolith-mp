@@ -32,6 +32,7 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"mp_trusted", coop_cfg_switch, coop_cfg_tunable},   // off | server | Accepts a client level-geometry checksum mismatch anyway (trusted-peer debugging only, not a default).
 	{"xrnet_udp", coop_cfg_switch, coop_cfg_tunable},   // off (DirectPlay/stock transport) | both | Selects the ENet UDP transport; xr_enet::enabled() gates almost every co-op path.
 	// ---- control
+	{"coop_ownership_allow_double", coop_cfg_switch, coop_cfg_control},   // off | server | Lets a second take reparent an item that already has a parent (removes the §10.5 claim guard; control only).
 	{"coop_no_server_drive", coop_cfg_switch, coop_cfg_control},   // off | server | Gamedata mp_coop_decision_server: the server tick does not drive decisions (control).
 	{"coop_emission_stock", coop_cfg_switch, coop_cfg_control},   // off | server | Gamedata mp_coop_emission: surges judge the save actor only, as before §10.2.
 	{"coop_allow_time_skip", coop_cfg_switch, coop_cfg_control},   // off | server | Lets scripts on the co-op server skip world time (change_game_time); the fix refuses it (§10.1/§10.6).
@@ -74,6 +75,7 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_smem", coop_cfg_value, coop_cfg_diag},   // off | server | Read-only shared-memory (smem_container) census every N ms.
 	{"coop_smem_clean", coop_cfg_switch, coop_cfg_diag},   // off | server | Also calls smem_container::clean() during the census; refused unless -coop_smem is also given.
 	// ---- test
+	{"coop_test_claim_item", coop_cfg_value, coop_cfg_test},   // off | server | Spawns <section> beside the first player <s> seconds after they bind (§10.5 claim race harness).
 	{"coop_test_psi_storm", coop_cfg_value, coop_cfg_test},   // off | server | Gamedata mp_coop_emission: start a psi storm <s> seconds after boot (§10.2 harness).
 	{"coop_squad_move", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (squad move).
 	{"coop_real_move", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_decision_server scenario mode (real move).

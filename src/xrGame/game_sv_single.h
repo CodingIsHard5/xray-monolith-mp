@@ -222,6 +222,7 @@ private:
 	bool coop_spawn_checkpoint_item(CSE_Abstract* owner, xrClientData* CL,
 	                                const coop_checkpoint_item& rec);
 	void coop_test_drop_world_item();    // harness: §9.2 negative case (see below)
+	CSE_Abstract* coop_spawn_world_item_beside(LPCSTR section, CSE_Abstract* near_actor); // harness spawn helper
 	CSE_Abstract* coop_spawn_checkpoint_item_e(CSE_Abstract* owner, xrClientData* CL, const coop_checkpoint_item& rec);
 	// §9.2 corpse pile: detach an item from its parent into the world at pos (a GE_OWNERSHIP_REJECT from the server)
 	bool coop_drop_to_world(CSE_Abstract* item, CSE_Abstract* parent, const Fvector& pos);

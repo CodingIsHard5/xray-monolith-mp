@@ -3,6 +3,7 @@
 #include "xrserver_objects.h"
 #include "xrserver_objects_alife_monsters.h"
 #include "xrServer_svclient_validation.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§10.5): co-op claim logging
 
 void ReplaceOwnershipHeader(NET_Packet& P)
 {
@@ -55,7 +56,27 @@ void xrServer::Process_event_ownership(NET_Packet& P, ClientID sender, u32 time,
 		return;
 	}
 
-	if (0xffff != e_entity->ID_Parent) return;
+	// MP fork (design doc §10.5 "an artifact is a shared world object ONE player can claim"): this guard is what keeps a
+	// claim race conserved — the first take the server processes wins, a second take of an item that already has a parent
+	// is dropped. Logged for co-op so the race is visible; -coop_ownership_allow_double removes the guard (control arm only:
+	// it lets the second take reparent an item that is still listed as the first owner's child).
+	if (0xffff != e_entity->ID_Parent)
+	{
+		static int s_allow_double = -1;
+		if (s_allow_double < 0)
+			s_allow_double = strstr(Core.Params, "-coop_ownership_allow_double") ? 1 : 0;
+		const bool log = xr_enet::enabled();
+		if (!s_allow_double)
+		{
+			if (log)
+				Msg("- COOP(claim): take of item %u by %u REFUSED — already held by %u", u32(id_entity), u32(id_parent),
+					u32(e_entity->ID_Parent));
+			return;
+		}
+		if (log)
+			Msg("! COOP(claim): take of item %u by %u while held by %u ALLOWED (-coop_ownership_allow_double, control)",
+				u32(id_entity), u32(id_parent), u32(e_entity->ID_Parent));
+	}
 
 	xrClientData* c_parent = e_parent->owner;
 	xrClientData* c_entity = e_entity->owner;
@@ -82,6 +103,9 @@ void xrServer::Process_event_ownership(NET_Packet& P, ClientID sender, u32 time,
 		// Perform migration if needed
 		if (c_parent != c_entity) PerformMigration(e_entity, c_entity, c_parent);
 
+		if (xr_enet::enabled())
+			Msg("- COOP(claim): item %u [%s] taken by %u (was parent %u)", u32(id_entity), e_entity->s_name.c_str(),
+				u32(id_parent), u32(e_entity->ID_Parent));
 		// Rebuild parentness
 		e_entity->ID_Parent = id_parent;
 		e_parent->children.push_back(id_entity);

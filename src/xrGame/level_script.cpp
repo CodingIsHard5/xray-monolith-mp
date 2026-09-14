@@ -169,6 +169,23 @@ bool coop_send_chat(LPCSTR text)
 // MP fork (design doc §10.2): server side. The entity ids of the connected players' bodies, as "id,id,...", so server
 // gamedata can apply per-player world events (an emission's shelter check and damage) to players instead of to db.actor,
 // which on the dedicated server is the host save actor. Empty on a client or with nobody connected.
+// MP fork (design doc §10.5, harness): client side. Ask the server for ownership of a world item for the actor this client
+// controls — the stock GE_OWNERSHIP_TAKE a pickup sends, without the pickup UI, so a two-client claim race can be scripted.
+bool coop_test_take(u16 item_id)
+{
+	if (!xr_enet::enabled() || ai().get_alife() || !g_pGameLevel)
+		return false;
+	CGameObject* const me = smart_cast<CGameObject*>(Level().CurrentControlEntity());
+	if (!me)
+		return false;
+	NET_Packet P;
+	CGameObject::u_EventGen(P, GE_OWNERSHIP_TAKE, me->ID());
+	P.w_u16(item_id);
+	CGameObject::u_EventSend(P);
+	Msg("- COOP(take): sent take of item %u for actor %u", u32(item_id), u32(me->ID()));
+	return true;
+}
+
 LPCSTR coop_player_actor_ids()
 {
 	static string4096 s_out;
@@ -2866,6 +2883,7 @@ void CLevel::script_register(lua_State* L)
 			def("coop_request_checkpoint", &coop_request_checkpoint),
 			def("coop_send_chat", &coop_send_chat),
 			def("coop_player_actor_ids", &coop_player_actor_ids),
+			def("coop_test_take", &coop_test_take),
 #ifdef DEBUG
 		def("debug_object",						get_object_by_name),
 		def("debug_actor",						tpfGetActor),

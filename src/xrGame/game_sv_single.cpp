@@ -2453,6 +2453,43 @@ bool game_sv_Single::coop_bank_checkpoint(LPCSTR player_name)
 	return true;
 }
 
+// MP fork (harness): one unparented WORLD item of <section> 2 m beside <near_actor>, spawned by the server. Shared by the §9.2
+// world-item check and the §10.5 claim race. NULL if the section is invalid or the spawn fails.
+CSE_Abstract* game_sv_Single::coop_spawn_world_item_beside(LPCSTR section, CSE_Abstract* near_actor)
+{
+	if (!near_actor)
+		return NULL;
+	CSE_Abstract* it = F_entity_Create(section);
+	if (!it)
+	{
+		Msg("! COOP(test): world item section '%s' invalid", section);
+		return NULL;
+	}
+	CSE_ALifeDynamicObject* od = smart_cast<CSE_ALifeDynamicObject*>(near_actor);
+	it->s_name = section;
+	it->set_name_replace("");
+	it->s_RP = 0xFE;
+	it->ID = 0xffff;
+	it->ID_Phantom = 0xffff;
+	it->ID_Parent = 0xffff;             // WORLD item: parented to nobody
+	it->RespawnTime = 0;
+	it->o_Position = near_actor->o_Position;
+	it->o_Position.x += 2.f;            // beside the player, not inside them
+	it->s_flags.assign(M_SPAWN_OBJECT_LOCAL);
+	if (CSE_ALifeDynamicObject* dyn = smart_cast<CSE_ALifeDynamicObject*>(it))
+		if (od) { dyn->m_tNodeID = od->m_tNodeID; dyn->m_tGraphID = od->m_tGraphID; }
+	if (CSE_ALifeObject* al = smart_cast<CSE_ALifeObject*>(it))
+	{
+		al->m_story_id = INVALID_STORY_ID;
+		al->m_spawn_story_id = INVALID_SPAWN_STORY_ID;
+	}
+
+	CSE_Abstract* N = spawn_end(it, m_server->GetServerClient()->ID);
+	if (!N)
+		Msg("! COOP(test): failed to spawn world item '%s'", section);
+	return N;
+}
+
 // MP fork (§14 step 7 phase 3 C3, harness): drop one item into the WORLD (unparented, next
 // to the player) right after the checkpoint is banked, and remember it. §9.2 says a death
 // rewinds the PERSON and leaves the WORLD untouched — so the rollback re-checks this entity
@@ -2494,37 +2531,9 @@ void game_sv_Single::coop_test_drop_world_item()
 	if (!a.found)
 		return;
 
-	CSE_Abstract* it = F_entity_Create(section);
-	if (!it)
-	{
-		Msg("! COOP(checkpoint-test): world item section '%s' invalid", section);
-		return;
-	}
-	CSE_ALifeDynamicObject* od = smart_cast<CSE_ALifeDynamicObject*>(a.found);
-	it->s_name = section;
-	it->set_name_replace("");
-	it->s_RP = 0xFE;
-	it->ID = 0xffff;
-	it->ID_Phantom = 0xffff;
-	it->ID_Parent = 0xffff;             // WORLD item: parented to nobody
-	it->RespawnTime = 0;
-	it->o_Position = a.found->o_Position;
-	it->o_Position.x += 2.f;            // beside the player, not inside them
-	it->s_flags.assign(M_SPAWN_OBJECT_LOCAL);
-	if (CSE_ALifeDynamicObject* dyn = smart_cast<CSE_ALifeDynamicObject*>(it))
-		if (od) { dyn->m_tNodeID = od->m_tNodeID; dyn->m_tGraphID = od->m_tGraphID; }
-	if (CSE_ALifeObject* al = smart_cast<CSE_ALifeObject*>(it))
-	{
-		al->m_story_id = INVALID_STORY_ID;
-		al->m_spawn_story_id = INVALID_SPAWN_STORY_ID;
-	}
-
-	CSE_Abstract* N = spawn_end(it, m_server->GetServerClient()->ID);
+	CSE_Abstract* N = coop_spawn_world_item_beside(section, a.found);
 	if (!N)
-	{
-		Msg("! COOP(checkpoint-test): failed to spawn world item '%s'", section);
 		return;
-	}
 	m_coop_test_worlditem_id = N->ID;
 	m_coop_test_worlditem_pos = N->o_Position;
 	Msg("- COOP(checkpoint-test): world item '%s' id=%u pos %.1f,%.1f,%.1f",
@@ -4263,6 +4272,45 @@ void game_sv_Single::Update()
 				Msg("- COOP(checkpoint): test auto-bank done (%u player(s))", b.banked);
 				coop_test_drop_world_item();          // harness: §9.2 negative case (see header)
 				coop_test_post_bank_items();          // harness: §9.2 corpse pile (gain + a banked item left in the world)
+			}
+		}
+	}
+
+	// MP fork (design doc §10.5, harness): -coop_test_claim_item <section> <seconds> puts one world item (an artifact) beside
+	// the first connected player <seconds> after that player binds, for the two-client claim race. One-shot.
+	{
+		static int s_ci = -1;
+		static u32 s_ci_at = 0;
+		static string64 s_ci_sec = "";
+		if (s_ci < 0)
+		{
+			s_ci = 0;
+			if (LPCSTR p = strstr(Core.Params, "-coop_test_claim_item "))
+			{
+				p += sizeof("-coop_test_claim_item ") - 1;
+				u32 i = 0;
+				while (*p && *p != ' ' && i + 1 < sizeof(s_ci_sec)) s_ci_sec[i++] = *p++;
+				s_ci_sec[i] = 0;
+				const int sec = atoi(p);
+				if (i && sec > 0 && sec <= 3600) { s_ci = 1; s_ci_at = u32(sec) * 1000; }
+				else Msg("! COOP(claim-test): -coop_test_claim_item wants <section> <seconds 1..3600>");
+			}
+		}
+		if (s_ci == 1)
+		{
+			struct first_player { game_sv_Single* self; CSE_Abstract* found;
+				void operator()(IClient* c) { xrClientData* cd = static_cast<xrClientData*>(c);
+					if (!found && cd != self->m_server->GetServerClient() && cd->owner) found = cd->owner; } };
+			static u32 s_seen_ms = 0;
+			first_player fp; fp.self = this; fp.found = NULL;
+			m_server->ForEachClientDo(fp);
+			if (fp.found && !s_seen_ms) s_seen_ms = Device.dwTimeGlobal;
+			if (s_seen_ms && Device.dwTimeGlobal - s_seen_ms >= s_ci_at)
+			{
+				s_ci = 2;
+				if (CSE_Abstract* it = coop_spawn_world_item_beside(s_ci_sec, fp.found))
+					Msg("- COOP(claim-test): item '%s' id=%u beside player %u at %.1f,%.1f,%.1f", s_ci_sec, u32(it->ID),
+						fp.found ? u32(fp.found->ID) : 0xffffu, it->o_Position.x, it->o_Position.y, it->o_Position.z);
 			}
 		}
 	}
