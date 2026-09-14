@@ -1305,8 +1305,28 @@ void coop_race_fire_claim()
 	coop_race_say("race_x", "CONTESTED");
 }
 
+// MP fork (diag, psi death loop): time of the last co-op revive on this client, for the condition trace in UpdateCL
+static u32 s_coop_revive_ms = 0;
+
 void CActor::UpdateCL()
 {
+	// MP fork (diag): a revived player dies again in the next frame, self-credited, with an empty Lua stack, even after the
+	// pending deltas are dropped. Trace the conditions frame by frame for 5 s after a revive and whenever health is low, so
+	// the value that goes to 0 (or the write that sets it) can be named.
+	if (coop_thin_client() && this == Actor())
+	{
+		const bool fresh = s_coop_revive_ms && (Device.dwTimeGlobal - s_coop_revive_ms) < 5000;
+		if (fresh || (g_Alive() && conditions().GetHealth() < 0.5f))
+		{
+			static u32 s_trace = 0;
+			if (++s_trace <= 400)
+				Msg("~ COOP(cond-trace): t+%ums alive=%d hp=%.3f dHp=%.3f psy=%.3f rad=%.3f bleed=%.3f sat=%.3f pow=%.3f",
+					s_coop_revive_ms ? Device.dwTimeGlobal - s_coop_revive_ms : 0, g_Alive() ? 1 : 0, conditions().GetHealth(),
+					conditions().coop_dbg_delta(), conditions().GetPsyHealth(), conditions().GetRadiation(),
+					conditions().BleedingSpeed(), conditions().GetSatiety(), conditions().GetPower());
+		}
+	}
+
 	if (g_Alive() && Level().CurrentViewEntity() == this)
 	{
 		if (CurrentGameUI() && (!CurrentGameUI()->TopInputReceiver() || (CurrentGameUI()->TopInputReceiver() && !CurrentGameUI()->TopInputReceiver()->StopAnyMove())) && !m_holder)
@@ -2595,6 +2615,7 @@ void CActor::coop_respawn()
 	// (The first version queued negating deltas, which sat BEHIND the death's backlog of deltas that UpdateCondition had
 	// not applied while health was 0 — the player still died on the first frame. The reset drops the backlog itself.)
 	conditions().coop_reset_for_revive();
+	s_coop_revive_ms = Device.dwTimeGlobal;
 	Msg("- COOP(respawn): conditions reset on revive (pending deltas dropped; radiation 0, psy health 1, wounds cleared)");
 	// Mods keep per-life state of their own in Lua (GAMMA's arszi_psy has a psy-health meter that kills at 0 every second,
 	// and it killed a revived player again after every revive in the §10.2 psi control — conditions() never sees it).
