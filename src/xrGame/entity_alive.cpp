@@ -11,6 +11,7 @@
 #include "../Include/xrRender/Kinematics.h"
 #include "relation_registry.h"
 #include "../xrNetServer/xr_enet_transport.h"   // MP fork (§14 step 8 P4 R3.1 run 1): co-op-only death tracing
+#include "Actor.h"                                // MP fork (co-op): the server copy of a player body (coop_server_copy_of_player)
 #include "monster_community.h"
 #include "entitycondition.h"
 #include "script_game_object.h"
@@ -209,13 +210,28 @@ void CEntityAlive::reload(LPCSTR section)
 	m_fFood = 100 * pSettings->r_float(section, "ph_mass");
 }
 
+// MP fork (co-op): is this the SERVER's own game object for a connected player's body? A player's body has one author, its
+// client (see SAVE_LOAD_PLAN P4 D2). The server's copy is never updated by that client, yet it ran its own condition update
+// and its own death decision: during a psi storm it went to 0 health at the spawn, the server broadcast a self-credited
+// death, and after every revive it did it again — five deaths per run, killer=self, empty Lua stack on the client
+// (psi5/psi6/psi7 control). On the co-op server Actor() is the host save actor, which keeps the stock behaviour.
+static bool coop_server_copy_of_player(CEntityAlive* e)
+{
+	if (!xr_enet::enabled() || !g_pGameLevel || !Level().Server)
+		return false;
+	CActor* const a = smart_cast<CActor*>(e);
+	return a && a != Actor();
+}
+
 void CEntityAlive::shedule_Update(u32 dt)
 {
 	inherited::shedule_Update(dt);
 
+	const bool coop_copy = coop_server_copy_of_player(this);
 	//condition update with the game time pass
 	conditions().UpdateConditionTime();
-	conditions().UpdateCondition();
+	if (!coop_copy)
+		conditions().UpdateCondition();
 	//Обновление партиклов огня
 	UpdateFireParticles();
 	//капли крови
@@ -224,7 +240,7 @@ void CEntityAlive::shedule_Update(u32 dt)
 	conditions().UpdateWounds();
 
 	//убить сущность
-	if (Local() && !g_Alive() && !AlreadyDie())
+	if (Local() && !g_Alive() && !AlreadyDie() && !coop_copy)
 	{
 		if (conditions().GetWhoHitLastTime())
 		{
