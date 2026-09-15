@@ -437,17 +437,28 @@ void CControlManagerCustom::script_release(ControlCom::EControlType type)
 // MP fork (design doc §3.4 inc 3a v4): MEASUREMENT-ONLY instrument, approved by the Overseer. A script jump is refused SILENTLY
 // here, and three gamedata-only measurements counted commands that never became jumps. This logs the decision and, on a refusal,
 // which pure control holds the manager. Log only: no branch of this function changes. Co-op only (xr_enet), server side only.
+// v4 amendment, after the calibration falsified the predicted field: is_captured(eControlJump) is ALWAYS false here, because the
+// jump element's capturer is a non-pure com and CControl_Manager::is_base() (ced() == 0) makes is_captured() report no capture.
+// The running jump is visible instead in WHO holds the pure capture: CControlJump::activate() calls capture_pure(this), so the
+// pure elements' capturer is the jump com itself, and com_type() names it.
+static bool coop_jump_running(CControl_Manager* man)
+{
+	CControl_Com* pure = man->get_capturer(ControlCom::eControlPath);
+	return pure && man->com_type(pure) == ControlCom::eControlJump;
+}
+
 static void coop_jump_log(CBaseMonster* obj, CControl_Manager* man, bool refused)
 {
 	if (!xr_enet::enabled() || !obj || !man) return;
-	Msg("- COOP(jump): %u t %u %s jump_active %d pure path %d anim %d move %d dir %d", obj->ID(), Device.dwTimeGlobal,
-		refused ? "REFUSED" : "accepted", man->is_captured(ControlCom::eControlJump) ? 1 : 0,
+	Msg("- COOP(jump): %u t %u %s jump_running %d jump_active %d pure path %d anim %d move %d dir %d", obj->ID(), Device.dwTimeGlobal,
+		refused ? "REFUSED" : "accepted", coop_jump_running(man) ? 1 : 0, man->is_captured(ControlCom::eControlJump) ? 1 : 0,
 		man->is_captured(ControlCom::eControlPath) ? 1 : 0, man->is_captured(ControlCom::eControlAnimation) ? 1 : 0,
 		man->is_captured(ControlCom::eControlMovement) ? 1 : 0, man->is_captured(ControlCom::eControlDir) ? 1 : 0);
 }
 
 // MP fork (§3.4 inc 3a v4 instrument, measurement-only): the monster's control-capture state, read-only, for the server's own
-// sampling. Bit 0 jump, 1 path, 2 animation, 3 movement, 4 direction; 0xFFFFFFFF = not a monster / not found / not co-op.
+// sampling. Bit 0 jump (unreliable, see coop_jump_running), 1 path, 2 animation, 3 movement, 4 direction, and bit 5 = a jump is
+// RUNNING (the pure capture belongs to the jump com); 0xFFFFFFFF = not a monster / not found / not co-op.
 u32 coop_jump_state(u16 id)
 {
 	if (!xr_enet::enabled() || !g_pGameLevel) return u32(-1);
@@ -457,7 +468,7 @@ u32 coop_jump_state(u16 id)
 	CControl_Manager& man = m->control();
 	return (man.is_captured(ControlCom::eControlJump) ? 1 : 0) | (man.is_captured(ControlCom::eControlPath) ? 2 : 0) |
 		(man.is_captured(ControlCom::eControlAnimation) ? 4 : 0) | (man.is_captured(ControlCom::eControlMovement) ? 8 : 0) |
-		(man.is_captured(ControlCom::eControlDir) ? 16 : 0);
+		(man.is_captured(ControlCom::eControlDir) ? 16 : 0) | (coop_jump_running(&man) ? 32 : 0);
 }
 
 void CControlManagerCustom::script_jump(const Fvector& position, float factor)
