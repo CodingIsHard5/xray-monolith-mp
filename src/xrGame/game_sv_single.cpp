@@ -2493,6 +2493,17 @@ bool game_sv_Single::coop_trade_allow(xrClientData* CL, CSE_Abstract* trader, u1
 }
 
 // ---- §16.3: active-NPC cap near player clusters ----------------------------------------------------------------------
+// The quest-critical set: Anomaly names its story NPCs with SCRIPT story ids (story_objects), not the engine's m_story_id (which
+// §16.3 fixed attempt 2 found empty for Sidorovich). Gamedata hands the ids in through level.coop_npc_cap_exempt.
+static xr_set<u16>& coop_npccap_script_exempt() { static xr_set<u16> s; return s; }
+void coop_npc_cap_exempt(u16 id, bool on)
+{
+	if (on)
+		coop_npccap_script_exempt().insert(id);
+	else
+		coop_npccap_script_exempt().erase(id);
+}
+
 // Every 1 s: online alive creatures within the radius of any connected player, ranked by distance to the nearest; the nearest N
 // are FULL, the rest THROTTLED, story NPCs EXEMPT (CCustomMonster::shedule_Scale acts on the class). Nothing is despawned.
 // -coop_npc_cap <n> arms it (classification + metrics); -coop_npc_cap_off keeps the classification and metrics but does not apply
@@ -2567,7 +2578,7 @@ void game_sv_Single::coop_npc_cap_tick()
 			continue;
 		}
 		CSE_ALifeObject* const se = smart_cast<CSE_ALifeObject*>(ai().alife().objects().object(m->ID(), true));
-		const bool story = se && se->m_story_id != INVALID_STORY_ID;
+		const bool story = (se && se->m_story_id != INVALID_STORY_ID) || coop_npccap_script_exempt().count(m->ID());
 		if (story)
 			++story_total;
 		float d = flt_max;

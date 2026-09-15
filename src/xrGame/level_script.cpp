@@ -288,6 +288,9 @@ u32 coop_trade_price(u16 trader_id, u16 player_id, u16 item_id, bool trader_buys
 	return ai().get_alife() ? coop_trade_price_now(trader_id, player_id, item_id, trader_buys) : 0;
 }
 
+// MP fork (design doc §16.3): gamedata marks the quest-critical (script story) NPCs the cap never throttles (game_sv_single.cpp)
+void coop_npc_cap_exempt(u16 id, bool on);
+
 // MP fork (design doc §10.3 S3b): server gamedata's saved world state (alife_storage_manager.cpp)
 void coop_state_put(LPCSTR blob);
 LPCSTR coop_state_loaded();
@@ -3102,6 +3105,7 @@ void CLevel::script_register(lua_State* L)
 			def("coop_test_drop", &coop_test_drop),
 			def("coop_test_children", &coop_test_children),
 			def("coop_state_put", &coop_state_put),
+			def("coop_npc_cap_exempt", &coop_npc_cap_exempt),
 			def("coop_state_loaded", &coop_state_loaded),
 			def("coop_trade_quote_now", &coop_trade_quote_now),
 			def("coop_test_sell", &coop_test_sell),
