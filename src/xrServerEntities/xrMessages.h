@@ -158,7 +158,7 @@ enum
 
 	// MP fork (design doc §10.3 item 4): server -> ONE client, the HOLDER. Another player's client asked to take an item out of
 	// this player's inventory; nothing has moved. Payload: u32 request id, u16 item id, u16 taker entity, stringZ taker name,
-	// stringZ item section. The holder answers with M_XRNET_COOP_REQUEST kind COOP_CONSENT_REQUEST_KIND; no answer is a no.
+	// stringZ item section, u16 seconds to answer (appended later; absent = unknown). The holder answers with M_XRNET_COOP_REQUEST kind COOP_CONSENT_REQUEST_KIND; no answer is a no.
 	M_XRNET_COOP_CONSENT_ASK,
 
 	MSG_FORCEDWORD = u32(-1)

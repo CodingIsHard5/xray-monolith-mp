@@ -2567,6 +2567,7 @@ bool game_sv_Single::coop_consent_intercept(xrClientData* CL, CSE_Abstract* hold
 	A.w_u16(taker->ID);
 	A.w_stringZ(tn ? tn : "?");
 	A.w_stringZ(sec);
+	A.w_u16(u16(rq.timeout_ms / 1000));   // appended: the holder's prompt counts down the server's real window
 	m_server->SendTo(rq.holder_cl, A, net_flags(TRUE, TRUE));
 	Msg("- COOP(consent): request %u — '%s' (%u) asks '%s' (%u) for item %u [%s]; nothing moved, %d s to answer",
 		rq.id, tn ? tn : "?", u32(taker->ID), hn ? hn : "?", u32(holder->ID), u32(item_id), sec, secs);

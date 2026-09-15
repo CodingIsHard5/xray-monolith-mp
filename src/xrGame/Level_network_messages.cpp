@@ -230,10 +230,12 @@ void CLevel::ClientReceive()
 					}
 					bufs[k][i] = 0;
 				}
-				Msg("* COOP(consent): '%s' (%u) asks for item %u [%s] — request %u", name, u32(taker), u32(item), sec, request);
+				const u32 secs = (P->B.count - P->r_tell() >= sizeof(u16)) ? u32(P->r_u16()) : 0;
+				Msg("* COOP(consent): '%s' (%u) asks for item %u [%s] — request %u, %u s to answer", name, u32(taker), u32(item), sec,
+					request, secs);
 				luabind::functor<void> f;
 				if (ai().script_engine().functor("_G.mp_coop_on_consent_ask", f))
-					f(request, u32(item), u32(taker), name, sec);
+					f(request, u32(item), u32(taker), name, sec, secs);
 			}
 			break;
 		case M_XRNET_COOP_MONEY:
