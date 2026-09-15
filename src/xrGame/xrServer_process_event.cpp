@@ -134,6 +134,9 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
 			const u16 item_id = P.r_u16();
 			P.r_seek(r_save);
 			game_sv_Single* const single = smart_cast<game_sv_Single*>(game);
+			// §10.3 item 4: out of ANOTHER player's inventory only with that player's yes
+			if (single && single->coop_consent_intercept(ID_to_client(sender), receiver, item_id))
+				break;
 			if (single && !single->coop_trade_allow(ID_to_client(sender), receiver, item_id))
 				break;
 			// §10.3 S2b: a player putting down an item they hold may be SELLING it; the trader's take pays them

@@ -17,6 +17,7 @@ enum
 	COOP_CHAT_WINDOW_MS   = 10000,
 	COOP_CHAT_PER_WINDOW  = 5,
 	COOP_CHAT_REQUEST_KIND = 2,
+	COOP_CONSENT_REQUEST_KIND = 3,   // §10.3 item 4: u32 request id, u8 yes (the holder's answer)
 };
 
 // Control characters (newlines included) become spaces, runs of spaces collapse to one, the ends are

@@ -258,6 +258,46 @@ u32 coop_trade_price(u16 trader_id, u16 player_id, u16 item_id, bool trader_buys
 	return ai().get_alife() ? coop_trade_price_now(trader_id, player_id, item_id, trader_buys) : 0;
 }
 
+// MP fork (design doc §10.3 item 4): client side. Answer another player's ask for an item this player holds.
+bool coop_consent_answer(u32 request, bool yes)
+{
+	if (!xr_enet::enabled() || ai().get_alife() || !g_pGameLevel)
+		return false;
+	NET_Packet P;
+	P.w_begin(M_XRNET_COOP_REQUEST);
+	P.w_u8(COOP_CONSENT_REQUEST_KIND);
+	P.w_u32(request);
+	P.w_u8(yes ? 1 : 0);
+	Level().Send(P, net_flags(TRUE, TRUE));
+	Msg("- COOP(consent): answered request %u: %s", request, yes ? "yes" : "no");
+	return true;
+}
+
+// MP fork (§10.3 item 4, harness): server side. Grant <count> of <section> to an entity and return the ids it now carries of
+// that section, as "id,id,...".
+LPCSTR coop_test_grant(u16 owner_id, LPCSTR section, u32 count)
+{
+	static string1024 s_out;
+	s_out[0] = 0;
+	game_sv_Single* const g = (g_pGameLevel && Level().Server && section) ? smart_cast<game_sv_Single*>(Level().Server->game) : NULL;
+	if (!g || !count || count > 0xFFFF)
+		return s_out;
+	g->coop_grant_items(owner_id, shared_str(section), u16(count));
+	CSE_Abstract* const owner = Level().Server->ID_to_entity(owner_id);
+	if (!owner)
+		return s_out;
+	for (u32 i = 0; i < owner->children.size(); ++i)
+	{
+		CSE_Abstract* const c = Level().Server->ID_to_entity(owner->children[i]);
+		if (!c || xr_strcmp(c->s_name.c_str(), section))
+			continue;
+		string16 one;
+		xr_sprintf(one, "%s%u", s_out[0] ? "," : "", u32(c->ID));
+		xr_strcat(s_out, one);
+	}
+	return s_out;
+}
+
 u32 coop_test_money()
 {
 	CActor* const me = g_pGameLevel ? smart_cast<CActor*>(Level().CurrentControlEntity()) : NULL;
@@ -2964,6 +3004,8 @@ void CLevel::script_register(lua_State* L)
 			def("coop_test_take", &coop_test_take),
 			def("coop_test_buy", &coop_test_buy),
 			def("coop_test_buy_force", &coop_test_buy_force),
+			def("coop_consent_answer", &coop_consent_answer),
+			def("coop_test_grant", &coop_test_grant),
 			def("coop_test_money_of", &coop_test_money_of),
 			def("coop_money", &coop_money),
 			def("coop_money_set", &coop_money_set),

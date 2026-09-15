@@ -206,6 +206,36 @@ void CLevel::ClientReceive()
 					f(text);
 			}
 			break;
+		case M_XRNET_COOP_CONSENT_ASK:
+			{
+				// MP fork (design doc §10.3 item 4): another player asks for an item this player holds. Read bounded, logged,
+				// handed to gamedata (_G.mp_coop_on_consent_ask), which decides how to ask the player. No answer is a no.
+				if (P->B.count - P->r_tell() < sizeof(u32) + 2 * sizeof(u16))
+					break;
+				const u32 request = P->r_u32();
+				const u16 item = P->r_u16();
+				const u16 taker = P->r_u16();
+				string128 name, sec;
+				char* const bufs[2] = {name, sec};
+				for (int k = 0; k < 2; ++k)
+				{
+					u32 i = 0;
+					while (P->r_pos < P->B.count)
+					{
+						const char c = char(P->B.data[P->r_pos++]);
+						if (!c)
+							break;
+						if (i + 1 < sizeof(name))
+							bufs[k][i++] = c;
+					}
+					bufs[k][i] = 0;
+				}
+				Msg("* COOP(consent): '%s' (%u) asks for item %u [%s] — request %u", name, u32(taker), u32(item), sec, request);
+				luabind::functor<void> f;
+				if (ai().script_engine().functor("_G.mp_coop_on_consent_ask", f))
+					f(request, u32(item), u32(taker), name, sec);
+			}
+			break;
 		case M_XRNET_COOP_MONEY:
 			{
 				// MP fork (design doc §10.3 S2b): the server's ledger says this owner has this much. Display only.

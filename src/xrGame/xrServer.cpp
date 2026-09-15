@@ -1152,6 +1152,14 @@ void xrServer::coop_run_request(NET_Packet& P, ClientID sender)
 			single->coop_request_chat(CL, raw);
 		}
 		break;
+	case COOP_CONSENT_REQUEST_KIND:
+		if ((P.B.count - P.r_tell()) >= sizeof(u32) + sizeof(u8))
+		{
+			const u32 request = P.r_u32();
+			const u8 yes = P.r_u8();
+			single->coop_consent_answer(CL, request, yes != 0);
+		}
+		break;
 	default:
 		Msg("! COOP(request): unknown request kind %u from client %u — ignored", u32(kind), sender.value());
 		break;

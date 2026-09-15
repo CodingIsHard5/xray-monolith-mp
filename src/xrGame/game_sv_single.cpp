@@ -2491,6 +2491,158 @@ bool game_sv_Single::coop_trade_allow(xrClientData* CL, CSE_Abstract* trader, u1
 	return allow;
 }
 
+// ---- §10.3 item 4: consent for a take out of another player's inventory ----------------------------------------------
+
+bool game_sv_Single::coop_move_item(u16 item_id, u16 from_id, u16 to_id)
+{
+	if (!m_server)
+		return false;
+	CSE_Abstract* const item = m_server->ID_to_entity(item_id);
+	CSE_Abstract* const from = m_server->ID_to_entity(from_id);
+	CSE_Abstract* const to = m_server->ID_to_entity(to_id);
+	// Perform_transfer ASSERTS these (see coop_hand_over): refuse instead
+	if (!item || !from || !to || from == to || item->ID_Parent != from->ID)
+		return false;
+	NET_Packet EventPack, PacketReject, PacketTake;
+	EventPack.w_begin(M_EVENT_PACK);
+	m_server->Perform_transfer(PacketReject, PacketTake, item, from, to);
+	EventPack.w_u8(u8(PacketReject.B.count));
+	EventPack.w(&PacketReject.B.data, PacketReject.B.count);
+	EventPack.w_u8(u8(PacketTake.B.count));
+	EventPack.w(&PacketTake.B.data, PacketTake.B.count);
+	u_EventSend(EventPack);
+	return true;
+}
+
+bool game_sv_Single::coop_consent_intercept(xrClientData* CL, CSE_Abstract* holder, u16 item_id)
+{
+	if (!xr_enet::enabled() || !m_server || !CL || !holder || CL == m_server->GetServerClient())
+		return false;
+	CSE_ALifeCreatureActor* const holder_actor = smart_cast<CSE_ALifeCreatureActor*>(holder);
+	CSE_ALifeCreatureActor* const taker = smart_cast<CSE_ALifeCreatureActor*>(CL->owner);
+	if (!holder_actor || !taker || CL->owner == holder || !holder->owner || holder->owner == m_server->GetServerClient())
+		return false;   // not one player's client reaching into ANOTHER connected player's inventory
+	static int s_off = -1;
+	if (s_off < 0)
+	{
+		s_off = coop_param("-coop_consent_off") ? 1 : 0;
+		Msg("- COOP(consent): takes out of another player's inventory %s", s_off ?
+			"are NOT asked about (-coop_consent_off, control)" : "need that player's yes");
+	}
+	if (s_off)
+		return false;
+	LPCSTR const tn = coop_player_name(CL);
+	LPCSTR const hn = coop_player_name(holder->owner);
+	CSE_Abstract* const item = get_entity_from_eid(item_id);
+	LPCSTR const sec = item ? item->s_name.c_str() : "?";
+	// the taker's client already moved its own money for a priced take: reverse it (§10.3 S2a.1)
+	NET_Packet R;
+	R.w_begin(M_XRNET_COOP_TRADE_REFUSED);
+	R.w_u16(item_id);
+	m_server->SendTo(CL->ID, R, net_flags(TRUE, TRUE));
+	for (u32 i = 0; i < m_coop_consents.size(); ++i)
+		if (m_coop_consents[i].item == item_id)
+		{
+			Msg("- COOP(consent): '%s' (%u) asks again for item %u [%s] held by '%s' (%u) — already asked (request %u)",
+				tn ? tn : "?", u32(taker->ID), u32(item_id), sec, hn ? hn : "?", u32(holder->ID), m_coop_consents[i].id);
+			return true;
+		}
+	LPCSTR const t = coop_param("-coop_consent_timeout");
+	const int secs = (t && atoi(t) > 0) ? atoi(t) : 15;
+	coop_consent_req rq;
+	rq.id = m_coop_consent_next++;
+	rq.item = item_id;
+	rq.holder = holder->ID;
+	rq.taker = taker->ID;
+	rq.holder_cl = holder->owner->ID;
+	rq.taker_cl = CL->ID;
+	rq.asked_at = Device.dwTimeGlobal;
+	rq.timeout_ms = u32(_min(secs, 3600)) * 1000;
+	m_coop_consents.push_back(rq);
+
+	NET_Packet A;
+	A.w_begin(M_XRNET_COOP_CONSENT_ASK);
+	A.w_u32(rq.id);
+	A.w_u16(item_id);
+	A.w_u16(taker->ID);
+	A.w_stringZ(tn ? tn : "?");
+	A.w_stringZ(sec);
+	m_server->SendTo(rq.holder_cl, A, net_flags(TRUE, TRUE));
+	Msg("- COOP(consent): request %u — '%s' (%u) asks '%s' (%u) for item %u [%s]; nothing moved, %d s to answer",
+		rq.id, tn ? tn : "?", u32(taker->ID), hn ? hn : "?", u32(holder->ID), u32(item_id), sec, secs);
+	string256 txt;
+	xr_sprintf(txt, "Asked %s for that item. It is theirs until they say yes.", hn ? hn : "the other player");
+	coop_send_notice(CL, 18, txt);
+	return true;
+}
+
+void game_sv_Single::coop_consent_answer(xrClientData* CL, u32 request, bool yes)
+{
+	if (!m_server || !CL)
+		return;
+	for (u32 i = 0; i < m_coop_consents.size(); ++i)
+	{
+		const coop_consent_req rq = m_coop_consents[i];
+		if (rq.id != request)
+			continue;
+		if (!(CL->ID == rq.holder_cl) || !CL->owner || CL->owner->ID != rq.holder)
+		{
+			Msg("! COOP(consent): request %u answered by client %u, who does not hold item %u — ignored", request,
+				CL->ID.value(), u32(rq.item));
+			return;
+		}
+		m_coop_consents.erase(m_coop_consents.begin() + i);
+		xrClientData* const taker_cl = m_server->ID_to_client(rq.taker_cl);
+		if (Device.dwTimeGlobal - rq.asked_at >= rq.timeout_ms)
+		{
+			// the answer came after the window closed: the timeout's no stands, whatever the tick order was
+			Msg("- COOP(consent): request %u — NO ANSWER from holder %u after %u ms (a late %s is ignored); item %u stays",
+				request, u32(rq.holder), Device.dwTimeGlobal - rq.asked_at, yes ? "yes" : "no", u32(rq.item));
+			if (taker_cl)
+				coop_send_notice(taker_cl, 21, "The other player did not answer: the item stays with them.");
+			return;
+		}
+		if (!yes)
+		{
+			Msg("- COOP(consent): request %u — holder %u said NO; item %u stays", request, u32(rq.holder), u32(rq.item));
+			if (taker_cl)
+				coop_send_notice(taker_cl, 20, "The other player said no: the item stays with them.");
+			return;
+		}
+		CSE_ALifeCreatureAbstract* const tk = smart_cast<CSE_ALifeCreatureAbstract*>(get_entity_from_eid(rq.taker));
+		const bool connected = taker_cl && taker_cl->owner && taker_cl->owner->ID == rq.taker;
+		const bool moved = connected && tk && tk->g_Alive() && coop_move_item(rq.item, rq.holder, rq.taker);
+		Msg("- COOP(consent): request %u — holder %u said YES; item %u %s", request, u32(rq.holder), u32(rq.item),
+			moved ? "moved to the taker" : "NOT moved (the item left the holder, or the taker is gone or dead)");
+		if (taker_cl)
+			coop_send_notice(taker_cl, moved ? 19 : 20, moved ? "The other player said yes: the item is yours." :
+				"The other player said yes, but the item could not be handed over.");
+		return;
+	}
+	Msg("- COOP(consent): answer to request %u — no such open request (expired or answered)", request);
+}
+
+void game_sv_Single::coop_consent_tick()
+{
+	if (m_coop_consents.empty() || !m_server)
+		return;
+	const u32 now = Device.dwTimeGlobal;
+	for (u32 i = 0; i < m_coop_consents.size();)
+	{
+		const coop_consent_req rq = m_coop_consents[i];
+		if (now - rq.asked_at < rq.timeout_ms)
+		{
+			++i;
+			continue;
+		}
+		m_coop_consents.erase(m_coop_consents.begin() + i);
+		Msg("- COOP(consent): request %u — NO ANSWER from holder %u after %u ms; item %u stays", rq.id, u32(rq.holder),
+			now - rq.asked_at, u32(rq.item));
+		if (xrClientData* const taker_cl = m_server->ID_to_client(rq.taker_cl))
+			coop_send_notice(taker_cl, 21, "The other player did not answer: the item stays with them.");
+	}
+}
+
 // ---- §10.3 S2b: server-owned money -----------------------------------------------------------------------------------
 
 bool game_sv_Single::coop_money_server_owned()
@@ -4374,6 +4526,7 @@ void game_sv_Single::Update()
 	coop_poll_spawns();    // MP fork (§14 co-op): give ready clients their own actor + reconnection
 	coop_update_anchors(); // MP fork (§15 co-op): re-centre A-Life on the players
 	coop_broadcast_roster(); // MP fork (design doc §13.1): who is connected, by name, for mp_api
+	coop_consent_tick();      // MP fork (design doc §10.3 item 4): unanswered asks expire as a no
 	// MP fork (§14 step 7 phase 4 D2): an operator/harness stop request. Does not return if one
 	// is pending — the clean stop flushes the world and exits from inside it.
 	coop_check_stop_request();

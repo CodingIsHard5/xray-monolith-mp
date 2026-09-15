@@ -206,6 +206,15 @@ private:
 		bool sale;
 	};
 	xr_vector<coop_pending_trade> m_coop_pending_trades;
+	struct coop_consent_req
+	{
+		u32 id;
+		u16 item, holder, taker;
+		ClientID holder_cl, taker_cl;
+		u32 asked_at, timeout_ms;   // elapsed-time comparisons: Device.dwTimeGlobal can wrap
+	};
+	xr_vector<coop_consent_req> m_coop_consents;
+	u32 m_coop_consent_next = 1;
 	// The notice codes are a wire contract with gamedata (_G.mp_coop_on_notice) — append only.
 	static const u8 COOP_NOTICE_CRASH_RESUME = 1;
 	static const u32 COOP_DIRTY_MAGIC = 0x54524944;   // 'DIRT' (LE)
@@ -336,6 +345,12 @@ public:
 	// A GE_TRADE_BUY handed item_id to taker: move the money of the purchase or sale it completes, if any.
 	void coop_trade_settle(CSE_Abstract* taker, u16 item_id);
 	u32  coop_trade_price(u16 trader_id, u16 player_id, u16 item_id, bool trader_buys);
+	// §10.3 item 4: a take out of ANOTHER player's inventory needs that player's yes. intercept => true: the caller drops
+	// the event (the server asked the holder instead). answer: the holder's reply. tick: expire unanswered asks (a no).
+	bool coop_consent_intercept(xrClientData* CL, CSE_Abstract* holder, u16 item_id);
+	void coop_consent_answer(xrClientData* CL, u32 request, bool yes);
+	void coop_consent_tick();
+	bool coop_move_item(u16 item_id, u16 from_id, u16 to_id);   // server-side transfer of one item (Perform_transfer)
 	// §10.1: while the world clock is halted (nobody connected), a script's time-factor change is remembered for the
 	// resume instead of restarting the clock. Returns true when the request was absorbed.
 	bool coop_absorb_time_factor(float f);
