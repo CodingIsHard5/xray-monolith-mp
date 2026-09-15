@@ -58,6 +58,8 @@ public:
 	void OnPerformTrade(u32 money_get, u32 money_put);
 
 	void TransferItem(CInventoryItem* pItem, bool bBuying, bool bFree = false);
+	// MP fork (design doc §10.3 S2a.1): co-op client — reverse the money of a purchase the server refused.
+	static void coop_refund_refused(u16 item_id);
 
 	CInventoryOwner* GetPartner();
 	CTrade* GetPartnerTrade();

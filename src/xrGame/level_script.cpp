@@ -13,6 +13,8 @@
 #include "mp_coop_chat.h"                           // MP fork (§13.4): COOP_CHAT_REQUEST_KIND
 #include "level.h"
 #include "actor.h"
+#include "trade.h"                               // MP fork (§10.3 S2a.1): coop_test_buy
+#include "inventory_item.h"
 #include "script_game_object.h"
 #include "patrol_path_storage.h"
 #include "xrServer.h"
@@ -184,6 +186,52 @@ bool coop_test_take(u16 item_id)
 	CGameObject::u_EventSend(P);
 	Msg("- COOP(take): sent take of item %u for actor %u", u32(item_id), u32(me->ID()));
 	return true;
+}
+
+// MP fork (design doc §10.3 S2a.1, harness): client side. Buy one item from the NPC holding it the way the trade menu does —
+// CTrade::TransferItem on the trader's trade (price, local money, GE_TRADE_SELL + GE_TRADE_BUY) and then the absolute
+// GE_MONEY of both parties — without the UI, so a refused purchase's money can be measured.
+bool coop_test_buy(u16 item_id)
+{
+	if (!xr_enet::enabled() || ai().get_alife() || !g_pGameLevel)
+		return false;
+	CActor* const me = smart_cast<CActor*>(Level().CurrentControlEntity());
+	CObject* const obj = Level().Objects.net_Find(item_id);
+	CInventoryItem* const item = obj ? smart_cast<CInventoryItem*>(obj) : NULL;
+	CInventoryOwner* const trader = (obj && obj->H_Parent()) ? smart_cast<CInventoryOwner*>(obj->H_Parent()) : NULL;
+	if (!me || !item || !trader || trader == smart_cast<CInventoryOwner*>(me))
+	{
+		Msg("! COOP(buy): priced purchase of item %u — actor %s, item %s, holder %s", u32(item_id), me ? "yes" : "no",
+			item ? "yes" : "no", trader ? "yes" : "no");
+		return false;
+	}
+	CTrade* const t = trader->GetTrade();
+	me->GetTrade()->StartTradeEx(trader);
+	t->StartTradeEx(me);
+	const u32 price = t->GetItemPrice(item, false);
+	const u32 before = me->get_money();
+	if (!price || before < price)
+	{
+		// what the trade menu refuses too (not for sale / not enough money): nothing is sent
+		t->StopTrade();
+		me->GetTrade()->StopTrade();
+		Msg("! COOP(buy): priced purchase of item %u not made — price %u, money %u", u32(item_id), price, before);
+		return false;
+	}
+	t->TransferItem(item, false);
+	t->pThis.inv_owner->set_money(t->pThis.inv_owner->get_money(), true);
+	t->pPartner.inv_owner->set_money(t->pPartner.inv_owner->get_money(), true);
+	t->StopTrade();
+	me->GetTrade()->StopTrade();
+	Msg("- COOP(buy): priced purchase of item %u from %u: price %u, money %u -> %u", u32(item_id), u32(obj->H_Parent()->ID()),
+		price, before, me->get_money());
+	return true;
+}
+
+u32 coop_test_money()
+{
+	CActor* const me = g_pGameLevel ? smart_cast<CActor*>(Level().CurrentControlEntity()) : NULL;
+	return me ? me->get_money() : u32(-1);
 }
 
 LPCSTR coop_player_actor_ids()
@@ -2884,6 +2932,8 @@ void CLevel::script_register(lua_State* L)
 			def("coop_send_chat", &coop_send_chat),
 			def("coop_player_actor_ids", &coop_player_actor_ids),
 			def("coop_test_take", &coop_test_take),
+			def("coop_test_buy", &coop_test_buy),
+			def("coop_test_money", &coop_test_money),
 #ifdef DEBUG
 		def("debug_object",						get_object_by_name),
 		def("debug_actor",						tpfGetActor),

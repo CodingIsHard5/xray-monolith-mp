@@ -2,6 +2,7 @@
 // MP fork (§19 co-op): M_XRNET_OPEN_MENU
 #include "UIGameSP.h"
 #include "InventoryOwner.h"
+#include "trade.h"                             // MP fork (§10.3 S2a.1): CTrade::coop_refund_refused
 #include "GametaskManager.h"                  // MP fork (§19 co-op): M_XRNET_TASKS
 #include "entity.h"
 #include "xrserver_objects.h"
@@ -203,6 +204,13 @@ void CLevel::ClientReceive()
 				luabind::functor<void> f;
 				if (ai().script_engine().functor("_G.mp_coop_on_roster", f))
 					f(text);
+			}
+			break;
+		case M_XRNET_COOP_TRADE_REFUSED:
+			{
+				// MP fork (design doc §10.3 S2a.1): give back the money of a purchase the server refused.
+				if (P->B.count - P->r_tell() >= sizeof(u16))
+					CTrade::coop_refund_refused(P->r_u16());
 			}
 			break;
 		case M_XRNET_COOP_CHAT:

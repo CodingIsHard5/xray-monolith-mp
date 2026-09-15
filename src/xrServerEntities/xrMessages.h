@@ -146,6 +146,11 @@ enum
 	// and hands it to gamedata (_G.mp_coop_on_chat) for the PDA news feed.
 	M_XRNET_COOP_CHAT,
 
+	// MP fork (design doc §10.3 S2a.1): server -> ONE client. The server refused this client's take of an item from a
+	// trader's stock (game_sv_Single::coop_trade_allow). Payload: u16 item id. Money is still client-authored, and the
+	// client already moved it when it sent the purchase (CTrade::TransferItem), so the client reverses that move.
+	M_XRNET_COOP_TRADE_REFUSED,
+
 	MSG_FORCEDWORD = u32(-1)
 };
 

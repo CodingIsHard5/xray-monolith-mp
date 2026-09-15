@@ -2416,7 +2416,14 @@ bool game_sv_Single::coop_trade_allow(xrClientData* CL, CSE_Abstract* trader, u1
 	Msg("- COOP(trade): '%s' (%u) takes item %u [%s] from trader %u — %s", nm ? nm : "?", u32(player->ID),
 		u32(item_id), sec, u32(trader->ID), allow ? "ALLOWED" : "REFUSED");
 	if (!allow)
+	{
 		coop_send_notice(CL, 16, "Trade refused: your standing with this trader does not allow that item.");
+		// §10.3 S2a.1: the buyer's client has already paid itself out; name the item so it can reverse that
+		NET_Packet R;
+		R.w_begin(M_XRNET_COOP_TRADE_REFUSED);
+		R.w_u16(item_id);
+		m_server->SendTo(CL->ID, R, net_flags(TRUE, TRUE));
+	}
 	return allow;
 }
 

@@ -14,6 +14,55 @@
 #include "game_object_space.h"
 #include "trade_parameters.h"
 #include "eatable_item.h"
+#include "ai_space.h"
+#include "alife_simulator.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§10.3 S2a.1): xr_enet::enabled()
+
+// MP fork (design doc §10.3 S2a.1): the purchases this co-op client has sent and not yet seen refused. A client moves money
+// locally when it sends a purchase (below) and the server may refuse the item afterwards (M_XRNET_COOP_TRADE_REFUSED);
+// without this record a refused buyer paid for nothing. Bounded: an entry older than two minutes is no longer refundable.
+namespace
+{
+	struct coop_pending_purchase
+	{
+		u16 item, payer, gainer;
+		u32 price, at;
+	};
+	xr_vector<coop_pending_purchase> s_coop_pending;
+	const u32 COOP_PENDING_MS = 120000;
+	const u32 COOP_PENDING_MAX = 64;
+}
+
+void CTrade::coop_refund_refused(u16 item_id)
+{
+	const u32 now = Device.dwTimeGlobal;
+	for (int i = int(s_coop_pending.size()) - 1; i >= 0; --i)
+	{
+		const coop_pending_purchase rec = s_coop_pending[i];
+		if (now - rec.at > COOP_PENDING_MS)
+			continue;
+		if (rec.item != item_id)
+			continue;
+		s_coop_pending.erase(s_coop_pending.begin() + i);
+		CInventoryOwner* const payer = smart_cast<CInventoryOwner*>(Level().Objects.net_Find(rec.payer));
+		CInventoryOwner* const gainer = smart_cast<CInventoryOwner*>(Level().Objects.net_Find(rec.gainer));
+		if (!payer)
+		{
+			Msg("! COOP(trade): refused item %u — its buyer %u is not resolvable, %u not refunded", u32(item_id), u32(rec.payer),
+				rec.price);
+			return;
+		}
+		const u32 before = payer->get_money();
+		// the same absolute GE_MONEY the trade UI sends after a purchase, so the server's record follows
+		payer->set_money(before + rec.price, true);
+		if (gainer)
+			gainer->set_money(gainer->get_money() > rec.price ? gainer->get_money() - rec.price : 0, true);
+		Msg("* COOP(trade): refused item %u — refunded %u to %u (money %u -> %u)", u32(item_id), rec.price, u32(rec.payer),
+			before, payer->get_money());
+		return;
+	}
+	Msg("~ COOP(trade): refused item %u — no pending purchase of it on this client (nothing to refund)", u32(item_id));
+}
 
 bool CTrade::CanTrade()
 {
@@ -103,6 +152,22 @@ void CTrade::TransferItem(CInventoryItem* pItem, bool bBuying, bool bFree)
 		pThis.inv_owner->set_money(pThis.inv_owner->get_money() - dwTransferMoney, false);
 	else
 		pPartner.inv_owner->set_money(pPartner.inv_owner->get_money() - dwTransferMoney, false);
+
+	// MP fork (design doc §10.3 S2a.1): on a co-op client, remember a purchase from an NPC by the actor this client controls,
+	// so the money can be given back if the server refuses the item. O1 dropped the item and was paid; O2 took it and paid.
+	if (xr_enet::enabled() && !ai().get_alife() && dwTransferMoney && !smart_cast<CActor*>(O1) &&
+		Level().CurrentControlEntity() && O2->ID() == Level().CurrentControlEntity()->ID())
+	{
+		coop_pending_purchase rec;
+		rec.item = pItem->object().ID();
+		rec.payer = O2->ID();
+		rec.gainer = O1->ID();
+		rec.price = dwTransferMoney;
+		rec.at = Device.dwTimeGlobal;
+		if (s_coop_pending.size() >= COOP_PENDING_MAX)
+			s_coop_pending.erase(s_coop_pending.begin());
+		s_coop_pending.push_back(rec);
+	}
 
 
 	CAI_Trader* pTrader = NULL;
