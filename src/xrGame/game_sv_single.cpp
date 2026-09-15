@@ -25,6 +25,7 @@
 #include "character_info.h"                        // MP fork (§14 step 8 Q4): the player's community
 #include "Actor.h"                                 // MP fork (§14 step 8 Q4): tell a player actor apart
 #include "trade.h"                                 // MP fork (§10.3 S2b): server-side price
+#include "CustomMonster.h"                          // MP fork (§16.3): NPC cap
 #include "inventory_item.h"
 #include "entity_alive.h"                          // MP fork (§14 step 8 Q4): only talk to the living
 #include "ai/stalker/ai_stalker.h"                 // MP fork (§14 step 8 P4 R3.0): the stock KILL path needs a stalker victim
@@ -2491,6 +2492,130 @@ bool game_sv_Single::coop_trade_allow(xrClientData* CL, CSE_Abstract* trader, u1
 	return allow;
 }
 
+// ---- §16.3: active-NPC cap near player clusters ----------------------------------------------------------------------
+// Every 1 s: online alive creatures within the radius of any connected player, ranked by distance to the nearest; the nearest N
+// are FULL, the rest THROTTLED, story NPCs EXEMPT (CCustomMonster::shedule_Scale acts on the class). Nothing is despawned.
+// -coop_npc_cap <n> arms it (classification + metrics); -coop_npc_cap_off keeps the classification and metrics but does not apply
+// it (control); -coop_npc_cap_radius <m> (default 150).
+void game_sv_Single::coop_npc_cap_tick()
+{
+	if (!xr_enet::enabled() || !ai().get_alife() || !g_pGameLevel || !m_server)
+		return;
+	static int s_cap = -1;
+	static float s_radius = 150.f;
+	static bool s_off = false;
+	if (s_cap == -1)
+	{
+		LPCSTR c = coop_param("-coop_npc_cap");
+		s_cap = c ? _max(0, atoi(c)) : -2;
+		if (LPCSTR r = coop_param("-coop_npc_cap_radius"))
+			s_radius = _max(10.f, float(atof(r)));
+		s_off = coop_param("-coop_npc_cap_off") != NULL;
+		if (s_cap >= 0)
+			Msg("- COOP(npccap): cap %d full NPCs within %.0f m of players — %s", s_cap, s_radius,
+				(s_off || s_cap == 0) ? "classified and measured, NOT applied (control)" : "APPLIED");
+	}
+	if (s_cap < 0)
+		return;
+	CCustomMonster::s_coop_npccap_apply = !s_off && s_cap > 0;
+
+	static u32 s_frames = 0, s_frame_ms = 0;
+	++s_frames;
+	s_frame_ms += Device.dwTimeDelta;
+	static u32 s_next = 0, s_next_report = 0;
+	if (Device.dwTimeGlobal < s_next)
+		return;
+	s_next = Device.dwTimeGlobal + 1000;
+
+	struct players_collect
+	{
+		xrServer* server;
+		xr_vector<Fvector> pos;
+		void operator()(IClient* client)
+		{
+			xrClientData* const CL = static_cast<xrClientData*>(client);
+			if (CL != server->GetServerClient() && CL->owner)
+				pos.push_back(CL->owner->o_Position);
+		}
+	} pc;
+	pc.server = m_server;
+	m_server->ForEachClientDo(pc);
+
+	struct cand { float d; CCustomMonster* m; bool operator<(const cand& o) const { return d < o.d; } };
+	xr_vector<cand> near_list;
+	static u64 s_ticks[4] = {0, 0, 0, 0}, s_npcsec[4] = {0, 0, 0, 0};
+	static u32 s_max_within = 0, s_max_full = 0, s_throttled_exempt = 0;
+	u32 exempt_near = 0, story_total = 0;
+	CObjectList& objs = Level().Objects;
+	for (u32 i = 0; i < objs.o_count(); ++i)
+	{
+		CCustomMonster* const m = smart_cast<CCustomMonster*>(objs.o_get_by_iterator(i));
+		if (!m || smart_cast<CActor*>(m))
+			continue;
+		// metrics for the interval that just ended, under the class it had
+		const u32 delta = m->m_coop_sched_ticks - m->m_coop_sched_ticks_prev;
+		m->m_coop_sched_ticks_prev = m->m_coop_sched_ticks;
+		const u8 was = m->m_coop_npccap_class;
+		if (was < 4)
+		{
+			s_ticks[was] += delta;
+			s_npcsec[was] += 1;
+		}
+		if (!m->g_Alive())
+		{
+			m->m_coop_npccap_class = 0;
+			continue;
+		}
+		CSE_ALifeObject* const se = smart_cast<CSE_ALifeObject*>(ai().alife().objects().object(m->ID(), true));
+		const bool story = se && se->m_story_id != INVALID_STORY_ID;
+		if (story)
+			++story_total;
+		float d = flt_max;
+		for (u32 k = 0; k < pc.pos.size(); ++k)
+			d = _min(d, pc.pos[k].distance_to(m->Position()));
+		if (d > s_radius)
+		{
+			m->m_coop_npccap_class = 0;
+			continue;
+		}
+		if (story)
+		{
+			m->m_coop_npccap_class = 3;
+			++exempt_near;
+			continue;
+		}
+		cand c;
+		c.d = d;
+		c.m = m;
+		near_list.push_back(c);
+	}
+	std::sort(near_list.begin(), near_list.end());
+	u32 full = 0, throttled = 0;
+	for (u32 i = 0; i < near_list.size(); ++i)
+	{
+		const bool is_full = i < u32(s_cap);
+		near_list[i].m->m_coop_npccap_class = is_full ? 1 : 2;
+		++(is_full ? full : throttled);
+	}
+	s_max_within = _max(s_max_within, u32(near_list.size()));
+	s_max_full = _max(s_max_full, full);
+
+	if (Device.dwTimeGlobal < s_next_report)
+		return;
+	s_next_report = Device.dwTimeGlobal + 5000;
+	const float ups_full = s_npcsec[1] ? float(s_ticks[1]) / float(s_npcsec[1]) : -1.f;
+	const float ups_thr = s_npcsec[2] ? float(s_ticks[2]) / float(s_npcsec[2]) : -1.f;
+	const float ups_exe = s_npcsec[3] ? float(s_ticks[3]) / float(s_npcsec[3]) : -1.f;
+	Msg("- COOP(npccap): players %u | within %.0f m: %u non-exempt (full %u, throttled %u), %u exempt | applied %s | updates/s per "
+		"NPC: full %.2f, throttled %.2f, exempt %.2f | story NPCs online %u | frame %.1f ms",
+		u32(pc.pos.size()), s_radius, u32(near_list.size()), full, throttled, exempt_near,
+		CCustomMonster::s_coop_npccap_apply ? "yes" : "no", ups_full, ups_thr, ups_exe, story_total,
+		s_frames ? float(s_frame_ms) / float(s_frames) : 0.f);
+	for (int k = 0; k < 4; ++k)
+		s_ticks[k] = s_npcsec[k] = 0;
+	s_frames = s_frame_ms = 0;
+}
+
 // ---- §10.3 S2c: the client shows the server's price ------------------------------------------------------------------
 
 void game_sv_Single::coop_trade_quote(xrClientData* CL, u16 trader_id)
@@ -4682,6 +4807,7 @@ void game_sv_Single::Update()
 	coop_update_anchors(); // MP fork (§15 co-op): re-centre A-Life on the players
 	coop_broadcast_roster(); // MP fork (design doc §13.1): who is connected, by name, for mp_api
 	coop_consent_tick();      // MP fork (design doc §10.3 item 4): unanswered asks expire as a no
+	coop_npc_cap_tick();      // MP fork (design doc §16.3): active-NPC cap near player clusters
 	// MP fork (§14 step 7 phase 4 D2): an operator/harness stop request. Does not return if one
 	// is pending — the clean stop flushes the world and exits from inside it.
 	coop_check_stop_request();

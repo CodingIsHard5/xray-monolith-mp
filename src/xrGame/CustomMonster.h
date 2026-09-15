@@ -202,6 +202,14 @@ public:
 	{
 	};
 	virtual void shedule_Update(u32 DT);
+	// MP fork (design doc §16.3): the scheduler asks this once per update. The co-op server's NPC cap sets the class; stock
+	// behaviour (distance to the camera) otherwise. The call count is the cap's measurement of updates per NPC.
+	virtual float shedule_Scale();
+	u8  m_coop_npccap_class = 0;       // 0 unclassified/outside, 1 full, 2 throttled, 3 exempt (story)
+	u8  m_coop_npccap_prev = 0;        // the class during the last classification interval (metrics)
+	u32 m_coop_sched_ticks = 0;
+	u32 m_coop_sched_ticks_prev = 0;
+	static bool s_coop_npccap_apply;
 	virtual void UpdateCL();
 
 	// Network

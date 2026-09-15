@@ -359,6 +359,7 @@ public:
 	bool coop_consent_intercept(xrClientData* CL, CSE_Abstract* holder, u16 item_id);
 	void coop_consent_answer(xrClientData* CL, u32 request, bool yes);
 	void coop_consent_tick();
+	void coop_npc_cap_tick();   // §16.3: classify and (when on) throttle excess NPCs near players; metrics every 5 s
 	bool coop_move_item(u16 item_id, u16 from_id, u16 to_id);   // server-side transfer of one item (Perform_transfer)
 	// §10.1: while the world clock is halted (nobody connected), a script's time-factor change is remembered for the
 	// resume instead of restarting the clock. Returns true when the request was absorbed.
