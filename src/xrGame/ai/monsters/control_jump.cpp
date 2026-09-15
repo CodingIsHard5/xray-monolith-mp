@@ -32,7 +32,10 @@
 // is printed here, so the log NAMES the blocked exit instead of it being read out of the numbers.
 void CControlJump::coop_trace(LPCSTR tag)
 {
-	if (!xr_enet::enabled() || !m_object) return;
+	// Opt-in: the diagnostic does a ray query and writes log lines, so an ordinary co-op session must not pay for it.
+	static int s_on = -1;
+	if (s_on < 0) s_on = strstr(Core.Params, "-coop_jumpdiag") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+	if (!s_on || !xr_enet::enabled() || !m_object) return;
 	const u32 now = time();
 	const bool periodic = (0 == xr_strcmp(tag, "run"));
 	if (periodic)
