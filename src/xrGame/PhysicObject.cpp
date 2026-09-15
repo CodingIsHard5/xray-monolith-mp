@@ -625,6 +625,20 @@ void CPhysicObject::net_Export(NET_Packet& P)
 		State.position.set(this->Position());
 
 
+	// MP fork (design doc §3.4 increment 2): the state the co-op server actually sends, at most 5 Hz per object — the server's own
+	// XFORM (obj:position()) updates only about once a second on the renderless server, so this is the authoritative path to compare
+	if (coop_sync)
+	{
+		static xr_map<u16, u32> s_next;
+		u32& next = s_next[ID()];
+		if (Device.dwTimeGlobal >= next)
+		{
+			next = Device.dwTimeGlobal + 200;
+			Msg("- COOP(tele): state %u t %u pos %.3f,%.3f,%.3f", u32(ID()), Device.dwTimeGlobal, State.position.x, State.position.y,
+				State.position.z);
+		}
+	}
+
 	mask_num_items num_items;
 	num_items.mask = 0;
 	u16 temp = this->PHGetSyncItemsNumber();
@@ -762,7 +776,11 @@ void CPhysicObject::net_Import(NET_Packet& P)
 	//if (!p->NET_IItem.empty())
 	//m_flags.set							(FInInterpolate, TRUE);
 
-	Level().AddObject_To_Objects4CrPr(this);
+	// MP fork (design doc §3.4 increment 2): NOT on a co-op client. The stock MP correction-prediction pass this enrols the object in
+	// also runs CActor::PH_B_CrPr on the actor list, which the co-op actor is not set up for: the first thrown-object run crashed a
+	// client there (AV at CActor::PH_B_CrPr+0x548). UpdateCL's Interpolate() follows the server's states without it.
+	if (!(xr_enet::enabled() && !OnServer()))
+		Level().AddObject_To_Objects4CrPr(this);
 	//this->CrPr_SetActivated				(false);
 	//this->CrPr_SetActivationStep			(0);
 
