@@ -151,6 +151,11 @@ enum
 	// client already moved it when it sent the purchase (CTrade::TransferItem), so the client reverses that move.
 	M_XRNET_COOP_TRADE_REFUSED,
 
+	// MP fork (design doc §10.3 S2b): server -> clients. An inventory owner's money AS THE SERVER'S LEDGER HAS IT (the CSE's
+	// m_dwMoney). Payload: u16 entity id, u32 amount. The client sets its copy without sending anything back: in co-op the
+	// server owns money, and a client's own GE_MONEY is refused and answered with this.
+	M_XRNET_COOP_MONEY,
+
 	MSG_FORCEDWORD = u32(-1)
 };
 

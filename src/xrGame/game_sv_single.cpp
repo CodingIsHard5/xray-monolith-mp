@@ -24,6 +24,8 @@
 #include "InventoryOwner.h"                        // MP fork (§14 step 8 Q4): HasInfo / CharacterInfo
 #include "character_info.h"                        // MP fork (§14 step 8 Q4): the player's community
 #include "Actor.h"                                 // MP fork (§14 step 8 Q4): tell a player actor apart
+#include "trade.h"                                 // MP fork (§10.3 S2b): server-side price
+#include "inventory_item.h"
 #include "entity_alive.h"                          // MP fork (§14 step 8 Q4): only talk to the living
 #include "ai/stalker/ai_stalker.h"                 // MP fork (§14 step 8 P4 R3.0): the stock KILL path needs a stalker victim
 #include "relation_registry.h"                    // MP fork (§14 step 8 P4 R1): goodwill storage
@@ -2345,6 +2347,29 @@ void game_sv_Single::coop_request_chat(xrClientData* CL, LPCSTR raw)
 			CL->owner ? u32(CL->owner->ID) : 0xffffu, u32(raw_len), u32(n), text);
 }
 
+// MP fork (design doc §10.3 S2b): an item's price as the server's own objects compute it (the trade menu's
+// CTrade::GetItemPrice). trader_buys: the trader's buy side (a player selling), else its sell side (a player buying).
+// 0 when an object is not online here, or the trader does not trade that item.
+u32 coop_trade_price_now(u16 trader_id, u16 player_id, u16 item_id, bool trader_buys)
+{
+	if (!g_pGameLevel)
+		return 0;
+	CInventoryOwner* const trader = smart_cast<CInventoryOwner*>(Level().Objects.net_Find(trader_id));
+	CInventoryOwner* const player = smart_cast<CInventoryOwner*>(Level().Objects.net_Find(player_id));
+	CInventoryItem* const item = smart_cast<CInventoryItem*>(Level().Objects.net_Find(item_id));
+	if (!trader || !player || !item || trader == player)
+	{
+		Msg("! COOP(money): cannot price item %u (trader %u %s, player %u %s, item %s)", u32(item_id), u32(trader_id),
+			trader ? "ok" : "absent", u32(player_id), player ? "ok" : "absent", item ? "ok" : "absent");
+		return 0;
+	}
+	CTrade* const t = trader->GetTrade();
+	t->StartTradeEx(player);
+	const u32 price = t->GetItemPrice(item, trader_buys);
+	t->StopTrade();
+	return price;
+}
+
 // MP fork (design doc §10.3 S2a): server-side trade ACCESS. Before this, a client's purchase was two plain ownership
 // changes and the only access check was its own UI, judged by its own copy of the world. Now the server asks gamedata
 // whether THIS player's standing allows the item, with the player as the acting subject (so goodwill reads route to
@@ -2374,15 +2399,15 @@ bool game_sv_Single::coop_trade_allow(xrClientData* CL, CSE_Abstract* trader, u1
 		               q[sizeof("-coop_trade_no_authority") - 1] == ' ')) ? 1 : 0;
 		Msg("- COOP(trade): server trade access is %s", s_off ? "OFF (-coop_trade_no_authority, control)" : "ON");
 	}
+
+	bool allow = true;
+	luabind::functor<bool> f;
 	if (s_off)
 	{
 		Msg("- COOP(trade): '%s' (%u) takes item %u [%s] from trader %u — ALLOWED without a check (control)",
 			nm ? nm : "?", u32(player->ID), u32(item_id), sec, u32(trader->ID));
-		return true;
 	}
-
-	luabind::functor<bool> f;
-	if (!ai().script_engine().functor("_G.mp_coop_trade_allow", f))
+	else if (!ai().script_engine().functor("_G.mp_coop_trade_allow", f))
 	{
 		static bool s_said = false;
 		if (!s_said)
@@ -2390,9 +2415,8 @@ bool game_sv_Single::coop_trade_allow(xrClientData* CL, CSE_Abstract* trader, u1
 			s_said = true;
 			Msg("! COOP(trade): gamedata _G.mp_coop_trade_allow is not registered — trades are NOT checked");
 		}
-		return true;
 	}
-	bool allow = true;
+	else
 	{
 		// The scope lives OUTSIDE the try: this project builds without unwind semantics (C4530 on the first build of this
 		// function), so a local destroyed by exception unwinding is never destroyed, and a leaked acting player would
@@ -2412,20 +2436,216 @@ bool game_sv_Single::coop_trade_allow(xrClientData* CL, CSE_Abstract* trader, u1
 			Msg("! COOP(trade): _G.mp_coop_trade_allow raised for item %u — allowed (fail open)", u32(item_id));
 			allow = true;
 		}
+		Msg("- COOP(trade): '%s' (%u) takes item %u [%s] from trader %u — %s", nm ? nm : "?", u32(player->ID),
+			u32(item_id), sec, u32(trader->ID), allow ? "ALLOWED" : "REFUSED");
 	}
-	Msg("- COOP(trade): '%s' (%u) takes item %u [%s] from trader %u — %s", nm ? nm : "?", u32(player->ID),
-		u32(item_id), sec, u32(trader->ID), allow ? "ALLOWED" : "REFUSED");
+
+	// §10.3 S2b: the purchase must also be paid for out of the SERVER's ledger, at the SERVER's price.
+	u32 price = 0, balance = 0;
+	bool broke = false;
+	if (allow && coop_money_server_owned())
+	{
+		price = coop_trade_price(trader->ID, player->ID, item_id, false);
+		balance = coop_money_get(player->ID);
+		broke = (balance == u32(-1)) || (balance < price) || !price;
+		if (broke)
+		{
+			allow = false;
+			Msg("- COOP(money): '%s' (%u) buys item %u [%s] from trader %u — REFUSED: %s (balance %u, price %u)",
+				nm ? nm : "?", u32(player->ID), u32(item_id), sec, u32(trader->ID),
+				price ? "not enough money" : "the server could not price it", balance, price);
+		}
+		else
+		{
+			for (xr_vector<coop_pending_trade>::iterator it = m_coop_pending_trades.begin(); it != m_coop_pending_trades.end();)
+				it = (it->item == item_id || Device.dwTimeGlobal - it->at > 30000) ? m_coop_pending_trades.erase(it) : it + 1;
+			coop_pending_trade rec;
+			rec.item = item_id;
+			rec.payer = player->ID;
+			rec.payee = trader->ID;
+			rec.price = price;
+			rec.at = Device.dwTimeGlobal;
+			rec.sale = false;
+			m_coop_pending_trades.push_back(rec);
+			Msg("- COOP(money): '%s' (%u) buys item %u [%s] from trader %u — price %u, balance %u (settles when the item is handed over)",
+				nm ? nm : "?", u32(player->ID), u32(item_id), sec, u32(trader->ID), price, balance);
+		}
+	}
+
 	if (!allow)
 	{
-		coop_send_notice(CL, 16, "Trade refused: your standing with this trader does not allow that item.");
+		if (broke)
+			coop_send_notice(CL, 17, "Trade refused: you do not have enough money for that item.");
+		else
+			coop_send_notice(CL, 16, "Trade refused: your standing with this trader does not allow that item.");
 		// §10.3 S2a.1: the buyer's client has already paid itself out; name the item so it can reverse that
 		NET_Packet R;
 		R.w_begin(M_XRNET_COOP_TRADE_REFUSED);
 		R.w_u16(item_id);
 		m_server->SendTo(CL->ID, R, net_flags(TRUE, TRUE));
+		// §10.3 S2b: and then what the ledger really says, AFTER the refusal (same ordered channel), so the client's
+		// local reversal cannot leave it off by the price
+		if (coop_money_server_owned())
+			coop_money_send(CL, player->ID);
 	}
 	return allow;
 }
+
+// ---- §10.3 S2b: server-owned money -----------------------------------------------------------------------------------
+
+bool game_sv_Single::coop_money_server_owned()
+{
+	static int s_client = -1;
+	if (s_client < 0)
+	{
+		LPCSTR q = strstr(Core.Params, "-coop_money_client_authority");   // exact token
+		s_client = (q && (q[sizeof("-coop_money_client_authority") - 1] == 0 ||
+		                  q[sizeof("-coop_money_client_authority") - 1] == ' ')) ? 1 : 0;
+		if (xr_enet::enabled())
+			Msg("- COOP(money): money is %s", s_client ? "CLIENT-written (-coop_money_client_authority, control)" :
+				"owned by the server (a client's GE_MONEY is refused)");
+	}
+	return xr_enet::enabled() && !s_client;
+}
+
+u32 game_sv_Single::coop_money_get(u16 id)
+{
+	CSE_ALifeTraderAbstract* const t = smart_cast<CSE_ALifeTraderAbstract*>(get_entity_from_eid(id));
+	return t ? t->m_dwMoney : u32(-1);
+}
+
+void game_sv_Single::coop_money_send(xrClientData* CL, u16 id)
+{
+	if (!m_server)
+		return;
+	const u32 amount = coop_money_get(id);
+	if (amount == u32(-1))
+		return;
+	NET_Packet P;
+	P.w_begin(M_XRNET_COOP_MONEY);
+	P.w_u16(id);
+	P.w_u32(amount);
+	if (CL)
+		m_server->SendTo(CL->ID, P, net_flags(TRUE, TRUE));
+	else
+		m_server->SendBroadcast(BroadcastCID, P, net_flags(TRUE, TRUE));
+}
+
+// Game thread only: it also sets the server's own game object, which a script reward (db.actor:give_money on the server)
+// adds to — a stale object would write a stale balance back through GE_MONEY.
+bool game_sv_Single::coop_money_set(u16 id, u32 amount, LPCSTR why)
+{
+	CSE_ALifeTraderAbstract* const t = smart_cast<CSE_ALifeTraderAbstract*>(get_entity_from_eid(id));
+	if (!t)
+		return false;
+	const u32 before = t->m_dwMoney;
+	t->m_dwMoney = amount;
+	if (g_pGameLevel)
+		if (CInventoryOwner* const o = smart_cast<CInventoryOwner*>(Level().Objects.net_Find(id)))
+			o->set_money(amount, false);
+	coop_money_send(NULL, id);
+	Msg("- COOP(money): ledger %u: %u -> %u (%s)", u32(id), before, amount, why ? why : "");
+	return true;
+}
+
+void game_sv_Single::coop_trade_note_sale(xrClientData* CL, CSE_Abstract* seller, u16 item_id)
+{
+	if (!coop_money_server_owned() || !CL || !seller || CL->owner != seller)
+		return;
+	for (xr_vector<coop_pending_trade>::iterator it = m_coop_pending_trades.begin(); it != m_coop_pending_trades.end();)
+		it = (it->item == item_id || Device.dwTimeGlobal - it->at > 30000) ? m_coop_pending_trades.erase(it) : it + 1;
+	coop_pending_trade rec;
+	rec.item = item_id;
+	rec.payer = seller->ID;   // for a sale: the player who is PAID
+	rec.payee = 0xffff;
+	rec.price = 0;
+	rec.at = Device.dwTimeGlobal;
+	rec.sale = true;
+	m_coop_pending_trades.push_back(rec);
+}
+
+void game_sv_Single::coop_trade_settle(CSE_Abstract* taker, u16 item_id)
+{
+	if (!coop_money_server_owned() || !taker)
+		return;
+	for (u32 i = 0; i < m_coop_pending_trades.size(); ++i)
+	{
+		coop_pending_trade rec = m_coop_pending_trades[i];
+		if (rec.item != item_id)
+			continue;
+		m_coop_pending_trades.erase(m_coop_pending_trades.begin() + i);
+		if (Device.dwTimeGlobal - rec.at > 30000)
+			return;
+		CSE_Abstract* const item = get_entity_from_eid(item_id);
+		LPCSTR const sec = item ? item->s_name.c_str() : "?";
+		if (!rec.sale)
+		{
+			if (taker->ID != rec.payer)
+			{
+				Msg("! COOP(money): item %u [%s] was bought by %u but handed to %u — nothing charged", u32(item_id), sec,
+					u32(rec.payer), u32(taker->ID));
+				return;
+			}
+			const u32 bal = coop_money_get(rec.payer);
+			const u32 after = (bal != u32(-1) && bal > rec.price) ? bal - rec.price : 0;
+			if (bal == u32(-1) || bal < rec.price)
+				Msg("! COOP(money): item %u [%s]: %u can no longer pay %u (balance %u) — charged to 0", u32(item_id), sec,
+					u32(rec.payer), rec.price, bal);
+			Msg("- COOP(money): purchase of item %u [%s]: %u pays %u to %u (balance %u -> %u)", u32(item_id), sec,
+				u32(rec.payer), rec.price, u32(rec.payee), bal, after);
+			coop_money_set(rec.payer, after, "purchase");
+			const u32 tb = coop_money_get(rec.payee);
+			if (tb != u32(-1))
+				coop_money_set(rec.payee, tb + rec.price, "sale to a player");
+			return;
+		}
+		// a sale: paid only when a LIVING NPC trader took the item the player put down
+		CSE_ALifeCreatureAbstract* const creature = smart_cast<CSE_ALifeCreatureAbstract*>(taker);
+		if (smart_cast<CSE_ALifeCreatureActor*>(taker) || !smart_cast<CSE_ALifeTraderAbstract*>(taker) ||
+			(creature && !creature->g_Alive()))
+			return;
+		const u32 price = coop_trade_price(taker->ID, rec.payer, item_id, true);
+		const u32 bal = coop_money_get(rec.payer), tb = coop_money_get(taker->ID);
+		if (bal == u32(-1) || tb == u32(-1))
+		{
+			Msg("! COOP(money): sale of item %u [%s]: seller %u or trader %u has no ledger — nothing paid", u32(item_id), sec,
+				u32(rec.payer), u32(taker->ID));
+			return;
+		}
+		Msg("- COOP(money): sale of item %u [%s]: %u pays %u to %u (balance %u -> %u)", u32(item_id), sec, u32(taker->ID),
+			price, u32(rec.payer), bal, bal + price);
+		coop_money_set(rec.payer, bal + price, "sale");
+		coop_money_set(taker->ID, tb > price ? tb - price : 0, "purchase from a player");
+		return;
+	}
+}
+
+// The price as the SERVER computes it: CTrade::GetItemPrice on the server's own objects. Gamedata runs it with db.actor
+// pointed at the player (_G.mp_coop_trade_price), so the trader's discount condlist judges that player; without gamedata
+// it is computed here directly (discounts then judge the host save actor).
+u32 game_sv_Single::coop_trade_price(u16 trader_id, u16 player_id, u16 item_id, bool trader_buys)
+{
+	luabind::functor<u32> f;
+	if (ai().script_engine().functor("_G.mp_coop_trade_price", f))
+	{
+		mp_coop_owner::acting_scope scope(player_id);
+		bool raised = false;
+		u32 r = 0;
+		try
+		{
+			r = f(u32(trader_id), u32(player_id), u32(item_id), trader_buys);
+		}
+		catch (...)
+		{
+			raised = true;
+		}
+		if (!raised)
+			return r;
+		Msg("! COOP(money): _G.mp_coop_trade_price raised for item %u — pricing in the engine", u32(item_id));
+	}
+	return coop_trade_price_now(trader_id, player_id, item_id, trader_buys);
+}
+
 
 bool game_sv_Single::coop_bank_checkpoint(LPCSTR player_name)
 {

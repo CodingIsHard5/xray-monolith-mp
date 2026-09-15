@@ -45,6 +45,7 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_no_ik", coop_cfg_switch, coop_cfg_control},   // off | server | Suppresses IK controller creation on the dedicated server (§8 treatment arm for IK/animation faults; one binary one bit apart).
 	{"coop_no_spawn_guard", coop_cfg_switch, coop_cfg_control},   // off | server | Disables the fresh-spawn relocation guard (level-changer/nav-mesh check) and places players at the wanted position.
 	{"coop_no_time_halt", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: world time keeps running with no players (edges still logged) instead of halting.
+	{"coop_money_client_authority", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: clients write their own money (GE_MONEY accepted, no server price or balance check) (§10.3 S2b); exact-token match.
 	{"coop_trade_no_authority", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: a player's take from a trader's stock is not checked against their standing (§10.3 S2a); exact-token match.
 	{"coop_orphan_hit_allow", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: hits on reserved (orphaned) player bodies are not refused; exact-token match.
 	{"coop_test_widelock", coop_cfg_switch, coop_cfg_control},   // off | server | Restores the old wide delayed-packet lock held across the Lua handler (A/B vs the pop-a-copy fix).

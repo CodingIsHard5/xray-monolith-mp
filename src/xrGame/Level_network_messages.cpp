@@ -206,6 +206,22 @@ void CLevel::ClientReceive()
 					f(text);
 			}
 			break;
+		case M_XRNET_COOP_MONEY:
+			{
+				// MP fork (design doc §10.3 S2b): the server's ledger says this owner has this much. Display only.
+				if (P->B.count - P->r_tell() >= sizeof(u16) + sizeof(u32))
+				{
+					const u16 id = P->r_u16();
+					const u32 amount = P->r_u32();
+					CInventoryOwner* const o = smart_cast<CInventoryOwner*>(Objects.net_Find(id));
+					static u32 s_logged = 0;
+					if (++s_logged <= 500 || (s_logged % 100) == 1)
+						Msg("* COOP(money): %u = %u%s", u32(id), amount, o ? "" : " (not here)");
+					if (o)
+						o->set_money(amount, false);
+				}
+			}
+			break;
 		case M_XRNET_COOP_TRADE_REFUSED:
 			{
 				// MP fork (design doc §10.3 S2a.1): give back the money of a purchase the server refused.

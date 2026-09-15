@@ -199,6 +199,13 @@ private:
 	// player currently learns nothing at all, which means a resume at the WRONG position looks
 	// exactly like a resume at the right one from where they are standing.
 	void coop_send_notice(xrClientData* CL, u8 code, LPCSTR text);
+	struct coop_pending_trade
+	{
+		u16 item, payer, payee;   // payee = 0xffff for a sale not yet taken (the trader is known only at the take)
+		u32 price, at;
+		bool sale;
+	};
+	xr_vector<coop_pending_trade> m_coop_pending_trades;
 	// The notice codes are a wire contract with gamedata (_G.mp_coop_on_notice) — append only.
 	static const u8 COOP_NOTICE_CRASH_RESUME = 1;
 	static const u32 COOP_DIRTY_MAGIC = 0x54524944;   // 'DIRT' (LE)
@@ -317,6 +324,18 @@ public:
 	// decides (_G.mp_coop_trade_allow) with the acting player set; false => the caller drops the SELL and the buyer is told.
 	// -coop_trade_no_authority (control) answers true without asking.
 	bool coop_trade_allow(xrClientData* CL, CSE_Abstract* trader, u16 item_id);
+	// §10.3 S2b: server-owned money. The ledger is the CSE's m_dwMoney. -coop_money_client_authority (control) restores
+	// client-written money. coop_money_set writes the ledger (and the server's own object) and broadcasts it;
+	// coop_money_send tells one client (or everyone, CL NULL) what the ledger says without changing it.
+	static bool coop_money_server_owned();
+	u32  coop_money_get(u16 id);                       // u32(-1) when the entity has no ledger
+	bool coop_money_set(u16 id, u32 amount, LPCSTR why);
+	void coop_money_send(xrClientData* CL, u16 id);
+	// A player's GE_TRADE_SELL of an item they hold (a sale to a trader): remembered so the trader's take can pay them.
+	void coop_trade_note_sale(xrClientData* CL, CSE_Abstract* seller, u16 item_id);
+	// A GE_TRADE_BUY handed item_id to taker: move the money of the purchase or sale it completes, if any.
+	void coop_trade_settle(CSE_Abstract* taker, u16 item_id);
+	u32  coop_trade_price(u16 trader_id, u16 player_id, u16 item_id, bool trader_buys);
 	// §10.1: while the world clock is halted (nobody connected), a script's time-factor change is remembered for the
 	// resume instead of restarting the clock. Returns true when the request was absorbed.
 	bool coop_absorb_time_factor(float f);

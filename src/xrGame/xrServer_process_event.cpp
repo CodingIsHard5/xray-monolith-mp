@@ -94,6 +94,20 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
 		}
 		break;
 	case GE_TRADE_BUY:
+		// MP fork (design doc §10.3 S2b): the hand-over that completes a purchase or a sale is where the server moves money.
+		if (xr_enet::enabled() && receiver && (P.B.count - P.r_tell()) >= sizeof(u16))
+		{
+			const u32 r_save = P.r_tell();
+			const u16 item_id = P.r_u16();
+			P.r_seek(r_save);
+			Process_event_ownership(P, sender, timestamp, destination);
+			CSE_Abstract* const e_item = game->get_entity_from_eid(item_id);
+			game_sv_Single* const single = smart_cast<game_sv_Single*>(game);
+			if (single && e_item && e_item->ID_Parent == destination)
+				single->coop_trade_settle(receiver, item_id);
+			break;
+		}
+		// fall through
 	case GE_OWNERSHIP_TAKE:
 		{
 			Process_event_ownership(P, sender, timestamp, destination);
@@ -122,6 +136,9 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
 			game_sv_Single* const single = smart_cast<game_sv_Single*>(game);
 			if (single && !single->coop_trade_allow(ID_to_client(sender), receiver, item_id))
 				break;
+			// §10.3 S2b: a player putting down an item they hold may be SELLING it; the trader's take pays them
+			if (single && smart_cast<CSE_ALifeCreatureActor*>(receiver))
+				single->coop_trade_note_sale(ID_to_client(sender), receiver, item_id);
 		}
 		// fall through
 	case GE_OWNERSHIP_REJECT:
@@ -499,7 +516,30 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
 		{
 			CSE_Abstract* e_dest = receiver;
 			CSE_ALifeTraderAbstract* pTa = smart_cast<CSE_ALifeTraderAbstract*>(e_dest);
-			pTa->m_dwMoney = P.r_u32();
+			const u32 amount = P.r_u32();
+			// MP fork (design doc §10.3 S2b): in co-op the server owns money. A client's GE_MONEY (the trade menu's, a
+			// script's give_money on a client) is refused and answered with the ledger; the server's own is applied and,
+			// for a player, broadcast so every client shows the balance the server holds.
+			game_sv_Single* const single = smart_cast<game_sv_Single*>(game);
+			if (pTa && single && game_sv_Single::coop_money_server_owned())
+			{
+				xrClientData* const from = ID_to_client(sender);
+				if (from != GetServerClient())
+				{
+					static u32 s_refused = 0;
+					if (++s_refused <= 200 || (s_refused % 100) == 1)
+						Msg("- COOP(money): GE_MONEY from a client for %u (%u) REFUSED — the ledger holds %u [%u]",
+							u32(destination), amount, pTa->m_dwMoney, s_refused);
+					single->coop_money_send(from, destination);
+					break;
+				}
+				pTa->m_dwMoney = amount;
+				if (smart_cast<CSE_ALifeCreatureActor*>(receiver))
+					single->coop_money_send(NULL, destination);
+				break;
+			}
+			if (pTa)
+				pTa->m_dwMoney = amount;
 		}
 		break;
 	case GE_TRADER_FLAGS:

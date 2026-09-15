@@ -191,7 +191,12 @@ bool coop_test_take(u16 item_id)
 // MP fork (design doc §10.3 S2a.1, harness): client side. Buy one item from the NPC holding it the way the trade menu does —
 // CTrade::TransferItem on the trader's trade (price, local money, GE_TRADE_SELL + GE_TRADE_BUY) and then the absolute
 // GE_MONEY of both parties — without the UI, so a refused purchase's money can be measured.
-bool coop_test_buy(u16 item_id)
+static bool coop_test_buy_impl(u16 item_id, bool force);
+bool coop_test_buy(u16 item_id) { return coop_test_buy_impl(item_id, false); }
+// forced: skips the client's own "can I afford it" check, as a modified client would — the server must refuse instead
+bool coop_test_buy_force(u16 item_id) { return coop_test_buy_impl(item_id, true); }
+
+static bool coop_test_buy_impl(u16 item_id, bool force)
 {
 	if (!xr_enet::enabled() || ai().get_alife() || !g_pGameLevel)
 		return false;
@@ -210,7 +215,7 @@ bool coop_test_buy(u16 item_id)
 	t->StartTradeEx(me);
 	const u32 price = t->GetItemPrice(item, false);
 	const u32 before = me->get_money();
-	if (!price || before < price)
+	if (!price || (before < price && !force))
 	{
 		// what the trade menu refuses too (not for sale / not enough money): nothing is sent
 		t->StopTrade();
@@ -223,9 +228,34 @@ bool coop_test_buy(u16 item_id)
 	t->pPartner.inv_owner->set_money(t->pPartner.inv_owner->get_money(), true);
 	t->StopTrade();
 	me->GetTrade()->StopTrade();
-	Msg("- COOP(buy): priced purchase of item %u from %u: price %u, money %u -> %u", u32(item_id), u32(obj->H_Parent()->ID()),
-		price, before, me->get_money());
+	Msg("- COOP(buy): priced purchase of item %u from %u: price %u, money %u -> %u%s", u32(item_id), u32(obj->H_Parent()->ID()),
+		price, before, me->get_money(), force ? " (FORCED past the client's own money check)" : "");
 	return true;
+}
+
+bool coop_test_buy_force(u16 item_id);
+
+u32 coop_test_money_of(u16 id)
+{
+	CInventoryOwner* const o = g_pGameLevel ? smart_cast<CInventoryOwner*>(Level().Objects.net_Find(id)) : NULL;
+	return o ? o->get_money() : u32(-1);
+}
+
+// MP fork (design doc §10.3 S2b): server side. The ledger (CSE m_dwMoney) and the server's price, for gamedata and harnesses.
+u32 coop_trade_price_now(u16 trader_id, u16 player_id, u16 item_id, bool trader_buys);   // game_sv_single.cpp
+u32 coop_money(u16 id)
+{
+	game_sv_Single* const g = (g_pGameLevel && Level().Server) ? smart_cast<game_sv_Single*>(Level().Server->game) : NULL;
+	return g ? g->coop_money_get(id) : u32(-1);
+}
+bool coop_money_set(u16 id, u32 amount)
+{
+	game_sv_Single* const g = (g_pGameLevel && Level().Server) ? smart_cast<game_sv_Single*>(Level().Server->game) : NULL;
+	return g ? g->coop_money_set(id, amount, "script") : false;
+}
+u32 coop_trade_price(u16 trader_id, u16 player_id, u16 item_id, bool trader_buys)
+{
+	return ai().get_alife() ? coop_trade_price_now(trader_id, player_id, item_id, trader_buys) : 0;
 }
 
 u32 coop_test_money()
@@ -2933,6 +2963,11 @@ void CLevel::script_register(lua_State* L)
 			def("coop_player_actor_ids", &coop_player_actor_ids),
 			def("coop_test_take", &coop_test_take),
 			def("coop_test_buy", &coop_test_buy),
+			def("coop_test_buy_force", &coop_test_buy_force),
+			def("coop_test_money_of", &coop_test_money_of),
+			def("coop_money", &coop_money),
+			def("coop_money_set", &coop_money_set),
+			def("coop_trade_price", &coop_trade_price),
 			def("coop_test_money", &coop_test_money),
 #ifdef DEBUG
 		def("debug_object",						get_object_by_name),
