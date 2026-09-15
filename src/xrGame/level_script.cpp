@@ -288,6 +288,29 @@ u32 coop_trade_price(u16 trader_id, u16 player_id, u16 item_id, bool trader_buys
 	return ai().get_alife() ? coop_trade_price_now(trader_id, player_id, item_id, trader_buys) : 0;
 }
 
+// MP fork (design doc §10.3 S3, harness): server side. The sections an entity's CSE carries ("sec,sec,..."), online or not —
+// a trader's stock as the server's registry holds it, readable while he is offline.
+LPCSTR coop_test_children(u16 id)
+{
+	static xr_string s_out;
+	s_out.clear();
+	if (!ai().get_alife())
+		return s_out.c_str();
+	CSE_ALifeDynamicObject* const e = ai().alife().objects().object(id, true);
+	if (!e)
+		return s_out.c_str();
+	for (u32 i = 0; i < e->children.size(); ++i)
+	{
+		CSE_ALifeDynamicObject* const c = ai().alife().objects().object(e->children[i], true);
+		if (!c)
+			continue;
+		if (!s_out.empty())
+			s_out += ",";
+		s_out += c->s_name.c_str();
+	}
+	return s_out.c_str();
+}
+
 // MP fork (design doc §10.3 gap 4c, harness): client side. Send the stock drop event for an item out of whoever holds it —
 // the event a modified client could send for another player's item.
 bool coop_test_drop(u16 item_id)
@@ -3073,6 +3096,7 @@ void CLevel::script_register(lua_State* L)
 			def("coop_consent_answer", &coop_consent_answer),
 			def("coop_trade_quote_request", &coop_trade_quote_request),
 			def("coop_test_drop", &coop_test_drop),
+			def("coop_test_children", &coop_test_children),
 			def("coop_trade_quote_now", &coop_trade_quote_now),
 			def("coop_test_sell", &coop_test_sell),
 			def("coop_test_grant", &coop_test_grant),

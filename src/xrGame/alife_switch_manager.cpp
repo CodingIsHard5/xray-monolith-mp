@@ -18,6 +18,47 @@
 #include "level_graph.h"
 #include "mp_anchors.h"
 #include "../xrNetServer/xr_enet_transport.h"   // MP fork (§15 diag): xr_enet::enabled()
+#include "xrServer_Objects_ALife_Monsters.h"      // MP fork (§10.3 S3a): trader switch log
+
+// MP fork (design doc §10.3 S3a): every online/offline switch of a trader NPC on the co-op server, with the connected player
+// nearest to it (the anchor that explains the switch) and the stock it carries across.
+struct coop_nearest_player_finder
+{
+	Fvector at;
+	u16 id;
+	float dist;
+	xrServer* server;
+	void operator()(IClient* client)
+	{
+		xrClientData* const CL = static_cast<xrClientData*>(client);
+		if (CL == server->GetServerClient() || !CL->owner)
+			return;
+		const float d = CL->owner->o_Position.distance_to(at);
+		if (d < dist)
+		{
+			dist = d;
+			id = CL->owner->ID;
+		}
+	}
+};
+
+static void coop_trader_switch_log(CSE_ALifeDynamicObject* object, bool online, xrServer* server, float on_d, float off_d)
+{
+	if (!xr_enet::enabled() || !object || !server)
+		return;
+	CSE_ALifeTraderAbstract* const t = smart_cast<CSE_ALifeTraderAbstract*>(object);
+	if (!t || smart_cast<CSE_ALifeCreatureActor*>(object) || xr_strcmp(t->CommunityName(), "trader"))
+		return;
+	coop_nearest_player_finder f;
+	f.at = object->o_Position;
+	f.id = 0xffff;
+	f.dist = flt_max;
+	f.server = server;
+	server->ForEachClientDo(f);
+	Msg("- COOP(trader-switch): %s [%u] %s — nearest player %u at %.1f m (online within %.0f m, offline beyond %.0f m), stock %u",
+		object->name_replace(), u32(object->ID), online ? "ONLINE" : "OFFLINE", u32(f.id), f.id == 0xffff ? -1.f : f.dist, on_d, off_d,
+		u32(object->children.size()));
+}
 
 // MP fork: attention-anchor registry (design doc §5.1). Kept here to
 // avoid a new translation unit in the vcxproj.
@@ -139,6 +180,7 @@ void CALifeSwitchManager::switch_online(CSE_ALifeDynamicObject* object)
 	// switches at all (boot 20's "zero [LSS] lines" mystery)
 	if (strstr(Core.Params, "-dbg"))
 		Msg						("[LSS][%d] Going online [%d][%s][%d] ([%f][%f][%f] : [%f][%f][%f]), on '%s'",Device.dwFrame,Device.dwTimeGlobal,object->name_replace(), object->ID,VPUSH(graph().actor()->o_Position),VPUSH(object->o_Position), "*SERVER*");
+		coop_trader_switch_log(object, true, &server(), online_distance(), offline_distance());
 		object->switch_online();
 	STOP_PROFILE
 }
@@ -149,6 +191,7 @@ void CALifeSwitchManager::switch_offline(CSE_ALifeDynamicObject* object)
 	// MP fork: was #ifdef DEBUG only (see switch_online above)
 	if (strstr(Core.Params, "-dbg"))
 		Msg							("[LSS][%d] Going offline [%d][%s][%d] ([%f][%f][%f] : [%f][%f][%f]), on '%s'",Device.dwFrame,Device.dwTimeGlobal,object->name_replace(), object->ID,VPUSH(graph().actor()->o_Position),VPUSH(object->o_Position), "*SERVER*");
+		coop_trader_switch_log(object, false, &server(), online_distance(), offline_distance());
 		object->switch_offline();
 	STOP_PROFILE
 }
