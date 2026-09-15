@@ -228,6 +228,9 @@ public:
 	virtual bool can_be_seen() const { return get_visibility_state() == full_visibility; }
 	visibility_t get_visibility_state() const;
 	void set_visibility_state(visibility_t new_state);
+	// MP fork (design doc §3.4): a co-op client applies the server's cloak state as a forced state (no change delay), so its
+	// own update_invisibility cannot disagree with the server.
+	void coop_apply_server_visibility(u8 state);
 	void force_visibility_state(int state);
 	void update_invisibility();
 

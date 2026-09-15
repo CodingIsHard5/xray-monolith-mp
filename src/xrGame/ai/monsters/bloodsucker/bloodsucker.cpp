@@ -1,4 +1,6 @@
 #include "stdafx.h"
+#include "../../../../xrNetServer/xr_enet_transport.h"   // MP fork (§3.4): xr_enet::enabled()
+#include "../../../ai_space.h"                          // MP fork (§3.4): ai().get_alife() (server or client)
 #include "bloodsucker.h"
 #include "bloodsucker_state_manager.h"
 #include "../../../actor.h"
@@ -520,6 +522,8 @@ float CAI_Bloodsucker::GetTransparency()
 }
 //--DSR-- HeatVision_end
 
+void coop_state_broadcast(u16 id, u8 kind, u8 value);   // game_sv_single.cpp (MP fork §3.4)
+
 void CAI_Bloodsucker::set_visibility_state(visibility_t new_state)
 {
 	if (m_force_visibility_state != unset)
@@ -547,6 +551,10 @@ void CAI_Bloodsucker::set_visibility_state(visibility_t new_state)
 
 	m_visibility_state = new_state;
 
+	// MP fork (design doc §3.4): the co-op server authors cloak state; tell every client at once
+	if (xr_enet::enabled() && ai().get_alife())
+		coop_state_broadcast(ID(), 1, u8(m_visibility_state));
+
 	if (m_visibility_state == full_visibility)
 	{
 		stop_invisible_predator();
@@ -571,6 +579,25 @@ void CAI_Bloodsucker::force_visibility_state(int state)
 {
 	m_force_visibility_state = (visibility_t)state;
 	set_visibility_state((visibility_t)state);
+	// MP fork (§3.4): a forced state is the server's state too, even if the change delay held set_visibility_state back
+	if (xr_enet::enabled() && ai().get_alife() && state != unset)
+		coop_state_broadcast(ID(), 1, u8(state));
+}
+
+void CAI_Bloodsucker::coop_apply_server_visibility(u8 state)
+{
+	if (state > u8(full_visibility))
+		return;
+	const visibility_t was = get_visibility_state();
+	m_force_visibility_state = (visibility_t)state;
+	m_visibility_state_last_changed_time = 0;   // the server already applied its own change delay
+	set_visibility_state((visibility_t)state);
+	if (was != (visibility_t)state)
+	{
+		static u32 s_logged = 0;
+		if (++s_logged <= 300 || (s_logged % 100) == 1)
+			Msg("* COOP(state): bloodsucker %u cloak %d -> %d (server)", u32(ID()), int(was), int(state));
+	}
 }
 
 void CAI_Bloodsucker::update_invisibility()

@@ -3,6 +3,7 @@
 #include "UIGameSP.h"
 #include "InventoryOwner.h"
 #include "trade.h"                             // MP fork (§10.3 S2a.1): CTrade::coop_refund_refused
+#include "ai/monsters/bloodsucker/bloodsucker.h"   // MP fork (§3.4): server-authored cloak
 #include "GametaskManager.h"                  // MP fork (§19 co-op): M_XRNET_TASKS
 #include "entity.h"
 #include "xrserver_objects.h"
@@ -204,6 +205,20 @@ void CLevel::ClientReceive()
 				luabind::functor<void> f;
 				if (ai().script_engine().functor("_G.mp_coop_on_roster", f))
 					f(text);
+			}
+			break;
+		case M_XRNET_COOP_STATE:
+			{
+				// MP fork (design doc §3.4): server-authored mutant state; a client never computes it itself
+				if (P->B.count - P->r_tell() >= sizeof(u16) + 2 * sizeof(u8) && !ai().get_alife())
+				{
+					const u16 id = P->r_u16();
+					const u8 kind = P->r_u8();
+					const u8 value = P->r_u8();
+					if (kind == 1)
+						if (CAI_Bloodsucker* const b = smart_cast<CAI_Bloodsucker*>(Objects.net_Find(id)))
+							b->coop_apply_server_visibility(value);
+				}
 			}
 			break;
 		case M_XRNET_COOP_TRADE_QUOTES:

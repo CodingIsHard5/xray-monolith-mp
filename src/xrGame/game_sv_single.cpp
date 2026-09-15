@@ -26,6 +26,7 @@
 #include "Actor.h"                                 // MP fork (§14 step 8 Q4): tell a player actor apart
 #include "trade.h"                                 // MP fork (§10.3 S2b): server-side price
 #include "CustomMonster.h"                          // MP fork (§16.3): NPC cap
+#include "ai/monsters/bloodsucker/bloodsucker.h"    // MP fork (§3.4): cloak state
 #include "inventory_item.h"
 #include "entity_alive.h"                          // MP fork (§14 step 8 Q4): only talk to the living
 #include "ai/stalker/ai_stalker.h"                 // MP fork (§14 step 8 P4 R3.0): the stock KILL path needs a stalker victim
@@ -2492,6 +2493,42 @@ bool game_sv_Single::coop_trade_allow(xrClientData* CL, CSE_Abstract* trader, u1
 	return allow;
 }
 
+// ---- §3.4: server-authored mutant state ------------------------------------------------------------------------------
+// Broadcast one mutant state (M_XRNET_COOP_STATE). -coop_cloak_local (control) sends nothing: clients compute cloak locally.
+void coop_state_broadcast(u16 id, u8 kind, u8 value)
+{
+	static int s_local = -1;
+	if (s_local < 0)
+	{
+		s_local = strstr(Core.Params, "-coop_cloak_local") ? 1 : 0;
+		Msg("- COOP(state): mutant cloak is %s", s_local ? "computed LOCALLY by each client (-coop_cloak_local, control)" :
+			"server-authoritative (M_XRNET_COOP_STATE)");
+	}
+	if (s_local || !g_pGameLevel || !Level().Server)
+		return;
+	NET_Packet P;
+	P.w_begin(M_XRNET_COOP_STATE);
+	P.w_u16(id);
+	P.w_u8(kind);
+	P.w_u8(value);
+	Level().Server->SendBroadcast(BroadcastCID, P, net_flags(TRUE, TRUE));
+}
+
+// every 2 s: re-send every online bloodsucker's cloak (late joiners, relevance entries); change events go out immediately
+static void coop_state_resend_tick()
+{
+	if (!xr_enet::enabled() || !ai().get_alife() || !g_pGameLevel)
+		return;
+	static u32 s_next = 0;
+	if (Device.dwTimeGlobal < s_next)
+		return;
+	s_next = Device.dwTimeGlobal + 2000;
+	CObjectList& objs = Level().Objects;
+	for (u32 i = 0; i < objs.o_count(); ++i)
+		if (CAI_Bloodsucker* const b = smart_cast<CAI_Bloodsucker*>(objs.o_get_by_iterator(i)))
+			coop_state_broadcast(b->ID(), 1, u8(b->get_visibility_state()));
+}
+
 // ---- §16.3: active-NPC cap near player clusters ----------------------------------------------------------------------
 // The quest-critical set: Anomaly names its story NPCs with SCRIPT story ids (story_objects), not the engine's m_story_id (which
 // §16.3 fixed attempt 2 found empty for Sidorovich). Gamedata hands the ids in through level.coop_npc_cap_exempt.
@@ -4826,6 +4863,7 @@ void game_sv_Single::Update()
 	coop_broadcast_roster(); // MP fork (design doc §13.1): who is connected, by name, for mp_api
 	coop_consent_tick();      // MP fork (design doc §10.3 item 4): unanswered asks expire as a no
 	coop_npc_cap_tick();      // MP fork (design doc §16.3): active-NPC cap near player clusters
+	coop_state_resend_tick();  // MP fork (design doc §3.4): server-authored mutant state
 	// MP fork (§14 step 7 phase 4 D2): an operator/harness stop request. Does not return if one
 	// is pending — the clean stop flushes the world and exits from inside it.
 	coop_check_stop_request();

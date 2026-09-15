@@ -48,6 +48,7 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_npc_cap", coop_cfg_value, coop_cfg_tunable},   // 24 | server | §16.3: at most <n> non-story NPCs within the radius of players run at the full think rate; the rest are throttled.
 	{"coop_npc_cap_disable", coop_cfg_switch, coop_cfg_tunable},   // off | server | §16.3: turn the NPC cap off entirely (stock camera-distance think rates, i.e. every NPC near players at the slowest rate on a dedicated server).
 	{"coop_npc_cap_radius", coop_cfg_value, coop_cfg_tunable},   // 150 | server | §16.3: the radius (m) around players the NPC cap considers.
+	{"coop_cloak_local", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: the server does not send mutant cloak state; each client computes it locally (§3.4).
 	{"coop_npc_cap_off", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: the NPC cap classifies and measures but does not throttle (§16.3).
 	{"coop_trade_schedule_noload", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: the restock schedule ignores its saved per-trader record at boot (§10.3 S3b persistence).
 	{"coop_trade_no_schedule", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: the server does not run the shared-trader restock schedule (§10.3 S3b).
