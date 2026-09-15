@@ -235,6 +235,36 @@ static bool coop_test_buy_impl(u16 item_id, bool force)
 
 bool coop_test_buy_force(u16 item_id);
 
+// MP fork (design doc §10.3 sell check, harness): client side. SELL one item this actor holds to an NPC trader the way the trade
+// menu does (TransferItems(actor list -> partner, partner trade, bBuying = true)) without the UI.
+bool coop_test_sell(u16 item_id, u16 trader_id)
+{
+	if (!xr_enet::enabled() || ai().get_alife() || !g_pGameLevel)
+		return false;
+	CActor* const me = smart_cast<CActor*>(Level().CurrentControlEntity());
+	CObject* const obj = Level().Objects.net_Find(item_id);
+	CInventoryItem* const item = obj ? smart_cast<CInventoryItem*>(obj) : NULL;
+	CInventoryOwner* const trader = smart_cast<CInventoryOwner*>(Level().Objects.net_Find(trader_id));
+	if (!me || !item || !trader || obj->H_Parent() != smart_cast<CObject*>(me))
+	{
+		Msg("! COOP(sell): sale of item %u to %u — actor %s, item %s, trader %s, held by me %s", u32(item_id), u32(trader_id),
+			me ? "yes" : "no", item ? "yes" : "no", trader ? "yes" : "no", (obj && me && obj->H_Parent() == smart_cast<CObject*>(me)) ? "yes" : "no");
+		return false;
+	}
+	CTrade* const t = trader->GetTrade();
+	me->GetTrade()->StartTradeEx(trader);
+	t->StartTradeEx(me);
+	const u32 price = t->GetItemPrice(item, true);
+	const u32 before = me->get_money();
+	t->TransferItem(item, true);
+	t->pThis.inv_owner->set_money(t->pThis.inv_owner->get_money(), true);
+	t->pPartner.inv_owner->set_money(t->pPartner.inv_owner->get_money(), true);
+	t->StopTrade();
+	me->GetTrade()->StopTrade();
+	Msg("- COOP(sell): sold item %u to %u: price %u, money %u -> %u", u32(item_id), u32(trader_id), price, before, me->get_money());
+	return true;
+}
+
 u32 coop_test_money_of(u16 id)
 {
 	CInventoryOwner* const o = g_pGameLevel ? smart_cast<CInventoryOwner*>(Level().Objects.net_Find(id)) : NULL;
@@ -3005,6 +3035,7 @@ void CLevel::script_register(lua_State* L)
 			def("coop_test_buy", &coop_test_buy),
 			def("coop_test_buy_force", &coop_test_buy_force),
 			def("coop_consent_answer", &coop_consent_answer),
+			def("coop_test_sell", &coop_test_sell),
 			def("coop_test_grant", &coop_test_grant),
 			def("coop_test_money_of", &coop_test_money_of),
 			def("coop_money", &coop_money),
