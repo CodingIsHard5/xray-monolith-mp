@@ -2506,8 +2506,8 @@ void coop_npc_cap_exempt(u16 id, bool on)
 
 // Every 1 s: online alive creatures within the radius of any connected player, ranked by distance to the nearest; the nearest N
 // are FULL, the rest THROTTLED, story NPCs EXEMPT (CCustomMonster::shedule_Scale acts on the class). Nothing is despawned.
-// -coop_npc_cap <n> arms it (classification + metrics); -coop_npc_cap_off keeps the classification and metrics but does not apply
-// it (control); -coop_npc_cap_radius <m> (default 150).
+// On by default (24 within 150 m); -coop_npc_cap <n> / -coop_npc_cap_radius <m> override; -coop_npc_cap_off keeps the classification
+// and metrics but does not apply it (control); -coop_npc_cap_disable turns the whole thing off.
 void game_sv_Single::coop_npc_cap_tick()
 {
 	if (!xr_enet::enabled() || !ai().get_alife() || !g_pGameLevel || !m_server)
@@ -2517,8 +2517,15 @@ void game_sv_Single::coop_npc_cap_tick()
 	static bool s_off = false;
 	if (s_cap == -1)
 	{
+		// DEFAULT-ON (§16.3 control finding: without it the dedicated server runs every NPC near players at the slowest think rate,
+		// because stock scaling is distance to a camera nobody is at): 24 full NPCs within 150 m unless overridden or disabled.
 		LPCSTR c = coop_param("-coop_npc_cap");
-		s_cap = c ? _max(0, atoi(c)) : -2;
+		s_cap = c ? _max(0, atoi(c)) : 24;
+		if (coop_param("-coop_npc_cap_disable"))
+		{
+			s_cap = -2;
+			Msg("- COOP(npccap): DISABLED (-coop_npc_cap_disable) — stock camera-distance think rates");
+		}
 		if (LPCSTR r = coop_param("-coop_npc_cap_radius"))
 			s_radius = _max(10.f, float(atof(r)));
 		s_off = coop_param("-coop_npc_cap_off") != NULL;
