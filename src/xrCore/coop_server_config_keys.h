@@ -45,6 +45,7 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_no_ik", coop_cfg_switch, coop_cfg_control},   // off | server | Suppresses IK controller creation on the dedicated server (§8 treatment arm for IK/animation faults; one binary one bit apart).
 	{"coop_no_spawn_guard", coop_cfg_switch, coop_cfg_control},   // off | server | Disables the fresh-spawn relocation guard (level-changer/nav-mesh check) and places players at the wanted position.
 	{"coop_no_time_halt", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: world time keeps running with no players (edges still logged) instead of halting.
+	{"coop_trade_schedule_noload", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: the restock schedule ignores its saved per-trader record at boot (§10.3 S3b persistence).
 	{"coop_trade_no_schedule", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: the server does not run the shared-trader restock schedule (§10.3 S3b).
 	{"coop_drop_guard_off", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: a client may drop an item out of another player's inventory (§10.3 gap 4c); exact-token match.
 	{"coop_trade_no_quotes", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: the server does not answer a client's price-quote request, so the trade UI shows local prices (§10.3 S2c).

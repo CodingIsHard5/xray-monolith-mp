@@ -26,6 +26,11 @@
 // ownership tags ride the .scop, in the same write as the task list they annotate.
 #include "GametaskManager.h"
 #include "mp_coop_ff.h"
+#include "mp_coop_chunk_reader.h"                   // MP fork (§10.3 S3b): bounded chunk reads
+#include "pch_script.h"                             // MP fork (§10.3 S3b): the gamedata state functor
+#include "ai_space.h"
+#include "script_engine.h"
+#include "../xrNetServer/xr_enet_transport.h"       // MP fork (§10.3 S3b): xr_enet::enabled()
 // MP fork (§14 step 8 phase 4 R2 / doc §8.1): coop_rep_state_save/load — the FACTION tier of
 // reputation, which R1 measured as the one part of this layer that nothing persisted.
 #include "relation_registry.h"
@@ -44,6 +49,105 @@ using namespace ALife;
 #endif
 
 extern string_path g_last_saved_game;
+
+// MP fork (design doc §10.3 S3b): server GAMEDATA's world state, in the same save as the engine's co-op chunks. Gamedata owns the
+// format; the engine only carries it. On save it asks gamedata (_G.mp_coop_state_save, which hands its string to
+// level.coop_state_put); on load it keeps the string for gamedata to read back (level.coop_state_loaded). The string is copied
+// into engine memory by coop_state_put, so no pointer into the Lua heap outlives the call.
+namespace
+{
+	const u16 coop_gamedata_state_version = 1;
+	const u32 coop_gamedata_state_max = 256 * 1024;
+	xr_string& coop_state_out() { static xr_string s; return s; }
+	xr_string& coop_state_in() { static xr_string s; return s; }
+}
+
+static bool s_coop_state_failed = false;
+
+void coop_state_put(LPCSTR blob)
+{
+	coop_state_out() = blob ? blob : "";
+	if (coop_state_out().size() > coop_gamedata_state_max)
+	{
+		Msg("! COOP(state): gamedata state is %u bytes, over the %u cap — this save carries the last loaded state instead",
+			u32(coop_state_out().size()), coop_gamedata_state_max);
+		s_coop_state_failed = true;
+	}
+}
+
+LPCSTR coop_state_loaded() { return coop_state_in().c_str(); }
+
+static void coop_gamedata_state_save(IWriter& stream)
+{
+	if (!xr_enet::enabled())
+		return;
+	coop_state_out().clear();
+	s_coop_state_failed = false;
+	luabind::functor<void> f;
+	if (ai().script_engine().functor("_G.mp_coop_state_save", f))
+	{
+		bool raised = false;
+		try
+		{
+			f();
+		}
+		catch (...)
+		{
+			raised = true;
+		}
+		if (raised)
+		{
+			Msg("! COOP(state): _G.mp_coop_state_save raised — this save carries the last loaded state instead");
+			s_coop_state_failed = true;
+		}
+	}
+	// A failed capture must not ERASE gamedata state in the save that replaces the last one: carry the last loaded blob forward.
+	// (Not aborting the save: a world that cannot be saved at all because of a gamedata error loses far more.)
+	if (s_coop_state_failed)
+		coop_state_out() = coop_state_in();
+	stream.open_chunk(COOP_GAMEDATA_CHUNK_DATA);
+	stream.w_u16(coop_gamedata_state_version);
+	stream.w_u32(u32(coop_state_out().size()));
+	if (!coop_state_out().empty())
+		stream.w(coop_state_out().data(), u32(coop_state_out().size()));
+	stream.close_chunk();
+	Msg("- COOP(state): saved %u byte(s) of gamedata state", u32(coop_state_out().size()));
+}
+
+static void coop_gamedata_state_load(IReader& stream)
+{
+	coop_state_in().clear();   // a load that finds nothing must leave nothing of the previous world
+	const int caller_pos = stream.tell();
+	const u32 chunk_size = stream.find_chunk(COOP_GAMEDATA_CHUNK_DATA);
+	if (!chunk_size)
+	{
+		stream.seek(caller_pos);
+		Msg("- COOP(state): no gamedata state chunk in this save");
+		return;
+	}
+	coop_chunk_reader r(stream, stream.tell() + int(chunk_size));
+	const u16 ver = r.u16v();
+	u32 n = 0;
+	if (r.ok && ver == coop_gamedata_state_version && r.room(4))
+	{
+		n = stream.r_u32();
+		if (n > coop_gamedata_state_max || !r.room(int(n)))
+			r.ok = false;
+		else if (n)
+		{
+			coop_state_in().resize(n);
+			stream.r(&coop_state_in()[0], n);
+		}
+	}
+	if (!r.ok || ver != coop_gamedata_state_version)
+	{
+		coop_state_in().clear();
+		Msg("! COOP(state): gamedata state chunk version %u / truncated — REFUSING all of it", u32(ver));
+	}
+	else
+		Msg("- COOP(state): loaded %u byte(s) of gamedata state", n);
+	stream.seek(caller_pos);
+}
 
 CALifeStorageManager::~CALifeStorageManager()
 {
@@ -104,6 +208,8 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
 		coop_rep_state_save(stream);
 		// MP fork (design doc §12.2): per-zone friendly-fire overrides are world state too.
 		coop_ff_state_save(stream);
+		// MP fork (design doc §10.3 S3b): server gamedata's own world state (e.g. the trader restock schedule).
+		coop_gamedata_state_save(stream);
 
 		source_count = stream.tell();
 		void* source_data = stream.pointer();
@@ -181,6 +287,8 @@ void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR fil
 	coop_rep_state_load(source);
 	// MP fork (design doc §12.2): always called; clears the previous world's overrides before it looks.
 	coop_ff_state_load(source);
+	// MP fork (design doc §10.3 S3b): always called; clears the previous world's gamedata blob before it looks.
+	coop_gamedata_state_load(source);
 
 	can_register_objects(true);
 

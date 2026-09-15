@@ -288,6 +288,10 @@ u32 coop_trade_price(u16 trader_id, u16 player_id, u16 item_id, bool trader_buys
 	return ai().get_alife() ? coop_trade_price_now(trader_id, player_id, item_id, trader_buys) : 0;
 }
 
+// MP fork (design doc §10.3 S3b): server gamedata's saved world state (alife_storage_manager.cpp)
+void coop_state_put(LPCSTR blob);
+LPCSTR coop_state_loaded();
+
 // MP fork (design doc §10.3 S3, harness): server side. The sections an entity's CSE carries ("sec,sec,..."), online or not —
 // a trader's stock as the server's registry holds it, readable while he is offline.
 LPCSTR coop_test_children(u16 id)
@@ -3097,6 +3101,8 @@ void CLevel::script_register(lua_State* L)
 			def("coop_trade_quote_request", &coop_trade_quote_request),
 			def("coop_test_drop", &coop_test_drop),
 			def("coop_test_children", &coop_test_children),
+			def("coop_state_put", &coop_state_put),
+			def("coop_state_loaded", &coop_state_loaded),
 			def("coop_trade_quote_now", &coop_trade_quote_now),
 			def("coop_test_sell", &coop_test_sell),
 			def("coop_test_grant", &coop_test_grant),

@@ -34,6 +34,7 @@
 // co-op faction state" instead of desynchronising the chunks behind it.
 #define COOP_REP_CHUNK_DATA			0x00C1
 #define COOP_FF_CHUNK_DATA			0x00C2 // MP fork (design doc §12): per-zone friendly-fire overrides
+#define COOP_GAMEDATA_CHUNK_DATA	0x00C3 // MP fork (design doc §10.3 S3b): server gamedata's own world state (a string blob)
 #define SECTION_HEADER				"location_"
 #define SAVE_EXTENSION				".scop"
 #define SPAWN_NAME					"game.spawn"
