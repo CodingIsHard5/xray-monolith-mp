@@ -288,6 +288,27 @@ u32 coop_trade_price(u16 trader_id, u16 player_id, u16 item_id, bool trader_buys
 	return ai().get_alife() ? coop_trade_price_now(trader_id, player_id, item_id, trader_buys) : 0;
 }
 
+// MP fork (design doc §10.3 gap 4c, harness): client side. Send the stock drop event for an item out of whoever holds it —
+// the event a modified client could send for another player's item.
+bool coop_test_drop(u16 item_id)
+{
+	if (!xr_enet::enabled() || ai().get_alife() || !g_pGameLevel)
+		return false;
+	CObject* const obj = Level().Objects.net_Find(item_id);
+	CGameObject* const go = obj ? smart_cast<CGameObject*>(obj) : NULL;
+	if (!go || !obj->H_Parent())
+	{
+		Msg("! COOP(drop): test drop of item %u — %s", u32(item_id), go ? "it has no holder" : "not on this client");
+		return false;
+	}
+	NET_Packet P;
+	go->u_EventGen(P, GE_OWNERSHIP_REJECT, obj->H_Parent()->ID());
+	P.w_u16(item_id);
+	go->u_EventSend(P);
+	Msg("- COOP(drop): sent drop of item %u out of %u", u32(item_id), u32(obj->H_Parent()->ID()));
+	return true;
+}
+
 // MP fork (design doc §10.3 S2c): client side, harness — ask the server for a trader's prices (the trade menu does this itself).
 bool coop_trade_quote_request(u16 trader)
 {
@@ -3051,6 +3072,7 @@ void CLevel::script_register(lua_State* L)
 			def("coop_test_buy_force", &coop_test_buy_force),
 			def("coop_consent_answer", &coop_consent_answer),
 			def("coop_trade_quote_request", &coop_trade_quote_request),
+			def("coop_test_drop", &coop_test_drop),
 			def("coop_trade_quote_now", &coop_trade_quote_now),
 			def("coop_test_sell", &coop_test_sell),
 			def("coop_test_grant", &coop_test_grant),

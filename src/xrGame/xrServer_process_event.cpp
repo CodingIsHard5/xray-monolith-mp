@@ -145,6 +145,38 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
 		}
 		// fall through
 	case GE_OWNERSHIP_REJECT:
+		// MP fork (design doc §10.3 gap 4c): a player's client may not DROP an item out of ANOTHER player's inventory (or a
+		// disconnected player's reserved body). Stock trusts every reject; the server client and the owner's own client still do.
+		if (type == GE_OWNERSHIP_REJECT && xr_enet::enabled() && receiver && smart_cast<CSE_ALifeCreatureActor*>(receiver))
+		{
+			xrClientData* const from = ID_to_client(sender);
+			if (from && from != GetServerClient() && from->owner && receiver->owner != from)
+			{
+				static int s_off = -1;
+				if (s_off < 0)
+				{
+					LPCSTR q = strstr(Core.Params, "-coop_drop_guard_off");
+					s_off = (q && (q[sizeof("-coop_drop_guard_off") - 1] == 0 || q[sizeof("-coop_drop_guard_off") - 1] == ' ')) ? 1 : 0;
+					Msg("- COOP(drop): drops out of another player's inventory are %s", s_off ? "ALLOWED (-coop_drop_guard_off, control)" : "refused");
+				}
+				if (!s_off)
+				{
+					u16 item_id = 0xffff;
+					if ((P.B.count - P.r_tell()) >= sizeof(u16))
+					{
+						const u32 r_save = P.r_tell();
+						item_id = P.r_u16();
+						P.r_seek(r_save);
+					}
+					static u32 s_refused = 0;
+					if (++s_refused <= 200 || (s_refused % 100) == 1)
+						Msg("- COOP(drop): drop of item %u out of %u's inventory by client %u (player %u) REFUSED — not the owner [%u]",
+							u32(item_id), u32(destination), sender.value(), u32(from->owner->ID), s_refused);
+					break;
+				}
+			}
+		}
+		// fall through
 	case GE_LAUNCH_ROCKET:
 		{
 			Process_event_reject(P, sender, timestamp, destination, P.r_u16());

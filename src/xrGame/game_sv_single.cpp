@@ -2635,8 +2635,11 @@ bool game_sv_Single::coop_consent_intercept(xrClientData* CL, CSE_Abstract* hold
 		return false;
 	CSE_ALifeCreatureActor* const holder_actor = smart_cast<CSE_ALifeCreatureActor*>(holder);
 	CSE_ALifeCreatureActor* const taker = smart_cast<CSE_ALifeCreatureActor*>(CL->owner);
-	if (!holder_actor || !taker || CL->owner == holder || !holder->owner || holder->owner == m_server->GetServerClient())
-		return false;   // not one player's client reaching into ANOTHER connected player's inventory
+	if (!holder_actor || !taker || CL->owner == holder)
+		return false;   // not one player's client reaching into another player's inventory
+	const bool holder_away = !holder->owner || holder->m_coop_orphaned;
+	if (!holder_away && holder->owner == m_server->GetServerClient())
+		return false;   // the host's own save actor: not a player
 	static int s_off = -1;
 	if (s_off < 0)
 	{
@@ -2647,7 +2650,7 @@ bool game_sv_Single::coop_consent_intercept(xrClientData* CL, CSE_Abstract* hold
 	if (s_off)
 		return false;
 	LPCSTR const tn = coop_player_name(CL);
-	LPCSTR const hn = coop_player_name(holder->owner);
+	LPCSTR const hn = holder_away ? NULL : coop_player_name(holder->owner);
 	CSE_Abstract* const item = get_entity_from_eid(item_id);
 	LPCSTR const sec = item ? item->s_name.c_str() : "?";
 	// the taker's client already moved its own money for a priced take: reverse it (§10.3 S2a.1)
@@ -2655,6 +2658,14 @@ bool game_sv_Single::coop_consent_intercept(xrClientData* CL, CSE_Abstract* hold
 	R.w_begin(M_XRNET_COOP_TRADE_REFUSED);
 	R.w_u16(item_id);
 	m_server->SendTo(CL->ID, R, net_flags(TRUE, TRUE));
+	if (holder_away)
+	{
+		// §10.3 gap 4d: the holder is not connected and cannot answer; no answer is a no
+		Msg("- COOP(consent): '%s' (%u) takes item %u [%s] from %u — REFUSED: holder not connected (reserved body)",
+			tn ? tn : "?", u32(taker->ID), u32(item_id), sec, u32(holder->ID));
+		coop_send_notice(CL, 21, "That player is not here to answer: the item stays with them.");
+		return true;
+	}
 	for (u32 i = 0; i < m_coop_consents.size(); ++i)
 		if (m_coop_consents[i].item == item_id)
 		{
