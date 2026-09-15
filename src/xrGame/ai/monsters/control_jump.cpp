@@ -23,6 +23,40 @@
 #include "../../../xrPhysics/IPHWorld.h"
 #include "../../../xrPhysics/PHCharacter.h"
 #include "../../../xrCore/_vector3d_ext.h"
+#include "../../../xrNetServer/xr_enet_transport.h"   // MP fork (§3.4 inc 3 diagnostic): xr_enet::enabled()
+
+
+// MP fork (design doc §3.4 increment 3, stuck-jump diagnostic): MEASUREMENT-ONLY, log-only, co-op only. A jump that starts and
+// never ends holds the monster's pure capture forever (measured: 85 s, 0.00 m, dev/evidence/leap-measure4b). The three exits are
+// pre-registered as hypotheses H1 (bounce + path end), H2 (ground gate + ground ray), H3 (animation end). Every input to all three
+// is printed here, so the log NAMES the blocked exit instead of it being read out of the numbers.
+void CControlJump::coop_trace(LPCSTR tag)
+{
+	if (!xr_enet::enabled() || !m_object) return;
+	const u32 now = time();
+	const bool periodic = (0 == xr_strcmp(tag, "run"));
+	if (periodic)
+	{
+		if (m_time_started == 0 || (now - m_time_started) < 3000) return;
+		if (m_coop_trace_last && (now - m_coop_trace_last) < 1000) return;
+	}
+	m_coop_trace_last = now;
+	const bool gate = (m_time_started != 0) && (m_time_started + u32(m_jump_time * 1000.f) <= now);
+	bool ray = false;
+	if (gate)
+	{
+		Fvector dir, from;
+		dir.set(0.f, -1.f, 0.f);
+		m_object->Center(from);
+		collide::rq_result rq;
+		if (Level().ObjectSpace.RayPick(from, dir, m_trace_ground_range, collide::rqtStatic, rq, m_object))
+			ray = (rq.range < m_trace_ground_range);
+	}
+	Msg("- COOP(jumpstate): %u t %u %s age %u anim_state %d prev %d bounced %d path_end %d on_path %d jump_time %.3f ground_gate %d ground_ray %d pos %.3f,%.3f,%.3f",
+		m_object->ID(), now, tag, m_time_started ? (now - m_time_started) : 0, int(m_anim_state_current), int(m_anim_state_prev),
+		m_velocity_bounced ? 1 : 0, m_man->path_builder().is_path_end(0.1f) ? 1 : 0, m_man->path_builder().is_moving_on_path() ? 1 : 0,
+		m_jump_time, gate ? 1 : 0, ray ? 1 : 0, m_object->Position().x, m_object->Position().y, m_object->Position().z);
+}
 
 void CControlJump::reinit()
 {
@@ -68,6 +102,8 @@ void CControlJump::remove_links(CObject* object)
 
 void CControlJump::activate()
 {
+	m_coop_trace_last = 0;
+	coop_trace("activate");
 	m_man->capture_pure(this);
 	m_man->subscribe(this, ControlCom::eventAnimationEnd);
 	m_man->subscribe(this, ControlCom::eventAnimationStart);
@@ -230,8 +266,10 @@ void CControlJump::start_jump(const Fvector& point)
 //////////////////////////////////////////////////////////////////////////
 void CControlJump::select_next_anim_state()
 {
+	coop_trace("anim_state");
 	if (m_anim_state_current == eStateNone)
 	{
+		coop_trace("stop:anim_none");
 		stop();
 		return;
 	}
@@ -306,9 +344,11 @@ bool CControlJump::in_auto_aim()
 //////////////////////////////////////////////////////////////////////////
 void CControlJump::update_frame()
 {
+	coop_trace("run");
 	// check if all jump stages are ended
 	if (m_velocity_bounced && m_man->path_builder().is_path_end(0.1f))
 	{
+		coop_trace("stop:bounce+path_end");
 		stop();
 		return;
 	}
@@ -380,10 +420,12 @@ bool CControlJump::is_on_the_ground()
 
 void CControlJump::grounding()
 {
+	coop_trace("grounding");
 	if ((m_data.state_ground.velocity_mask == u32(-1)) || is_flag(SControlJumpData::eGroundSkip) || !m_data
 	                                                                                                 .state_ground.
 	                                                                                                 motion.valid())
 	{
+		coop_trace("stop:ground_skip");
 		stop();
 		return;
 	}
@@ -394,6 +436,7 @@ void CControlJump::grounding()
 	if (!m_man->build_path_line(this, target_position, u32(-1),
 	                            m_data.state_ground.velocity_mask | MonsterMovement::eVelocityParameterStand))
 	{
+		coop_trace("stop:ground_path_failed");
 		stop();
 	}
 	else
@@ -458,6 +501,7 @@ void CControlJump::on_event(ControlCom::EEventType type, ControlCom::IEventData*
 			}
 			else
 			{
+				coop_trace("stop:bounce_airborne");
 				stop();
 			}
 		}

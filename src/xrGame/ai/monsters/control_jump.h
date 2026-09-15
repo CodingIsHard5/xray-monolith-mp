@@ -78,6 +78,7 @@ class CControlJump : public CControl_ComCustom<SControlJumpData>
 
 	// run-time params
 	u32 m_time_next_allowed;
+	u32 m_coop_trace_last = 0; // MP fork (§3.4 inc 3 diagnostic): last COOP(jumpstate) sample, log-only
 	u32 m_time_started; // time jump started
 	float m_jump_time; // physical-counted time of jump
 	float m_blend_speed; // current anim blend speed
@@ -100,6 +101,7 @@ public:
 	virtual void load(LPCSTR section);
 	virtual void reinit();
 	virtual bool check_start_conditions();
+	void coop_trace(LPCSTR tag);   // MP fork (§3.4 inc 3 diagnostic): log-only, co-op only
 	virtual void activate();
 	virtual void on_release();
 	virtual void on_event(ControlCom::EEventType, ControlCom::IEventData*);
