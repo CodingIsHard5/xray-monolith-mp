@@ -31,6 +31,9 @@ class CPhysicsShellHolder : public CGameObject,
 {
 	bool b_sheduled;
 public:
+	// MP fork (design doc §3.4 increment 2): on the co-op server, the time until which this object's physics state is exported
+	// (set while telekinesis holds or throws it, +2 s after release). 0 = never.
+	u32 m_coop_ph_sync_until = 0;
 	void SheduleRegister()
 	{
 		if (!IsSheduled())shedule_register();

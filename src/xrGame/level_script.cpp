@@ -13,6 +13,9 @@
 #include "mp_coop_chat.h"                           // MP fork (§13.4): COOP_CHAT_REQUEST_KIND
 #include "level.h"
 #include "actor.h"
+#include "ai/monsters/telekinesis.h"                 // MP fork (§3.4 inc 2): coop_test_tele
+#include "PhysicsShellHolder.h"
+#include "../xrphysics/PhysicsShell.h"
 #include "trade.h"                               // MP fork (§10.3 S2a.1): coop_test_buy
 #include "inventory_item.h"
 #include "script_game_object.h"
@@ -286,6 +289,35 @@ bool coop_money_set(u16 id, u32 amount)
 u32 coop_trade_price(u16 trader_id, u16 player_id, u16 item_id, bool trader_buys)
 {
 	return ai().get_alife() ? coop_trade_price_now(trader_id, player_id, item_id, trader_buys) : 0;
+}
+
+// MP fork (design doc §3.4 increment 2, harness): server side. Drive a telekinetic monster's OWN telekinesis on a chosen physics object:
+// phase 0 raises it (CTelekinesis::activate), phase 1 throws it at (x, y, z) arriving in t seconds (CTelekinesis::fire_t).
+bool coop_test_tele(u16 monster_id, u16 object_id, u32 phase, float x, float y, float z, float t)
+{
+	if (!ai().get_alife() || !g_pGameLevel)
+		return false;
+	CTelekinesis* const tele = smart_cast<CTelekinesis*>(Level().Objects.net_Find(monster_id));
+	CPhysicsShellHolder* const obj = smart_cast<CPhysicsShellHolder*>(Level().Objects.net_Find(object_id));
+	if (!tele || !obj || !obj->PPhysicsShell())
+	{
+		Msg("! COOP(tele): test tele — monster %u %s, object %u %s", u32(monster_id), tele ? "ok" : "not telekinetic/absent",
+			u32(object_id), obj ? (obj->PPhysicsShell() ? "ok" : "no physics shell") : "absent");
+		return false;
+	}
+	if (!obj->PPhysicsShell()->isEnabled())
+		obj->PPhysicsShell()->Enable();
+	if (phase == 0)
+	{
+		const bool ok = tele->activate(obj, 3.f, 2.5f, 30000, false) != nullptr;
+		Msg("- COOP(tele): test raise of object %u by %u: %s", u32(object_id), u32(monster_id), ok ? "held" : "REFUSED");
+		return ok;
+	}
+	Fvector target;
+	target.set(x, y, z);
+	tele->fire_t(obj, target, t);
+	Msg("- COOP(tele): test fire of object %u by %u at %.1f,%.1f,%.1f in %.2f s", u32(object_id), u32(monster_id), x, y, z, t);
+	return true;
 }
 
 // MP fork (design doc §16.3): gamedata marks the quest-critical (script story) NPCs the cap never throttles (game_sv_single.cpp)
@@ -3106,6 +3138,7 @@ void CLevel::script_register(lua_State* L)
 			def("coop_test_children", &coop_test_children),
 			def("coop_state_put", &coop_state_put),
 			def("coop_npc_cap_exempt", &coop_npc_cap_exempt),
+			def("coop_test_tele", &coop_test_tele),
 			def("coop_state_loaded", &coop_state_loaded),
 			def("coop_trade_quote_now", &coop_trade_quote_now),
 			def("coop_test_sell", &coop_test_sell),

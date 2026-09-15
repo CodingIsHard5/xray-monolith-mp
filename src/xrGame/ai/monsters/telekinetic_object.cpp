@@ -7,6 +7,18 @@
 //#include "../../PHElement.h"
 #include "../../level.h"
 #include "../../gameobject.h"
+#include "../../../xrNetServer/xr_enet_transport.h"   // MP fork (§3.4 inc 2): xr_enet::enabled()
+
+// MP fork (design doc §3.4 increment 2): a telekinetic object's flight is simulated on the co-op server only; keep its physics
+// state exported to clients while it is held or thrown, and for 2 s after, so every client shows the server's path.
+static void coop_ph_sync_mark(CPhysicsShellHolder* obj)
+{
+	if (!obj || !xr_enet::enabled() || !OnServer())
+		return;
+	if (obj->m_coop_ph_sync_until < Device.dwTimeGlobal)
+		Msg("- COOP(tele): object %u [%s] physics sync ON (telekinesis)", u32(obj->ID()), obj->cNameSect().c_str());
+	obj->m_coop_ph_sync_until = Device.dwTimeGlobal + 2000;
+}
 
 
 #define KEEP_IMPULSE_UPDATE 200
@@ -33,6 +45,7 @@ bool CTelekineticObject::init(CTelekinesis* tele, CPhysicsShellHolder* obj, floa
 	//state				= TS_Raise;
 	switch_state(TS_Raise);
 	object = obj;
+	coop_ph_sync_mark(obj);
 
 	target_height = obj->Position().y + h;
 
@@ -83,6 +96,7 @@ void CTelekineticObject::fire_update()
 
 void CTelekineticObject::update_state()
 {
+	coop_ph_sync_mark(object);
 	switch (get_state())
 	{
 	case TS_Raise: raise_update();
@@ -196,6 +210,7 @@ void CTelekineticObject::keep()
 void CTelekineticObject::release()
 {
 	if (!object || !object->m_pPhysicsShell || !object->m_pPhysicsShell->isActive()) return;
+	coop_ph_sync_mark(object);
 
 
 	Fvector dir_inv;
@@ -215,6 +230,7 @@ void CTelekineticObject::release()
 void CTelekineticObject::fire_t(const Fvector& target, float time)
 {
 	switch_state(TS_Fire);
+	coop_ph_sync_mark(object);
 	//time_fire_started	= Device.dwTimeGlobal;
 
 	if (!object || !object->m_pPhysicsShell || !object->m_pPhysicsShell->isActive()) return;

@@ -4,6 +4,7 @@
 //#include "Physics.h"
 #include "xrserver_objects_alife.h"
 #include "Level.h"
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§3.4 inc 2): xr_enet::enabled()
 #include "../Include/xrRender/Kinematics.h"
 #include "../Include/xrRender/KinematicsAnimated.h"
 #include "../xrEngine/xr_collide_form.h"
@@ -394,7 +395,8 @@ void CPhysicObject::UpdateCL()
 		m_pPhysicsShell->AnimatorOnFrame();
 	}
 
-	if (!IsGameTypeSingle())
+	// MP fork (design doc §3.4 increment 2): a co-op client follows the server's states of a thrown object while they arrive
+	if (!IsGameTypeSingle() || (xr_enet::enabled() && !OnServer() && m_net_updateData && !m_net_updateData->NET_IItem.empty()))
 	{
 		Interpolate();
 	}
@@ -588,9 +590,26 @@ net_updatePhData* CPhysicObject::NetSync()
 	return m_net_updateData;
 }
 
+// MP fork (design doc §3.4 increment 2): the co-op server exports a telekinesis-driven object's physics state during its sync window
+// (stock single-player never exports). -coop_tele_local (control) keeps the stock behaviour.
+static bool coop_tele_local()
+{
+	static int s = -1;
+	if (s < 0)
+	{
+		s = strstr(Core.Params, "-coop_tele_local") ? 1 : 0;
+		if (xr_enet::enabled())
+			Msg("- COOP(tele): thrown-object physics is %s", s ? "LOCAL to each machine (-coop_tele_local, control)" :
+				"exported by the server while telekinesis moves it");
+	}
+	return s == 1;
+}
+
 void CPhysicObject::net_Export(NET_Packet& P)
 {
-	if (this->H_Parent() || IsGameTypeSingle())
+	const bool coop_sync = xr_enet::enabled() && OnServer() && m_coop_ph_sync_until > Device.dwTimeGlobal && PPhysicsShell() &&
+		!coop_tele_local();
+	if (this->H_Parent() || (IsGameTypeSingle() && !coop_sync))
 	{
 		P.w_u8(0);
 		return;
