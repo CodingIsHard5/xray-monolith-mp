@@ -2,6 +2,7 @@
 #include "xrserver.h"
 #include "xrserver_objects.h"
 #include "xrserver_objects_alife_monsters.h"
+#include "game_sv_single.h"                        // MP fork (§10.3 S2d): the pending-sale record
 #include "xrServer_svclient_validation.h"
 #include "../xrNetServer/xr_enet_transport.h"   // MP fork (§10.5): co-op claim logging
 
@@ -82,9 +83,32 @@ void xrServer::Process_event_ownership(NET_Packet& P, ClientID sender, u32 time,
 	xrClientData* c_entity = e_entity->owner;
 	xrClientData* c_from = ID_to_client(sender);
 
-	if ((GetServerClient() != c_from) && (c_parent != c_from))
+	// MP fork (design doc §10.3 S2d): a SALE to an NPC trader. The trade menu sends the trader's take from the SELLER's
+	// client, which is neither the server client nor the trader's owner, so this rule silently dropped every sale in co-op
+	// and left the item on the floor (measured: trade-sell). Trusted when a living NPC trader takes an item that the
+	// sending client's own actor put down in a GE_TRADE_SELL moments ago.
+	bool coop_sale = false;
+	if (xr_enet::enabled() && c_from && GetServerClient() != c_from && c_parent != c_from && c_from->owner &&
+		!smart_cast<CSE_ALifeCreatureActor*>(e_parent) && smart_cast<CSE_ALifeTraderAbstract*>(e_parent))
+	{
+		CSE_ALifeCreatureAbstract* const trader_creature = smart_cast<CSE_ALifeCreatureAbstract*>(e_parent);
+		game_sv_Single* const single = smart_cast<game_sv_Single*>(game);
+		coop_sale = single && (!trader_creature || trader_creature->g_Alive()) &&
+			single->coop_trade_sale_pending(id_entity, c_from->owner->ID);
+		if (coop_sale)
+			Msg("- COOP(claim): take of item %u by trader %u from the seller's client (%u) — trusted as a sale", u32(id_entity),
+				u32(id_parent), u32(c_from->owner->ID));
+	}
+	if ((GetServerClient() != c_from) && (c_parent != c_from) && !coop_sale)
 	{
 		// trust only ServerClient or new_ownerClient
+		if (xr_enet::enabled())
+		{
+			static u32 s_untrusted = 0;
+			if (++s_untrusted <= 100 || (s_untrusted % 100) == 1)
+				Msg("- COOP(claim): take of item %u by %u REFUSED — sent by a client that is neither the server nor the new owner's [%u]",
+					u32(id_entity), u32(id_parent), s_untrusted);
+		}
 		return;
 	}
 

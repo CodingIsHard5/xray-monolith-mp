@@ -2702,7 +2702,8 @@ bool game_sv_Single::coop_money_set(u16 id, u32 amount, LPCSTR why)
 
 void game_sv_Single::coop_trade_note_sale(xrClientData* CL, CSE_Abstract* seller, u16 item_id)
 {
-	if (!coop_money_server_owned() || !CL || !seller || CL->owner != seller)
+	// kept in co-op whatever the money mode: S2d's ownership trust rule needs it to let the trader take the item at all
+	if (!xr_enet::enabled() || !CL || !seller || CL->owner != seller)
 		return;
 	for (xr_vector<coop_pending_trade>::iterator it = m_coop_pending_trades.begin(); it != m_coop_pending_trades.end();)
 		it = (it->item == item_id || Device.dwTimeGlobal - it->at > 30000) ? m_coop_pending_trades.erase(it) : it + 1;
@@ -2716,9 +2717,20 @@ void game_sv_Single::coop_trade_note_sale(xrClientData* CL, CSE_Abstract* seller
 	m_coop_pending_trades.push_back(rec);
 }
 
+bool game_sv_Single::coop_trade_sale_pending(u16 item_id, u16 seller_id)
+{
+	for (u32 i = 0; i < m_coop_pending_trades.size(); ++i)
+	{
+		const coop_pending_trade& rec = m_coop_pending_trades[i];
+		if (rec.sale && rec.item == item_id && rec.payer == seller_id && Device.dwTimeGlobal - rec.at <= 30000)
+			return true;
+	}
+	return false;
+}
+
 void game_sv_Single::coop_trade_settle(CSE_Abstract* taker, u16 item_id)
 {
-	if (!coop_money_server_owned() || !taker)
+	if (!xr_enet::enabled() || !taker)
 		return;
 	for (u32 i = 0; i < m_coop_pending_trades.size(); ++i)
 	{
@@ -2732,6 +2744,8 @@ void game_sv_Single::coop_trade_settle(CSE_Abstract* taker, u16 item_id)
 		LPCSTR const sec = item ? item->s_name.c_str() : "?";
 		if (!rec.sale)
 		{
+			if (!coop_money_server_owned())
+				return;
 			if (taker->ID != rec.payer)
 			{
 				Msg("! COOP(money): item %u [%s] was bought by %u but handed to %u — nothing charged", u32(item_id), sec,
@@ -2757,6 +2771,20 @@ void game_sv_Single::coop_trade_settle(CSE_Abstract* taker, u16 item_id)
 			(creature && !creature->g_Alive()))
 			return;
 		const u32 price = coop_trade_price(taker->ID, rec.payer, item_id, true);
+		if (!price)
+		{
+			// §10.3 S2d: the trader does not buy this item. Give it back rather than leave it with him unpaid.
+			const bool back = coop_move_item(item_id, taker->ID, rec.payer);
+			Msg("- COOP(money): sale of item %u [%s] to %u DECLINED (the trader does not buy it) — %s", u32(item_id), sec,
+				u32(taker->ID), back ? "returned to the seller" : "could NOT be returned");
+			return;
+		}
+		if (!coop_money_server_owned())
+		{
+			Msg("- COOP(money): sale of item %u [%s] to %u — money is client-written, nothing paid by the server", u32(item_id),
+				sec, u32(taker->ID));
+			return;
+		}
 		const u32 bal = coop_money_get(rec.payer), tb = coop_money_get(taker->ID);
 		if (bal == u32(-1) || tb == u32(-1))
 		{

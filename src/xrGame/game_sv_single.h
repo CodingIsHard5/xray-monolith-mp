@@ -342,6 +342,8 @@ public:
 	void coop_money_send(xrClientData* CL, u16 id);
 	// A player's GE_TRADE_SELL of an item they hold (a sale to a trader): remembered so the trader's take can pay them.
 	void coop_trade_note_sale(xrClientData* CL, CSE_Abstract* seller, u16 item_id);
+	// §10.3 S2d: did seller_id put item_id down in a GE_TRADE_SELL in the last 30 s (so a trader's take of it is a sale)?
+	bool coop_trade_sale_pending(u16 item_id, u16 seller_id);
 	// A GE_TRADE_BUY handed item_id to taker: move the money of the purchase or sale it completes, if any.
 	void coop_trade_settle(CSE_Abstract* taker, u16 item_id);
 	u32  coop_trade_price(u16 trader_id, u16 player_id, u16 item_id, bool trader_buys);
