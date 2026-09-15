@@ -320,6 +320,12 @@ bool coop_test_tele(u16 monster_id, u16 object_id, u32 phase, float x, float y, 
 	return true;
 }
 
+// MP fork (design doc §3.4 inc 3a v2): MEASUREMENT-ONLY, not a feature. Read-only: this side's estimate of the server
+// clock (Level().timeServer(), the base CustomMonster::net_Export stamps states with; on a client it carries the bug 3
+// stream delta, NET_Client.h timeServer_Observe). 0 outside co-op. Nothing writes through it. Checked offline by
+// dev/harness/test_coop_server_clock_offline.sh against an injected offset.
+u32 coop_server_time() { return (xr_enet::enabled() && g_pGameLevel) ? Level().timeServer() : 0; }
+
 // MP fork (design doc §16.3): gamedata marks the quest-critical (script story) NPCs the cap never throttles (game_sv_single.cpp)
 void coop_npc_cap_exempt(u16 id, bool on);
 
@@ -3138,6 +3144,7 @@ void CLevel::script_register(lua_State* L)
 			def("coop_test_children", &coop_test_children),
 			def("coop_state_put", &coop_state_put),
 			def("coop_npc_cap_exempt", &coop_npc_cap_exempt),
+			def("coop_server_time", &coop_server_time),
 			def("coop_test_tele", &coop_test_tele),
 			def("coop_state_loaded", &coop_state_loaded),
 			def("coop_trade_quote_now", &coop_trade_quote_now),
