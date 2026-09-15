@@ -2393,15 +2393,25 @@ bool game_sv_Single::coop_trade_allow(xrClientData* CL, CSE_Abstract* trader, u1
 		return true;
 	}
 	bool allow = true;
-	try
 	{
+		// The scope lives OUTSIDE the try: this project builds without unwind semantics (C4530 on the first build of this
+		// function), so a local destroyed by exception unwinding is never destroyed, and a leaked acting player would
+		// attribute every later world read to them. Leaving the block normally, after the catch, does run the destructor.
 		mp_coop_owner::acting_scope scope(player->ID);
-		allow = f(u32(trader->ID), u32(player->ID), u32(item_id));
-	}
-	catch (...)
-	{
-		Msg("! COOP(trade): _G.mp_coop_trade_allow raised for item %u — allowed (fail open)", u32(item_id));
-		return true;
+		bool raised = false;
+		try
+		{
+			allow = f(u32(trader->ID), u32(player->ID), u32(item_id));
+		}
+		catch (...)
+		{
+			raised = true;
+		}
+		if (raised)
+		{
+			Msg("! COOP(trade): _G.mp_coop_trade_allow raised for item %u — allowed (fail open)", u32(item_id));
+			allow = true;
+		}
 	}
 	Msg("- COOP(trade): '%s' (%u) takes item %u [%s] from trader %u — %s", nm ? nm : "?", u32(player->ID),
 		u32(item_id), sec, u32(trader->ID), allow ? "ALLOWED" : "REFUSED");
