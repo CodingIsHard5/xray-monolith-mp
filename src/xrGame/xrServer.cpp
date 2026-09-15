@@ -1457,6 +1457,23 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 				P.r_u16(ev_type);
 				P.r_seek(r_save);
 			}
+			// MP fork (design doc §10.3 S2a): a purchase's GE_TRADE_SELL now reaches Lua (the server asks gamedata whether the
+			// buyer's standing allows the item), so it is deferred like GE_DIE. Its GE_TRADE_BUY is deferred WITH it: the BUY
+			// is the second half of the same purchase, and processed ahead of a queued SELL it would find the item still
+			// held by the trader, be refused, and then the SELL would drop the item on the floor. One FIFO keeps the pair in
+			// order. Co-op only; stock trade is untouched.
+			if (xr_enet::enabled() && (ev_type == GE_TRADE_SELL || ev_type == GE_TRADE_BUY))
+			{
+				static bool s_said_trade = false;
+				if (!s_said_trade)
+				{
+					s_said_trade = true;
+					Msg("- COOP(trade): GE_TRADE_SELL/GE_TRADE_BUY are deferred to the game thread (§10.3 S2a access check "
+						"runs gamedata).");
+				}
+				AddDelayedPacket(P, sender);
+				break;
+			}
 			if (ev_type == GE_DIE)
 			{
 				// Said once, because a per-death line is noise and a silent behaviour change is

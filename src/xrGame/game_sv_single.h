@@ -312,6 +312,11 @@ public:
 	// within -coop_checkpoint_radius, default 8 m; -coop_checkpoint_anywhere lifts the rule). Answers with a notice.
 	void coop_request_checkpoint(xrClientData* CL);
 	void coop_request_chat(xrClientData* CL, LPCSTR raw);   // §13.4: sanitise, rate-limit, broadcast
+	// §10.3 S2a: may this player take `item_id` out of a trader NPC's inventory? Asked when a client's GE_TRADE_SELL
+	// names a living trader (the trader drops the item, the matching GE_TRADE_BUY then hands it to the player). Gamedata
+	// decides (_G.mp_coop_trade_allow) with the acting player set; false => the caller drops the SELL and the buyer is told.
+	// -coop_trade_no_authority (control) answers true without asking.
+	bool coop_trade_allow(xrClientData* CL, CSE_Abstract* trader, u16 item_id);
 	// §10.1: while the world clock is halted (nobody connected), a script's time-factor change is remembered for the
 	// resume instead of restarting the clock. Returns true when the request was absorbed.
 	bool coop_absorb_time_factor(float f);

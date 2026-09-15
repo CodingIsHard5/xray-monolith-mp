@@ -2345,6 +2345,71 @@ void game_sv_Single::coop_request_chat(xrClientData* CL, LPCSTR raw)
 			CL->owner ? u32(CL->owner->ID) : 0xffffu, u32(raw_len), u32(n), text);
 }
 
+// MP fork (design doc §10.3 S2a): server-side trade ACCESS. Before this, a client's purchase was two plain ownership
+// changes and the only access check was its own UI, judged by its own copy of the world. Now the server asks gamedata
+// whether THIS player's standing allows the item, with the player as the acting subject (so goodwill reads route to
+// them), and refuses the SELL if not. Dropping the SELL is enough to refuse the whole purchase: the item stays parented
+// to the trader, so the BUY that follows it meets the ownership guard ("already held") and moves nothing.
+// Runs on the game thread: xrServer::OnMessage defers GE_TRADE_SELL/BUY in co-op because this reaches Lua.
+// Not decided here (S2b): price and money. A refused buyer's client has already changed its own local money.
+bool game_sv_Single::coop_trade_allow(xrClientData* CL, CSE_Abstract* trader, u16 item_id)
+{
+	if (!xr_enet::enabled() || !trader || !CL || !m_server || CL == m_server->GetServerClient())
+		return true;
+	CSE_ALifeCreatureActor* const player = smart_cast<CSE_ALifeCreatureActor*>(CL->owner);
+	if (!player || smart_cast<CSE_ALifeCreatureActor*>(trader) || !smart_cast<CSE_ALifeTraderAbstract*>(trader))
+		return true;   // not a player taking from an NPC: a stash, a corpse search by the server, a player-to-player hand-over
+	CSE_ALifeCreatureAbstract* const creature = smart_cast<CSE_ALifeCreatureAbstract*>(trader);
+	if (creature && !creature->g_Alive())
+		return true;   // looting a body is not trade
+	CSE_Abstract* const item = get_entity_from_eid(item_id);
+	LPCSTR const sec = item ? item->s_name.c_str() : "?";
+	LPCSTR const nm = coop_player_name(CL);
+
+	static int s_off = -1;
+	if (s_off < 0)
+	{
+		LPCSTR q = strstr(Core.Params, "-coop_trade_no_authority");   // exact token, as -coop_orphan_hit_allow
+		s_off = (q && (q[sizeof("-coop_trade_no_authority") - 1] == 0 ||
+		               q[sizeof("-coop_trade_no_authority") - 1] == ' ')) ? 1 : 0;
+		Msg("- COOP(trade): server trade access is %s", s_off ? "OFF (-coop_trade_no_authority, control)" : "ON");
+	}
+	if (s_off)
+	{
+		Msg("- COOP(trade): '%s' (%u) takes item %u [%s] from trader %u — ALLOWED without a check (control)",
+			nm ? nm : "?", u32(player->ID), u32(item_id), sec, u32(trader->ID));
+		return true;
+	}
+
+	luabind::functor<bool> f;
+	if (!ai().script_engine().functor("_G.mp_coop_trade_allow", f))
+	{
+		static bool s_said = false;
+		if (!s_said)
+		{
+			s_said = true;
+			Msg("! COOP(trade): gamedata _G.mp_coop_trade_allow is not registered — trades are NOT checked");
+		}
+		return true;
+	}
+	bool allow = true;
+	try
+	{
+		mp_coop_owner::acting_scope scope(player->ID);
+		allow = f(u32(trader->ID), u32(player->ID), u32(item_id));
+	}
+	catch (...)
+	{
+		Msg("! COOP(trade): _G.mp_coop_trade_allow raised for item %u — allowed (fail open)", u32(item_id));
+		return true;
+	}
+	Msg("- COOP(trade): '%s' (%u) takes item %u [%s] from trader %u — %s", nm ? nm : "?", u32(player->ID),
+		u32(item_id), sec, u32(trader->ID), allow ? "ALLOWED" : "REFUSED");
+	if (!allow)
+		coop_send_notice(CL, 16, "Trade refused: your standing with this trader does not allow that item.");
+	return allow;
+}
+
 bool game_sv_Single::coop_bank_checkpoint(LPCSTR player_name)
 {
 	if (!xr_enet::enabled() || !ai().get_alife())

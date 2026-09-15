@@ -45,6 +45,7 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_no_ik", coop_cfg_switch, coop_cfg_control},   // off | server | Suppresses IK controller creation on the dedicated server (§8 treatment arm for IK/animation faults; one binary one bit apart).
 	{"coop_no_spawn_guard", coop_cfg_switch, coop_cfg_control},   // off | server | Disables the fresh-spawn relocation guard (level-changer/nav-mesh check) and places players at the wanted position.
 	{"coop_no_time_halt", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: world time keeps running with no players (edges still logged) instead of halting.
+	{"coop_trade_no_authority", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: a player's take from a trader's stock is not checked against their standing (§10.3 S2a); exact-token match.
 	{"coop_orphan_hit_allow", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: hits on reserved (orphaned) player bodies are not refused; exact-token match.
 	{"coop_test_widelock", coop_cfg_switch, coop_cfg_control},   // off | server | Restores the old wide delayed-packet lock held across the Lua handler (A/B vs the pop-a-copy fix).
 	// ---- diag
@@ -75,6 +76,7 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_smem", coop_cfg_value, coop_cfg_diag},   // off | server | Read-only shared-memory (smem_container) census every N ms.
 	{"coop_smem_clean", coop_cfg_switch, coop_cfg_diag},   // off | server | Also calls smem_container::clean() during the census; refused unless -coop_smem is also given.
 	// ---- test
+	{"coop_test_trade_arm", coop_cfg_switch, coop_cfg_test},   // off | server | Gamedata mp_coop_trade_server: poll $app_data_root$/coop_trade_sv_arm for harness commands (goodwill, top-tier restock) (§10.3 S2a harness).
 	{"coop_test_restock", coop_cfg_value, coop_cfg_test},   // off | server | Gamedata mp_coop_trade_server: restock esc_m_trader <s> seconds after boot (§10.3 harness).
 	{"coop_test_claim_item", coop_cfg_value, coop_cfg_test},   // off | server | Spawns <section> beside the first player <s> seconds after they bind (§10.5 claim race harness).
 	{"coop_test_psi_storm", coop_cfg_value, coop_cfg_test},   // off | server | Gamedata mp_coop_emission: start a psi storm <s> seconds after boot (§10.2 harness).

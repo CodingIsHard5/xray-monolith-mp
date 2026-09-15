@@ -111,6 +111,19 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
 		}
 		break;
 	case GE_TRADE_SELL:
+		// MP fork (design doc §10.3 S2a): a player taking an item out of a living trader's stock is asked about first.
+		// A refusal drops this event, so the item stays with the trader and the GE_TRADE_BUY after it is refused by the
+		// ownership guard. Peeked, not consumed: the reject path below reads the same id.
+		if (xr_enet::enabled() && receiver && (P.B.count - P.r_tell()) >= sizeof(u16))
+		{
+			const u32 r_save = P.r_tell();
+			const u16 item_id = P.r_u16();
+			P.r_seek(r_save);
+			game_sv_Single* const single = smart_cast<game_sv_Single*>(game);
+			if (single && !single->coop_trade_allow(ID_to_client(sender), receiver, item_id))
+				break;
+		}
+		// fall through
 	case GE_OWNERSHIP_REJECT:
 	case GE_LAUNCH_ROCKET:
 		{
