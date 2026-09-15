@@ -326,6 +326,10 @@ bool coop_test_tele(u16 monster_id, u16 object_id, u32 phase, float x, float y, 
 // dev/harness/test_coop_server_clock_offline.sh against an injected offset.
 u32 coop_server_time() { return (xr_enet::enabled() && g_pGameLevel) ? Level().timeServer() : 0; }
 
+// MP fork (design doc §3.4 inc 3a v4): MEASUREMENT-ONLY, not a feature. Read-only control-capture bitmask of a monster
+// (ai/monsters/control_manager_custom.cpp), so a measurement can tell a commanded jump from a jump that actually started.
+u32 coop_jump_state(u16 id);
+
 // MP fork (design doc §16.3): gamedata marks the quest-critical (script story) NPCs the cap never throttles (game_sv_single.cpp)
 void coop_npc_cap_exempt(u16 id, bool on);
 
@@ -3145,6 +3149,7 @@ void CLevel::script_register(lua_State* L)
 			def("coop_state_put", &coop_state_put),
 			def("coop_npc_cap_exempt", &coop_npc_cap_exempt),
 			def("coop_server_time", &coop_server_time),
+			def("coop_jump_state", &coop_jump_state),
 			def("coop_test_tele", &coop_test_tele),
 			def("coop_state_loaded", &coop_state_loaded),
 			def("coop_trade_quote_now", &coop_trade_quote_now),

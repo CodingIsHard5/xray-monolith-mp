@@ -8,6 +8,7 @@
 #include "../../detail_path_manager.h"
 #include "../../level.h"
 #include "control_animation_base.h"
+#include "../../../xrNetServer/xr_enet_transport.h"   // MP fork (§3.4 inc 3a v4 instrument): xr_enet::enabled()
 #include "control_critical_wound.h"
 
 
@@ -433,9 +434,40 @@ void CControlManagerCustom::script_release(ControlCom::EControlType type)
 	if (m_man->check_capturer(this, type)) m_man->release(this, type);
 }
 
+// MP fork (design doc §3.4 inc 3a v4): MEASUREMENT-ONLY instrument, approved by the Overseer. A script jump is refused SILENTLY
+// here, and three gamedata-only measurements counted commands that never became jumps. This logs the decision and, on a refusal,
+// which pure control holds the manager. Log only: no branch of this function changes. Co-op only (xr_enet), server side only.
+static void coop_jump_log(CBaseMonster* obj, CControl_Manager* man, bool refused)
+{
+	if (!xr_enet::enabled() || !obj || !man) return;
+	Msg("- COOP(jump): %u t %u %s jump_active %d pure path %d anim %d move %d dir %d", obj->ID(), Device.dwTimeGlobal,
+		refused ? "REFUSED" : "accepted", man->is_captured(ControlCom::eControlJump) ? 1 : 0,
+		man->is_captured(ControlCom::eControlPath) ? 1 : 0, man->is_captured(ControlCom::eControlAnimation) ? 1 : 0,
+		man->is_captured(ControlCom::eControlMovement) ? 1 : 0, man->is_captured(ControlCom::eControlDir) ? 1 : 0);
+}
+
+// MP fork (§3.4 inc 3a v4 instrument, measurement-only): the monster's control-capture state, read-only, for the server's own
+// sampling. Bit 0 jump, 1 path, 2 animation, 3 movement, 4 direction; 0xFFFFFFFF = not a monster / not found / not co-op.
+u32 coop_jump_state(u16 id)
+{
+	if (!xr_enet::enabled() || !g_pGameLevel) return u32(-1);
+	CObject* o = Level().Objects.net_Find(id);
+	CBaseMonster* m = smart_cast<CBaseMonster*>(o);
+	if (!m) return u32(-1);
+	CControl_Manager& man = m->control();
+	return (man.is_captured(ControlCom::eControlJump) ? 1 : 0) | (man.is_captured(ControlCom::eControlPath) ? 2 : 0) |
+		(man.is_captured(ControlCom::eControlAnimation) ? 4 : 0) | (man.is_captured(ControlCom::eControlMovement) ? 8 : 0) |
+		(man.is_captured(ControlCom::eControlDir) ? 16 : 0);
+}
+
 void CControlManagerCustom::script_jump(const Fvector& position, float factor)
 {
-	if (!m_man->check_start_conditions(ControlCom::eControlJump)) return;
+	if (!m_man->check_start_conditions(ControlCom::eControlJump))
+	{
+		coop_jump_log(m_object, m_man, true);
+		return;
+	}
+	coop_jump_log(m_object, m_man, false);
 
 	m_man->capture(this, ControlCom::eControlJump);
 
