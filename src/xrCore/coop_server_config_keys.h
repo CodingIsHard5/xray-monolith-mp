@@ -45,6 +45,7 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_no_ik", coop_cfg_switch, coop_cfg_control},   // off | server | Suppresses IK controller creation on the dedicated server (§8 treatment arm for IK/animation faults; one binary one bit apart).
 	{"coop_no_spawn_guard", coop_cfg_switch, coop_cfg_control},   // off | server | Disables the fresh-spawn relocation guard (level-changer/nav-mesh check) and places players at the wanted position.
 	{"coop_no_time_halt", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: world time keeps running with no players (edges still logged) instead of halting.
+	{"coop_trade_no_quotes", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: the server does not answer a client's price-quote request, so the trade UI shows local prices (§10.3 S2c).
 	{"coop_consent_off", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: a client's take out of another player's inventory is not asked about (§10.3 item 4).
 	{"coop_consent_timeout", coop_cfg_value, coop_cfg_tunable},   // 15 | server | Seconds a player has to answer another player's ask for an item they hold; no answer is a no (§10.3 item 4).
 	{"coop_money_client_authority", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: clients write their own money (GE_MONEY accepted, no server price or balance check) (§10.3 S2b); exact-token match.

@@ -60,6 +60,10 @@ public:
 	void TransferItem(CInventoryItem* pItem, bool bBuying, bool bFree = false);
 	// MP fork (design doc §10.3 S2a.1): co-op client — reverse the money of a purchase the server refused.
 	static void coop_refund_refused(u16 item_id);
+	// MP fork (design doc §10.3 S2c): co-op client — the server's quoted prices (see M_XRNET_COOP_TRADE_QUOTES)
+	static void coop_quotes_store(u16 trader, bool first, NET_Packet& P, u16 n);
+	static bool coop_quote(u16 trader, u16 item, bool trader_buys, u32& price);
+	static void coop_request_quotes(u16 trader);
 
 	CInventoryOwner* GetPartner();
 	CTrade* GetPartnerTrade();

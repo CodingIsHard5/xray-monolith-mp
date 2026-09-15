@@ -33,6 +33,56 @@ namespace
 	const u32 COOP_PENDING_MAX = 64;
 }
 
+// MP fork (design doc §10.3 S2c): the server's quotes, keyed trader | item | direction.
+namespace
+{
+	xr_map<u64, u32> s_coop_quotes;
+	inline u64 coop_quote_key(u16 trader, u16 item, bool trader_buys)
+	{
+		return (u64(trader) << 32) | (u64(item) << 1) | (trader_buys ? 1 : 0);
+	}
+}
+
+void CTrade::coop_quotes_store(u16 trader, bool first, NET_Packet& P, u16 n)
+{
+	if (first)
+	{
+		xr_map<u64, u32>::iterator it = s_coop_quotes.lower_bound(u64(trader) << 32);
+		while (it != s_coop_quotes.end() && (it->first >> 32) == trader)
+			it = s_coop_quotes.erase(it);
+	}
+	u16 got = 0;
+	for (; got < n && P.B.count - P.r_tell() >= sizeof(u16) + sizeof(u8) + sizeof(u32); ++got)
+	{
+		const u16 item = P.r_u16();
+		const u8 dir = P.r_u8();
+		const u32 price = P.r_u32();
+		s_coop_quotes[coop_quote_key(trader, item, dir != 0)] = price;
+	}
+	Msg("* COOP(quote): trader %u: %u quote(s) received%s", u32(trader), u32(got), first ? " (replacing earlier ones)" : "");
+}
+
+bool CTrade::coop_quote(u16 trader, u16 item, bool trader_buys, u32& price)
+{
+	xr_map<u64, u32>::const_iterator it = s_coop_quotes.find(coop_quote_key(trader, item, trader_buys));
+	if (it == s_coop_quotes.end())
+		return false;
+	price = it->second;
+	return true;
+}
+
+void CTrade::coop_request_quotes(u16 trader)
+{
+	if (!xr_enet::enabled() || ai().get_alife() || !g_pGameLevel)
+		return;
+	NET_Packet P;
+	P.w_begin(M_XRNET_COOP_REQUEST);
+	P.w_u8(4);   // COOP_QUOTE_REQUEST_KIND (mp_coop_chat.h)
+	P.w_u16(trader);
+	Level().Send(P, net_flags(TRUE, TRUE));
+	Msg("- COOP(quote): asked the server for trader %u's prices", u32(trader));
+}
+
 void CTrade::coop_refund_refused(u16 item_id)
 {
 	const u32 now = Device.dwTimeGlobal;
@@ -217,6 +267,24 @@ u32 CTrade::GetItemPrice(PIItem pItem, bool b_buying, bool b_free)
 {
 	if (b_free)
 		return 0;
+
+	// MP fork (design doc §10.3 S2c): on a co-op client, the SERVER's price for this player when it has quoted one — the
+	// server is what charges, and the client's own trade parameters for an NPC are not the server's.
+	if (xr_enet::enabled() && !ai().get_alife() && pThis.inv_owner && pPartner.inv_owner)
+	{
+		CGameObject* const this_obj = smart_cast<CGameObject*>(pThis.inv_owner);
+		CGameObject* const partner_obj = smart_cast<CGameObject*>(pPartner.inv_owner);
+		const bool this_actor = !!smart_cast<CActor*>(pThis.inv_owner), partner_actor = !!smart_cast<CActor*>(pPartner.inv_owner);
+		u32 quoted = 0;
+		if (this_obj && partner_obj && this_actor != partner_actor)
+		{
+			// pThis = the trader: b_buying means the trader buys. pThis = the actor: b_buying means the actor buys (trader sells).
+			const u16 trader = this_actor ? partner_obj->ID() : this_obj->ID();
+			const bool trader_buys = this_actor ? !b_buying : b_buying;
+			if (coop_quote(trader, pItem->object().ID(), trader_buys, quoted))
+				return quoted;
+		}
+	}
 
 	CArtefact* pArtefact = smart_cast<CArtefact*>(pItem);
 

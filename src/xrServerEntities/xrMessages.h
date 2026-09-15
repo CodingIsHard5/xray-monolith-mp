@@ -161,6 +161,11 @@ enum
 	// stringZ item section, u16 seconds to answer (appended later; absent = unknown). The holder answers with M_XRNET_COOP_REQUEST kind COOP_CONSENT_REQUEST_KIND; no answer is a no.
 	M_XRNET_COOP_CONSENT_ASK,
 
+	// MP fork (design doc §10.3 S2c): server -> ONE client. The server's prices for this player at one trader, so the trade UI
+	// shows what the server will charge or pay. Payload: u16 trader, u8 first (1 = replaces this trader's earlier quotes),
+	// u16 n, then n x (u16 item, u8 direction 0 = the trader sells / 1 = the trader buys, u32 price; 0 = will not trade).
+	M_XRNET_COOP_TRADE_QUOTES,
+
 	MSG_FORCEDWORD = u32(-1)
 };
 

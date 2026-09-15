@@ -206,6 +206,17 @@ void CLevel::ClientReceive()
 					f(text);
 			}
 			break;
+		case M_XRNET_COOP_TRADE_QUOTES:
+			{
+				if (P->B.count - P->r_tell() >= sizeof(u16) + sizeof(u8) + sizeof(u16))
+				{
+					const u16 trader = P->r_u16();
+					const u8 first = P->r_u8();
+					const u16 n = P->r_u16();
+					CTrade::coop_quotes_store(trader, first != 0, *P, n);
+				}
+			}
+			break;
 		case M_XRNET_COOP_CONSENT_ASK:
 			{
 				// MP fork (design doc §10.3 item 4): another player asks for an item this player holds. Read bounded, logged,

@@ -288,6 +288,21 @@ u32 coop_trade_price(u16 trader_id, u16 player_id, u16 item_id, bool trader_buys
 	return ai().get_alife() ? coop_trade_price_now(trader_id, player_id, item_id, trader_buys) : 0;
 }
 
+// MP fork (design doc §10.3 S2c): client side, harness — ask the server for a trader's prices (the trade menu does this itself).
+bool coop_trade_quote_request(u16 trader)
+{
+	if (!xr_enet::enabled() || ai().get_alife() || !g_pGameLevel)
+		return false;
+	CTrade::coop_request_quotes(trader);
+	return true;
+}
+// server side: the quote pass, called by gamedata inside its db.actor swap
+u32 coop_trade_quote_now(u16 trader_id, u16 player_id)
+{
+	game_sv_Single* const g = (g_pGameLevel && Level().Server) ? smart_cast<game_sv_Single*>(Level().Server->game) : NULL;
+	return g ? g->coop_trade_quote_now(trader_id, player_id, true) : 0;
+}
+
 // MP fork (design doc §10.3 item 4): client side. Answer another player's ask for an item this player holds.
 bool coop_consent_answer(u32 request, bool yes)
 {
@@ -3035,6 +3050,8 @@ void CLevel::script_register(lua_State* L)
 			def("coop_test_buy", &coop_test_buy),
 			def("coop_test_buy_force", &coop_test_buy_force),
 			def("coop_consent_answer", &coop_consent_answer),
+			def("coop_trade_quote_request", &coop_trade_quote_request),
+			def("coop_trade_quote_now", &coop_trade_quote_now),
 			def("coop_test_sell", &coop_test_sell),
 			def("coop_test_grant", &coop_test_grant),
 			def("coop_test_money_of", &coop_test_money_of),

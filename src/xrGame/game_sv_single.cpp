@@ -2491,6 +2491,121 @@ bool game_sv_Single::coop_trade_allow(xrClientData* CL, CSE_Abstract* trader, u1
 	return allow;
 }
 
+// ---- §10.3 S2c: the client shows the server's price ------------------------------------------------------------------
+
+void game_sv_Single::coop_trade_quote(xrClientData* CL, u16 trader_id)
+{
+	if (!xr_enet::enabled() || !m_server || !CL)
+		return;
+	if (coop_param("-coop_trade_no_quotes"))
+	{
+		Msg("- COOP(quote): trader %u asked by client %u — NOT answered (-coop_trade_no_quotes, control)", u32(trader_id),
+			CL->ID.value());
+		return;
+	}
+	CSE_ALifeCreatureActor* const player = smart_cast<CSE_ALifeCreatureActor*>(CL->owner);
+	CSE_Abstract* const trader = get_entity_from_eid(trader_id);
+	CSE_ALifeCreatureAbstract* const tc = smart_cast<CSE_ALifeCreatureAbstract*>(trader);
+	if (!player || !trader || smart_cast<CSE_ALifeCreatureActor*>(trader) || !smart_cast<CSE_ALifeTraderAbstract*>(trader) ||
+		(tc && !tc->g_Alive()))
+	{
+		Msg("- COOP(quote): trader %u for client %u — not a living NPC trader, or no player body; nothing quoted", u32(trader_id),
+			CL->ID.value());
+		return;
+	}
+	m_coop_quote_cl = CL->ID;
+	m_coop_quote_active = true;   // request-scoped: coop_trade_quote_now refuses outside it
+	const u32 t0 = Device.dwTimeGlobal;
+	u32 sent = 0;
+	luabind::functor<u32> f;
+	if (ai().script_engine().functor("_G.mp_coop_trade_quote", f))
+	{
+		// one db.actor swap for the whole pass (gamedata calls back into coop_trade_quote_now)
+		mp_coop_owner::acting_scope scope(player->ID);
+		bool raised = false;
+		try
+		{
+			sent = f(u32(trader_id), u32(player->ID));
+		}
+		catch (...)
+		{
+			raised = true;
+		}
+		if (raised)
+		{
+			Msg("! COOP(quote): _G.mp_coop_trade_quote raised — quoting in the engine");
+			sent = coop_trade_quote_now(trader_id, player->ID, false);
+		}
+	}
+	else
+		sent = coop_trade_quote_now(trader_id, player->ID, false);
+	m_coop_quote_active = false;
+	Msg("- COOP(quote): trader %u for player %u: %u price(s) quoted in %u ms", u32(trader_id), u32(player->ID), sent,
+		Device.dwTimeGlobal - t0);
+}
+
+u32 game_sv_Single::coop_trade_quote_now(u16 trader_id, u16 player_id, bool in_swap)
+{
+	CSE_Abstract* const trader = get_entity_from_eid(trader_id);
+	CSE_Abstract* const player = get_entity_from_eid(player_id);
+	if (!m_coop_quote_active || !m_server || !trader || !player || !g_pGameLevel)
+		return 0;
+	CInventoryOwner* const t_obj = smart_cast<CInventoryOwner*>(Level().Objects.net_Find(trader_id));
+	CInventoryOwner* const p_obj = smart_cast<CInventoryOwner*>(Level().Objects.net_Find(player_id));
+	if (!t_obj || !p_obj || t_obj == p_obj)
+		return 0;
+	CTrade* const t = t_obj->GetTrade();
+	t->StartTradeEx(p_obj);
+	const u32 CHUNK = 1500;
+	u32 total = 0, in_chunk = 0;
+	bool first = true;
+	NET_Packet P;
+	u32 count_pos = 0;
+	struct begin_chunk
+	{
+		static void run(NET_Packet& P, u16 trader_id, bool first, u32& count_pos)
+		{
+			P.w_begin(M_XRNET_COOP_TRADE_QUOTES);
+			P.w_u16(trader_id);
+			P.w_u8(first ? 1 : 0);
+			count_pos = P.w_tell();
+			P.w_u16(0);
+		}
+	};
+	begin_chunk::run(P, trader_id, first, count_pos);
+	for (int side = 0; side < 2; ++side)
+	{
+		CSE_Abstract* const holder = side == 0 ? trader : player;   // side 0: the trader sells his stock; 1: he buys the player's
+		for (u32 i = 0; i < holder->children.size(); ++i)
+		{
+			CInventoryItem* const item = smart_cast<CInventoryItem*>(Level().Objects.net_Find(holder->children[i]));
+			if (!item)
+				continue;
+			const u32 price = in_swap ? t->GetItemPrice(item, side == 1) :
+				coop_trade_price(trader_id, player_id, holder->children[i], side == 1);
+			P.w_u16(holder->children[i]);
+			P.w_u8(u8(side));
+			P.w_u32(price);
+			++total;
+			if (++in_chunk == CHUNK)
+			{
+				P.w_seek(count_pos, &in_chunk, sizeof(u16));
+				m_server->SendTo(m_coop_quote_cl, P, net_flags(TRUE, TRUE));
+				first = false;
+				in_chunk = 0;
+				begin_chunk::run(P, trader_id, first, count_pos);
+			}
+		}
+	}
+	t->StopTrade();
+	if (in_chunk || first)
+	{
+		P.w_seek(count_pos, &in_chunk, sizeof(u16));
+		m_server->SendTo(m_coop_quote_cl, P, net_flags(TRUE, TRUE));
+	}
+	return total;
+}
+
 // ---- §10.3 item 4: consent for a take out of another player's inventory ----------------------------------------------
 
 bool game_sv_Single::coop_move_item(u16 item_id, u16 from_id, u16 to_id)

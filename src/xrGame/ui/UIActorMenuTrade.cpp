@@ -61,6 +61,9 @@ void CUIActorMenu::InitTradeMode()
 	VERIFY(m_partner_trade);
 	m_actor_trade->StartTradeEx(m_pPartnerInvOwner);
 	m_partner_trade->StartTradeEx(m_pActorInvOwner);
+	// MP fork (design doc §10.3 S2c): ask the server for its prices; they replace the local ones as they arrive
+	if (CGameObject* const partner_obj = smart_cast<CGameObject*>(m_pPartnerInvOwner))
+		CTrade::coop_request_quotes(partner_obj->ID());
 
 	UpdatePrices();
 }

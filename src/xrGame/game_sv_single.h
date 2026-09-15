@@ -349,6 +349,13 @@ public:
 	u32  coop_trade_price(u16 trader_id, u16 player_id, u16 item_id, bool trader_buys);
 	// §10.3 item 4: a take out of ANOTHER player's inventory needs that player's yes. intercept => true: the caller drops
 	// the event (the server asked the holder instead). answer: the holder's reply. tick: expire unanswered asks (a no).
+	// §10.3 S2c: quote this client's player every price at one trader (both directions), from the server's own computation
+	void coop_trade_quote(xrClientData* CL, u16 trader_id);
+	// computes and sends to the requesting client; only inside coop_trade_quote (else 0). in_swap: gamedata has pointed db.actor
+	// at the player, so the engine price IS the authoritative one; otherwise each entry goes through coop_trade_price.
+	u32  coop_trade_quote_now(u16 trader_id, u16 player_id, bool in_swap);
+	ClientID m_coop_quote_cl;
+	bool m_coop_quote_active = false;
 	bool coop_consent_intercept(xrClientData* CL, CSE_Abstract* holder, u16 item_id);
 	void coop_consent_answer(xrClientData* CL, u32 request, bool yes);
 	void coop_consent_tick();

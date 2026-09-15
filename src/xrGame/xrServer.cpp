@@ -1152,6 +1152,10 @@ void xrServer::coop_run_request(NET_Packet& P, ClientID sender)
 			single->coop_request_chat(CL, raw);
 		}
 		break;
+	case COOP_QUOTE_REQUEST_KIND:
+		if ((P.B.count - P.r_tell()) >= sizeof(u16))
+			single->coop_trade_quote(CL, P.r_u16());
+		break;
 	case COOP_CONSENT_REQUEST_KIND:
 		if ((P.B.count - P.r_tell()) >= sizeof(u32) + sizeof(u8))
 		{
