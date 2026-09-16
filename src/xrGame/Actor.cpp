@@ -572,8 +572,26 @@ struct playing_pred
 	}
 };
 
+static int coop_bodylog()
+{
+	static int s_on = -1;
+	if (s_on < 0) s_on = (xr_enet::enabled() && ai().get_alife() && strstr(Core.Params, "-coop_bodylog")) ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+	return s_on;
+}
+
 void CActor::Hit(SHit* pHDS)
 {
+	if (coop_bodylog() && pHDS)
+	{
+		const CObject* const who = pHDS->who;
+		++m_coop_bodylog_hits;
+		m_coop_bodylog_last_hit_t = Device.dwTimeGlobal;
+		m_coop_bodylog_last_who = who ? who->ID() : u16(-1);
+		Msg("- COOP(bodylog): %u t %u hit by %d %s type %d power %.4f bone %u hp_before %.4f pos %.2f,%.2f,%.2f alive %d",
+			ID(), Device.dwTimeGlobal, who ? int(who->ID()) : -1, who ? who->cNameSect().c_str() : "none", int(pHDS->hit_type),
+			pHDS->power, u32(pHDS->boneID), GetfHealth(), Position().x, Position().y, Position().z, g_Alive() ? 1 : 0);
+	}
+
 	bool b_initiated = pHDS->aim_bullet; // physics strike by poltergeist
 
 	pHDS->aim_bullet = false;
@@ -2693,6 +2711,23 @@ void CActor::coop_respawn()
 
 void CActor::shedule_Update(u32 DT)
 {
+	if (coop_bodylog())
+	{
+		// every health change on the server body since the last scheduled update, with what the condition model holds this tick
+		// (radiation, bleeding, psy, satiety) and whether any Hit arrived in between — so a loss with no hit names its source class
+		const float hp = GetfHealth();
+		if (m_coop_bodylog_hp > -1.5f && _abs(hp - m_coop_bodylog_hp) >= 0.0005f)
+		{
+			const bool hit_since = m_coop_bodylog_last_hit_t && (Device.dwTimeGlobal - m_coop_bodylog_last_hit_t) <= 1000;
+			Msg("- COOP(bodylog): %u t %u hp %.4f -> %.4f delta %+.4f hits_total %u hit_within_1s %d last_by %d radiation %.4f bleeding %.4f psy %.4f satiety %.4f alive %d local %d pos %.2f,%.2f,%.2f",
+				ID(), Device.dwTimeGlobal, m_coop_bodylog_hp, hp, hp - m_coop_bodylog_hp, m_coop_bodylog_hits, hit_since ? 1 : 0,
+				int(m_coop_bodylog_last_who == u16(-1) ? -1 : int(m_coop_bodylog_last_who)), conditions().GetRadiation(),
+				conditions().BleedingSpeed(), conditions().GetPsyHealth(), conditions().GetSatiety(), g_Alive() ? 1 : 0, Local() ? 1 : 0,
+				Position().x, Position().y, Position().z);
+		}
+		m_coop_bodylog_hp = hp;
+	}
+
 	setSVU(OnServer());
 	//.	UpdateInventoryOwner			(DT);
 

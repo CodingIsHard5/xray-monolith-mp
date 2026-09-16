@@ -687,6 +687,11 @@ public:
 	// MP fork (§3.4 player position feed): the dedicated server's copy of this player's CSE position and facing (game thread only).
 	// Returns how far the object was from that position before the copy.
 	float coop_apply_server_feed(const Fvector& pos, float model_yaw, const SRotation& torso);
+	// MP fork (§3.4 scope 1 follow-up, -coop_bodylog, MEASUREMENT-ONLY): hits and health changes on a player's SERVER body
+	float m_coop_bodylog_hp = -2.f;
+	u32 m_coop_bodylog_hits = 0;
+	u32 m_coop_bodylog_last_hit_t = 0;
+	u16 m_coop_bodylog_last_who = u16(-1);
 	void SetPhPosition(const Fmatrix& pos);
 	virtual void PH_B_CrPr(); // actions & operations before physic correction-prediction steps
 	virtual void PH_I_CrPr(); // actions & operations after correction before prediction steps
