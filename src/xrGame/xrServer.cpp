@@ -1562,6 +1562,26 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 					P.r_u8();                // flags
 					Fvector pos;
 					P.r_vec3(pos);
+					// MP fork (§3.4 player position feed): the facing that follows the position in the body — model yaw and torso
+					// yaw/pitch/roll — kept with the position as ONE snapshot for the game-thread copy onto the server's own CActor.
+					// Bounds-checked here because the packet cursor's VERIFYs compile out in release (a short update is dropped).
+					if (P.r_elapsed() >= 4 * sizeof(float))
+					{
+						const float model_yaw = P.r_float();
+						const float torso_yaw = P.r_float();
+						const float torso_pitch = P.r_float();
+						const float torso_roll = P.r_float();
+						if (_valid(pos) && _valid(model_yaw) && _valid(torso_yaw) && _valid(torso_pitch) && _valid(torso_roll))
+						{
+							InterlockedIncrement(&CL->m_coop_pose_seq);   // odd: a write is in progress
+							CL->m_coop_pose_pos = pos;
+							CL->m_coop_pose_yaw = model_yaw;
+							CL->m_coop_pose_torso[0] = torso_yaw;
+							CL->m_coop_pose_torso[1] = torso_pitch;
+							CL->m_coop_pose_torso[2] = torso_roll;
+							InterlockedIncrement(&CL->m_coop_pose_seq);   // even: complete
+						}
+					}
 					// D2 run 5: name this write. It runs on the ENet PUMP THREAD and assigns straight
 					// into a CSE the game thread may be serialising at that very instant, and a
 					// client that has not yet been given a body sends zeros — which is exactly the

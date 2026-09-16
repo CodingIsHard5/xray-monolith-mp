@@ -46,6 +46,14 @@ public:
 	// word, used only as a "has it ever" test, so no ordering guarantee is required.
 	u32 m_coop_cl_update_count;
 
+	// MP fork (§3.4 player position feed): the pose from this client's latest M_CL_UPDATE as ONE snapshot — position, model yaw,
+	// torso — written by the ENet pump thread under a sequence counter (odd while writing) and read by the game thread with a
+	// retry, so coop_player_posfeed_tick never mixes the fields of two updates. Single writer per client.
+	volatile LONG m_coop_pose_seq = 0;
+	Fvector m_coop_pose_pos = {0, 0, 0};
+	float m_coop_pose_yaw = 0;
+	float m_coop_pose_torso[3] = {0, 0, 0};   // yaw, pitch, roll
+
 	// MP fork (§14 step 7 phase 4 D3.3 / doc §9.4): the health this client last reported, and
 	// when it last went DOWN. The M_CL_UPDATE peek already reads the health field and threw it
 	// away; keeping it is what lets the server answer "was this player being hurt when they

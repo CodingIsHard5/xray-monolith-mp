@@ -2668,6 +2668,72 @@ LPCSTR coop_sched_probe(u16 id)
 	return buf;
 }
 
+// MP fork (§3.4 player acquisition, scope 1): on a dedicated co-op server a player's M_CL_UPDATE is relayed to the other clients and
+// peeked into the player's CSE (o_Position, o_model, o_torso — xrServer.cpp, pump thread), but nothing applies it to the SERVER's
+// own CActor: there is no SV_Client loopback, so that object keeps its spawn transform forever (measured: 463 m from its client
+// while the CSE matched it exactly). Every server-side reader of the object — feel_vision, EnemyMan, melee distance checks — then
+// looks at the spawn. Here, on the GAME thread and from the CSE only (never net_Import on the pump thread, never the export
+// writeback), each claimed, driven, alive player body gets its position and facing copied onto the server CActor every tick, with
+// the physics movement and the spatial entry updated in the same tick. -coop_player_posfeed_off keeps the stale object (control).
+void game_sv_Single::coop_player_posfeed_tick()
+{
+	static int s_off = -1;
+	if (s_off < 0)
+	{
+		s_off = strstr(Core.Params, "-coop_player_posfeed_off") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+		if (xr_enet::enabled())
+			Msg("- COOP(posfeed): server player-object position feed %s", s_off ? "OFF (-coop_player_posfeed_off)" : "ON (default)");
+	}
+	if (s_off || !xr_enet::enabled() || !m_server || !g_pGameLevel || !ai().get_alife())
+		return;
+	struct feed
+	{
+		xrServer* server;
+		void operator()(IClient* client)
+		{
+			xrClientData* const CL = static_cast<xrClientData*>(client);
+			if (CL == server->GetServerClient() || !CL->owner || CL->m_coop_cl_update_count == 0)
+				return;   // not a player, no body, or the body is not being driven yet (a record, not a player)
+			CSE_ALifeCreatureAbstract* const se = smart_cast<CSE_ALifeCreatureAbstract*>(CL->owner);
+			CActor* const a = smart_cast<CActor*>(Level().Objects.net_Find(CL->owner->ID));
+			if (!se || !a || !a->g_Alive())
+				return;
+			// read the pump thread's pose snapshot consistently (sequence counter: retry while a write is in progress or changed)
+			Fvector pos;
+			float yaw = 0;
+			SRotation torso;
+			bool got = false;
+			for (int tries = 0; tries < 8 && !got; ++tries)
+			{
+				const LONG s1 = CL->m_coop_pose_seq;
+				if (s1 & 1)
+					continue;
+				pos = CL->m_coop_pose_pos;
+				yaw = CL->m_coop_pose_yaw;
+				torso.yaw = CL->m_coop_pose_torso[0];
+				torso.pitch = CL->m_coop_pose_torso[1];
+				torso.roll = CL->m_coop_pose_torso[2];
+				got = (s1 != 0) && (s1 == CL->m_coop_pose_seq);
+			}
+			if (!got || !_valid(pos) || !_valid(yaw))
+				return;
+			// the CSE's facing is set here on the game thread from the same snapshot (its position is the pump thread's peek)
+			se->o_model = yaw;
+			se->o_torso = torso;
+			const float gap = a->coop_apply_server_feed(pos, yaw, torso);
+			static u32 s_next_log = 0;
+			if (Device.dwTimeGlobal >= s_next_log)
+			{
+				s_next_log = Device.dwTimeGlobal + 5000;
+				Msg("- COOP(posfeed): body %u copied from its CSE (%.1f,%.1f,%.1f) yaw %.2f; server object was %.1f m away",
+					u32(CL->owner->ID), pos.x, pos.y, pos.z, yaw, gap);
+			}
+		}
+	} f;
+	f.server = m_server;
+	m_server->ForEachClientDo(f);
+}
+
 void game_sv_Single::coop_jump_alive_tick()
 {
 	if (!xr_enet::enabled() || !ai().get_alife() || !g_pGameLevel || !m_server)
@@ -5047,6 +5113,7 @@ void game_sv_Single::Update()
 	coop_update_anchors(); // MP fork (§15 co-op): re-centre A-Life on the players
 	coop_broadcast_roster(); // MP fork (design doc §13.1): who is connected, by name, for mp_api
 	coop_consent_tick();      // MP fork (design doc §10.3 item 4): unanswered asks expire as a no
+	coop_player_posfeed_tick(); // MP fork (§3.4): the server's own player objects follow their players (perception, melee)
 	coop_npc_cap_tick();      // MP fork (design doc §16.3): active-NPC cap near player clusters
 	coop_jump_alive_tick();   // MP fork (design doc §3.4 inc 3, H4): is a stuck jump's monster still being updated?
 	coop_state_resend_tick();  // MP fork (design doc §3.4): server-authored mutant state

@@ -3437,6 +3437,24 @@ void CActor::SetPhPosition(const Fmatrix& transform)
 	//else m_phSkeleton->S
 }
 
+float CActor::coop_apply_server_feed(const Fvector& pos, float model_yaw, const SRotation& torso)
+{
+	const float gap = Position().distance_to(pos);
+	r_model_yaw = model_yaw;
+	unaffected_r_torso = torso;
+	r_torso = torso;
+	// same sequence as the fork's own displacement test and coop_respawn: position, physics movement, then the transform
+	Position().set(pos);
+	if (character_physics_support() && character_physics_support()->movement())
+		character_physics_support()->movement()->SetPosition(pos);
+	Fmatrix m;
+	m.rotateY(-model_yaw);
+	m.c.set(pos);
+	XFORM().set(m);
+	spatial_update(0.f, 0.f);   // the spatial entry this same tick, so feel_vision queries find the body where it is
+	return gap;
+}
+
 void CActor::ForceTransform(const Fmatrix& m)
 {
 	//if( !g_Alive() )

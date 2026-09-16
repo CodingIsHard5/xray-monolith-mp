@@ -684,6 +684,9 @@ protected:
 public:
 	void g_Physics(Fvector& accel, float jump, float dt);
 	virtual void ForceTransform(const Fmatrix& m);
+	// MP fork (§3.4 player position feed): the dedicated server's copy of this player's CSE position and facing (game thread only).
+	// Returns how far the object was from that position before the copy.
+	float coop_apply_server_feed(const Fvector& pos, float model_yaw, const SRotation& torso);
 	void SetPhPosition(const Fmatrix& pos);
 	virtual void PH_B_CrPr(); // actions & operations before physic correction-prediction steps
 	virtual void PH_I_CrPr(); // actions & operations after correction before prediction steps
