@@ -336,6 +336,8 @@ LPCSTR coop_sched_probe(u16 id);
 bool coop_perframe_hold(u16 id, bool on);
 // MP fork (§3.4 player acquisition): MEASUREMENT-ONLY vision-flag / community / relation probe (game_sv_single.cpp)
 LPCSTR coop_vis_probe(u16 id, u16 other);
+// MP fork (§3.4 player acquisition): MEASUREMENT-ONLY — trace one Vision owner's candidate adds/removals and items (Feel_Vision.cpp)
+void coop_vistrace(u16 owner_id) { g_coop_vistrace_owner = owner_id; Msg("- COOP(vistrace): tracing owner %u", u32(owner_id)); }
 
 // MP fork (design doc §16.3): gamedata marks the quest-critical (script story) NPCs the cap never throttles (game_sv_single.cpp)
 void coop_npc_cap_exempt(u16 id, bool on);
@@ -3160,6 +3162,7 @@ void CLevel::script_register(lua_State* L)
 			def("coop_sched_probe", &coop_sched_probe),
 			def("coop_perframe_hold", &coop_perframe_hold),
 			def("coop_vis_probe", &coop_vis_probe),
+			def("coop_vistrace", &coop_vistrace),
 			def("coop_test_tele", &coop_test_tele),
 			def("coop_state_loaded", &coop_state_loaded),
 			def("coop_trade_quote_now", &coop_trade_quote_now),

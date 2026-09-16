@@ -8,6 +8,10 @@ class IRender_Sector;
 class CObject;
 class ISpatial;
 
+// MP fork (§3.4 player acquisition, o_new/o_delete trace): MEASUREMENT-ONLY. When a Vision owner's ID equals this, its candidate
+// additions/removals and (once a second) every feel_visible item are logged. 0xFFFF = off. Set by coop_vistrace (level_script.cpp).
+extern ENGINE_API u16 g_coop_vistrace_owner;
+
 namespace Feel
 {
 	const float fuzzy_update_vis = 1000.f; // speed of fuzzy-logic desisions

@@ -5,6 +5,19 @@
 #include "xr_collide_form.h"
 #include "igame_level.h"
 #include "cl_intersect.h"
+#include "device.h"
+#include "../Include/xrRender/RenderVisual.h"
+#include "../Include/xrRender/Kinematics.h"
+
+ENGINE_API u16 g_coop_vistrace_owner = u16(-1);
+
+static void coop_vistrace_obj(const char* what, CObject const* owner, CObject* O, u16 bone_id, const Fvector& cp)
+{
+	IKinematics* const K = O->Visual() ? O->Visual()->dcast_PKinematics() : nullptr;
+	Msg("- COOP(vistrace): owner %u t %u %s target %u visual %d bones %d cform %d bone_id %d cp %.2f,%.2f,%.2f dist %.1f",
+		owner->ID(), Device.dwTimeGlobal, what, O->ID(), O->Visual() ? 1 : 0, K ? int(K->LL_BoneCount()) : -1, O->CFORM() ? 1 : 0,
+		bone_id == u16(-1) ? -1 : int(bone_id), cp.x, cp.y, cp.z, owner->Position().distance_to(O->Position()));
+}
 
 namespace Feel
 {
@@ -73,10 +86,14 @@ namespace Feel
 		I.fuzzy = -EPS_S;
 		I.cp_LP = O->get_new_local_point_on_mesh(I.bone_id);
 		I.cp_LAST = O->get_last_local_point_on_mesh(I.cp_LP, I.bone_id);
+		if (m_owner && m_owner->ID() == g_coop_vistrace_owner)
+			coop_vistrace_obj("new", m_owner, O, I.bone_id, I.cp_LP);
 	}
 
 	void Vision::o_delete(CObject* O)
 	{
+		if (m_owner && m_owner->ID() == g_coop_vistrace_owner)
+			Msg("- COOP(vistrace): owner %u t %u delete target %u", m_owner->ID(), Device.dwTimeGlobal, O->ID());
 		xr_vector<feel_visible_Item>::iterator I = feel_visible.begin(), TE = feel_visible.end();
 		for (; I != TE; I++)
 			if (I->O == O)
@@ -182,6 +199,22 @@ namespace Feel
 
 	void Vision::o_trace(Fvector& P, float dt, float vis_threshold)
 	{
+		struct coop_trace_dump
+		{
+			Vision* v;
+			~coop_trace_dump()
+			{
+				static u32 s_next = 0;
+				if (!v->m_owner || v->m_owner->ID() != g_coop_vistrace_owner || Device.dwTimeGlobal < s_next)
+					return;
+				s_next = Device.dwTimeGlobal + 1000;
+				Msg("- COOP(vistrace): owner %u t %u items %u seen %u query %u", v->m_owner->ID(), Device.dwTimeGlobal,
+					u32(v->feel_visible.size()), u32(v->seen.size()), u32(v->query.size()));
+				for (xr_vector<feel_visible_Item>::iterator it = v->feel_visible.begin(); it != v->feel_visible.end(); ++it)
+					Msg("- COOP(vistrace): owner %u t %u item target %u fuzzy %.3f cform %d dist %.1f", v->m_owner->ID(), Device.dwTimeGlobal,
+						it->O->ID(), it->fuzzy, it->O->CFORM() ? 1 : 0, v->m_owner->Position().distance_to(it->O->Position()));
+			}
+		} coop_dump = { this };
 		RQR.r_clear();
 		xr_vector<feel_visible_Item>::iterator I = feel_visible.begin(), E = feel_visible.end();
 		for (; I != E; I++)
