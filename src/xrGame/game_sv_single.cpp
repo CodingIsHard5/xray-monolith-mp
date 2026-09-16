@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "coop_ghost.h"   // MP fork (§3.4 object-0 scope)
 #include "game_sv_single.h"
 #include "xrserver_objects_alife_monsters.h"
 #include "xrServer_Objects_ALife_Items.h"          // MP fork (§20): CSE_ALifeItemWeapon (kit mag pre-load)
@@ -2675,6 +2676,52 @@ LPCSTR coop_sched_probe(u16 id)
 // looks at the spawn. Here, on the GAME thread and from the CSE only (never net_Import on the pump thread, never the export
 // writeback), each claimed, driven, alive player body gets its position and facing copied onto the server CActor every tick, with
 // the physics movement and the spatial entry updated in the same tick. DEFAULT OFF; -coop_player_posfeed enables it.
+// MP fork (§3.4 object-0 scope, -coop_saveactor_exclude): the excluded save-actor id (u16(-1) while none). Set on the game thread by
+// coop_saveactor_exclude_tick; read by the enemy managers (game thread) and the GE_HIT refusal (server event processing).
+static u16 g_coop_ghost_id = u16(-1);
+bool coop_ghost_excluded(u16 id) { return g_coop_ghost_id != u16(-1) && id == g_coop_ghost_id; }
+
+void game_sv_Single::coop_saveactor_exclude_tick()
+{
+	static int s_on = -1;
+	if (s_on < 0)
+	{
+		s_on = (xr_enet::enabled() && strstr(Core.Params, "-coop_saveactor_exclude")) ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+		if (xr_enet::enabled())
+			Msg("- COOP(ghost): save-actor exclusion %s", s_on ? "ON (-coop_saveactor_exclude)" : "OFF (default)");
+	}
+	if (!s_on || !m_server || !g_pGameLevel || !ai().get_alife())
+		return;
+	static u32 s_next = 0;
+	if (Device.dwTimeGlobal < s_next)
+		return;
+	s_next = Device.dwTimeGlobal + 1000;
+	CSE_Abstract* const se = m_server->ID_to_entity(0);
+	CActor* const a = smart_cast<CActor*>(Level().Objects.net_Find(0));
+	// only the SERVER's own actor: object 0 driven by a real player (never expected) is not a ghost
+	const bool ghost = se && a && (!se->owner || se->owner == m_server->GetServerClient());
+	if (!ghost)
+	{
+		if (g_coop_ghost_id != u16(-1))
+			Msg("! COOP(ghost): object 0 is no longer the server's own actor (cse %d, object %d, owner %p) — exclusion lifted", se ? 1 : 0, a ? 1 : 0,
+				se ? (void*)se->owner : nullptr);
+		g_coop_ghost_id = u16(-1);
+		return;
+	}
+	const bool first = g_coop_ghost_id == u16(-1);
+	g_coop_ghost_id = 0;
+	const bool bit = (a->spatial.type & STYPE_VISIBLEFORAI) != 0;
+	const bool flag = se->m_flags.is(CSE_ALifeObject::flVisibleForAI);
+	if (bit)
+		a->spatial.type &= ~STYPE_VISIBLEFORAI;
+	if (flag)
+		se->m_flags.set(CSE_ALifeObject::flVisibleForAI, FALSE);
+	if (first || bit || flag)
+		Msg("- COOP(ghost): save actor 0 %s: VISIBLEFORAI bit %s, CSE flVisibleForAI %s, alive %d, pos %.1f,%.1f,%.1f", first ? "EXCLUDED" : "re-excluded",
+			bit ? "cleared" : "already clear", flag ? "cleared" : "already clear", a->g_Alive() ? 1 : 0, a->Position().x, a->Position().y,
+			a->Position().z);
+}
+
 void game_sv_Single::coop_player_posfeed_tick()
 {
 	static int s_off = -1;
@@ -5177,6 +5224,7 @@ void game_sv_Single::Update()
 	coop_update_anchors(); // MP fork (§15 co-op): re-centre A-Life on the players
 	coop_broadcast_roster(); // MP fork (design doc §13.1): who is connected, by name, for mp_api
 	coop_consent_tick();      // MP fork (design doc §10.3 item 4): unanswered asks expire as a no
+	coop_saveactor_exclude_tick(); // MP fork (§3.4 object-0 scope): the save actor out of perception and enemy selection
 	coop_player_posfeed_tick(); // MP fork (§3.4): the server's own player objects follow their players (perception, melee)
 	coop_npc_cap_tick();      // MP fork (design doc §16.3): active-NPC cap near player clusters
 	coop_jump_alive_tick();   // MP fork (design doc §3.4 inc 3, H4): is a stuck jump's monster still being updated?

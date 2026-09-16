@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include "coop_ghost.h"   // MP fork (§3.4 object-0 scope)
 #include "enemy_manager.h"
 #include "memory_manager.h"
 #include "visual_memory_manager.h"
@@ -61,6 +62,9 @@ int enemy_manager_useful_cache_time = 200;
 bool CEnemyManager::useful(const CEntityAlive* entity_alive) const
 {
 	if (!entity_alive->g_Alive())
+		return (false);
+
+	if (coop_ghost_excluded(entity_alive->ID()))   // MP fork (§3.4 object-0 scope): never the server's save actor
 		return (false);
 
 	if ((entity_alive->spatial.type & STYPE_VISIBLEFORAI) != STYPE_VISIBLEFORAI)

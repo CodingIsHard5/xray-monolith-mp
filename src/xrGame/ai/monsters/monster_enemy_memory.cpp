@@ -1,5 +1,6 @@
 #include "pch_script.h"
 #include "monster_enemy_memory.h"
+#include "../../coop_ghost.h"   // MP fork (§3.4 object-0 scope)
 
 extern ENGINE_API bool g_dedicated_server;
 #include "BaseMonster/base_monster.h"
@@ -138,6 +139,7 @@ void CMonsterEnemyMemory::update()
 
 void CMonsterEnemyMemory::add_enemy(const CEntityAlive* enemy)
 {
+	if (enemy && coop_ghost_excluded(enemy->ID())) return;   // MP fork (§3.4 object-0 scope)
 	SMonsterEnemy enemy_info;
 	enemy_info.position = enemy->Position();
 	enemy_info.vertex = enemy->ai_location().level_vertex_id();
@@ -159,6 +161,7 @@ void CMonsterEnemyMemory::add_enemy(const CEntityAlive* enemy)
 
 void CMonsterEnemyMemory::add_enemy(const CEntityAlive* enemy, const Fvector& pos, u32 vertex, u32 time)
 {
+	if (enemy && coop_ghost_excluded(enemy->ID())) return;   // MP fork (§3.4 object-0 scope)
 	SMonsterEnemy enemy_info;
 	enemy_info.position = pos;
 	enemy_info.vertex = vertex;

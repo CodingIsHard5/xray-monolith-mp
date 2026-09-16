@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "coop_ghost.h"   // MP fork (§3.4 object-0 scope)
 #include "xrServer.h"
 #include "game_sv_single.h"
 #include "alife_simulator.h"
@@ -290,6 +291,15 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
 					Msg("- COOP(orphan): refusing hit on reserved body id %u (%u so far) — an "
 						"unclaimed body absorbs fire; the record it restores from cannot be shot",
 						destination, s_orphan_hits);
+				break;
+			}
+
+			// MP fork (§3.4 object-0 scope, -coop_saveactor_exclude): the server's save actor is not a participant — refuse the hit
+			if (receiver && coop_ghost_excluded(receiver->ID))
+			{
+				static u32 s_ghost_hits = 0;
+				if (++s_ghost_hits <= 50 || (s_ghost_hits % 50) == 1)
+					Msg("- COOP(ghost): refusing hit on the save actor %u (%u so far)", u32(destination), s_ghost_hits);
 				break;
 			}
 
