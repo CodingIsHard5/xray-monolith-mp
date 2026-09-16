@@ -2557,9 +2557,16 @@ void game_sv_Single::coop_jump_alive_tick()
 {
 	if (!xr_enet::enabled() || !ai().get_alife() || !g_pGameLevel || !m_server)
 		return;
-	static int s_on = -1;
-	if (s_on < 0) s_on = coop_param("-coop_jumpdiag") ? 1 : 0;
-	if (!s_on)
+	// DEFAULT-ON (Overseer, 2026-09-16): the stuck jump was observed three times pre-reboot and has not reproduced since, so a
+	// recurrence must be CAPTURED when it happens rather than reconstructed afterwards. The sweep is 1 Hz and logs only while a
+	// jump is actually running, which is rare; -coop_jumpdiag_off disables it.
+	static int s_off = -1;
+	if (s_off < 0)
+	{
+		s_off = coop_param("-coop_jumpdiag_off") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+		Msg("- COOP(jumpalive): stuck-jump capture %s", s_off ? "OFF (-coop_jumpdiag_off)" : "ON (default)");
+	}
+	if (s_off)
 		return;
 	static u32 s_next = 0;
 	if (Device.dwTimeGlobal < s_next)
