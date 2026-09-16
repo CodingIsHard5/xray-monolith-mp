@@ -143,6 +143,14 @@ namespace xr_imgui
 
     void ide::OnFrame()
     {
+        // MP fork (harness enabler, 2026-09-15): a HEADLESS client runs the dedicated exe against the null-D3D9 stub, whose
+        // methods return SUCCESS with NULL objects (same family as the renderless save-screenshot AV). ImGui's per-frame
+        // backend call then dereferences that null device and the client dies at connect, inside the d3d module —
+        // symbolicated to dxImGuiRender::Frame from CRenderDevice::FrameMove (dev/evidence/jump-h4*). Opt-in, so a normal
+        // client is untouched: -coop_noimgui skips the in-game ImGui frame entirely.
+        static int s_no_imgui = -1;
+        if (s_no_imgui < 0) s_no_imgui = strstr(Core.Params, "-coop_noimgui") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+        if (s_no_imgui) return;
         if (!!!Device.b_is_Active) return;
 
         const float frametime = m_timer.GetElapsed_sec();
