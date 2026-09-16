@@ -2593,7 +2593,7 @@ void game_sv_Single::coop_jump_alive_tick()
 		if (s_provoke && !m->m_coop_provoked_jump && m->m_coop_updatecl)
 		{
 			m->m_coop_provoked_jump = Device.dwTimeGlobal;
-			m->ObjectProcessingDeactivate();
+			m->processing_deactivate();   // the public form of the same request the island-sleep path makes
 			Msg("- COOP(jumpprovoke): %u t %u forced ObjectProcessingDeactivate during a running jump", m->ID(), Device.dwTimeGlobal);
 		}
 		Msg("- COOP(jumpalive): %u t %u js %u updatecl %u (+%d) shedule %u (+%d) processing %d needed %d t_min %u t_max %u locked %u scale %.3f pos %.3f,%.3f,%.3f",
