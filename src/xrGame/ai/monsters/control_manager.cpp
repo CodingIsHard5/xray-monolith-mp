@@ -376,7 +376,14 @@ void CControl_Manager::deactivate(CControl_Com* com)
 
 bool CControl_Manager::is_captured(ControlCom::EControlType type)
 {
-	CControl_Com* capturer = m_control_elems[type]->ced()->capturer();
+	// MP fork (§3.4 inc 3, 2026-09-16): a monster only registers the control elements its class uses — a non-jumping monster has
+	// no eControlJump entry, and the stock code dereferenced the missing element. Every caller in the engine happens to ask only
+	// about elements its own monster owns, so this never fired until a diagnostic asked EVERY monster about jump and killed the
+	// dedicated server (dev/evidence/boot-probe-svflags). get_capturer() right below already guards exactly this.
+	CControl_Com* const target = m_control_elems[type];
+	if (!target || !target->ced())
+		return false;
+	CControl_Com* capturer = target->ced()->capturer();
 	if (!capturer || is_base(capturer)) return false;
 
 	return true;
