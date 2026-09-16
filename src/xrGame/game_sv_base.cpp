@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "Actor.h"   // MP fork (§3.4 (A))
+#include "ActorCondition.h"   // MP fork (§3.4 (A)): server revive resets the server body's conditions
 #include "../xrNetServer/xr_enet_transport.h"   // MP fork (§19 co-op): xr_enet::enabled()
 #include "LevelGameDef.h"
 #include "script_process.h"
