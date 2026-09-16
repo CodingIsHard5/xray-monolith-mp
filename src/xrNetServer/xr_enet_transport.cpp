@@ -78,6 +78,27 @@ namespace xr_enet
 		addr.host = ENET_HOST_ANY;
 		addr.port = (enet_uint16)port;
 
+		// MP fork (harness security, 2026-09-16): -coop_bind <ip> binds the server socket to one address instead of every
+		// interface. Default unchanged (INADDR_ANY), so real co-op sessions are untouched. The measurement harness passes
+		// 127.0.0.1: an unauthenticated (-mp_noauth) test server must not be reachable from outside for the hours a driver runs.
+		// FAIL CLOSED: if the flag is present but its address does not parse, refuse to host rather than fall back to every
+		// interface, because a silent fallback would reopen exactly the exposure the flag exists to close.
+		char bind_ip[64] = "";
+		if (const char* bp = strstr(Core.Params, "-coop_bind "))   // plain literal: the App. B key drift check reads flags from source literals
+		{
+			bp += sizeof("-coop_bind ") - 1;
+			while (*bp == ' ') ++bp;
+			size_t n = 0;
+			while (bp[n] && bp[n] != ' ' && n + 1 < sizeof(bind_ip)) { bind_ip[n] = bp[n]; ++n; }
+			bind_ip[n] = 0;
+			if (!bind_ip[0] || enet_address_set_host_ip(&addr, bind_ip) != 0)
+			{
+				Msg("! XRNET(enet): -coop_bind '%s' is not a usable address — REFUSING to host rather than bind every interface", bind_ip);
+				enet_unref();
+				return false;
+			}
+		}
+
 		ENetHost* h = enet_host_create(&addr, max_players ? max_players : 32, 2, 0, 0);
 		if (!h)
 		{
@@ -89,7 +110,7 @@ namespace xr_enet
 		m_stop = false;
 		thread_spawn(pump_thread, "xrnet-enet-sv", 0, this);
 		m_thread_up = true;
-		Msg("- XRNET(enet): server hosting on udp port %d (max %d)", port, max_players);
+		Msg("- XRNET(enet): server hosting on udp port %d (max %d), bound to %s", port, max_players, bind_ip[0] ? bind_ip : "every interface (INADDR_ANY)");
 		return true;
 	}
 
