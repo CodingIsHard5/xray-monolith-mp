@@ -123,6 +123,22 @@ void CControlJump::activate()
 {
 	m_coop_trace_last = 0;
 	coop_trace("activate");
+	// MP fork (design doc §3.4 increment 3 FIX, co-op only): hold a processing reference for the life of this jump.
+	// MEASURED (dev/evidence/jump-selector): a monster left the per-frame processing list while its jump was still active
+	// (processing 0, needed 1, updatecl +0, shedule still rising), so UpdateCL — and with it this control's update_frame —
+	// never ran again, no exit condition was ever evaluated, and the jump held the pure capture for 115 s with the mutant
+	// frozen and every later jump refused. Props.bActiveCounter is a COUNTER, so an island going to sleep now takes it from
+	// 2 to 1 and the object keeps ticking. -coop_jumpfix_off restores the old behaviour for the control arm.
+	if (xr_enet::enabled() && m_object && !m_coop_processing_held)
+	{
+		static int s_off = -1;
+		if (s_off < 0) s_off = strstr(Core.Params, "-coop_jumpfix_off") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+		if (!s_off)
+		{
+			m_object->processing_activate();
+			m_coop_processing_held = true;
+		}
+	}
 	m_man->capture_pure(this);
 	m_man->subscribe(this, ControlCom::eventAnimationEnd);
 	m_man->subscribe(this, ControlCom::eventAnimationStart);
@@ -147,6 +163,12 @@ void CControlJump::activate()
 
 void CControlJump::on_release()
 {
+	// MP fork (§3.4 inc 3 FIX): release the processing reference with the control itself, so it follows the com's lifetime.
+	if (m_coop_processing_held && m_object)
+	{
+		m_object->processing_deactivate();
+		m_coop_processing_held = false;
+	}
 	m_man->unlock(this, ControlCom::eControlPath);
 
 	SControlDirectionData* ctrl_data_dir = (SControlDirectionData*)m_man->data(this, ControlCom::eControlDir);

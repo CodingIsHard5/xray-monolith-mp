@@ -214,6 +214,7 @@ public:
 	// Read once a second by game_sv_Single::coop_jump_alive_tick while a jump is active. Log-only.
 	u32 m_coop_updatecl = 0;
 	u32 m_coop_shedule = 0;
+	u32 m_coop_provoked_jump = 0;   // MP fork (§3.4 inc 3 test hook): one forced deactivation per jump, -coop_jump_provoke
 	u32 m_coop_diag_last_cl = 0;   // previous sample, per monster (the probe is per object, not global)
 	u32 m_coop_diag_last_sh = 0;
 	virtual void UpdateCL();

@@ -78,6 +78,7 @@ class CControlJump : public CControl_ComCustom<SControlJumpData>
 
 	// run-time params
 	u32 m_time_next_allowed;
+	bool m_coop_processing_held = false;   // MP fork (§3.4 inc 3 FIX): this control holds a processing reference for the jump
 	u32 m_coop_trace_last = 0; // MP fork (§3.4 inc 3 diagnostic): last COOP(jumpstate) sample, log-only
 	u32 m_time_started; // time jump started
 	float m_jump_time; // physical-counted time of jump

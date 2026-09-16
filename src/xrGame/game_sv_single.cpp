@@ -2581,7 +2581,21 @@ void game_sv_Single::coop_jump_alive_tick()
 			continue;
 		const u32 js = coop_jump_state(m->ID());
 		if (js == u32(-1) || !(js & 32))
+		{
+			m->m_coop_provoked_jump = 0;
 			continue;
+		}
+		// MP fork (§3.4 inc 3 TEST HOOK, -coop_jump_provoke, off by default): force the very path the sleeping physics island
+		// takes — ObjectProcessingDeactivate — while a jump is running, so the freeze can be reproduced deterministically
+		// instead of waiting for a 1-in-142 occurrence. Once per jump, after it has been running a moment.
+		static int s_provoke = -1;
+		if (s_provoke < 0) s_provoke = coop_param("-coop_jump_provoke") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+		if (s_provoke && !m->m_coop_provoked_jump && m->m_coop_updatecl)
+		{
+			m->m_coop_provoked_jump = Device.dwTimeGlobal;
+			m->ObjectProcessingDeactivate();
+			Msg("- COOP(jumpprovoke): %u t %u forced ObjectProcessingDeactivate during a running jump", m->ID(), Device.dwTimeGlobal);
+		}
 		Msg("- COOP(jumpalive): %u t %u js %u updatecl %u (+%d) shedule %u (+%d) processing %d needed %d t_min %u t_max %u locked %u scale %.3f pos %.3f,%.3f,%.3f",
 			m->ID(), Device.dwTimeGlobal, js, m->m_coop_updatecl, int(m->m_coop_updatecl - m->m_coop_diag_last_cl),
 			m->m_coop_shedule, int(m->m_coop_shedule - m->m_coop_diag_last_sh), m->processing_enabled() ? 1 : 0, m->shedule_Needed() ? 1 : 0,
