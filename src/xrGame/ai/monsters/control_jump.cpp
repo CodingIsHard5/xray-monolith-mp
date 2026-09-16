@@ -55,6 +55,22 @@ void CControlJump::coop_trace(LPCSTR tag)
 		if (Level().ObjectSpace.RayPick(from, dir, m_trace_ground_range, collide::rqtStatic, rq, m_object))
 			ray = (rq.range < m_trace_ground_range);
 	}
+	// v7 (Overseer, 2026-09-16): the decision parameters, once per jump at activate, so the fast/slow regimes can be compared on
+	// what the jump was ASKED to do — no already-logged parameter separates them (dev/harness/jump_regime_table.py over 98 jumps).
+	if (0 == xr_strcmp(tag, "activate"))
+	{
+		Fvector v;
+		v.set(0.f, 0.f, 0.f);
+		m_object->PHGetLinearVell(v);
+		const Fvector& tp = m_data.target_position;
+		const Fvector p = m_object->Position();
+		Msg("- COOP(jumpparam): %u t %u target %.3f,%.3f,%.3f dist %.2f dy %.2f force_factor %.3f flags 0x%x jump_factor %.3f "
+			"jump_time %.3f build_line %.2f trace_ground %.2f vel %.2f,%.2f,%.2f ground_valid %d prepare_valid %d glide_valid %d",
+			m_object->ID(), now, tp.x, tp.y, tp.z, p.distance_to(tp), tp.y - p.y, m_data.force_factor, m_data.flags.get(),
+			m_jump_factor, m_jump_time, m_build_line_distance, m_trace_ground_range, v.x, v.y, v.z,
+			m_data.state_ground.motion.valid() ? 1 : 0, m_data.state_prepare.motion.valid() ? 1 : 0,
+			m_data.state_glide.motion.valid() ? 1 : 0);
+	}
 	Msg("- COOP(jumpstate): %u t %u %s age %u anim_state %d prev %d bounced %d path_end %d on_path %d jump_time %.3f ground_gate %d ground_ray %d pos %.3f,%.3f,%.3f",
 		m_object->ID(), now, tag, m_time_started ? (now - m_time_started) : 0, int(m_anim_state_current), int(m_anim_state_prev),
 		m_velocity_bounced ? 1 : 0, m_man->path_builder().is_path_end(0.1f) ? 1 : 0, m_man->path_builder().is_moving_on_path() ? 1 : 0,
