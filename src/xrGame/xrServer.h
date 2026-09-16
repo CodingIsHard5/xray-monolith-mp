@@ -53,7 +53,9 @@ public:
 	Fvector m_coop_pose_pos = {0, 0, 0};
 	float m_coop_pose_yaw = 0;
 	float m_coop_pose_torso[3] = {0, 0, 0};   // yaw, pitch, roll
-	float m_coop_pose_hp = 1.f;               // §3.4 player proxy: the health the client reported with this pose
+	float m_coop_pose_hp = 1.f;               // §3.4: the health the client reported with this pose (read by the health-sync log)
+	float m_coop_hp_sent = -1.f;              // §3.4 health sync (A): the last server-body health sent to this owner, and when
+	u32 m_coop_hp_sent_t = 0;
 
 	// MP fork (§14 step 7 phase 4 D3.3 / doc §9.4): the health this client last reported, and
 	// when it last went DOWN. The M_CL_UPDATE peek already reads the health field and threw it

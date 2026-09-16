@@ -170,6 +170,12 @@ enum
 	// u16 n, then n x (u16 item, u8 direction 0 = the trader sells / 1 = the trader buys, u32 price; 0 = will not trade).
 	M_XRNET_COOP_TRADE_QUOTES,
 
+	// MP fork (design doc §3.4 player health, redesign (A)): server -> ONE client, the OWNER. The server body's health: the server is
+	// the only damage authority for a player (the client never applies a hit), so without this the owning client's health read only
+	// full or dead. Payload: u16 actor id, float health (> 0 only — death stays the GE_DIE path), u32 server timeServer() at send.
+	// Behind -coop_player_proxy. The client sets its own actor's health; it never sends anything back for it.
+	M_XRNET_COOP_HEALTH,
+
 	MSG_FORCEDWORD = u32(-1)
 };
 

@@ -2682,8 +2682,8 @@ void game_sv_Single::coop_player_posfeed_tick()
 	{
 		// DEFAULT OFF (Overseer ruling after SOAK): with the feed on, a claimed body at the spawn died silently on the server
 		// (no Die hook, client alive) — that must not reach a real session. -coop_player_posfeed enables it for measurement.
-		// The player proxy (-coop_player_proxy) is applied inside this tick, so it IMPLIES the feed (CodeRabbit: the proxy flag
-		// alone was a silent no-op — m_coop_proxy_body was never set).
+		// The player health sync (-coop_player_proxy) runs inside this tick, so it IMPLIES the feed (CodeRabbit on 2b00f069: the
+		// proxy flag alone was a silent no-op).
 		const bool proxy_implies = strstr(Core.Params, "-coop_player_proxy") != nullptr;
 		{
 			const char* const pf = strstr(Core.Params, "-coop_player_posfeed");
@@ -2731,29 +2731,37 @@ void game_sv_Single::coop_player_posfeed_tick()
 			se->o_model = yaw;
 			se->o_torso = torso;
 			const float gap = a->coop_apply_server_feed(pos, yaw, torso);
-			// §3.4 player proxy (-coop_player_proxy): the body applies no damage (CActor::Hit) and MIRRORS the health its client
-			// reports; a mirrored health at or below zero kills the server body with the last hit's initiator — never the reverse
-			static int s_proxy = -1;
-			if (s_proxy < 0)
+			// §3.4 player health, redesign (A) (-coop_player_proxy): the SERVER body is the only damage authority for a player (a client
+			// never applies a hit — its health read only full or dead), so the owner is told its server body's health, one way. Only a
+			// health above zero is sent: a death reaches the client by the existing GE_DIE path, so nothing dies twice. Sent on a change
+			// of more than 0.0005, and re-sent every 2 s (unreliable-safe), for a claimed, alive, driven body only.
+			static int s_sync = -1;
+			if (s_sync < 0)
 			{
-				s_proxy = strstr(Core.Params, "-coop_player_proxy") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
-				Msg("- COOP(proxy): server player-body proxy %s", s_proxy ? "ON (-coop_player_proxy)" : "OFF");
+				s_sync = strstr(Core.Params, "-coop_player_proxy") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+				Msg("- COOP(hpsync): server-to-owner player health sync %s", s_sync ? "ON (-coop_player_proxy)" : "OFF");
 			}
-			a->m_coop_proxy_body = s_proxy != 0;
-			if (s_proxy && _valid(hp))
+			const float shp = a->GetfHealth();
+			if (s_sync && _valid(shp) && shp > 0.f &&
+			    (_abs(shp - CL->m_coop_hp_sent) > 0.0005f || Device.dwTimeGlobal - CL->m_coop_hp_sent_t >= 2000))
 			{
-				const float before = a->GetfHealth();
-				if (hp > 0.f)
+				const bool changed = _abs(shp - CL->m_coop_hp_sent) > 0.0005f;
+				const u32 st = Level().timeServer();
+				NET_Packet P;
+				P.w_begin(M_XRNET_COOP_HEALTH);
+				P.w_u16(a->ID());
+				P.w_float(shp);
+				P.w_u32(st);
+				server->SendTo(CL->ID, P, net_flags(TRUE, TRUE));
+				if (changed)
 				{
-					if (_abs(before - hp) > 0.0005f)
-						a->SetfHealth(hp);
+					static u32 s_n = 0;
+					if (++s_n <= 2000 || (s_n % 100) == 1)
+						Msg("- COOP(hpsync): send actor %u t %u st %u health %.4f (was %.4f) client reports %.4f", u32(a->ID()), Device.dwTimeGlobal,
+							st, shp, CL->m_coop_hp_sent, hp);
 				}
-				else if (a->g_Alive())
-				{
-					Msg("- COOP(deathorder): server actor %u t %u mirrored client hp %.3f -> KillEntity by %d", u32(a->ID()),
-						Device.dwTimeGlobal, hp, a->m_coop_proxy_last_who == u16(-1) ? -1 : int(a->m_coop_proxy_last_who));
-					a->KillEntity(a->m_coop_proxy_last_who == u16(-1) ? a->ID() : a->m_coop_proxy_last_who, TRUE);
-				}
+				CL->m_coop_hp_sent = shp;
+				CL->m_coop_hp_sent_t = Device.dwTimeGlobal;
 			}
 			static u32 s_next_log = 0;
 			if (Device.dwTimeGlobal >= s_next_log)

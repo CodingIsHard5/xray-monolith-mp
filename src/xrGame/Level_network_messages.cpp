@@ -280,6 +280,36 @@ void CLevel::ClientReceive()
 				}
 			}
 			break;
+		case M_XRNET_COOP_HEALTH:
+			{
+				// MP fork (design doc §3.4 player health, redesign (A)): the server body's health for OUR actor. Applied only to the
+				// controlled actor, only while it is alive, and only above zero — a death arrives as GE_DIE, as before.
+				if (P->B.count - P->r_tell() >= sizeof(u16) + sizeof(float) + sizeof(u32))
+				{
+					const u16 id = P->r_u16();
+					const float h = P->r_float();
+					const u32 sent_st = P->r_u32();
+					CActor* const a = smart_cast<CActor*>(CurrentEntity());
+					const bool apply = a && a->ID() == id && a->g_Alive() && _valid(h) && h > 0.f;
+					const float before = a ? a->GetfHealth() : -2.f;
+					if (apply && _abs(before - h) > 0.0005f)
+					{
+						a->SetfHealth(h);
+						static u32 s_n = 0;
+						if (++s_n <= 2000 || (s_n % 100) == 1)
+							Msg("~ COOP(hpsync-cl): actor %u t %u st %u health %.4f (was %.4f) sent st %u", u32(id), Device.dwTimeGlobal,
+								timeServer(), h, before, sent_st);
+					}
+					else if (!apply)
+					{
+						static u32 s_skip = 0;
+						if (++s_skip <= 50 || (s_skip % 200) == 1)
+							Msg("~ COOP(hpsync-cl): skipped id %u health %.4f (controlled %d, alive %d)", u32(id), h,
+								a ? int(a->ID()) : -1, a ? int(a->g_Alive()) : -1);
+					}
+				}
+			}
+			break;
 		case M_XRNET_COOP_TRADE_REFUSED:
 			{
 				// MP fork (design doc §10.3 S2a.1): give back the money of a purchase the server refused.
