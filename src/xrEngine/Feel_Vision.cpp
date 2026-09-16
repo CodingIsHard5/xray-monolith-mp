@@ -37,6 +37,8 @@ namespace Feel
 		Vision::feel_visible_Item* item;
 		float vis;
 		float vis_threshold;
+		CObject* coop_blocker = nullptr;   // MP fork (§3.4 trace): the first object whose transparency cut vis (nullptr = geometry)
+		bool coop_geometry = false;
 
 		SFeelParam(Vision* _parent, Vision::feel_visible_Item* _item, float _vis_threshold) : parent(_parent),
 		                                                                                      item(_item), vis(1.f),
@@ -51,6 +53,12 @@ namespace Feel
 		SFeelParam* fp = (SFeelParam*)params;
 		float vis = fp->parent->feel_vision_mtl_transp(result.O, result.element);
 		fp->vis *= vis;
+		// the hit that takes visibility to or below the threshold names the blocker (CodeRabbit: not merely the first partial one)
+		if (fp->vis <= fp->vis_threshold && !fp->coop_blocker && !fp->coop_geometry)
+		{
+			if (result.O) fp->coop_blocker = result.O;
+			else fp->coop_geometry = true;
+		}
 		if (NULL == result.O && fis_zero(vis))
 		{
 			CDB::TRI* T = g_pGameLevel->ObjectSpace.GetStaticTris() + result.element;
@@ -296,6 +304,7 @@ namespace Feel
 				RD.flags = CDB::OPT_ONLYFIRST;
 
 				bool collision_found = false;
+				CObject const* coop_collider = nullptr;
 				xr_vector<ISpatial*>::const_iterator i = r_spatial.begin();
 				xr_vector<ISpatial*>::const_iterator e = r_spatial.end();
 				for (; i != e; ++i)
@@ -321,12 +330,29 @@ namespace Feel
 						continue;
 
 					collision_found = true;
+					coop_collider = object;
 					break;
 				}
 
 				if (collision_found)
 					feel_params.vis = 0.f;
 
+				if (feel_params.vis < feel_params.vis_threshold && m_owner && m_owner->ID() == g_coop_vistrace_owner)
+				{
+					// MP fork (§3.4 trace): name what blocked this ray — the q_ray collision object, else the RayQuery object whose
+					// material cut visibility, else level geometry, else the cached triangle from an earlier blocked ray
+					string128 by;
+					if (coop_collider)
+						xr_sprintf(by, "object %u %s (collision)", coop_collider->ID(), coop_collider->cNameSect_str());
+					else if (feel_params.coop_blocker)
+						xr_sprintf(by, "object %u %s (material)", feel_params.coop_blocker->ID(), feel_params.coop_blocker->cNameSect_str());
+					else if (feel_params.coop_geometry)
+						xr_strcpy(by, "level geometry");
+					else
+						xr_strcpy(by, "cached triangle (earlier geometry hit)");
+					Msg("- COOP(vistrace): owner %u t %u ray target %u vis %.3f threshold %.3f dist %.1f blocked by %s", m_owner->ID(),
+						Device.dwTimeGlobal, I->O->ID(), feel_params.vis, feel_params.vis_threshold, f, by);
+				}
 				if (feel_params.vis < feel_params.vis_threshold)
 				{
 					// INVISIBLE, choose next point
