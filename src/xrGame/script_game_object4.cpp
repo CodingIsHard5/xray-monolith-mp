@@ -444,6 +444,8 @@ void CScriptGameObject::stop_particles(LPCSTR pname, LPCSTR bone)
 		                                "Cant stop particles, bone [%s] is not visible now", bone);
 }
 
+void coop_log_script_health_write_ex(CEntityAlive* e, float value);   // MP fork (§3.4): defined in script_game_object.cpp
+
 //AVO: directly set entity health instead of going throuhg normal health property which operates on delta
 #ifdef GAME_OBJECT_TESTING_EXPORTS
 void CScriptGameObject::SetHealthEx(float hp)
@@ -451,6 +453,8 @@ void CScriptGameObject::SetHealthEx(float hp)
 	CEntity* obj = smart_cast<CEntity*>(&object());
 	if (!obj) return;
 	clamp(hp, -0.01f, 1.0f);
+	if (CEntityAlive* const ea = smart_cast<CEntityAlive*>(obj))
+		coop_log_script_health_write_ex(ea, hp);   // MP fork (§3.4, -coop_bodylog): measurement-only, see script_game_object.cpp
 	obj->SetfHealth(hp);
 }
 

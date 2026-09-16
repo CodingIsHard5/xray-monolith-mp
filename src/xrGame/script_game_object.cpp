@@ -129,8 +129,58 @@ BIND_FUNCTION10(&object(), CScriptGameObject::GetFOV, CEntityAlive, ffGetFov, fl
 BIND_FUNCTION10(&object(), CScriptGameObject::GetRange, CEntityAlive, ffGetRange, float, -1);
 
 BIND_FUNCTION10(&object(), CScriptGameObject::GetHealth, CEntityAlive, conditions().GetHealth, float, -1);
-BIND_FUNCTION01(&object(), CScriptGameObject::SetHealth, CEntityAlive, conditions().SetHealth, float, float);
-BIND_FUNCTION01(&object(), CScriptGameObject::ChangeHealth, CEntityAlive, conditions().ChangeHealth, float, float);
+// MP fork (§3.4 scope 1 follow-up, -coop_bodylog, MEASUREMENT-ONLY): a Lua write of a PLAYER's server-body health is logged with
+// the writer's Lua traceback, so a health step with no hit and no condition cause is named by the script that wrote it. On the
+// dedicated server db.actor is a real player's body, and GAMMA's single-actor scripts write actor health directly. The writes
+// themselves are unchanged (the same conditions() calls the stock BIND_FUNCTION01 lines made).
+static void coop_log_script_health_write(CEntityAlive* e, const char* what, float value)
+{
+	static int s_on = -1;
+	if (s_on < 0) s_on = (xr_enet::enabled() && ai().get_alife() && strstr(Core.Params, "-coop_bodylog")) ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+	if (!s_on || !smart_cast<CActor*>(e))
+		return;
+	string2048 tb = "";
+	lua_State* const L = ai().script_engine().lua();
+	if (L)
+	{
+		lua_Debug ar;
+		for (int i = 0; i < 12 && lua_getstack(L, i, &ar); ++i)
+		{
+			lua_getinfo(L, "nSl", &ar);
+			string256 frame;
+			xr_sprintf(frame, " <- %s:%d %s", ar.short_src, ar.currentline, ar.name ? ar.name : "?");
+			xr_strcat(tb, frame);
+		}
+	}
+	Msg("- COOP(bodylog): %u t %u script %s %.4f hp_before %.4f traceback%s", e->ID(), Device.dwTimeGlobal, what, value,
+		e->conditions().GetHealth(), tb[0] ? tb : " (none: not called from the main Lua state)");
+}
+
+void coop_log_script_health_write_ex(CEntityAlive* e, float value) { coop_log_script_health_write(e, "set_health_ex", value); }
+
+void CScriptGameObject::SetHealth(float f)
+{
+	CEntityAlive* const l_tpEntity = smart_cast<CEntityAlive*>(&object());
+	if (!l_tpEntity)
+	{
+		ai().script_engine().script_log(ScriptStorage::eLuaMessageTypeError, "CEntityAlive : cannot access class member CScriptGameObject::SetHealth!");
+		return;
+	}
+	coop_log_script_health_write(l_tpEntity, "health=", f);
+	l_tpEntity->conditions().SetHealth(f);
+}
+
+void CScriptGameObject::ChangeHealth(float f)
+{
+	CEntityAlive* const l_tpEntity = smart_cast<CEntityAlive*>(&object());
+	if (!l_tpEntity)
+	{
+		ai().script_engine().script_log(ScriptStorage::eLuaMessageTypeError, "CEntityAlive : cannot access class member CScriptGameObject::ChangeHealth!");
+		return;
+	}
+	coop_log_script_health_write(l_tpEntity, "change_health", f);
+	l_tpEntity->conditions().ChangeHealth(f);
+}
 
 BIND_FUNCTION10(&object(), CScriptGameObject::GetPsyHealth, CEntityAlive, conditions().GetPsyHealth, float, -1);
 BIND_FUNCTION01(&object(), CScriptGameObject::SetPsyHealth, CEntityAlive, conditions().SetPsyHealth, float, float);
