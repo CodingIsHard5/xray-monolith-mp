@@ -70,6 +70,14 @@ void CControlJump::coop_trace(LPCSTR tag)
 			m_jump_factor, m_jump_time, m_build_line_distance, m_trace_ground_range, v.x, v.y, v.z,
 			m_data.state_ground.motion.valid() ? 1 : 0, m_data.state_prepare.motion.valid() ? 1 : 0,
 			m_data.state_glide.motion.valid() ? 1 : 0);
+		// §3.4 inc 3a (Overseer, name the enemy): what the jump was aimed at, and whom the monster's own AI is fighting.
+		// A point jump has no target object; a monster with no current enemy logs none.
+		const CObject* tobj = m_data.target_object;
+		const CEntityAlive* enemy = m_object->EnemyMan.get_enemy();
+		Msg("- COOP(jumptarget): %u t %u target_obj %d %s %.2f enemy %d %s %.2f",
+			m_object->ID(), now,
+			tobj ? int(tobj->ID()) : -1, tobj ? tobj->cNameSect().c_str() : "none", tobj ? p.distance_to(tobj->Position()) : -1.f,
+			enemy ? int(enemy->ID()) : -1, enemy ? enemy->cNameSect().c_str() : "none", enemy ? p.distance_to(enemy->Position()) : -1.f);
 	}
 	Msg("- COOP(jumpstate): %u t %u %s age %u anim_state %d prev %d bounced %d path_end %d on_path %d jump_time %.3f ground_gate %d ground_ray %d pos %.3f,%.3f,%.3f",
 		m_object->ID(), now, tag, m_time_started ? (now - m_time_started) : 0, int(m_anim_state_current), int(m_anim_state_prev),
