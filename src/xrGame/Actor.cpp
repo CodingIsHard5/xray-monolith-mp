@@ -579,6 +579,8 @@ static int coop_bodylog()
 	return s_on;
 }
 
+u8 CActor::s_coop_hit_path = 0;
+
 void CActor::Hit(SHit* pHDS)
 {
 	if (coop_bodylog() && pHDS)
@@ -587,9 +589,9 @@ void CActor::Hit(SHit* pHDS)
 		++m_coop_bodylog_hits;
 		m_coop_bodylog_last_hit_t = Device.dwTimeGlobal;
 		m_coop_bodylog_last_who = who ? who->ID() : u16(-1);
-		Msg("- COOP(bodylog): %u t %u hit by %d %s type %d power %.4f bone %u hp_before %.4f pos %.2f,%.2f,%.2f alive %d",
+		Msg("- COOP(bodylog): %u t %u hit by %d %s type %d power %.4f bone %u hp_before %.4f pos %.2f,%.2f,%.2f alive %d path %u",
 			ID(), Device.dwTimeGlobal, who ? int(who->ID()) : -1, who ? who->cNameSect().c_str() : "none", int(pHDS->hit_type),
-			pHDS->power, u32(pHDS->boneID), GetfHealth(), Position().x, Position().y, Position().z, g_Alive() ? 1 : 0);
+			pHDS->power, u32(pHDS->boneID), GetfHealth(), Position().x, Position().y, Position().z, g_Alive() ? 1 : 0, u32(s_coop_hit_path));
 	}
 
 	bool b_initiated = pHDS->aim_bullet; // physics strike by poltergeist

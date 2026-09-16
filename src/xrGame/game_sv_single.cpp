@@ -2810,6 +2810,11 @@ void game_sv_Single::coop_player_posfeed_tick()
 					a->SetfHealth(h0);
 			}
 			const float shp = a->GetfHealth();
+			// the CSE carries the authoritative health too: a claimed body's CSE was never written (the server's own export is refused
+			// for it and the client's update carries pose only), so the disconnect snapshot, the recovery sampler and saves held a stale
+			// value (hpsync_return fixed: handed back 1.00 for a player at 0.60)
+			if (s_sync && _valid(shp) && shp > 0.f && _abs(se->get_health() - shp) > 0.0005f)
+				se->set_health(shp);
 			if (s_sync && _valid(shp) && shp > 0.f &&
 			    (_abs(shp - CL->m_coop_hp_sent) > 0.0005f || Device.dwTimeGlobal - CL->m_coop_hp_sent_t >= 2000))
 			{

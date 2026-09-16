@@ -1,5 +1,6 @@
 #include "pch_script.h"
 #include "GameObject.h"
+#include "Actor.h"   // MP fork (§3.4 (A)): CActor::s_coop_hit_path
 //#include "../Include/xrRender/RenderVisual.h"
 #include "../Include/xrRender/RenderVisual.h"
 #include "../xrphysics/PhysicsShell.h"
@@ -241,7 +242,9 @@ void CGameObject::OnEvent(NET_Packet& P, u16 type)
 				break;
 			}
 			SetHitInfo(Hitter, Weapon, HDS.bone(), HDS.p_in_bone_space, HDS.dir);
+			CActor::s_coop_hit_path = 2;   // MP fork (§3.4 (A), measurement): this delivery is CGameObject::OnEvent(GE_HIT)
 			Hit(&HDS);
+			CActor::s_coop_hit_path = 0;
 			//---------------------------------------------------------------------------
 			if (GameID() != eGameIDSingle)
 			{

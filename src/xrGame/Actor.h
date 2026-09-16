@@ -687,6 +687,9 @@ public:
 	// MP fork (§3.4 player position feed): the dedicated server's copy of this player's CSE position and facing (game thread only).
 	// Returns how far the object was from that position before the copy.
 	float coop_apply_server_feed(const Fvector& pos, float model_yaw, const SRotation& torso);
+	// MP fork (§3.4 redesign (A), MEASUREMENT-ONLY): which caller delivered the current Hit — 1 the §19 GAME_EVENT_ON_HIT hit-apply,
+	// 2 CGameObject::OnEvent(GE_HIT), 0 any other direct call; set around the call and logged by -coop_bodylog
+	static u8 s_coop_hit_path;
 	// MP fork (§3.4 scope 1 follow-up, -coop_bodylog, MEASUREMENT-ONLY): hits and health changes on a player's SERVER body
 	float m_coop_bodylog_hp = -2.f;
 	u32 m_coop_bodylog_hits = 0;

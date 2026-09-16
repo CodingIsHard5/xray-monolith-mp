@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "Actor.h"   // MP fork (§3.4 (A))
 #include "../xrNetServer/xr_enet_transport.h"   // MP fork (§19 co-op): xr_enet::enabled()
 #include "LevelGameDef.h"
 #include "script_process.h"
@@ -872,7 +873,9 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 
 					target->SetHitInfo(hit.who, Level().Objects.net_Find(hit.weaponID), hit.bone(),
 					                   hit.p_in_bone_space, hit.dir);
+					CActor::s_coop_hit_path = 1;   // MP fork (§3.4 (A), measurement): the §19 hit-apply
 					target->Hit(&hit);
+					CActor::s_coop_hit_path = 0;
 
 					// MP fork (§19 co-op): guarantee the damage and the death. On the headless
 					// server the stock chain is unreliable: Hit() feeds a delta that
@@ -886,7 +889,24 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 					if (target_ea && target_ea->g_Alive())
 					{
 						const float hp_mid = target_ea->GetfHealth();
-						if (hp_mid >= hp_pre - EPS_L)
+						// MP fork (§3.4 redesign (A), -coop_player_proxy): ONE damage application per bite on a PLAYER body. The fallback
+						// below exists because a server-owned NPC's condition deltas never applied on the headless server (Local()
+						// gate); a player's server body is not that case — its CActor::Hit -> conditions path applies the engine's
+						// damage model (outfit and helmet immunities, bone armour, belt artefacts, wounds), and in FIXED (A) it applied
+						// alongside this flat min(power,2)*0.5 copy: every bite twice. For a claimed player body the fallback is skipped.
+						static int s_proxy = -1;
+						if (s_proxy < 0) s_proxy = strstr(Core.Params, "-coop_player_proxy") ? 1 : 0;   // plain literal: App. B key drift check
+						const CSE_Abstract* const dest_e = get_entity_from_eid(id_dest);
+						const bool player_body = s_proxy && smart_cast<CActor*>(target_ea) && dest_e && dest_e->owner &&
+							dest_e->owner != m_server->GetServerClient();
+						if (player_body && hp_mid >= hp_pre - EPS_L)
+						{
+							static u32 s_skip = 0;
+							if (++s_skip <= 50 || (s_skip % 200) == 1)
+								Msg("- COOP(hitpath): §19 fallback skipped for player body %u (power %.4f; the engine conditions apply it) (%u so far)",
+									u32(id_dest), hit.power, s_skip);
+						}
+						else if (hp_mid >= hp_pre - EPS_L)
 						{
 							const float dmg = _min(hit.power, 2.0f) * 0.5f;
 							target_ea->SetfHealth(hp_pre - dmg);
@@ -1004,7 +1024,17 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 				CEntityAlive* const ea = obj ? smart_cast<CEntityAlive*>(obj) : NULL;
 				if (ea)
 				{
-					ea->SetfHealth(ea->GetMaxHealth());
+					// MP fork (§3.4 redesign (A)): the server body is the damage authority, so its revive must reset what the client's
+					// revive resets (CActor::coop_respawn): pending condition deltas, radiation, psy health, WOUNDS/bleeding — FIXED (A)
+					// measured bleeding at the 10.0 cap across revives and lives of 7-18 s. And its health is the respawn's health (the
+					// checkpoint's when there is one), not max: the health sync pushes this value to the player.
+					if (CActor* const act = smart_cast<CActor*>(ea))
+					{
+						act->conditions().coop_reset_for_revive();
+						Msg("- COOP(respawn-sv): actor %u server-body conditions reset (deltas, radiation 0, psy 1, wounds cleared), health %.2f",
+							actor_id, spawn_health);
+					}
+					ea->SetfHealth(spawn_health > 0.f ? spawn_health : ea->GetMaxHealth());
 					ea->Position().set(spawn_pos);
 					// Clear death state so the entity is considered alive again
 					ea->m_level_death_time = 0;
