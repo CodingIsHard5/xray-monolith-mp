@@ -2553,6 +2553,53 @@ void coop_npc_cap_exempt(u16 id, bool on)
 // monster's per-frame and scheduled updates are still running at all, and the scheduler state around them.
 u32 coop_jump_state(u16 id);   // ai/monsters/control_manager_custom.cpp; bit 5 = a jump is running
 
+// MP fork (§3.4/§16.3 camera-fallback measurement): MEASUREMENT-ONLY. One line describing how the scheduler rates this creature
+// right now: the scale it would get (peeked, no tick counted), the NPC cap class, the server's camera point and the distance
+// to it, the distance to the nearest connected player (the cap's own source, CL->owner->o_Position), t_min/t_max, the interval
+// xrSheduler.cpp derives from them, and the update counters. Empty string outside co-op or for a non-CCustomMonster id.
+LPCSTR coop_sched_probe(u16 id)
+{
+	static string512 buf;
+	buf[0] = 0;
+	if (!xr_enet::enabled() || !g_pGameLevel || !Level().Server)
+		return buf;
+	CCustomMonster* const m = smart_cast<CCustomMonster*>(Level().Objects.net_Find(id));
+	if (!m)
+		return buf;
+	struct nearest_player
+	{
+		xrServer* server;
+		Fvector at;
+		float d;
+		void operator()(IClient* client)
+		{
+			xrClientData* const CL = static_cast<xrClientData*>(client);
+			if (CL != server->GetServerClient() && CL->owner)
+				d = _min(d, CL->owner->o_Position.distance_to(at));
+		}
+	} np;
+	np.server = Level().Server;
+	np.at = m->Position();
+	np.d = flt_max;
+	Level().Server->ForEachClientDo(np);
+	const float scale = m->coop_sched_scale_peek();
+	const u32 dwMin = _max(u32(30), m->shedule.t_min);
+	const u32 dwMax = (1000 + m->shedule.t_max) / 2;
+	u32 dwUpdate = dwMin + iFloor(float(dwMax - dwMin) * scale);
+	clamp(dwUpdate, u32(_max(dwMin, u32(20))), dwMax);
+	const Fvector& cam = Device.vCameraPosition;
+	string32 near_s;
+	if (np.d < flt_max)
+		xr_sprintf(near_s, "%.1f", np.d);
+	else
+		xr_strcpy(near_s, "none");
+	xr_sprintf(buf, "alive %d class %u scale %.3f cam %.1f,%.1f,%.1f cam_dist %.1f near_player %s t_min %u t_max %u interval_ms %u updatecl %u shedule %u pos %.1f,%.1f,%.1f",
+		m->g_Alive() ? 1 : 0, u32(m->m_coop_npccap_class), scale, cam.x, cam.y, cam.z, cam.distance_to(m->Position()),
+		near_s, u32(m->shedule.t_min), u32(m->shedule.t_max), dwUpdate,
+		m->m_coop_updatecl, m->m_coop_shedule, m->Position().x, m->Position().y, m->Position().z);
+	return buf;
+}
+
 void game_sv_Single::coop_jump_alive_tick()
 {
 	if (!xr_enet::enabled() || !ai().get_alife() || !g_pGameLevel || !m_server)

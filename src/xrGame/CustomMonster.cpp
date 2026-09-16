@@ -1558,6 +1558,21 @@ void CCustomMonster::OnHUDDraw(CCustomHUD *hud)
 // MP fork (design doc §16.3): see CustomMonster.h. FULL and EXEMPT run at the fastest scheduler rate, THROTTLED at the slowest.
 bool CCustomMonster::s_coop_npccap_apply = false;
 
+float CCustomMonster::coop_sched_scale_peek()
+{
+	// mirrors shedule_Scale below (minus the tick count); keep the two in step
+	if (m_coop_jump_sched_hold && g_Alive())
+		return 0.f;
+	if (s_coop_npccap_apply)
+	{
+		if (m_coop_npccap_class == 1 || m_coop_npccap_class == 3)
+			return 0.f;
+		if (m_coop_npccap_class == 2)
+			return 1.f;
+	}
+	return inherited::shedule_Scale();
+}
+
 float CCustomMonster::shedule_Scale()
 {
 	++m_coop_sched_ticks;

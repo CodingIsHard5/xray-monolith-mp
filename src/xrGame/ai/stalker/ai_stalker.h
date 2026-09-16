@@ -832,6 +832,7 @@ public:
 
 public:
 	virtual float shedule_Scale();
+	virtual float coop_sched_scale_peek();   // MP fork (§3.4/§16.3 measurement): mirrors shedule_Scale, no tick
 
 private:
 	bool m_sniper_update_rate;

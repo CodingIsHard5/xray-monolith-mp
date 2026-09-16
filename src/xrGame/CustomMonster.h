@@ -208,6 +208,9 @@ public:
 	// MP fork (design doc §16.3): the scheduler asks this once per update. The co-op server's NPC cap sets the class; stock
 	// behaviour (distance to the camera) otherwise. The call count is the cap's measurement of updates per NPC.
 	virtual float shedule_Scale();
+	// MP fork (§3.4/§16.3 camera-fallback measurement): the scale shedule_Scale would return, WITHOUT counting a tick (the
+	// cap's updates/s metric counts shedule_Scale calls). Measurement-only; read by coop_sched_probe (game_sv_single.cpp).
+	virtual float coop_sched_scale_peek();
 	u8  m_coop_npccap_class = 0;       // 0 unclassified/outside, 1 full, 2 throttled, 3 exempt (story)
 	u8  m_coop_npccap_prev = 0;        // the class during the last classification interval (metrics)
 	u32 m_coop_sched_ticks = 0;

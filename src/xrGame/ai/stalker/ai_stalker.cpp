@@ -1812,6 +1812,13 @@ void CAI_Stalker::on_after_change_team()
 	agent_manager().member().register_in_combat(this);
 }
 
+float CAI_Stalker::coop_sched_scale_peek()
+{
+	if (!sniper_update_rate())
+		return (inherited::coop_sched_scale_peek());
+	return (0.f);
+}
+
 float CAI_Stalker::shedule_Scale()
 {
 	if (!sniper_update_rate())
