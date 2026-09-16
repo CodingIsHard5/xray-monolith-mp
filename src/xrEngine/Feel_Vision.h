@@ -11,6 +11,8 @@ class ISpatial;
 // MP fork (§3.4 player acquisition, o_new/o_delete trace): MEASUREMENT-ONLY. When a Vision owner's ID equals this, its candidate
 // additions/removals and (once a second) every feel_visible item are logged. 0xFFFF = off. Set by coop_vistrace (level_script.cpp).
 extern ENGINE_API u16 g_coop_vistrace_owner;
+extern ENGINE_API u16 g_coop_vistrace_owner2;   // a second traced owner (two creatures traced in one run)
+inline bool coop_vistrace_is(u16 id) { return id == g_coop_vistrace_owner || id == g_coop_vistrace_owner2; }
 
 namespace Feel
 {

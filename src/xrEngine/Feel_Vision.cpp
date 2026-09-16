@@ -10,6 +10,7 @@
 #include "../Include/xrRender/Kinematics.h"
 
 ENGINE_API u16 g_coop_vistrace_owner = u16(-1);
+ENGINE_API u16 g_coop_vistrace_owner2 = u16(-1);
 
 static void coop_vistrace_obj(const char* what, CObject const* owner, CObject* O, u16 bone_id, const Fvector& cp)
 {
@@ -94,13 +95,13 @@ namespace Feel
 		I.fuzzy = -EPS_S;
 		I.cp_LP = O->get_new_local_point_on_mesh(I.bone_id);
 		I.cp_LAST = O->get_last_local_point_on_mesh(I.cp_LP, I.bone_id);
-		if (m_owner && m_owner->ID() == g_coop_vistrace_owner)
+		if (m_owner && coop_vistrace_is(m_owner->ID()))
 			coop_vistrace_obj("new", m_owner, O, I.bone_id, I.cp_LP);
 	}
 
 	void Vision::o_delete(CObject* O)
 	{
-		if (m_owner && m_owner->ID() == g_coop_vistrace_owner)
+		if (m_owner && coop_vistrace_is(m_owner->ID()))
 			Msg("- COOP(vistrace): owner %u t %u delete target %u", m_owner->ID(), Device.dwTimeGlobal, O->ID());
 		xr_vector<feel_visible_Item>::iterator I = feel_visible.begin(), TE = feel_visible.end();
 		for (; I != TE; I++)
@@ -212,10 +213,13 @@ namespace Feel
 			Vision* v;
 			~coop_trace_dump()
 			{
-				static u32 s_next = 0;
-				if (!v->m_owner || v->m_owner->ID() != g_coop_vistrace_owner || Device.dwTimeGlobal < s_next)
+				static u32 s_next[2] = {0, 0};   // one rate limit per traced owner
+				if (!v->m_owner || !coop_vistrace_is(v->m_owner->ID()))
 					return;
-				s_next = Device.dwTimeGlobal + 1000;
+				const int k = v->m_owner->ID() == g_coop_vistrace_owner ? 0 : 1;
+				if (Device.dwTimeGlobal < s_next[k])
+					return;
+				s_next[k] = Device.dwTimeGlobal + 1000;
 				Msg("- COOP(vistrace): owner %u t %u items %u seen %u query %u", v->m_owner->ID(), Device.dwTimeGlobal,
 					u32(v->feel_visible.size()), u32(v->seen.size()), u32(v->query.size()));
 				for (xr_vector<feel_visible_Item>::iterator it = v->feel_visible.begin(); it != v->feel_visible.end(); ++it)
@@ -337,7 +341,7 @@ namespace Feel
 				if (collision_found)
 					feel_params.vis = 0.f;
 
-				if (feel_params.vis < feel_params.vis_threshold && m_owner && m_owner->ID() == g_coop_vistrace_owner)
+				if (feel_params.vis < feel_params.vis_threshold && m_owner && coop_vistrace_is(m_owner->ID()))
 				{
 					// MP fork (§3.4 trace): name what blocked this ray — the q_ray collision object, else the RayQuery object whose
 					// material cut visibility, else level geometry, else the cached triangle from an earlier blocked ray
