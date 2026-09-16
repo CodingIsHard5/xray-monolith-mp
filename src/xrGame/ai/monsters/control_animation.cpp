@@ -4,6 +4,7 @@
 #include "control_manager.h"
 #include "profiler.h"
 #include "../../../xrNetServer/xr_enet_transport.h"   // MP fork: xr_enet::enabled() (melee measurement gate)
+#include "control_animation_base.h"                   // MP fork: GetAnimTranslation (melee measurement motion names)
 
 //#ifdef _DEBUG
 //#include "control_animation_base.h"
@@ -111,6 +112,12 @@ void CControlAnimation::play()
 	}
 }
 
+static shared_str coop_motion_name(CBaseMonster* o, const MotionID& m)
+{
+	shared_str n = o->anim().GetAnimTranslation(m);
+	return n.size() ? n : shared_str("?");
+}
+
 static int coop_meleediag()
 {
 	static int s_on = -1;
@@ -130,7 +137,7 @@ void CControlAnimation::coop_melee_part_started(SAnimationPart& part)
 			for (ANIMATION_EVENT_VEC_IT e = pit->second.begin(); e != pit->second.end(); ++e)
 				if (!e->handled)
 					Msg("- COOP(melee-miss): %u t %u part %d motion %s event %u time_perc %.3f played_ms %u len_ms %u", m_object->ID(),
-						Device.dwTimeGlobal, k, m_skeleton_animated->LL_MotionDefName_dbg(m_coop_prev_motion[k]).first, e->event_id,
+						Device.dwTimeGlobal, k, coop_motion_name(m_object, m_coop_prev_motion[k]).c_str(), e->event_id,
 						e->time_perc, Device.dwTimeGlobal - m_coop_prev_start[k], m_coop_prev_len_ms[k]);
 	}
 	m_coop_prev_motion[k] = part.get_motion();
@@ -139,7 +146,7 @@ void CControlAnimation::coop_melee_part_started(SAnimationPart& part)
 	ANIMATION_EVENT_MAP_IT it = m_anim_events.find(part.get_motion());
 	if (it != m_anim_events.end() && part.blend)
 		Msg("- COOP(melee-anim): %u t %u part %d motion %s len_ms %u events %u", m_object->ID(), Device.dwTimeGlobal, k,
-			m_skeleton_animated->LL_MotionDefName_dbg(part.get_motion()).first, m_coop_prev_len_ms[k], u32(it->second.size()));
+			coop_motion_name(m_object, part.get_motion()).c_str(), m_coop_prev_len_ms[k], u32(it->second.size()));
 }
 
 void CControlAnimation::play_part(SAnimationPart& part, PlayCallback callback)
@@ -237,7 +244,7 @@ void CControlAnimation::check_events(SAnimationPart& part)
 					{
 						const float len_ms = (part.blend->timeTotal / part.blend->speed) * 1000.f;
 						Msg("- COOP(melee): %u t %u motion %s event %u time_perc %.3f cur_perc %.3f len_ms %.0f delay_ms %.0f", m_object->ID(),
-							Device.dwTimeGlobal, m_skeleton_animated->LL_MotionDefName_dbg(part.get_motion()).first, event.event_id,
+							Device.dwTimeGlobal, coop_motion_name(m_object, part.get_motion()).c_str(), event.event_id,
 							event.time_perc, cur_perc, len_ms, (cur_perc - event.time_perc) * len_ms);
 					}
 

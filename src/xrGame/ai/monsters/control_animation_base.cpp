@@ -729,6 +729,9 @@ void CControlAnimationBase::AA_reload(LPCSTR section)
 	{
 		anim.motion = skel_animated->LL_MotionID(anim_name);
 		if (!anim.motion.valid()) continue;
+		// MP fork (§3.4/§16.3 melee measurement): name the attack motion for the -coop_meleediag logs (the engine's own motion-name
+		// lookup LL_MotionDefName_dbg exists only in DEBUG builds); map insert leaves an existing translation untouched
+		AddAnimTranslation(anim.motion, anim_name);
 
 		// check if it is compound (if there is one item, mean it as a section)
 		if (_GetItemCount(val) == 1)
