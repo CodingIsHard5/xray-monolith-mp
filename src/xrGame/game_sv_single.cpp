@@ -2682,12 +2682,16 @@ void game_sv_Single::coop_player_posfeed_tick()
 	{
 		// DEFAULT OFF (Overseer ruling after SOAK): with the feed on, a claimed body at the spawn died silently on the server
 		// (no Die hook, client alive) — that must not reach a real session. -coop_player_posfeed enables it for measurement.
+		// The player proxy (-coop_player_proxy) is applied inside this tick, so it IMPLIES the feed (CodeRabbit: the proxy flag
+		// alone was a silent no-op — m_coop_proxy_body was never set).
+		const bool proxy_implies = strstr(Core.Params, "-coop_player_proxy") != nullptr;
 		{
 			const char* const pf = strstr(Core.Params, "-coop_player_posfeed");
-			s_off = (pf && strncmp(pf, "-coop_player_posfeed_off", 24) != 0) ? 0 : 1;
+			s_off = ((pf && strncmp(pf, "-coop_player_posfeed_off", 24) != 0) || proxy_implies) ? 0 : 1;
 		}
 		if (xr_enet::enabled())
-			Msg("- COOP(posfeed): server player-object position feed %s", s_off ? "OFF (default; -coop_player_posfeed enables)" : "ON (-coop_player_posfeed)");
+			Msg("- COOP(posfeed): server player-object position feed %s", s_off ? "OFF (default; -coop_player_posfeed enables)"
+				: (proxy_implies ? "ON (-coop_player_posfeed, or implied by -coop_player_proxy)" : "ON (-coop_player_posfeed)"));
 	}
 	if (s_off || !xr_enet::enabled() || !m_server || !g_pGameLevel || !ai().get_alife())
 		return;
