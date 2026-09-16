@@ -2674,15 +2674,20 @@ LPCSTR coop_sched_probe(u16 id)
 // while the CSE matched it exactly). Every server-side reader of the object — feel_vision, EnemyMan, melee distance checks — then
 // looks at the spawn. Here, on the GAME thread and from the CSE only (never net_Import on the pump thread, never the export
 // writeback), each claimed, driven, alive player body gets its position and facing copied onto the server CActor every tick, with
-// the physics movement and the spatial entry updated in the same tick. -coop_player_posfeed_off keeps the stale object (control).
+// the physics movement and the spatial entry updated in the same tick. DEFAULT OFF; -coop_player_posfeed enables it.
 void game_sv_Single::coop_player_posfeed_tick()
 {
 	static int s_off = -1;
 	if (s_off < 0)
 	{
-		s_off = strstr(Core.Params, "-coop_player_posfeed_off") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+		// DEFAULT OFF (Overseer ruling after SOAK): with the feed on, a claimed body at the spawn died silently on the server
+		// (no Die hook, client alive) — that must not reach a real session. -coop_player_posfeed enables it for measurement.
+		{
+			const char* const pf = strstr(Core.Params, "-coop_player_posfeed");
+			s_off = (pf && strncmp(pf, "-coop_player_posfeed_off", 24) != 0) ? 0 : 1;
+		}
 		if (xr_enet::enabled())
-			Msg("- COOP(posfeed): server player-object position feed %s", s_off ? "OFF (-coop_player_posfeed_off)" : "ON (default)");
+			Msg("- COOP(posfeed): server player-object position feed %s", s_off ? "OFF (default; -coop_player_posfeed enables)" : "ON (-coop_player_posfeed)");
 	}
 	if (s_off || !xr_enet::enabled() || !m_server || !g_pGameLevel || !ai().get_alife())
 		return;
