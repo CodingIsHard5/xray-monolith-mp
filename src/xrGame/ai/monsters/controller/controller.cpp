@@ -455,7 +455,7 @@ void CController::UpdateCL()
 			xr_delete(m_sndShockEffector);
 	}
 
-	if (active_control_fx)
+	if (active_control_fx && CurrentGameUI())   // MP fork (§3.4): no game UI on the dedicated server (same NULL as base_monster_feel.cpp)
 	{
 		u32 time_to_show = 150;
 		float percent = float((Device.dwTimeGlobal - time_control_hit_started)) / float(time_to_show);

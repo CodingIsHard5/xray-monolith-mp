@@ -111,7 +111,10 @@ void CBaseMonster::HitEntity(const CEntity* pEntity, float fDamage, float impuls
 		HS.Write_Packet(l_P);
 		u_EventSend(l_P);
 
-		if (pEntityNC == Actor() && draw_hit_marks)
+		// MP fork (§3.4): the block below is the LOCAL player's presentation (claw-mark HUD static, accel lock, camera effectors). On
+		// the dedicated server there is no game UI and Actor() is the save actor (object 0): a monster's bite on it read a field off the
+		// NULL CurrentGameUI() and killed the server (facing-1, AV in CUIGameCustom::AddCustomStatic from HitEntity).
+		if (pEntityNC == Actor() && draw_hit_marks && CurrentGameUI())
 		{
 			START_PROFILE("BaseMonster/Animation/HitEntity")
 				;
