@@ -1561,6 +1561,11 @@ bool CCustomMonster::s_coop_npccap_apply = false;
 float CCustomMonster::shedule_Scale()
 {
 	++m_coop_sched_ticks;
+	// MP fork (§3.4 slow-jump fix): a monster with a running jump is scheduled at full rate, whatever the NPC cap class or the stock
+	// distance schedule says (the jump's prepare phase advances per update; throttled, it ran ~9 s and exited ground_path_failed).
+	// Like story NPCs, it is exempt; the hold ends with the jump (CControlJump::on_release). Dead monsters are never held.
+	if (m_coop_jump_sched_hold && g_Alive())
+		return 0.f;
 	if (s_coop_npccap_apply)
 	{
 		if (m_coop_npccap_class == 1 || m_coop_npccap_class == 3)

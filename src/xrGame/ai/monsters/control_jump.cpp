@@ -147,6 +147,15 @@ void CControlJump::activate()
 			m_coop_processing_held = true;
 		}
 	}
+	// MP fork (§3.4 slow-jump fix): exempt the jumping monster from update throttling for the jump's lifetime.
+	// -coop_jumpthrottle_off keeps the old scheduling (control arm).
+	if (xr_enet::enabled() && m_object)
+	{
+		static int s_thr_off = -1;
+		if (s_thr_off < 0) s_thr_off = strstr(Core.Params, "-coop_jumpthrottle_off") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+		if (!s_thr_off)
+			m_object->m_coop_jump_sched_hold = true;
+	}
 	m_man->capture_pure(this);
 	m_man->subscribe(this, ControlCom::eventAnimationEnd);
 	m_man->subscribe(this, ControlCom::eventAnimationStart);
@@ -177,6 +186,8 @@ void CControlJump::on_release()
 		m_object->processing_deactivate();
 		m_coop_processing_held = false;
 	}
+	if (m_object)
+		m_object->m_coop_jump_sched_hold = false;   // §3.4 slow-jump fix: the throttle exemption ends with the jump
 	m_man->unlock(this, ControlCom::eControlPath);
 
 	SControlDirectionData* ctrl_data_dir = (SControlDirectionData*)m_man->data(this, ControlCom::eControlDir);

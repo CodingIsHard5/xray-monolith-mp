@@ -141,6 +141,9 @@ public:
 	// its position as a coop_puppet. Default false = today's dense streaming (zero regression).
 	// INCREMENT A: the flag + accessors exist and are Lua-settable, but NOTHING reads it yet —
 	// the shedule_Update/UpdateCL/AI-call gates land in increment B. So this is a pure no-op.
+	// MP fork (§3.4 slow-jump fix): set by CControlJump while a jump holds the pure capture. shedule_Scale returns 0 for it, so a
+	// running jump is never update-throttled (measured: forced-throttle T/F, 79 of 82 jumps prepare-bound at scale 2.3-2.5, 0 of 84 at 0).
+	bool  m_coop_jump_sched_hold = false;
 	bool  m_coop_locally_driven;
 	u32   m_coop_locally_driven_ts;   // §14 step 3 (D): time of the last decision that (re)set the flag
 	// §14 step 4 (correction diagnosis): state carried BETWEEN UpdateCL calls so the witness can
