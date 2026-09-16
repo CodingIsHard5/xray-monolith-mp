@@ -1579,6 +1579,7 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 							CL->m_coop_pose_torso[0] = torso_yaw;
 							CL->m_coop_pose_torso[1] = torso_pitch;
 							CL->m_coop_pose_torso[2] = torso_roll;
+							CL->m_coop_pose_hp = _valid(hp) ? hp : CL->m_coop_pose_hp;
 							InterlockedIncrement(&CL->m_coop_pose_seq);   // even: complete
 						}
 					}

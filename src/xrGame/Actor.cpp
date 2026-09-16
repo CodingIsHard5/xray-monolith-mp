@@ -581,6 +581,17 @@ static int coop_bodylog()
 
 void CActor::Hit(SHit* pHDS)
 {
+	// MP fork (§3.4 player proxy): the server copy of a claimed player delivers and logs the hit and still runs every callback, but
+	// applies no damage — the owning client applies it and reports its health, which the server mirrors (game_sv_single.cpp)
+	if (m_coop_proxy_body && pHDS && xr_enet::enabled() && ai().get_alife())
+	{
+		m_coop_proxy_last_who = pHDS->who ? pHDS->who->ID() : u16(-1);
+		static u32 s_n = 0;
+		if (++s_n <= 20 || (s_n % 50) == 1)
+			Msg("- COOP(proxy): body %u t %u hit by %d power %.4f -> 0 (the client applies it)", ID(), Device.dwTimeGlobal,
+				pHDS->who ? int(pHDS->who->ID()) : -1, pHDS->power);
+		pHDS->power = 0.f;
+	}
 	if (coop_bodylog() && pHDS)
 	{
 		const CObject* const who = pHDS->who;
@@ -912,6 +923,15 @@ static inline bool coop_thin_client()
 
 void CActor::Die(CObject* who)
 {
+	// MP fork (§3.4 player proxy, death order): which side, when, by whom, and on a client whether a GE_DIE message had just arrived
+	// (server-reported death) or not (the client's own local hit killed it)
+	if (xr_enet::enabled())
+	{
+		const bool server = ai().get_alife() != nullptr;
+		const bool msg = m_coop_gedie_t && (Device.dwTimeGlobal - m_coop_gedie_t) <= 200;
+		Msg("- COOP(deathorder): %s actor %u t %u Die by %d via %s", server ? "server" : "client", ID(), Device.dwTimeGlobal,
+			who ? int(who->ID()) : -1, server ? "server object" : (msg ? "GE_DIE message" : "local hit (no GE_DIE)"));
+	}
 #ifdef HOLDERCUSTOM_NEW
 	use_HolderEx(NULL, true);
 #endif
@@ -2705,8 +2725,8 @@ void CActor::coop_respawn()
 		u_EventSend(P);
 	}
 
-	Msg("- COOP(respawn): player revived at (%.1f,%.1f,%.1f)",
-		VPUSH(spawn_pos));
+	Msg("- COOP(respawn): player revived at (%.1f,%.1f,%.1f) t %u (respawn request sent)",
+		VPUSH(spawn_pos), Device.dwTimeGlobal);
 }
 
 void CActor::shedule_Update(u32 DT)

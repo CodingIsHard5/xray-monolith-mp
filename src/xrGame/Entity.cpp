@@ -61,6 +61,7 @@ void CEntity::OnEvent(NET_Packet& P, u16 type)
 			P.r_u16(id);
 			P.r_u32(cl);
 			CObject* who = Level().Objects.net_Find(id);
+			m_coop_gedie_t = Device.dwTimeGlobal;   // MP fork (§3.4 proxy death order)
 			if (who && !IsGameTypeSingle())
 			{
 				if (this != who) /*if(bDebug) */ Msg("%s killed by %s ...", cName().c_str(), who->cName().c_str());

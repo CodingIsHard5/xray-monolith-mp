@@ -692,6 +692,10 @@ public:
 	u32 m_coop_bodylog_hits = 0;
 	u32 m_coop_bodylog_last_hit_t = 0;
 	u16 m_coop_bodylog_last_who = u16(-1);
+	// MP fork (§3.4 player proxy): set each tick by the server feed for a claimed, driven body while -coop_player_proxy is on; the last
+	// hit's initiator is kept for the mirrored death
+	bool m_coop_proxy_body = false;
+	u16 m_coop_proxy_last_who = u16(-1);
 	void SetPhPosition(const Fmatrix& pos);
 	virtual void PH_B_CrPr(); // actions & operations before physic correction-prediction steps
 	virtual void PH_I_CrPr(); // actions & operations after correction before prediction steps

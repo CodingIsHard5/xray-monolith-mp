@@ -2705,7 +2705,7 @@ void game_sv_Single::coop_player_posfeed_tick()
 				return;
 			// read the pump thread's pose snapshot consistently (sequence counter: retry while a write is in progress or changed)
 			Fvector pos;
-			float yaw = 0;
+			float yaw = 0, hp = 1.f;
 			SRotation torso;
 			bool got = false;
 			for (int tries = 0; tries < 8 && !got; ++tries)
@@ -2718,6 +2718,7 @@ void game_sv_Single::coop_player_posfeed_tick()
 				torso.yaw = CL->m_coop_pose_torso[0];
 				torso.pitch = CL->m_coop_pose_torso[1];
 				torso.roll = CL->m_coop_pose_torso[2];
+				hp = CL->m_coop_pose_hp;
 				got = (s1 != 0) && (s1 == CL->m_coop_pose_seq);
 			}
 			if (!got || !_valid(pos) || !_valid(yaw))
@@ -2726,6 +2727,30 @@ void game_sv_Single::coop_player_posfeed_tick()
 			se->o_model = yaw;
 			se->o_torso = torso;
 			const float gap = a->coop_apply_server_feed(pos, yaw, torso);
+			// §3.4 player proxy (-coop_player_proxy): the body applies no damage (CActor::Hit) and MIRRORS the health its client
+			// reports; a mirrored health at or below zero kills the server body with the last hit's initiator — never the reverse
+			static int s_proxy = -1;
+			if (s_proxy < 0)
+			{
+				s_proxy = strstr(Core.Params, "-coop_player_proxy") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+				Msg("- COOP(proxy): server player-body proxy %s", s_proxy ? "ON (-coop_player_proxy)" : "OFF");
+			}
+			a->m_coop_proxy_body = s_proxy != 0;
+			if (s_proxy && _valid(hp))
+			{
+				const float before = a->GetfHealth();
+				if (hp > 0.f)
+				{
+					if (_abs(before - hp) > 0.0005f)
+						a->SetfHealth(hp);
+				}
+				else if (a->g_Alive())
+				{
+					Msg("- COOP(deathorder): server actor %u t %u mirrored client hp %.3f -> KillEntity by %d", u32(a->ID()),
+						Device.dwTimeGlobal, hp, a->m_coop_proxy_last_who == u16(-1) ? -1 : int(a->m_coop_proxy_last_who));
+					a->KillEntity(a->m_coop_proxy_last_who == u16(-1) ? a->ID() : a->m_coop_proxy_last_who, TRUE);
+				}
+			}
 			static u32 s_next_log = 0;
 			if (Device.dwTimeGlobal >= s_next_log)
 			{

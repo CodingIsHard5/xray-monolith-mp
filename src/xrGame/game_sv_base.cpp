@@ -994,9 +994,9 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 			{
 				creature->set_health(spawn_health);
 				creature->o_Position.set(spawn_pos);
-				Msg("- COOP(respawn-sv): actor %u revived at (%.1f,%.1f,%.1f), health=%.1f%s",
+				Msg("- COOP(respawn-sv): actor %u revived at (%.1f,%.1f,%.1f), health=%.1f%s t %u",
 					actor_id, VPUSH(spawn_pos), creature->get_health(),
-					from_checkpoint ? " [checkpoint]" : " [death position]");
+					from_checkpoint ? " [checkpoint]" : " [death position]", Device.dwTimeGlobal);
 
 				// Also restore health on the game-object (CEntityAlive) in the server process.
 				// On a dedicated server the game object coexists in the same process.

@@ -30,6 +30,7 @@ protected:
 	virtual CEntityConditionSimple* create_entity_condition(CEntityConditionSimple* ec);
 
 public:
+	u32 m_coop_gedie_t = 0;   // MP fork (§3.4 proxy death order): when this object last RECEIVED a GE_DIE event (client-side reading)
 	IC float GetfHealth() const { return m_entity_condition->GetHealth(); }
 	IC float SetfHealth(float value)
 	{
