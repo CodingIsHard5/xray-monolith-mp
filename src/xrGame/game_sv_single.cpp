@@ -2741,6 +2741,26 @@ void game_sv_Single::coop_player_posfeed_tick()
 				s_sync = strstr(Core.Params, "-coop_player_proxy") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
 				Msg("- COOP(hpsync): server-to-owner player health sync %s", s_sync ? "ON (-coop_player_proxy)" : "OFF");
 			}
+			// FIRST sync of a connection (a join or a RETURN): the server GAME OBJECT may hold a stale health — a reserved body's object
+			// keeps whatever it rotted to, while the reclaim restored the CSE to the health P4's rules give (logged-off record,
+			// recovery record, or clamp). The object adopts the CSE's health before anything is sent, so a stale value is never pushed
+			// to a returning player (Overseer, the P4 D2 hazard). -coop_hpsync_noadopt is the TEST-ONLY control that skips it.
+			static int s_noadopt = -1;
+			if (s_noadopt < 0)
+			{
+				s_noadopt = strstr(Core.Params, "-coop_hpsync_noadopt") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+				if (s_noadopt)
+					Msg("! COOP(hpsync): -coop_hpsync_noadopt SET — the first sync does NOT adopt the claim-restored health (CONTROL arm)");
+			}
+			if (s_sync && CL->m_coop_hp_sent < 0.f)
+			{
+				const float h0 = se->get_health();
+				const float obj = a->GetfHealth();
+				Msg("- COOP(hpsync): first sync actor %u t %u: server object %.4f, CSE (claim-restored) %.4f -> %s", u32(a->ID()),
+					Device.dwTimeGlobal, obj, h0, (s_noadopt || !_valid(h0) || h0 <= 0.f || _abs(h0 - obj) <= 0.0005f) ? "kept" : "object adopts the CSE");
+				if (!s_noadopt && _valid(h0) && h0 > 0.f && _abs(h0 - obj) > 0.0005f)
+					a->SetfHealth(h0);
+			}
 			const float shp = a->GetfHealth();
 			if (s_sync && _valid(shp) && shp > 0.f &&
 			    (_abs(shp - CL->m_coop_hp_sent) > 0.0005f || Device.dwTimeGlobal - CL->m_coop_hp_sent_t >= 2000))
@@ -4407,6 +4427,8 @@ void game_sv_Single::coop_poll_spawns()
 					body->set_killer_id(ALife::_OBJECT_ID(-1));
 				}
 				body->set_health(saved_health);
+				// §3.4 health sync (A): the one line a returning-player check reads — the health P4 hands back, and from where
+				Msg("- COOP(bindings): handing back '%s' body %u health %.2f (%s)", client_name, u32(orphan->ID), saved_health, hp_source);
 			}
 
 			// Restore children ownership
