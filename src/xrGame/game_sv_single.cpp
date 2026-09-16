@@ -2711,11 +2711,12 @@ void game_sv_Single::coop_saveactor_exclude_tick()
 	const bool first = g_coop_ghost_id == u16(-1);
 	g_coop_ghost_id = 0;
 	const bool bit = (a->spatial.type & STYPE_VISIBLEFORAI) != 0;
-	const bool flag = se->m_flags.is(CSE_ALifeObject::flVisibleForAI);
+	CSE_ALifeObject* const so = smart_cast<CSE_ALifeObject*>(se);
+	const bool flag = so && so->m_flags.is(CSE_ALifeObject::flVisibleForAI);
 	if (bit)
 		a->spatial.type &= ~STYPE_VISIBLEFORAI;
 	if (flag)
-		se->m_flags.set(CSE_ALifeObject::flVisibleForAI, FALSE);
+		so->m_flags.set(CSE_ALifeObject::flVisibleForAI, FALSE);
 	if (first || bit || flag)
 		Msg("- COOP(ghost): save actor 0 %s: VISIBLEFORAI bit %s, CSE flVisibleForAI %s, alive %d, pos %.1f,%.1f,%.1f", first ? "EXCLUDED" : "re-excluded",
 			bit ? "cleared" : "already clear", flag ? "cleared" : "already clear", a->g_Alive() ? 1 : 0, a->Position().x, a->Position().y,
