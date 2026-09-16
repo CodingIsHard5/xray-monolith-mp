@@ -12,6 +12,7 @@
 #include "../xrServerEntities/xrMessages.h"        // MP fork (§9.1): M_XRNET_COOP_REQUEST
 #include "mp_coop_chat.h"                           // MP fork (§13.4): COOP_CHAT_REQUEST_KIND
 #include "level.h"
+#include "../xrEngine/feel_vision.h"                  // MP fork (§3.4 player acquisition): g_coop_vistrace_owner
 #include "actor.h"
 #include "ai/monsters/telekinesis.h"                 // MP fork (§3.4 inc 2): coop_test_tele
 #include "PhysicsShellHolder.h"
