@@ -662,6 +662,18 @@ void CControlAnimationBase::check_hit(MotionID motion, float time_perc)
 
 	if (should_hit)
 		m_object->HitEntity(enemy, params.hit_power, params.impulse, params.impulse_dir);
+	{
+		// MP fork (§3.4/§16.3 crow-list melee measurement, -coop_meleediag): every hit-event check and whether it hit
+		static int s_diag = -1;
+		if (s_diag < 0) s_diag = strstr(Core.Params, "-coop_meleediag") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+		if (s_diag)
+		{
+			Fvector dd;
+			dd.sub(enemy->Position(), m_object->Position());
+			Msg("- COOP(melee-hit): %u t %u enemy %u should_hit %d dist %.2f max_dist %.2f hit_power %.3f", m_object->ID(), Device.dwTimeGlobal,
+				enemy->ID(), should_hit ? 1 : 0, dd.magnitude(), params.dist, params.hit_power);
+		}
+	}
 
 	m_object->MeleeChecker.on_hit_attempt(should_hit);
 }

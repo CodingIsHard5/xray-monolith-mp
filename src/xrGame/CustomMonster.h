@@ -144,6 +144,8 @@ public:
 	// MP fork (§3.4 slow-jump fix): set by CControlJump while a jump holds the pure capture. shedule_Scale returns 0 for it, so a
 	// running jump is never update-throttled (measured: forced-throttle T/F, 79 of 82 jumps prepare-bound at scale 2.3-2.5, 0 of 84 at 0).
 	bool  m_coop_jump_sched_hold = false;
+	// MP fork (§3.4/§16.3 crow-list melee measurement): TEST-ONLY per-frame hold (-coop_melee_perframe), balanced by coop_perframe_hold
+	bool  m_coop_perframe_hold = false;
 	bool  m_coop_locally_driven;
 	u32   m_coop_locally_driven_ts;   // §14 step 3 (D): time of the last decision that (re)set the flag
 	// §14 step 4 (correction diagnosis): state carried BETWEEN UpdateCL calls so the witness can

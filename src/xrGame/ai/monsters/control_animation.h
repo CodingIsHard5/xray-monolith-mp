@@ -69,6 +69,13 @@ class CControlAnimation : public CControl_ComPure<SControlAnimationData>
 	DEFINE_MAP(MotionID, ANIMATION_EVENT_VEC, ANIMATION_EVENT_MAP, ANIMATION_EVENT_MAP_IT);
 	ANIMATION_EVENT_MAP m_anim_events;
 
+	// MP fork (§3.4/§16.3 crow-list melee measurement, -coop_meleediag, MEASUREMENT-ONLY): the motion each part last played, so an
+	// animation event still unhandled when the part plays again is logged as a MISSED event (e.g. a hit never checked).
+	MotionID m_coop_prev_motion[3];
+	u32 m_coop_prev_start[3] = {0, 0, 0};
+	u32 m_coop_prev_len_ms[3] = {0, 0, 0};
+	void coop_melee_part_started(SAnimationPart& part);
+
 	bool m_freeze;
 	float m_saved_global_speed;
 	float m_saved_legs_speed;

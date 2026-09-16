@@ -3,6 +3,7 @@
 #include "BaseMonster/base_monster.h"
 #include "control_manager.h"
 #include "profiler.h"
+#include "../../../xrNetServer/xr_enet_transport.h"   // MP fork: xr_enet::enabled() (melee measurement gate)
 
 //#ifdef _DEBUG
 //#include "control_animation_base.h"
@@ -110,6 +111,37 @@ void CControlAnimation::play()
 	}
 }
 
+static int coop_meleediag()
+{
+	static int s_on = -1;
+	if (s_on < 0) s_on = (xr_enet::enabled() && strstr(Core.Params, "-coop_meleediag")) ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+	return s_on;
+}
+
+// MP fork (§3.4/§16.3 crow-list melee measurement): called right after a part starts a motion. Logs every event of the motion the
+// part played before that was never handled (MISSED), then the start of this motion when it carries events (an attack).
+void CControlAnimation::coop_melee_part_started(SAnimationPart& part)
+{
+	const int k = (&part == &m_data.global) ? 0 : ((&part == &m_data.legs) ? 1 : 2);
+	if (m_coop_prev_motion[k].valid())
+	{
+		ANIMATION_EVENT_MAP_IT pit = m_anim_events.find(m_coop_prev_motion[k]);
+		if (pit != m_anim_events.end())
+			for (ANIMATION_EVENT_VEC_IT e = pit->second.begin(); e != pit->second.end(); ++e)
+				if (!e->handled)
+					Msg("- COOP(melee-miss): %u t %u part %d motion %s event %u time_perc %.3f played_ms %u len_ms %u", m_object->ID(),
+						Device.dwTimeGlobal, k, m_skeleton_animated->LL_MotionDefName_dbg(m_coop_prev_motion[k]).first, e->event_id,
+						e->time_perc, Device.dwTimeGlobal - m_coop_prev_start[k], m_coop_prev_len_ms[k]);
+	}
+	m_coop_prev_motion[k] = part.get_motion();
+	m_coop_prev_start[k] = part.time_started;
+	m_coop_prev_len_ms[k] = part.blend ? u32(part.blend->timeTotal / part.blend->speed * 1000.f) : 0;
+	ANIMATION_EVENT_MAP_IT it = m_anim_events.find(part.get_motion());
+	if (it != m_anim_events.end() && part.blend)
+		Msg("- COOP(melee-anim): %u t %u part %d motion %s len_ms %u events %u", m_object->ID(), Device.dwTimeGlobal, k,
+			m_skeleton_animated->LL_MotionDefName_dbg(part.get_motion()).first, m_coop_prev_len_ms[k], u32(it->second.size()));
+}
+
 void CControlAnimation::play_part(SAnimationPart& part, PlayCallback callback)
 {
 	VERIFY(part.get_motion().valid());
@@ -143,6 +175,8 @@ void CControlAnimation::play_part(SAnimationPart& part, PlayCallback callback)
 
 	part.time_started = Device.dwTimeGlobal;
 	part.actual = true;
+	if (coop_meleediag())
+		coop_melee_part_started(part);   // before the handled flags below are reset, so a replay of the same motion still counts
 
 	m_man->notify(ControlCom::eventAnimationStart, 0);
 
@@ -199,6 +233,13 @@ void CControlAnimation::check_events(SAnimationPart& part)
 				if (!event.handled && (event.time_perc < cur_perc))
 				{
 					event.handled = true;
+					if (coop_meleediag())
+					{
+						const float len_ms = (part.blend->timeTotal / part.blend->speed) * 1000.f;
+						Msg("- COOP(melee): %u t %u motion %s event %u time_perc %.3f cur_perc %.3f len_ms %.0f delay_ms %.0f", m_object->ID(),
+							Device.dwTimeGlobal, m_skeleton_animated->LL_MotionDefName_dbg(part.get_motion()).first, event.event_id,
+							event.time_perc, cur_perc, len_ms, (cur_perc - event.time_perc) * len_ms);
+					}
 
 					// gen event
 					SAnimationSignalEventData anim_event(part.get_motion(), event.time_perc, event.event_id);

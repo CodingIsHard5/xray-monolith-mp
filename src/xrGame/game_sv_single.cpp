@@ -2557,6 +2557,31 @@ u32 coop_jump_state(u16 id);   // ai/monsters/control_manager_custom.cpp; bit 5 
 // right now: the scale it would get (peeked, no tick counted), the NPC cap class, the server's camera point and the distance
 // to it, the distance to the nearest connected player (the cap's own source, CL->owner->o_Position), t_min/t_max, the interval
 // xrSheduler.cpp derives from them, and the update counters. Empty string outside co-op or for a non-CCustomMonster id.
+// MP fork (§3.4/§16.3 crow-list melee measurement): TEST-ONLY. Holds (or releases) one processing reference on a creature so it is on
+// the per-frame processing list — what the crow list grants a creature near the camera in single player. Refused (returns false)
+// unless the server was started with -coop_melee_perframe. Balanced: a second hold or a release without a hold is a no-op.
+bool coop_perframe_hold(u16 id, bool on)
+{
+	static int s_allowed = -1;
+	if (s_allowed < 0) s_allowed = (xr_enet::enabled() && strstr(Core.Params, "-coop_melee_perframe")) ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+	if (!s_allowed || !g_pGameLevel)
+		return false;
+	CCustomMonster* const m = smart_cast<CCustomMonster*>(Level().Objects.net_Find(id));
+	if (!m)
+		return false;
+	if (on && !m->m_coop_perframe_hold)
+	{
+		m->processing_activate();
+		m->m_coop_perframe_hold = true;
+	}
+	else if (!on && m->m_coop_perframe_hold)
+	{
+		m->processing_deactivate();
+		m->m_coop_perframe_hold = false;
+	}
+	return m->m_coop_perframe_hold;
+}
+
 LPCSTR coop_sched_probe(u16 id)
 {
 	static string512 buf;
