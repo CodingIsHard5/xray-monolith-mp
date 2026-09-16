@@ -545,6 +545,7 @@ void CCustomMonster::net_Import(NET_Packet& P)
 
 void CCustomMonster::shedule_Update(u32 DT)
 {
+	++m_coop_shedule;   // MP fork (§3.4 inc 3, H4): scheduled update counter, log-only
 	VERIFY(!g_Alive() || processing_enabled());
 	// Queue shrink
 	VERIFY(_valid(Position()));
@@ -748,6 +749,7 @@ void CCustomMonster::update_sound_player()
 
 void CCustomMonster::UpdateCL()
 {
+	++m_coop_updatecl;   // MP fork (§3.4 inc 3, H4): per-frame update counter, log-only
 	START_PROFILE("CustomMonster/client_update")
 		m_client_update_delta = (u32)std::min(Device.dwTimeGlobal - m_last_client_update_time, u32(100));
 		m_last_client_update_time = Device.dwTimeGlobal;

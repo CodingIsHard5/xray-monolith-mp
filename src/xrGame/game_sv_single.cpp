@@ -2545,6 +2545,46 @@ void coop_npc_cap_exempt(u16 id, bool on)
 // are FULL, the rest THROTTLED, story NPCs EXEMPT (CCustomMonster::shedule_Scale acts on the class). Nothing is despawned.
 // On by default (24 within 150 m); -coop_npc_cap <n> / -coop_npc_cap_radius <m> override; -coop_npc_cap_off keeps the classification
 // and metrics but does not apply it (control); -coop_npc_cap_disable turns the whole thing off.
+
+// MP fork (design doc §3.4 increment 3, H4 "update starvation"): MEASUREMENT-ONLY, log-only, opt-in behind -coop_jumpdiag.
+// A jump that starts and never ends holds the monster's pure capture forever, and its own trace stops at activate, which means
+// CControlJump::update_frame is never called again (measured: dev/evidence/jump-arm-trace2). update_frame is driven from
+// CBaseMonster::UpdateCL (base_monster.cpp:372), so this probe reports, once a second while a jump is running, whether the
+// monster's per-frame and scheduled updates are still running at all, and the scheduler state around them.
+u32 coop_jump_state(u16 id);   // ai/monsters/control_manager_custom.cpp; bit 5 = a jump is running
+
+void game_sv_Single::coop_jump_alive_tick()
+{
+	if (!xr_enet::enabled() || !ai().get_alife() || !g_pGameLevel || !m_server)
+		return;
+	static int s_on = -1;
+	if (s_on < 0) s_on = coop_param("-coop_jumpdiag") ? 1 : 0;
+	if (!s_on)
+		return;
+	static u32 s_next = 0;
+	if (Device.dwTimeGlobal < s_next)
+		return;
+	s_next = Device.dwTimeGlobal + 1000;
+
+	CObjectList& objs = Level().Objects;
+	for (u32 i = 0; i < objs.o_count(); ++i)
+	{
+		CCustomMonster* const m = smart_cast<CCustomMonster*>(objs.o_get_by_iterator(i));
+		if (!m || smart_cast<CActor*>(m))
+			continue;
+		const u32 js = coop_jump_state(m->ID());
+		if (js == u32(-1) || !(js & 32))
+			continue;
+		Msg("- COOP(jumpalive): %u t %u js %u updatecl %u (+%d) shedule %u (+%d) processing %d needed %d t_min %u t_max %u locked %u scale %.3f pos %.3f,%.3f,%.3f",
+			m->ID(), Device.dwTimeGlobal, js, m->m_coop_updatecl, int(m->m_coop_updatecl - m->m_coop_diag_last_cl),
+			m->m_coop_shedule, int(m->m_coop_shedule - m->m_coop_diag_last_sh), m->processing_enabled() ? 1 : 0, m->shedule_Needed() ? 1 : 0,
+			u32(m->shedule.t_min), u32(m->shedule.t_max), u32(m->shedule.b_locked), m->shedule_Scale(),
+			m->Position().x, m->Position().y, m->Position().z);
+		m->m_coop_diag_last_cl = m->m_coop_updatecl;
+		m->m_coop_diag_last_sh = m->m_coop_shedule;
+	}
+}
+
 void game_sv_Single::coop_npc_cap_tick()
 {
 	if (!xr_enet::enabled() || !ai().get_alife() || !g_pGameLevel || !m_server)
@@ -4863,6 +4903,7 @@ void game_sv_Single::Update()
 	coop_broadcast_roster(); // MP fork (design doc §13.1): who is connected, by name, for mp_api
 	coop_consent_tick();      // MP fork (design doc §10.3 item 4): unanswered asks expire as a no
 	coop_npc_cap_tick();      // MP fork (design doc §16.3): active-NPC cap near player clusters
+	coop_jump_alive_tick();   // MP fork (design doc §3.4 inc 3, H4): is a stuck jump's monster still being updated?
 	coop_state_resend_tick();  // MP fork (design doc §3.4): server-authored mutant state
 	// MP fork (§14 step 7 phase 4 D2): an operator/harness stop request. Does not return if one
 	// is pending — the clean stop flushes the world and exits from inside it.

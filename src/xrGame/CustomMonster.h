@@ -210,6 +210,12 @@ public:
 	u32 m_coop_sched_ticks = 0;
 	u32 m_coop_sched_ticks_prev = 0;
 	static bool s_coop_npccap_apply;
+	// MP fork (§3.4 inc 3, H4 update starvation): how many times this monster's per-frame and scheduled updates have run.
+	// Read once a second by game_sv_Single::coop_jump_alive_tick while a jump is active. Log-only.
+	u32 m_coop_updatecl = 0;
+	u32 m_coop_shedule = 0;
+	u32 m_coop_diag_last_cl = 0;   // previous sample, per monster (the probe is per object, not global)
+	u32 m_coop_diag_last_sh = 0;
 	virtual void UpdateCL();
 
 	// Network
