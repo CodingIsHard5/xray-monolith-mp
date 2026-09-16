@@ -2557,6 +2557,49 @@ u32 coop_jump_state(u16 id);   // ai/monsters/control_manager_custom.cpp; bit 5 
 // right now: the scale it would get (peeked, no tick counted), the NPC cap class, the server's camera point and the distance
 // to it, the distance to the nearest connected player (the cap's own source, CL->owner->o_Position), t_min/t_max, the interval
 // xrSheduler.cpp derives from them, and the update counters. Empty string outside co-op or for a non-CCustomMonster id.
+// MP fork (§3.4 player-acquisition, vision-flag probe): MEASUREMENT-ONLY. One line about object <id> as server-side AI sees it: the
+// spatial STYPE_VISIBLEFORAI bit feel_vision filters on, whether it is registered in the spatial DB (node) and has a render sector,
+// its CSE flVisibleForAI flag, its community (CInventoryOwner) and team/squad/group (CEntity); and, when <other> is an inventory
+// owner too, <other>'s relation to it through RELATION_REGISTRY with the attitude split into its public parts (personal goodwill,
+// community goodwill to the character, the community-to-community table from game_relations.ltx; the rest = rank + reputation).
+LPCSTR coop_vis_probe(u16 id, u16 other)
+{
+	static string1024 buf;
+	buf[0] = 0;
+	if (!xr_enet::enabled() || !g_pGameLevel || !ai().get_alife())
+		return buf;
+	CObject* const o = Level().Objects.net_Find(id);
+	if (!o)
+	{
+		xr_strcpy(buf, "offline");
+		return buf;
+	}
+	CSE_ALifeObject* const se = smart_cast<CSE_ALifeObject*>(ai().alife().objects().object(id, true));
+	CEntity* const ent = smart_cast<CEntity*>(o);
+	CInventoryOwner* const io = smart_cast<CInventoryOwner*>(o);
+	string256 rel = "rel n/a";
+	CInventoryOwner* const from = smart_cast<CInventoryOwner*>(Level().Objects.net_Find(other));
+	if (io && from)
+	{
+		static const int thr_neutral = pSettings->r_s16(GAME_RELATIONS_SECT, "attitude_neutal_threshold");
+		static const int thr_friend = pSettings->r_s16(GAME_RELATIONS_SECT, "attitude_friend_threshold");
+		const CHARACTER_GOODWILL total = RELATION_REGISTRY().GetAttitude(from, io);
+		const CHARACTER_GOODWILL personal = RELATION_REGISTRY().GetGoodwill(from->object_id(), io->object_id());
+		const CHARACTER_GOODWILL comm_gw = RELATION_REGISTRY().GetCommunityGoodwill(from->Community(), io->object_id());
+		const CHARACTER_GOODWILL comm_tab = RELATION_REGISTRY().GetCommunityRelation(from->Community(), io->Community());
+		xr_sprintf(rel, "rel_from %u type %d attitude %d personal %d community_goodwill %d community_table %d rank_rep %d thresholds %d/%d",
+			u32(other), int(RELATION_REGISTRY().GetRelationType(from, io)), int(total), int(personal), int(comm_gw), int(comm_tab),
+			int(total - personal - comm_gw - comm_tab), thr_neutral, thr_friend);
+	}
+	xr_sprintf(buf, "visibleforai %d spatial_node %d sector %d cse %s cse_visibleforai %s community %s index %d team %d squad %d group %d alive %d pos %.1f,%.1f,%.1f | %s",
+		(o->spatial.type & STYPE_VISIBLEFORAI) ? 1 : 0, o->spatial.node_ptr ? 1 : 0, o->spatial.sector ? 1 : 0, se ? "yes" : "no",
+		se ? (se->m_flags.is(CSE_ALifeObject::flVisibleForAI) ? "1" : "0") : "-",
+		io ? io->CharacterInfo().Community().id().c_str() : "-", io ? int(io->Community()) : -1,
+		ent ? ent->g_Team() : -1, ent ? ent->g_Squad() : -1, ent ? ent->g_Group() : -1, ent ? (ent->g_Alive() ? 1 : 0) : -1,
+		o->Position().x, o->Position().y, o->Position().z, rel);
+	return buf;
+}
+
 // MP fork (§3.4/§16.3 crow-list melee measurement): TEST-ONLY. Holds (or releases) one processing reference on a creature so it is on
 // the per-frame processing list — what the crow list grants a creature near the camera in single player. Refused (returns false)
 // unless the server was started with -coop_melee_perframe. Balanced: a second hold or a release without a hold is a no-op.
