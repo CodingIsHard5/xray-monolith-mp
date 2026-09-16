@@ -2582,6 +2582,15 @@ void game_sv_Single::coop_jump_alive_tick()
 		const u32 js = coop_jump_state(m->ID());
 		if (js == u32(-1) || !(js & 32))
 		{
+			// The provocation must be BALANCED, as the real island-sleep path is (CPHShell re-activates the ref object when the
+			// island wakes, PHShell.cpp:140). An unbalanced deactivate permanently removed one processing reference per
+			// provoked jump: in dev/evidence/jumpfix-fixed the FIXED build survived its first provocation, the counter then
+			// sat at 0 between jumps (updatecl +2 in 24 s), and the next jump froze because of the hook, not the defect.
+			if (m->m_coop_provoked_jump)
+			{
+				m->processing_activate();
+				Msg("- COOP(jumpprovoke): %u t %u jump ended, restored the provoked processing reference", m->ID(), Device.dwTimeGlobal);
+			}
 			m->m_coop_provoked_jump = 0;
 			continue;
 		}
