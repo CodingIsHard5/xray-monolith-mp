@@ -2710,16 +2710,16 @@ void game_sv_Single::coop_saveactor_exclude_tick()
 	}
 	const bool first = g_coop_ghost_id == u16(-1);
 	g_coop_ghost_id = 0;
+	// ONLY the server object's spatial bit (what feel_vision queries filter on). NOT the CSE's flVisibleForAI: every co-op player body is
+	// spawned as a CLONE of entity 0's CSE (coop_spawn_actor_for -> base->Spawn_Write), and net_Spawn copies that flag into the new body's
+	// spatial bit — clearing it here made every player joining afterwards invisible to all AI (ghostleak-ON: both players' bit and CSE
+	// flag 0; facing-2: 0 of 240 samples in frustum, no player hit all run).
 	const bool bit = (a->spatial.type & STYPE_VISIBLEFORAI) != 0;
-	CSE_ALifeObject* const so = smart_cast<CSE_ALifeObject*>(se);
-	const bool flag = so && so->m_flags.is(CSE_ALifeObject::flVisibleForAI);
 	if (bit)
 		a->spatial.type &= ~STYPE_VISIBLEFORAI;
-	if (flag)
-		so->m_flags.set(CSE_ALifeObject::flVisibleForAI, FALSE);
-	if (first || bit || flag)
-		Msg("- COOP(ghost): save actor 0 %s: VISIBLEFORAI bit %s, CSE flVisibleForAI %s, alive %d, pos %.1f,%.1f,%.1f", first ? "EXCLUDED" : "re-excluded",
-			bit ? "cleared" : "already clear", flag ? "cleared" : "already clear", a->g_Alive() ? 1 : 0, a->Position().x, a->Position().y,
+	if (first || bit)
+		Msg("- COOP(ghost): save actor 0 %s: VISIBLEFORAI bit %s (its CSE flag is left set: player bodies are cloned from it), alive %d, pos %.1f,%.1f,%.1f",
+			first ? "EXCLUDED" : "re-excluded", bit ? "cleared" : "already clear", a->g_Alive() ? 1 : 0, a->Position().x, a->Position().y,
 			a->Position().z);
 }
 
