@@ -231,3 +231,17 @@ function on_game_start()
 	end
 
 end
+
+-- MP fork (§9 (i) damage diagnostic, 2026-09-17): what does db.actor resolve to RIGHT NOW?
+-- The engine's COOP(hitsrc) line asks this at the moment of a hit on a player body. On the dedicated server
+-- db.actor is a PLAYER BODY, so when one player shoots another the hitter is db.actor in one direction and the
+-- victim is db.actor in the other -- and GAMMA's damage scripts special-case both, neither being the ordinary
+-- NPC-hits-NPC branch that NPC fire and anomaly hits take. Returns 65535 when there is no actor to name; the
+-- engine treats a missing helper and 65535 alike, so this is safe to be absent.
+function coop_db_actor_id()
+	local a = db and db.actor
+	if not a then return 65535 end
+	local ok, id = pcall(function() return a:id() end)
+	if ok and type(id) == "number" then return id end
+	return 65535
+end

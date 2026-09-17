@@ -215,6 +215,16 @@ void CLevel::ClientReceive()
 				P->r_vec3(pos);
 				const float health = P->r_float();
 
+				// CodeRabbit (minor) on this commit: an invalid position must not reach the revive. ActivateShell ends in
+				// Debug.fatal on a non-finite actor position, so a malformed packet would take the process down rather
+				// than be ignored. Refuse it by name, as every other co-op refusal is refused.
+				if (!_valid(pos))
+				{
+					Msg("! COOP(revive-cl): revive for body %u carried an INVALID position (%f,%f,%f) — ignoring the message",
+						u32(actor_id), pos.x, pos.y, pos.z);
+					break;
+				}
+
 				CObject* const obj = Objects.net_Find(actor_id);
 				CActor* const actor = obj ? smart_cast<CActor*>(obj) : NULL;
 				if (!actor)

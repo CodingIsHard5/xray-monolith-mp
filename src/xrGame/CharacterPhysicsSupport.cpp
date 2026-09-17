@@ -1547,7 +1547,13 @@ bool CCharacterPhysicsSupport::coop_revive(const char* why)
 	// ---- teardown half: exactly what in_NetDestroy undoes, in its order ----
 	destroy_imotion();                                   // clears m_interactive_motion
 	m_PhysicMovementControl->DestroyCharacter();         // in_Die destroyed it; do not leave two
-	RemoveActiveWeaponCollision();                       // undoes CreateShell's AddActiveWeaponCollision
+	// Undo CreateShell's AddActiveWeaponCollision — but ONLY if it actually added something. CodeRabbit (critical) on
+	// this commit: RemoveActiveWeaponCollision guards itself with VERIFY, which COMPILES OUT in release, and then
+	// dereferences m_weapon_geoms.begin() and m_active_item_obj unconditionally. AddActiveWeaponCollision is itself
+	// conditional — a body with no active weapon shell adds no geoms — so on an ordinary revive this would have read
+	// *end() and null-dereferenced. The same erase(end())-class defect that cost R3.1 five increments.
+	if (m_weapon_attach_bone && m_active_item_obj && !m_weapon_geoms.empty())
+		RemoveActiveWeaponCollision();
 	if (m_physics_skeleton)
 	{
 		m_physics_skeleton->Deactivate();

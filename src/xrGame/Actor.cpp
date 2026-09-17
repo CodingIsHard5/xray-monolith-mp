@@ -741,9 +741,26 @@ void CActor::Hit(SHit* pHDS)
 				{
 					static u32 s_hd = 0;
 					if (++s_hd <= 100 || (s_hd % 100) == 1)
-						Msg("- COOP(hitsrc): body %u hit by %d (%s) type %d power %.4f bone %u hp %.4f — before-hit callback %s (%u so far)",
+					{
+						// THE OVERSEER'S LEAD (2026-09-17): every server-side COOP(pvb) line ends "db.actor <id>", and on the
+						// dedicated server db.actor resolves to A PLAYER BODY. So when one player shoots another, the hitter IS
+						// db.actor in one direction and the victim IS db.actor in the other — and GAMMA's damage scripts
+						// special-case both ("the actor hit something" and "the actor was hit"), neither of which is the ordinary
+						// NPC-hits-NPC branch that NPC fire and anomalies took. Both directions failed in Caden's session, which
+						// fits. So name which side db.actor is at the moment of the hit; the (i) fixture fires from BOTH players so
+						// the two branches are separated, and if one direction lands after a fix and the other does not, this line
+						// is the tell. Read through a gamedata helper rather than raw Lua: a missing helper is not an error.
+						u32 dbid = u32(-1);
+						::luabind::functor<u32> dbf;
+						if (ai().script_engine().functor("_G.coop_db_actor_id", dbf))
+							dbid = dbf();
+						Msg("- COOP(hitsrc): body %u hit by %d (%s) type %d power %.4f bone %u hp %.4f — before-hit callback %s; "
+							"db.actor %d (victim is db.actor: %d, hitter is db.actor: %d) (%u so far)",
 							ID(), src ? int(src->ID()) : -1, src_is_player ? "A PLAYER" : (src ? src->cNameSect().c_str() : "none"),
-							int(HDS.hit_type), HDS.power, u32(HDS.boneID), GetfHealth(), have_funct ? "FOUND" : "NOT FOUND", s_hd);
+							int(HDS.hit_type), HDS.power, u32(HDS.boneID), GetfHealth(), have_funct ? "FOUND" : "NOT FOUND",
+							dbid == u32(-1) ? -1 : int(dbid), (dbid != u32(-1) && dbid == u32(ID())) ? 1 : 0,
+							(dbid != u32(-1) && src && dbid == u32(src->ID())) ? 1 : 0, s_hd);
+					}
 				}
 				if (have_funct)
 				{
