@@ -1204,14 +1204,21 @@ void xrServer::coop_run_sound(NET_Packet& P, ClientID sender)
 	const u32 pose_age = CL->m_coop_pose_t ? (now - CL->m_coop_pose_t) : u32(-1);
 	CObject* const body_obj = Level().Objects.net_Find(body->ID);
 	const Fvector obj_pos = body_obj ? body_obj->Position() : Fvector().set(0.f, 0.f, 0.f);
-	if (dist > 5.f)
+	// THE BOUND, set from the measured distribution (PM run, 85 forwarded events on 5c0566c3): a player's own sound sits at the LISTENER,
+	// so its steady-state distance to the body is the eye height — median 1.66 m, accepted max 2.29 m. The one refusal was 6.39 m with a
+	// CSE 402 ms old while the player moved: the check was blind to the AGE of the position it compared against. So the bound is
+	// 5 m (the static margin, ~2x the eye-height spread) plus what a player could cover in that age at 6 m/s (a sprint), capped at 15 m.
+	// A forged position is still bounded tightly, because a fresh CSE (median age 11 ms) allows only the 5 m.
+	const float age_s = (pose_age == u32(-1)) ? 0.f : float(pose_age) / 1000.f;
+	const float bound = _min(5.f + 6.f * age_s, 15.f);
+	if (dist > bound)
 	{
 		++s_pos;
 		if (s_refusal_lines < 200)
 		{
 			++s_refusal_lines;
-			Msg("! COOP(soundfwd): refused client 0x%08x src %u type 0x%x: position %.2f m from the body (bound 5.00) — packet %.2f,%.2f,%.2f cse %.2f,%.2f,%.2f "
-				"age %u ms object %.2f,%.2f,%.2f (object to packet %.2f m) t %u", sender.value(), u32(src), type, dist, pos.x, pos.y, pos.z,
+			Msg("! COOP(soundfwd): refused client 0x%08x src %u type 0x%x: position %.2f m from the body (bound %.2f) — packet %.2f,%.2f,%.2f cse %.2f,%.2f,%.2f "
+				"age %u ms object %.2f,%.2f,%.2f (object to packet %.2f m) t %u", sender.value(), u32(src), type, dist, bound, pos.x, pos.y, pos.z,
 				body->o_Position.x, body->o_Position.y, body->o_Position.z, pose_age, obj_pos.x, obj_pos.y, obj_pos.z,
 				body_obj ? pos.distance_to(obj_pos) : -1.f, now);
 		}
