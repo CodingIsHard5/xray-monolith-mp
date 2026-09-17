@@ -7069,9 +7069,20 @@ void game_sv_Single::Update()
 			// wine prefix), so the blast radius can now be OBSERVED on a real player instead of
 			// constructed. The synthetic candidate stays anyway — it is what pins the exact
 			// boundary at r and r+1, which a real player parked wherever it spawned cannot.
+			// -coop_test_rep31_prefer <community> (2026-09-17, Overseer-approved R3_1 rerun): the preferred leg-1 victim community,
+			// "stalker" when absent. The measured leg-2 FAIL was a zombied victim (no live stalker online, the fallback below): an
+			// enemy of actor_stalker, so the stock kill costs the enemy rate. A community neutral to both actor and actor_stalker
+			// (ecolog) keeps legs 1 and 2 at the neutral rate.
 			if (s_r31_prefer_comm == -2)
+			{
+				string64 want = "stalker";
+				if (LPCSTR q = coop_param("-coop_test_rep31_prefer"))
+					if (*q && *q != '-')
+						sscanf(q, "%63s", want);
 				s_r31_prefer_comm = int(CHARACTER_COMMUNITY::IdToIndex(
-					"stalker", CHARACTER_COMMUNITY_INDEX(-1), true));
+					want, CHARACTER_COMMUNITY_INDEX(-1), true));
+				Msg("- COOP(rep31): preferred leg-1 victim community '%s' -> index %d", want, s_r31_prefer_comm);
+			}
 
 			xr_vector<u16> players;
 			coop_all_player_actors(players);

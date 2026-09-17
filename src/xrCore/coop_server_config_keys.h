@@ -148,6 +148,7 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_test_rep2_verify", coop_cfg_value, coop_cfg_test},   // off; 25 when given without a valid value | server | R2 read-only verify pass.
 	{"coop_test_rep3", coop_cfg_value, coop_cfg_test},   // off; 30 when given without a valid value | server | R3 kill-attribution reputation probe with a seeded bystander.
 	{"coop_test_rep31", coop_cfg_value, coop_cfg_test},   // off; 30 when given without a valid value | server | R3.1 collective reputation falloff/threshold probe.
+	{"coop_test_rep31_prefer", coop_cfg_value, coop_cfg_test},   // stalker | server | R3.1 probe: the preferred leg-1 victim community (legs 2-3 then match it).
 	// ---- §3.4 co-op player bodies (registered 2026-09-17 with the default-ON flip; the drift check had 17 unregistered flags)
 	{"coop_player_proxy_off", coop_cfg_switch, coop_cfg_control},   // off (the proxy is ON) | server | Control arm: disables redesign (A) — health sync, single hit delivery, server-revive reset, CSE health writeback, kill guarantees, the before-hit quarantine and the per-victim balancer.
 	{"coop_player_posfeed_off", coop_cfg_switch, coop_cfg_control},   // off (the feed is ON) | server | Control arm: the server's copy of a player no longer follows its player; honoured only with -coop_player_proxy_off (the proxy implies the feed).
