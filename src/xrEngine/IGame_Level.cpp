@@ -260,6 +260,39 @@ void IGame_Level::SetViewEntity(CObject* O)
 }
 
 ENGINE_API bool (*g_coop_sndtrace_watch)(CObject*) = NULL;   // MP fork (§3.4 hearing measurement)
+ENGINE_API void (*g_coop_sound_forward)(CObject*, u32, const Fvector&, float, float, float, bool) = NULL;   // MP fork (§3.4 hearing fix (B))
+
+u32 IGame_Level::coop_sound_event_direct(CObject* src, u32 type, const Fvector& pos, float range, float volume, float max_ai_distance,
+                                         u16* ids, u32 max_ids)
+{
+	if (!g_bLoaded || !src || src->getDestroy() || !_valid(pos))
+		return 0;
+	clamp(range, 0.1f, 500.f);
+	clamp(max_ai_distance, 0.1f, 500.f);
+	range = _min(range, max_ai_distance);
+	xr_vector<ISpatial*> found;   // not snd_ER: this runs from the server's game-thread message drain, never inside SoundEvent_Register
+	Fvector bb_size = {range, range, range};
+	g_SpatialSpace->q_box(found, 0, STYPE_REACTTOSOUND, pos, bb_size);
+	u32 n = 0;
+	for (ISpatial* const sp : found)
+	{
+		Feel::Sound* const L = sp->dcast_FeelSound();
+		CObject* const CO = sp->dcast_CObject();
+		if (!L || !CO || CO->getDestroy() || CO == src)
+			continue;
+		const float dist = pos.distance_to(sp->spatial.sphere.P);
+		if (dist > max_ai_distance)
+			continue;
+		const float power = (1.f - dist / max_ai_distance) * volume;
+		if (power <= EPS_S)
+			continue;
+		L->feel_sound_new(src, int(type), CSound_UserDataPtr(), pos, power);
+		if (ids && n < max_ids)
+			ids[n] = CO->ID();
+		++n;
+	}
+	return n;
+}
 
 void IGame_Level::SoundEvent_Register(ref_sound_data_ptr S, float range)
 {
@@ -284,6 +317,8 @@ void IGame_Level::SoundEvent_Register(ref_sound_data_ptr S, float range)
 	VERIFY(p && _valid(range));
 	range = _min(range, p->max_ai_distance);
 	VERIFY(_valid(snd_position));
+	if (g_coop_sound_forward && S->g_object)
+		g_coop_sound_forward(S->g_object, S->g_type, snd_position, range, p->volume, p->max_ai_distance, S->feedback->is_2D() ? true : false);
 	VERIFY(_valid(p->max_ai_distance));
 	VERIFY(_valid(p->volume));
 

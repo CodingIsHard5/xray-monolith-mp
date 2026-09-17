@@ -8,6 +8,8 @@
 #include "mp_coop_chat.h"     // MP fork (§13.4): COOP_CHAT_REQUEST_KIND
 #include "../xrNetServer/xr_enet_transport.h"
 #include "xrMessages.h"
+#include "ai_sounds.h"          // MP fork (§3.4 hearing fix (B)): SOUND_TYPE_* for the forwarded-sound validation
+#include "coop_player_flags.h"  // MP fork (§3.4 hearing fix (B)): coop_token_present
 #include "xrServer_Objects_ALife_All.h"
 #include "level.h"
 #include "game_cl_base.h"
@@ -1064,6 +1066,11 @@ u32 xrServer::OnDelayedMessage(NET_Packet& P, ClientID sender) // Non-Zero means
 			coop_run_request(P, sender);
 		}
 		break;
+	case M_XRNET_COOP_SOUND:   // §3.4 hearing fix (B): delivery touches the spatial database and AI objects, so the game thread
+		{
+			coop_run_sound(P, sender);
+		}
+		break;
 	// MP fork (§4r FIX, second attempt): the DEFERRED GE_DIE lands here. Without this case the
 	// packet was queued and then silently DROPPED — the switch had four cases and no default, so
 	// the death simply stopped happening: rollback 0, respawn 0, and an audit reporting zero
@@ -1122,6 +1129,133 @@ extern float g_fCatchObjectTime;
 // (dialog id, phrase id). CPhraseDialog::Load shares the already-parsed dialog data, so this
 // is a lookup rather than a parse.
 // MP fork (design doc §9.1): a player's request, on the game thread (ProceedDelayedPackets).
+// MP fork (design doc §3.4 hearing fix (B), -coop_sound_forward, default OFF): one AI sound event a client's own actor raised locally.
+// The dedicated server runs -nosound, so nothing it plays reaches AI hearing (measured: hearing arms 1a/1b); the client's events are
+// real and correctly placed (arm 2). Validated, rate-capped, then delivered to the Feel::Sound receivers in range without the sound
+// library — no occlusion, an interim difference from single player (monsters hear through walls within range).
+void xrServer::coop_run_sound(NET_Packet& P, ClientID sender)
+{
+	static int s_on = -1, s_trace = -1;
+	if (s_on < 0) s_on = coop_token_present("-coop_sound_forward") ? 1 : 0;   // plain literal: App. B key drift check
+	if (s_trace < 0) s_trace = strstr(Core.Params, "-coop_soundtrace") ? 1 : 0;
+	if (!s_on || !g_pGameLevel)
+		return;
+	static u32 s_acc = 0, s_thr = 0, s_rate = 0, s_owner = 0, s_pos = 0, s_type = 0, s_bad = 0, s_rep_t = 0, s_refusal_lines = 0;
+	const u32 now = Device.dwTimeGlobal;
+	struct report_on_exit
+	{
+		u32 now;
+		~report_on_exit()
+		{
+			if (now - s_rep_t < 10000u) return;
+			if (s_acc || s_thr || s_rate || s_owner || s_pos || s_type || s_bad)
+				Msg("- COOP(soundfwd): last 10 s accepted %u throttled %u rate-capped %u refused owner %u pos %u type %u malformed %u",
+					s_acc, s_thr, s_rate, s_owner, s_pos, s_type, s_bad);
+			s_acc = s_thr = s_rate = s_owner = s_pos = s_type = s_bad = 0;
+			s_rep_t = now;
+		}
+	} reporter{now};
+	auto refuse = [&](u32& counter, LPCSTR why, u16 src)
+	{
+		++counter;
+		if (s_refusal_lines < 40)   // the first refusals are named; afterwards only the 10 s counters
+		{
+			++s_refusal_lines;
+			Msg("! COOP(soundfwd): refused client 0x%08x src %u: %s", sender.value(), u32(src), why);
+		}
+	};
+	xrClientData* const CL = ID_to_client(sender);
+	if (!CL || !CL->owner)
+		return;
+	if (P.r_elapsed() < 2 + 4 + 12 + 4 + 4 + 4)
+	{
+		refuse(s_bad, "short packet", 0);
+		return;
+	}
+	const u16 src = P.r_u16();
+	const u32 type = P.r_u32();
+	Fvector pos;
+	P.r_vec3(pos);
+	float range = P.r_float(), volume = P.r_float(), max_ai = P.r_float();
+	if (!_valid(pos) || !_valid(range) || !_valid(volume) || !_valid(max_ai))
+	{
+		refuse(s_bad, "non-finite field", src);
+		return;
+	}
+	// ownership: the client's own body, or an item whose parent is that body
+	const CSE_Abstract* const body = CL->owner;
+	const CSE_Abstract* const se = ID_to_entity(src);
+	if (!se || (src != body->ID && se->ID_Parent != body->ID))
+	{
+		refuse(s_owner, "source is neither this client's body nor an item it holds", src);
+		return;
+	}
+	// type: what a player produces — weapon sounds, steps, item handling
+	if (!(type & (SOUND_TYPE_WEAPON | SOUND_TYPE_STEP | SOUND_TYPE_ITEM)))
+	{
+		refuse(s_type, "type is not a player-producible sound", src);
+		return;
+	}
+	// position: within 5 m of the body's server position (the feed keeps it current)
+	if (pos.distance_to(body->o_Position) > 5.f)
+	{
+		refuse(s_pos, "position is more than 5 m from the body", src);
+		return;
+	}
+	// server-side rate cap: per (source, type) one per 200 ms, and 16 accepted per second per client
+	xrClientData::coop_snd_slot* slot = &CL->m_coop_snd_last[0];
+	for (xrClientData::coop_snd_slot& sl : CL->m_coop_snd_last)
+	{
+		if (sl.t && sl.src == src && sl.type == type)
+		{
+			slot = &sl;
+			break;
+		}
+		if (sl.t < slot->t) slot = &sl;
+	}
+	if (slot->t && slot->src == src && slot->type == type && now - slot->t < 200u)
+	{
+		++s_thr;
+		return;
+	}
+	if (now - CL->m_coop_snd_win_t >= 1000u)
+	{
+		CL->m_coop_snd_win_t = now;
+		CL->m_coop_snd_win_n = 0;
+	}
+	if (CL->m_coop_snd_win_n >= 16u)
+	{
+		++s_rate;
+		return;
+	}
+	++CL->m_coop_snd_win_n;
+	slot->src = src; slot->type = type; slot->t = now;
+	clamp(range, 0.1f, 500.f);
+	clamp(max_ai, 0.1f, 500.f);
+	clamp(volume, 0.f, 4.f);
+	CObject* const O = Level().Objects.net_Find(src);
+	if (!O)
+	{
+		refuse(s_owner, "source has no server object", src);
+		return;
+	}
+	u16 ids[8];
+	const u32 n = g_pGameLevel->coop_sound_event_direct(O, type, pos, range, volume, max_ai, ids, 8);
+	++s_acc;
+	if (s_trace)
+	{
+		string128 list = "";
+		for (u32 i = 0; i < n && i < 8; ++i)
+		{
+			string16 one;
+			xr_sprintf(one, "%u ", u32(ids[i]));
+			xr_strcat(list, one);
+		}
+		Msg("- COOP(soundfwd): accept client 0x%08x src %u type 0x%x at %.1f,%.1f,%.1f range %.1f receivers %u [%s] t %u", sender.value(),
+			u32(src), type, pos.x, pos.y, pos.z, range, n, list, now);
+	}
+}
+
 void xrServer::coop_run_request(NET_Packet& P, ClientID sender)
 {
 	const u8 kind = P.r_u8();
@@ -1409,6 +1543,12 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 			// about the action changes — same packet, same handler, same acting scope — only
 			// which thread is holding the VM when it runs. It also inherits the queue's existing
 			// correctness: a client that disconnects has its queued packets purged.
+			AddDelayedPacket(P, sender);
+		}
+		break;
+	case M_XRNET_COOP_SOUND:
+		{
+			// MP fork (§3.4 hearing fix (B)): a forwarded AI sound event; deferred to the game thread like the request below
 			AddDelayedPacket(P, sender);
 		}
 		break;

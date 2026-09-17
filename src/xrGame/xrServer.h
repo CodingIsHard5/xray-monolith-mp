@@ -56,6 +56,11 @@ public:
 	float m_coop_pose_hp = 1.f;               // §3.4: the health the client reported with this pose (read by the health-sync log)
 	float m_coop_hp_sent = -1.f;              // §3.4 health sync (A): the last server-body health sent to this owner, and when
 	u32 m_coop_hp_sent_t = 0;
+	// MP fork (§3.4 hearing fix (B)): the server-side rate cap on forwarded sound events, per client — per (source, type) at most one per
+	// 200 ms, and at most 16 accepted per second overall — so a modified client cannot flood whatever the client-side throttle says
+	struct coop_snd_slot { u16 src = 0; u32 type = 0; u32 t = 0; };
+	coop_snd_slot m_coop_snd_last[8];
+	u32 m_coop_snd_win_t = 0, m_coop_snd_win_n = 0;
 
 	// MP fork (§14 step 7 phase 4 D3.3 / doc §9.4): the health this client last reported, and
 	// when it last went DOWN. The M_CL_UPDATE peek already reads the health field and threw it
@@ -138,6 +143,7 @@ private:
 	// MP fork (§19 co-op): run a dialogue action a thin client asked us to perform.
 	void coop_run_dialog_action(NET_Packet& P);
 	void coop_run_request(NET_Packet& P, ClientID sender); // §9.1: M_XRNET_COOP_REQUEST, on the game thread
+	void coop_run_sound(NET_Packet& P, ClientID sender);   // §3.4 hearing fix (B): M_XRNET_COOP_SOUND, on the game thread
 
 	// §3 win #2b inc3 (per-client update packets): when target_client != nullptr, build the update stream
 	// for JUST that client — ambient creatures are filtered to its relevance set (m_coop_rel_known), while

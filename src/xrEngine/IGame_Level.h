@@ -57,6 +57,9 @@ public:
 // MP fork (§3.4 hearing measurement, -coop_soundtrace; MEASUREMENT ONLY): when set, SoundEvent_Register logs the AI sound events whose
 // source object this predicate accepts (xrGame: an actor, or an item held by one), with the receivers found. NULL = off.
 ENGINE_API extern bool (*g_coop_sndtrace_watch)(CObject*);
+// MP fork (§3.4 hearing fix (B), -coop_sound_forward, client): called from SoundEvent_Register for every AI sound event with a source
+// object, with the event's resolved position, range and parameters; xrGame decides whether to forward it to the server. NULL = off.
+ENGINE_API extern void (*g_coop_sound_forward)(CObject* src, u32 type, const Fvector& pos, float range, float volume, float max_ai_distance, bool is_2d);
 
 class ENGINE_API IGame_Level :
 	public DLL_Pure,
@@ -127,6 +130,10 @@ public:
 	void SetViewEntity(CObject* O); // { pCurrentViewEntity=O; }
 
 	void SoundEvent_Register(ref_sound_data_ptr S, float range);
+	// MP fork (§3.4 hearing fix (B), server): deliver one AI sound event to the Feel::Sound receivers in range WITHOUT the sound library
+	// (the dedicated server has no device). Same energy as SoundEvent_Register, no occlusion (the -nosound server loads no sound geometry).
+	// Delivered immediately; call on the game thread. Returns the number of receivers; the first max_ids of their ids go to ids.
+	u32 coop_sound_event_direct(CObject* src, u32 type, const Fvector& pos, float range, float volume, float max_ai_distance, u16* ids, u32 max_ids);
 	void SoundEvent_Dispatch();
 	void SoundEvent_OnDestDestroy(Feel::Sound*);
 

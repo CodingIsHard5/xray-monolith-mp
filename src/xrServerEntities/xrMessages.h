@@ -176,6 +176,12 @@ enum
 	// Behind -coop_player_proxy. The client sets its own actor's health; it never sends anything back for it.
 	M_XRNET_COOP_HEALTH,
 
+	// MP fork (design doc §3.4 hearing, fix (B)): client -> server. One AI sound event this client's own actor (or an item it holds) just
+	// raised locally: the dedicated server runs -nosound, so no sound it plays can ever reach a monster's hearing. Payload: u16 source id,
+	// u32 AI sound type, vec3 position, float range, float volume, float max_ai_distance. Unreliable; the client throttles per (source,
+	// type) and the server validates ownership, type and position and caps the rate per client. Behind -coop_sound_forward (both sides).
+	M_XRNET_COOP_SOUND,
+
 	MSG_FORCEDWORD = u32(-1)
 };
 

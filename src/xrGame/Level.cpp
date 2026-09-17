@@ -252,6 +252,83 @@ static void __stdcall coop_snd_attempt_log(CObject* O, const Fvector* pos, int a
 		has_handle, u32(game_type), p.x, p.y, p.z, Device.dwTimeGlobal);
 }
 
+// MP fork (§3.4 hearing fix (B), -coop_sound_forward, CLIENT): forward this client's own AI sound events to the server. The hook runs
+// inside the sound library's event path (not necessarily the game thread), so it only QUEUES, under a lock; CLevel::OnFrame sends.
+// Forwarded: 3D events (a 2D HUD twin never), range >= 2 m, a known AI type, whose source is the controlled actor or an item it holds.
+// Throttled here per (source, type) to one per 250 ms: one shot's emitter re-announces several times while it plays (hearing arm 2:
+// 144 events for 16 shots). The server enforces its own cap; this one only saves bandwidth.
+namespace coop_sound_fwd
+{
+	struct pending { u16 src; u32 type; Fvector pos; float range, volume, max_ai; };
+#ifdef PROFILE_CRITICAL_SECTIONS
+	static xrCriticalSection s_cs(MUTEX_PROFILE_ID(coop_sound_fwd));
+#else
+	static xrCriticalSection s_cs;
+#endif
+	static xr_vector<pending> s_queue;
+	struct slot { u16 src; u32 type; u32 t; };
+	static slot s_last[16];
+	static u32 s_sent = 0, s_throttled = 0, s_report_t = 0;
+}
+
+static void __stdcall coop_sound_forward_hook(CObject* src, u32 type, const Fvector& pos, float range, float volume, float max_ai, bool is_2d)
+{
+	using namespace coop_sound_fwd;
+	if (is_2d || range < 2.f || type == 0 || type == 0xffffffff || !src || !g_pGameLevel || Level().Server)
+		return;
+	CObject* const me = Level().CurrentControlEntity();
+	if (!me || (src != me && src->H_Parent() != me))
+		return;
+	const u32 now = Device.dwTimeGlobal;
+	xrCriticalSectionGuard guard(s_cs);
+	slot* free_slot = &s_last[0];
+	for (slot& sl : s_last)
+	{
+		if (sl.src == src->ID() && sl.type == type && sl.t)
+		{
+			if (now - sl.t < 250u) { ++s_throttled; return; }
+			free_slot = &sl;
+			break;
+		}
+		if (sl.t < free_slot->t) free_slot = &sl;   // the oldest slot is reused
+	}
+	free_slot->src = src->ID(); free_slot->type = type; free_slot->t = now;
+	if (s_queue.size() < 64)
+		s_queue.push_back({src->ID(), type, pos, range, volume, max_ai});
+}
+
+void coop_sound_forward_flush()   // CLevel::OnFrame, game thread
+{
+	using namespace coop_sound_fwd;
+	if (!g_coop_sound_forward || Level().Server)
+		return;
+	xr_vector<pending> out;
+	{
+		xrCriticalSectionGuard guard(s_cs);
+		out.swap(s_queue);
+	}
+	for (const pending& e : out)
+	{
+		NET_Packet P;
+		P.w_begin(M_XRNET_COOP_SOUND);
+		P.w_u16(e.src);
+		P.w_u32(e.type);
+		P.w_vec3(e.pos);
+		P.w_float(e.range);
+		P.w_float(e.volume);
+		P.w_float(e.max_ai);
+		Level().Send(P, net_flags(FALSE));
+		++s_sent;
+	}
+	if (Device.dwTimeGlobal - s_report_t >= 10000u)
+	{
+		if (s_sent || s_throttled)
+			Msg("- COOP(soundfwd-cl): last 10 s sent %u throttled %u", s_sent, s_throttled);
+		s_sent = s_throttled = 0;
+		s_report_t = Device.dwTimeGlobal;
+	}
+}
+
 CLevel::CLevel() :
     IPureClient(Device.GetTimerGlobal())
 #ifdef PROFILE_CRITICAL_SECTIONS
@@ -265,6 +342,8 @@ CLevel::CLevel() :
 		g_coop_sndtrace_watch = coop_sndtrace_watched;
 		Msg("- COOP(sndtrace): sound trace ON (attempts at the sound library, AI events at the level; actors and their items)");
 	}
+	if (strstr(Core.Params, "-coop_sound_forward"))   // plain literal: App. B key drift check. The server ignores this hook (Level().Server).
+		g_coop_sound_forward = coop_sound_forward_hook;
 	game_events = xr_new<NET_Queue_Event>();
 
     eChangeRP = Engine.Event.Handler_Attach("LEVEL:ChangeRP", this);
@@ -1290,8 +1369,11 @@ u32 g_coop_game_thread_id = 0;
 // it is meaningless without the thread id above, and the two should not be able to drift apart.
 u32 g_coop_vm_audit = 0;
 
+void coop_sound_forward_flush();   // MP fork (§3.4 hearing fix (B))
+
 void CLevel::OnFrame()
 {
+	coop_sound_forward_flush();
 	// MP fork (bug 3 clock probe, -coop_animdiag): the client renders NPC positions ~18.5 s behind the packets
 	// it holds (StalkerMPMod npc-anim-lag1: lag=newest ts - own timeServer() median 18540 ms, 552 buffered
 	// samples, moving NPCs drawn 14 m from their newest position). Its CLOCK_SYNC delta and the server's
