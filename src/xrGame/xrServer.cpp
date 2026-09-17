@@ -9,6 +9,7 @@
 #include "../xrNetServer/xr_enet_transport.h"
 #include "xrMessages.h"
 #include "ai_sounds.h"          // MP fork (§3.4 hearing fix (B)): SOUND_TYPE_* for the forwarded-sound validation
+#include "actor.h"              // MP fork (§3.4 hearing flip): CActor for the liveness check (C2027 on bcdb4ae0 without it)
 #include "coop_player_flags.h"  // MP fork (§3.4 hearing fix (B)): coop_token_present
 #include "xrServer_Objects_ALife_All.h"
 #include "level.h"
