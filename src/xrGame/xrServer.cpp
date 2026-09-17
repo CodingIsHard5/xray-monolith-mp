@@ -1230,9 +1230,12 @@ void xrServer::coop_run_sound(NET_Packet& P, ClientID sender)
 	}
 	++CL->m_coop_snd_win_n;
 	slot->src = src; slot->type = type; slot->t = now;
-	clamp(range, 0.1f, 500.f);
-	clamp(max_ai, 0.1f, 500.f);
-	clamp(volume, 0.f, 4.f);
+	// the client's values are bounds on what a player sound can reach, not trusted amounts (CodeRabbit): range and max_ai at most 200 m,
+	// volume at most 1, and the range never beyond max_ai
+	clamp(range, 0.1f, 200.f);
+	clamp(max_ai, 0.1f, 200.f);
+	clamp(volume, 0.f, 1.f);
+	range = _min(range, max_ai);
 	CObject* const O = Level().Objects.net_Find(src);
 	if (!O)
 	{
@@ -1548,8 +1551,12 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 		break;
 	case M_XRNET_COOP_SOUND:
 		{
-			// MP fork (§3.4 hearing fix (B)): a forwarded AI sound event; deferred to the game thread like the request below
-			AddDelayedPacket(P, sender);
+			// MP fork (§3.4 hearing fix (B)): a forwarded AI sound event; deferred to the game thread like the request below. Dropped
+			// here when the feature is off, so a client cannot fill the delayed-packet queue with messages nobody reads (CodeRabbit)
+			static int s_fwd = -1;
+			if (s_fwd < 0) s_fwd = coop_token_present("-coop_sound_forward") ? 1 : 0;
+			if (s_fwd)
+				AddDelayedPacket(P, sender);
 		}
 		break;
 	case M_XRNET_COOP_REQUEST:
