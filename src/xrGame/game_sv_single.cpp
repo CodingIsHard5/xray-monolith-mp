@@ -2814,6 +2814,36 @@ void game_sv_Single::coop_player_posfeed_tick()
 				a->KillEntity(who ? who : a->ID());
 				return;
 			}
+			// MP fork (§9 death delivery, 2026-09-17): THE DEATH MUST REACH ITS OWNER, whatever route it took.
+			//
+			// Caden's live session, 2026-09-17: body 34817 died on the server at t 336205 and run3 — its own client —
+			// logged no death, no respawn and no deathorder line at all. So it never started a respawn countdown, never
+			// sent GAME_EVENT_COOP_RESPAWN, and was never revived: the server carried a dead body for that player for
+			// the remaining half hour. A peer that joined afterwards received it at health -1 and could only watch it
+			// slide, which is the "only movement, no animations or poses" he reported.
+			//
+			// The stock route is GE_DIE out of CEntity::KillEntity, and it only fires for a death that goes THROUGH
+			// KillEntity on the server. A death reached any other way — a script writing health, a deferred condition
+			// delta, the kill guarantee above having already run for a body that then died again — never announces
+			// itself. The branch above catches "dead with no Die"; this catches "Die happened and nobody was told".
+			// Broadcast, not SendTo: peers have to ragdoll the body for the revive to have something to undo.
+			if (coop_player_proxy_on() && se && a && !a->g_Alive() && !CL->m_coop_death_sent)
+			{
+				const u16 who = a->conditions().GetWhoHitLastTimeID();
+				NET_Packet P;
+				P.w_begin(M_XRNET_COOP_DEATH);
+				P.w_u16(a->ID());
+				P.w_u16(who ? who : a->ID());
+				server->SendBroadcast(BroadcastCID, P, net_flags(TRUE, TRUE));
+				CL->m_coop_death_sent = true;
+				Msg("- COOP(death-sv): body %u is dead on the server (health %.4f, killer %d) and its owner had not been "
+					"told — death broadcast to every client", u32(a->ID()), a->GetfHealth(), who ? int(who) : -1);
+			}
+			if (se && a && a->g_Alive() && CL->m_coop_death_sent)
+			{
+				CL->m_coop_death_sent = false;   // a new life: the next death delivers again
+				Msg("- COOP(death-sv): body %u is alive again — death delivery re-armed", u32(a->ID()));
+			}
 			if (!se || !a || !a->g_Alive())
 				return;
 			// read the pump thread's pose snapshot consistently (sequence counter: retry while a write is in progress or changed)

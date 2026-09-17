@@ -56,6 +56,11 @@ public:
 	float m_coop_pose_hp = 1.f;               // §3.4: the health the client reported with this pose (read by the health-sync log)
 	float m_coop_hp_sent = -1.f;              // §3.4 health sync (A): the last server-body health sent to this owner, and when
 	u32 m_coop_hp_sent_t = 0;
+	// MP fork (§9 death delivery, 2026-09-17): has this player been told that their server body is dead, for THIS life?
+	// Caden's 2026-09-17 session: body 34817 died on the server at t 336205 and its owner was never told — no client
+	// death, no respawn request, no revive, and a peer that joined later received the body at health -1 and could only
+	// watch it slide. Cleared on revive, so one death delivers once.
+	bool m_coop_death_sent = false;
 	// MP fork (§3.4 hearing fix (B)): the server-side rate cap on forwarded sound events, per client — per (source, type) at most one per
 	// 200 ms, and at most 16 accepted per second overall — so a modified client cannot flood whatever the client-side throttle says
 	struct coop_snd_slot { u16 src = 0; u32 type = 0; u32 t = 0; };

@@ -182,6 +182,21 @@ enum
 	// type) and the server validates ownership, type and position and caps the rate per client. Behind -coop_sound_forward (both sides).
 	M_XRNET_COOP_SOUND,
 
+	// MP fork (design doc §9 revive, 2026-09-17): server -> EVERY client, broadcast. A player body has been revived, so
+	// every copy of it must undo the death its own process performed. Payload: u16 actor id, vec3 position, float health.
+	// Without this a peer keeps the body it ragdolled on GE_DIE: net_Import restores positive health, so it is "alive"
+	// and still slides with M_CL_UPDATE, but the physics shell owns its skeleton, so it never animates again. The owner
+	// revives itself in CActor::coop_respawn and the server revives its own copy in GAME_EVENT_COOP_RESPAWN; this is the
+	// third side. Behind -coop_revive (both sides).
+	M_XRNET_COOP_REVIVE,
+
+	// MP fork (design doc §9 death delivery, 2026-09-17): server -> EVERY client, broadcast. This player's SERVER body is
+	// dead and this is the guarantee that every side learns it, whatever route the death took. Payload: u16 actor id,
+	// u16 killer id. The stock route is GE_DIE from CEntity::KillEntity, which only fires for deaths that go through
+	// KillEntity on the server; a death reached any other way (a script writing health, a deferred condition) left the
+	// owner alive on its own machine and its body dead on the server, for the rest of the session. Sent once per life.
+	M_XRNET_COOP_DEATH,
+
 	MSG_FORCEDWORD = u32(-1)
 };
 

@@ -90,6 +90,8 @@ private:
 	SHit m_sv_hit;
 	u32 m_hit_valide_time;
 	u32 m_physics_shell_animated_time_destroy;
+	// MP fork (§9 revive): the skeleton's animation root, taken while the body is alive. u16(-1) = never taken.
+	u16 m_coop_anim_bone_root;
 public:
 	EType Type()
 	{
@@ -153,6 +155,17 @@ public:
 	void in_NetSave(NET_Packet& P);
 	void in_ChangeVisual();
 	void in_Die(bool hit = true);
+	// MP fork (design doc §9 revive, 2026-09-17): UNDO a death on a PLAYER body, so a co-op revive is a live
+	// character again rather than an animated corpse. Nothing else in the engine can do this: `m_eState = esAlive`
+	// is assigned in exactly two places in the whole tree, the constructor and in_NetDestroy — stock MP respawns
+	// by DESTROYING and re-creating the actor object, and co-op revives it in place. REFUSES any body that is not
+	// a player's, with a named line; in_Die, in_NetDestroy and SpawnCharacterCreate are untouched for every other
+	// creature. Returns true when the body is a live character afterwards (including "there was nothing to undo").
+	bool coop_revive(const char* why);
+	// Records the animation bone root while the body is still alive, because CreateShell re-roots the skeleton at
+	// bip01_pelvis on death and the original root is not recoverable afterwards (IKinematics has no accessor for
+	// the model's own root). Called from CActor::Die BEFORE the death runs; a no-op once the shell holds the skeleton.
+	void coop_remember_anim_root();
 	void on_create_anim_mov_ctrl();
 	void on_destroy_anim_mov_ctrl();
 	void PHGetLinearVell(Fvector& velocity);

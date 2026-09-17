@@ -31,6 +31,8 @@
 #include "../xrEngine/xr_input.h"
 //
 #include "Actor.h"
+#include "coop_player_flags.h"          // MP fork (§9 revive): coop_revive_on()
+#include "../xrEngine/xr_object.h"      // MP fork (§9 (i) diagnostic): CObject is used complete here
 #include "ActorAnimation.h"
 #include "actor_anim_defs.h"
 #include "HudItem.h"
@@ -724,9 +726,37 @@ void CActor::Hit(SHit* pHDS)
 				CScriptHit tLuaHit(&HDS);
 
 				::luabind::functor<bool> funct;
-				if (ai().script_engine().functor("_G.CActor__BeforeHitCallback", funct))
+				// MP fork (§9 (i) damage, 2026-09-17, DIAGNOSTIC): name what happens to a hit on a player body here.
+				// Caden's session: four player-fired hits on body 9027 (power 0.6769) were allowed by §12, reached this
+				// function, and produced NOT ONE COOP(pvb) line — the chain GAMMA applies actor damage on never ran —
+				// while NPC fire and anomaly hits on the same bodies applied normally. From the outside that is
+				// indistinguishable from "the callback ran and declined", and the two want opposite fixes. So: the
+				// hit's source class, whether the functor was found, and what it returned. Throttled, and only for a
+				// co-op player body, so single player and a firefight are unaffected.
+				const bool coop_diag = xr_enet::enabled();
+				const CObject* const src = HDS.who;
+				const bool src_is_player = src && smart_cast<const CActor*>(src) != NULL;
+				const bool have_funct = !!ai().script_engine().functor("_G.CActor__BeforeHitCallback", funct);
+				if (coop_diag)
 				{
-					if (!funct(this->lua_game_object(), &tLuaHit, HDS.boneID))
+					static u32 s_hd = 0;
+					if (++s_hd <= 100 || (s_hd % 100) == 1)
+						Msg("- COOP(hitsrc): body %u hit by %d (%s) type %d power %.4f bone %u hp %.4f — before-hit callback %s (%u so far)",
+							ID(), src ? int(src->ID()) : -1, src_is_player ? "A PLAYER" : (src ? src->cNameSect().c_str() : "none"),
+							int(HDS.hit_type), HDS.power, u32(HDS.boneID), GetfHealth(), have_funct ? "FOUND" : "NOT FOUND", s_hd);
+				}
+				if (have_funct)
+				{
+					const bool go_on = !!funct(this->lua_game_object(), &tLuaHit, HDS.boneID);
+					if (coop_diag)
+					{
+						static u32 s_hr = 0;
+						if (++s_hr <= 100 || (s_hr % 100) == 1)
+							Msg("- COOP(hitsrc):   before-hit callback returned %d for body %u (%s source) — %s (%u so far)",
+								go_on ? 1 : 0, ID(), src_is_player ? "player" : "non-player",
+								go_on ? "the hit continues" : "THE HIT IS DROPPED HERE", s_hr);
+					}
+					if (!go_on)
 						return;
 				}
 
@@ -914,6 +944,12 @@ static inline bool coop_thin_client()
 
 void CActor::Die(CObject* who)
 {
+	// MP fork (§9 revive): take the animation bone root NOW, while the skeleton is still the animator's. The death
+	// below re-roots it at bip01_pelvis for the ragdoll and the original is not recoverable afterwards. Every copy of
+	// the body runs Die (the owner locally, peers and the server from GE_DIE), so every copy records its own.
+	if (xr_enet::enabled() && character_physics_support())
+		character_physics_support()->coop_remember_anim_root();
+
 	// MP fork (§3.4 player proxy, death order): which side, when, by whom, and on a client whether a GE_DIE message had just arrived
 	// (server-reported death) or not (the client's own local hit killed it)
 	if (xr_enet::enabled())
@@ -2628,6 +2664,47 @@ void CActor::coop_set_respawn_position(const Fvector& pos, float health)
 	Msg("- COOP(respawn-cl): checkpoint position %.1f,%.1f,%.1f applied post-respawn", at.x, at.y, at.z);
 }
 
+// MP fork (design doc §9 revive, 2026-09-17): the one entry point that undoes a death on this process's copy of a
+// player body. Three callers, one behaviour: the owner after its respawn timer, a peer told by M_XRNET_COOP_REVIVE,
+// and the server's own copy in GAME_EVENT_COOP_RESPAWN. Behind -coop_revive_off (the control arm keeps the old
+// behaviour on the same binary: health comes back, the death's physics does not).
+void CActor::coop_revive_body(const Fvector& pos, float health, bool move, const char* why)
+{
+	if (!coop_revive_on())
+	{
+		static u32 s_off = 0;
+		if (++s_off <= 20 || (s_off % 200) == 1)
+			Msg("- COOP(revive): -coop_revive_off — body %u NOT revived (%s); this is the control arm, the death's "
+				"physics stays (%u so far)", ID(), why ? why : "?", s_off);
+		return;
+	}
+
+	if (health > 0.f)
+		SetfHealth(health);
+
+	// m_level_death_time != 0 => AlreadyDie() == true, which blocks every future death.
+	m_level_death_time = 0;
+	m_game_death_time  = 0;
+	clear_killer_id();
+
+	if (character_physics_support())
+		character_physics_support()->coop_revive(why);
+
+	if (move)
+	{
+		Position().set(pos);
+		if (character_physics_support() && character_physics_support()->movement())
+			character_physics_support()->movement()->SetPosition(pos);
+		Fmatrix m;
+		m.rotateY(-r_model_yaw);
+		m.c.set(pos);
+		XFORM().set(m);
+	}
+
+	setVisible(TRUE);
+	setEnabled(TRUE);
+}
+
 void CActor::coop_respawn()
 {
 	VERIFY(m_coop_dead);
@@ -2676,6 +2753,11 @@ void CActor::coop_respawn()
 	Fvector spawn_pos = m_coop_have_respawn_pos ? m_coop_respawn_pos : m_coop_death_pos;
 	m_coop_have_respawn_pos = false;   // one respawn, one position
 	spawn_pos.y += 0.5f;    // nudge up slightly to avoid ground-clip
+
+	// MP fork (§9 revive, 2026-09-17): undo the death's PHYSICS before placing the body. Until this existed, a revived
+	// player had no character to walk with — in_Die destroyed it and nothing recreated it — so they could shoot, reload
+	// and look around but not move, and the SetPosition below was a no-op on a character that did not exist.
+	coop_revive_body(spawn_pos, 0.f, false, "own respawn timer");
 
 	Position().set(spawn_pos);
 	if (character_physics_support() && character_physics_support()->movement())

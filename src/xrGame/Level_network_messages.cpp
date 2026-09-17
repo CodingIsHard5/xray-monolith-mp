@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "../xrEngine/xr_object.h"             // MP fork (§9 death delivery/revive): CObject is used complete here
 // MP fork (§19 co-op): M_XRNET_OPEN_MENU
 #include "UIGameSP.h"
 #include "InventoryOwner.h"
@@ -173,6 +174,59 @@ void CLevel::ClientReceive()
 				CActor* const actor = controlled ? smart_cast<CActor*>(controlled) : NULL;
 				if (actor && controlled->ID() == actor_id)
 					actor->coop_set_respawn_position(pos, health);
+			}
+			break;
+		case M_XRNET_COOP_DEATH:
+			{
+				// MP fork (§9 death delivery, 2026-09-17): the server says this player's body is dead and is making sure
+				// every side knows. Idempotent by AlreadyDie(): the common case is that GE_DIE already arrived and this
+				// changes nothing, which is why it says so as a value rather than treating it as an error.
+				const u16 actor_id = P->r_u16();
+				const u16 killer_id = P->r_u16();
+
+				CObject* const obj = Objects.net_Find(actor_id);
+				CActor* const actor = obj ? smart_cast<CActor*>(obj) : NULL;
+				if (!actor)
+				{
+					Msg("! COOP(death-cl): death for body %u arrived but this client has no such actor object", u32(actor_id));
+					break;
+				}
+				const bool mine = (CurrentControlEntity() && CurrentControlEntity()->ID() == actor_id);
+				if (!actor->g_Alive() || actor->AlreadyDie())
+				{
+					Msg("- COOP(death-cl): death received for body %u (%s) — already dead here, nothing to do",
+						u32(actor_id), mine ? "our own body" : "a peer's body");
+					break;
+				}
+				Msg("- COOP(death-cl): death received for body %u (%s) killer %u — this client still had it ALIVE; killing it "
+					"now (without this the server's death never reaches here)", u32(actor_id), mine ? "our own body" : "a peer's body",
+					u32(killer_id));
+				actor->KillEntity(killer_id);
+			}
+			break;
+		case M_XRNET_COOP_REVIVE:
+			{
+				// MP fork (§9 revive, 2026-09-17): a player body somewhere has been revived, and THIS process's copy
+				// of it still carries the death it performed on GE_DIE. Broadcast, so it reaches the owner too — the
+				// owner has already revived itself and coop_revive is idempotent, which is why it says so as a value
+				// rather than treating the second call as an error.
+				const u16 actor_id = P->r_u16();
+				Fvector pos;
+				P->r_vec3(pos);
+				const float health = P->r_float();
+
+				CObject* const obj = Objects.net_Find(actor_id);
+				CActor* const actor = obj ? smart_cast<CActor*>(obj) : NULL;
+				if (!actor)
+				{
+					Msg("! COOP(revive-cl): revive for body %u arrived but this client has no such actor object", u32(actor_id));
+					break;
+				}
+				const bool mine = (CurrentControlEntity() && CurrentControlEntity()->ID() == actor_id);
+				Msg("- COOP(revive-cl): revive received for body %u (%s) health %.2f at (%.1f,%.1f,%.1f)",
+					u32(actor_id), mine ? "our own body" : "a peer's body", health, VPUSH(pos));
+				// A peer's body is driven by net_Import, so move it; our own has already placed itself.
+				actor->coop_revive_body(pos, health, !mine, mine ? "broadcast, our own body" : "broadcast, peer body");
 			}
 			break;
 		case M_XRNET_COOP_NOTICE:

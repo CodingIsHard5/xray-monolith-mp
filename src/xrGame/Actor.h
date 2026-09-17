@@ -336,6 +336,12 @@ public:
 	void      coop_set_respawn_position(const Fvector& pos, float health);
 	bool      coop_is_dead() const       { return m_coop_dead; }
 	float     coop_respawn_timer() const { return m_coop_respawn_timer; }
+	// MP fork (§9 revive, 2026-09-17): undo a death on THIS process's copy of a player body — health, the death
+	// bookkeeping, and the physics and skeleton that CCharacterPhysicsSupport::in_Die took away. THE ONLY CALLER
+	// of CCharacterPhysicsSupport::coop_revive, reached from all three sides of one co-op respawn: the owner
+	// (coop_respawn), a peer (M_XRNET_COOP_REVIVE) and the server's own copy (GAME_EVENT_COOP_RESPAWN).
+	// health <= 0 leaves health alone (the caller already set it); pos is applied only when `move` is true.
+	void      coop_revive_body(const Fvector& pos, float health, bool move, const char* why);
 	SActorMotions* m_anims;
 #ifdef ENABLE_CAR
 	SActorVehicleAnims* m_vehicle_anims;

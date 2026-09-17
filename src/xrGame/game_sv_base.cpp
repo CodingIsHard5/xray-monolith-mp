@@ -1052,6 +1052,28 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 					ea->m_level_death_time = 0;
 					ea->m_game_death_time  = 0;
 					ea->clear_killer_id();
+
+					// MP fork (§9 revive, 2026-09-17): the server's own copy died too (it ran GE_DIE), so it also has
+					// no character and a ragdoll holding its skeleton. Health and a position are not a revive.
+					if (CActor* const act = smart_cast<CActor*>(ea))
+						act->coop_revive_body(spawn_pos, 0.f, false, "server copy, GAME_EVENT_COOP_RESPAWN");
+				}
+
+				// MP fork (§9 revive, 2026-09-17): TELL EVERY PEER. Until this existed the revive reached the owner
+				// (which revived itself) and the server (just above) and NOBODY ELSE: a peer kept the body it
+				// ragdolled on GE_DIE, imported positive health through net_Import — so it counted as alive — and
+				// still received M_CL_UPDATE, so it SLID WITHOUT ANIMATING for the rest of the session. That is
+				// Caden's 2026-09-17 report "from the other pov only movement works, no animations or poses".
+				if (coop_revive_on())
+				{
+					NET_Packet B;
+					B.w_begin(M_XRNET_COOP_REVIVE);
+					B.w_u16(actor_id);
+					B.w_vec3(spawn_pos);
+					B.w_float(spawn_health);
+					m_server->SendBroadcast(BroadcastCID, B, net_flags(TRUE, TRUE));
+					Msg("- COOP(revive-sv): broadcast revive of body %u at (%.1f,%.1f,%.1f) health %.2f to every client",
+						actor_id, VPUSH(spawn_pos), spawn_health);
 				}
 			}
 			else

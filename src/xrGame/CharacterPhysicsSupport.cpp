@@ -122,7 +122,8 @@ CCharacterPhysicsSupport::CCharacterPhysicsSupport(EType atype, CEntityAlive* ae
 	  m_weapon_attach_bone(0),
 	  m_active_item_obj(0),
 	  m_hit_valide_time(u32(-1)),
-	  m_collision_activating_delay(NULL)
+	  m_collision_activating_delay(NULL),
+	  m_coop_anim_bone_root(u16(-1))
 {
 	m_flags.assign(0);
 	m_flags.set(fl_death_anim_on,FALSE);
@@ -1493,6 +1494,100 @@ void CCharacterPhysicsSupport::in_Die(bool hit)
 
 	if (hit)
 		in_Hit(m_sv_hit, true);
+}
+
+// MP fork (design doc §9 revive, 2026-09-17). See the header for why this has to exist at all.
+void CCharacterPhysicsSupport::coop_remember_anim_root()
+{
+	// Once the shell holds the skeleton the root has already been moved to bip01_pelvis, and reading it then would
+	// record the physics root as if it were the animation root. Only a live body may answer.
+	if (m_eState != esAlive || m_pPhysicsShell || m_flags.test(fl_skeleton_in_shell))
+		return;
+	IKinematics* const K = smart_cast<IKinematics*>(m_EntityAlife.Visual());
+	if (!K)
+		return;
+	m_coop_anim_bone_root = K->LL_GetBoneRoot();
+}
+
+bool CCharacterPhysicsSupport::coop_revive(const char* why)
+{
+	// THE GUARD. §9 revive is about PLAYERS. Every other creature keeps the stock death path untouched: it dies, it
+	// stays dead, and it is removed and respawned as the engine has always done. A named refusal, because a silent
+	// "did nothing" on a path this invasive is indistinguishable from a path that ran and failed.
+	CActor* const A = smart_cast<CActor*>(&m_EntityAlife);
+	if (m_eType != etActor || !A)
+	{
+		Msg("! COOP(revive): REFUSED for %s id %u (%s) — this is not a player body; the death path of every other "
+			"creature is untouched by §9", m_EntityAlife.cNameSect().c_str(), m_EntityAlife.ID(), why ? why : "?");
+		return false;
+	}
+	if (m_eState == esRemoved)
+	{
+		Msg("! COOP(revive): REFUSED for player body %u (%s) — the object is being removed", m_EntityAlife.ID(), why ? why : "?");
+		return false;
+	}
+	IKinematics* const K = smart_cast<IKinematics*>(m_EntityAlife.Visual());
+	if (!K)
+	{
+		Msg("! COOP(revive): REFUSED for player body %u (%s) — no visual to give back to the animator", m_EntityAlife.ID(), why ? why : "?");
+		return false;
+	}
+	// Idempotent: a body that never died, or that has already been revived, is already what we want. Say so as a value
+	// — a revive arriving twice (owner + broadcast) is normal, not an error.
+	if (m_eState != esDead && !m_pPhysicsShell && !m_flags.test(fl_skeleton_in_shell))
+	{
+		Msg("- COOP(revive): player body %u (%s) was not dead — nothing to undo", m_EntityAlife.ID(), why ? why : "?");
+		if (!movement()->CharacterExist())
+			CreateCharacterSafe();      // a body that lost its character another way still gets one back
+		return true;
+	}
+
+	const bool had_shell = !!m_pPhysicsShell;
+
+	// ---- teardown half: exactly what in_NetDestroy undoes, in its order ----
+	destroy_imotion();                                   // clears m_interactive_motion
+	m_PhysicMovementControl->DestroyCharacter();         // in_Die destroyed it; do not leave two
+	RemoveActiveWeaponCollision();                       // undoes CreateShell's AddActiveWeaponCollision
+	if (m_physics_skeleton)
+	{
+		m_physics_skeleton->Deactivate();
+		xr_delete(m_physics_skeleton);
+	}
+	if (m_pPhysicsShell)
+	{
+		m_pPhysicsShell->Deactivate();
+		xr_delete(m_pPhysicsShell);                      // m_pPhysicsShell is a reference to the holder's pointer
+	}
+	xr_delete(m_interactive_animation);
+	xr_delete(m_collision_activating_delay);
+	destroy_animation_collision();
+	m_flags.set(fl_skeleton_in_shell, FALSE);
+	m_flags.set(fl_death_anim_on, FALSE);
+	CPHSkeleton::RespawnInit();
+	CPHDestroyable::RespawnInit();
+	m_eState = esAlive;
+
+	// ---- give the skeleton back to the animator ----
+	// CreateShell re-rooted it at bip01_pelvis and left the bone callbacks pointing at the shell's elements. Both
+	// have to go back, or the body stays a puppet of a shell that no longer exists.
+	if (m_coop_anim_bone_root != u16(-1))
+		K->LL_SetBoneRoot(m_coop_anim_bone_root);
+	for (u16 i = K->LL_BoneCount() - 1; i != u16(-1); --i)
+		K->LL_GetBoneInstance(i).reset_callback();
+	K->CalculateBones_Invalidate();
+	K->CalculateBones(TRUE);
+
+	// ---- creation half: exactly what SpawnCharacterCreate + in_NetSpawn's tail do ----
+	CreateCharacterSafe();
+	movement()->EnableCharacter();
+	movement()->SetPosition(m_EntityAlife.Position());
+	movement()->SetVelocity(0, 0, 0);
+
+	Msg("- COOP(revive): player body %u is a live character again (%s) — shell %s, bone root %u restored, "
+		"character exists %d, state alive %d",
+		m_EntityAlife.ID(), why ? why : "?", had_shell ? "dropped" : "none was held",
+		u32(m_coop_anim_bone_root), movement()->CharacterExist() ? 1 : 0, m_eState == esAlive ? 1 : 0);
+	return true;
 }
 
 u16 CCharacterPhysicsSupport::PHGetSyncItemsNumber()
