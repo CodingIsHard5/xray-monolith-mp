@@ -26,6 +26,7 @@
 #include "character_info.h"                        // MP fork (§14 step 8 Q4): the player's community
 #include "Actor.h"                                 // MP fork (§14 step 8 Q4): tell a player actor apart
 #include "ActorCondition.h"                        // MP fork (§3.4): the feed-tick kill guarantee reads the last hitter
+#include "coop_player_flags.h"   // MP fork (§3.4 step 4): default-ON player-body features with _off controls
 #include "trade.h"                                 // MP fork (§10.3 S2b): server-side price
 #include "CustomMonster.h"                          // MP fork (§16.3): NPC cap
 #include "ai/monsters/bloodsucker/bloodsucker.h"    // MP fork (§3.4): cloak state
@@ -2687,9 +2688,9 @@ void game_sv_Single::coop_saveactor_exclude_tick()
 	static int s_on = -1;
 	if (s_on < 0)
 	{
-		s_on = (xr_enet::enabled() && strstr(Core.Params, "-coop_saveactor_exclude")) ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+		s_on = (xr_enet::enabled() && coop_saveactor_exclude_on()) ? 1 : 0;
 		if (xr_enet::enabled())
-			Msg("- COOP(ghost): save-actor exclusion %s", s_on ? "ON (-coop_saveactor_exclude)" : "OFF (default)");
+			Msg("- COOP(ghost): save-actor exclusion %s", s_on ? "ON (default; -coop_saveactor_exclude_off disables)" : "OFF (-coop_saveactor_exclude_off)");
 	}
 	if (!s_on || !m_server || !g_pGameLevel || !ai().get_alife())
 		return;
@@ -2733,14 +2734,12 @@ void game_sv_Single::coop_player_posfeed_tick()
 		// (no Die hook, client alive) — that must not reach a real session. -coop_player_posfeed enables it for measurement.
 		// The player health sync (-coop_player_proxy) runs inside this tick, so it IMPLIES the feed (CodeRabbit on 2b00f069: the
 		// proxy flag alone was a silent no-op).
-		const bool proxy_implies = strstr(Core.Params, "-coop_player_proxy") != nullptr;
-		{
-			const char* const pf = strstr(Core.Params, "-coop_player_posfeed");
-			s_off = ((pf && strncmp(pf, "-coop_player_posfeed_off", 24) != 0) || proxy_implies) ? 0 : 1;
-		}
+		// §3.4 step 4: DEFAULT ON. The feed was OFF by default after SOAK's silent spawn deaths; those were GAMMA's balancer writing every
+		// player's damage into db.actor's body, which the proxy's quarantine and per-victim balancer remove. The proxy implies the feed.
+		s_off = coop_player_posfeed_on() ? 0 : 1;
 		if (xr_enet::enabled())
-			Msg("- COOP(posfeed): server player-object position feed %s", s_off ? "OFF (default; -coop_player_posfeed enables)"
-				: (proxy_implies ? "ON (-coop_player_posfeed, or implied by -coop_player_proxy)" : "ON (-coop_player_posfeed)"));
+			Msg("- COOP(posfeed): server player-object position feed %s", s_off ? "OFF (-coop_player_posfeed_off with -coop_player_proxy_off)"
+				: "ON (default; implied by the proxy; -coop_player_posfeed_off with -coop_player_proxy_off disables)");
 	}
 	if (s_off || !xr_enet::enabled() || !m_server || !g_pGameLevel || !ai().get_alife())
 		return;
@@ -2759,9 +2758,7 @@ void game_sv_Single::coop_player_posfeed_tick()
 			// §19 kill guarantee runs only inside a hit. Kill it here, once, with the last hitter if there was one.
 			// only after this connection's FIRST sync: before it, a returning player's reserved body may still hold a rotted health of 0 that the
 			// first sync replaces with the claim-restored one (the P4 D2 hazard) — killing it here would kill the returning player
-			static int s_kg = -1;
-			if (s_kg < 0) s_kg = strstr(Core.Params, "-coop_player_proxy") ? 1 : 0;   // plain literal: App. B key drift check
-			if (s_kg && se && a && CL->m_coop_hp_sent >= 0.f && !a->g_Alive() && !a->AlreadyDie())
+			if (coop_player_proxy_on() && se && a && CL->m_coop_hp_sent >= 0.f && !a->g_Alive() && !a->AlreadyDie())
 			{
 				const u16 who = a->conditions().GetWhoHitLastTimeID();
 				Msg("- COOP(hitpath): kill guarantee (feed tick) for %u — health %.4f outside a hit, no Die; killer %d", u32(a->ID()), a->GetfHealth(),
@@ -2802,8 +2799,8 @@ void game_sv_Single::coop_player_posfeed_tick()
 			static int s_sync = -1;
 			if (s_sync < 0)
 			{
-				s_sync = strstr(Core.Params, "-coop_player_proxy") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
-				Msg("- COOP(hpsync): server-to-owner player health sync %s", s_sync ? "ON (-coop_player_proxy)" : "OFF");
+				s_sync = coop_player_proxy_on() ? 1 : 0;
+				Msg("- COOP(hpsync): server-to-owner player health sync %s", s_sync ? "ON (default; -coop_player_proxy_off disables)" : "OFF (-coop_player_proxy_off)");
 			}
 			// FIRST sync of a connection (a join or a RETURN): the server GAME OBJECT may hold a stale health — a reserved body's object
 			// keeps whatever it rotted to, while the reclaim restored the CSE to the health P4's rules give (logged-off record,

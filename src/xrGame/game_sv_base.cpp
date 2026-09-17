@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "Actor.h"   // MP fork (§3.4 (A))
 #include "ActorCondition.h"   // MP fork (§3.4 (A)): server revive resets the server body's conditions
+#include "coop_player_flags.h"   // MP fork (§3.4 step 4): default-ON player-body features with _off controls
 #include "../xrNetServer/xr_enet_transport.h"   // MP fork (§19 co-op): xr_enet::enabled()
 #include "LevelGameDef.h"
 #include "script_process.h"
@@ -895,10 +896,8 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 						// gate); a player's server body is not that case — its CActor::Hit -> conditions path applies the engine's
 						// damage model (outfit and helmet immunities, bone armour, belt artefacts, wounds), and in FIXED (A) it applied
 						// alongside this flat min(power,2)*0.5 copy: every bite twice. For a claimed player body the fallback is skipped.
-						static int s_proxy = -1;
-						if (s_proxy < 0) s_proxy = strstr(Core.Params, "-coop_player_proxy") ? 1 : 0;   // plain literal: App. B key drift check
 						const CSE_Abstract* const dest_e = get_entity_from_eid(id_dest);
-						const bool player_body = s_proxy && smart_cast<CActor*>(target_ea) && dest_e && dest_e->owner &&
+						const bool player_body = coop_player_proxy_on() && smart_cast<CActor*>(target_ea) && dest_e && dest_e->owner &&
 							dest_e->owner != m_server->GetServerClient();
 						if (player_body && hp_mid >= hp_pre - EPS_L)
 						{

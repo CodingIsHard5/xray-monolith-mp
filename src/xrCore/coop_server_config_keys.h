@@ -148,6 +148,23 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_test_rep2_verify", coop_cfg_value, coop_cfg_test},   // off; 25 when given without a valid value | server | R2 read-only verify pass.
 	{"coop_test_rep3", coop_cfg_value, coop_cfg_test},   // off; 30 when given without a valid value | server | R3 kill-attribution reputation probe with a seeded bystander.
 	{"coop_test_rep31", coop_cfg_value, coop_cfg_test},   // off; 30 when given without a valid value | server | R3.1 collective reputation falloff/threshold probe.
+	// ---- §3.4 co-op player bodies (registered 2026-09-17 with the default-ON flip; the drift check had 17 unregistered flags)
+	{"coop_player_proxy_off", coop_cfg_switch, coop_cfg_control},   // off (the proxy is ON) | server | Control arm: disables redesign (A) — health sync, single hit delivery, server-revive reset, CSE health writeback, kill guarantees, the before-hit quarantine and the per-victim balancer.
+	{"coop_player_posfeed_off", coop_cfg_switch, coop_cfg_control},   // off (the feed is ON) | server | Control arm: the server's copy of a player no longer follows its player; honoured only with -coop_player_proxy_off (the proxy implies the feed).
+	{"coop_saveactor_exclude_off", coop_cfg_switch, coop_cfg_control},   // off (the exclusion is ON) | server | Control arm: the server's save actor (object 0) is perceivable, targetable and hittable again.
+	{"coop_player_balancer_off", coop_cfg_switch, coop_cfg_control},   // off (the balancer is ON) | server | Gamedata control arm: GAMMA's damage balancer stays quarantined instead of running for each hit's victim.
+	{"coop_balancer_noswap", coop_cfg_switch, coop_cfg_control},   // off | server | Gamedata control arm: the per-victim balancer swaps db.actor only, not the balancer's per-actor state (shows the cross-player coupling).
+	{"coop_hpsync_noadopt", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: the first health sync of a connection does not adopt the claim-restored CSE health (returning-player check).
+	{"coop_bodylog", coop_cfg_switch, coop_cfg_diag},   // off | server | Player server-body hit, health-change, hit-model, script-health-write and balancer-shadow logs.
+	{"coop_jumpdiag", coop_cfg_switch, coop_cfg_diag},   // off | server | Per-jump phase and parameter logs for monster leaps.
+	{"coop_jumpdiag_off", coop_cfg_switch, coop_cfg_control},   // off (capture ON) | server | Disables the default-on stuck-jump capture sweep.
+	{"coop_jumpfix_off", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: the monster jump fix is disabled.
+	{"coop_jumpthrottle_off", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: no scheduler hold while a monster jump runs (slow-jump fix off).
+	{"coop_jump_provoke", coop_cfg_switch, coop_cfg_test},   // off | server | Harness seam: provokes monster jumps for the leap measurements.
+	{"coop_meleediag", coop_cfg_switch, coop_cfg_diag},   // off | server | Monster melee timing, miss and animation logs.
+	{"coop_melee_perframe", coop_cfg_switch, coop_cfg_test},   // off | server | TEST-ONLY per-frame hold for the crow-list melee measurement.
+	{"coop_noimgui", coop_cfg_switch, coop_cfg_tunable},   // off | client | Skips ImGui on a headless client (the null-D3D9 stub AV at connect).
+	{"coop_bind", coop_cfg_value, coop_cfg_tunable},   // off (any address) | both | Binds the ENet socket to the given address (flag literal includes trailing space).
 	{"coop_test_rep32", coop_cfg_value, coop_cfg_test},   // off; 60 when given (atoi*1000) | server | R3.2 kill-pressure crossing and decay probe.
 	{"coop_test_rpg", coop_cfg_value, coop_cfg_test},   // off; 30 when given without a valid value | server | §14 step 8 ownership-tier probe (write+verify).
 	{"coop_test_rpg2", coop_cfg_value, coop_cfg_test},   // off; 30 when given without a valid value | server | §6.3 bridge-case probe.

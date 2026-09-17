@@ -1,6 +1,7 @@
 #include "pch_script.h"
 #include "GameObject.h"
 #include "Actor.h"   // MP fork (§3.4 (A)): CActor::s_coop_hit_path
+#include "coop_player_flags.h"   // MP fork (§3.4 step 4): default-ON player-body features with _off controls
 #include "../xrNetServer/xr_enet_transport.h"   // MP fork (§3.4 (A)): one delivery per hit
 #include "xrServer.h"   // MP fork (§3.4 (A)): one delivery per hit
 #include "alife_simulator.h"   // MP fork (§3.4 (A)): one delivery per hit
@@ -250,9 +251,7 @@ void CGameObject::OnEvent(NET_Packet& P, u16 type)
 			// CEntityAlive::shedule_Update is Local()-gated); this one is skipped for such a body.
 			if (xr_enet::enabled() && ai().get_alife() && smart_cast<CActor*>(this) && Level().Server)
 			{
-				static int s_proxy = -1;
-				if (s_proxy < 0) s_proxy = strstr(Core.Params, "-coop_player_proxy") ? 1 : 0;   // plain literal: App. B key drift check
-				const CSE_Abstract* const e = s_proxy ? Level().Server->ID_to_entity(ID()) : NULL;
+				const CSE_Abstract* const e = coop_player_proxy_on() ? Level().Server->ID_to_entity(ID()) : NULL;
 				if (e && e->owner && e->owner != Level().Server->GetServerClient())
 				{
 					static u32 s_skip = 0;
