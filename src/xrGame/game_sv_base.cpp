@@ -915,6 +915,18 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 						if (target_ea->GetfHealth() <= 0.f && !target_ea->AlreadyDie())
 							target_ea->KillEntity(hit.who ? hit.who->ID() : target_ea->ID());
 					}
+					// MP fork (§3.4 per-victim balancer, pvb-1): the kill guarantee above is gated on g_Alive() AFTER Hit(), so a before-hit
+					// script that writes health to <= 0 INSIDE Hit() (GAMMA's balancer: set_health_ex(health - damage)) left the body at
+					// health <= 0 with no Die — pvb-1: B at -0.01 for 40 s until the next hit killed it; A dead-without-Die for 85 s. A target
+					// that was alive before the hit and is at or below zero now is killed here, once.
+					else if (target_ea && hp_pre > 0.f && target_ea->GetfHealth() <= 0.f && !target_ea->AlreadyDie())
+					{
+						static u32 s_k = 0;
+						if (++s_k <= 50 || (s_k % 200) == 1)
+							Msg("- COOP(hitpath): kill guarantee for %u — health %.4f reached inside Hit() (a before-hit script wrote it) (%u so far)",
+								u32(id_dest), target_ea->GetfHealth(), s_k);
+						target_ea->KillEntity(hit.who ? hit.who->ID() : target_ea->ID());
+					}
 
 					if (log)
 					{
