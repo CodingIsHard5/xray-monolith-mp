@@ -175,6 +175,34 @@ function on_game_start()
 	-- axr_companions: setup_companion_logic uses db.actor for section
 	-- selection. Without actor, use loaded_active_section only.
 	-- ===================================================================
+	-- ===================================================================
+	-- xr_meet: an EMPTY start dialog id CRASHES the client (2026-09-17, Caden's live session).
+	--   Cmeet_manager:update() takes start_dialog from pick_section_from_condlist and rejects only
+	--   nil and the string "nil", so an empty result is passed to npc:set_start_dialog("").
+	--   The engine then tests `if (*m_sStartDialog)` — the POINTER, not the content — so the empty
+	--   id reaches CPhraseDialog::Load("") and CXML_IdToIndex<CPhraseDialog>::GetById aborts with
+	--   "item not found, id" and an EMPTY Arguments line. That is the crash when a conversation
+	--   opens (client 'caden', 14:40, orphan 9027).
+	--   Co-op makes the empty result likely: the condlists are evaluated against db.actor, which on
+	--   a thin client is object 0, not the controlled actor, so conditions that would pick a section
+	--   in single player fall through to nothing.
+	-- The guard: after each update, an empty start dialog is undone — the NPC keeps whatever its
+	-- profile default is, exactly as the "nil" branch of the stock code does.
+	-- ===================================================================
+	if xr_meet and xr_meet.Cmeet_manager then
+		local org_meet_update = xr_meet.Cmeet_manager.update
+		if org_meet_update then
+			xr_meet.Cmeet_manager.update = function(self, ...)
+				local r = org_meet_update(self, ...)
+				if self and self.startdialog == "" then
+					self.startdialog = nil
+					if self.npc then pcall(function() self.npc:restore_default_start_dialog() end) end
+				end
+				return r
+			end
+		end
+	end
+
 	if axr_companions then
 		local org_setup = axr_companions.setup_companion_logic
 		if org_setup then
