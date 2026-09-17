@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# pre-commit — THE MISSING-HEADER CHECK, because the same compile error has now cost three builds.
+#
+#   dd33945f   error C2027: use of undefined type 'CActorCondition'  (game_sv_single.cpp)
+#   the scope 2 build   the same class, game_sv_base.cpp
+#   bcdb4ae0   error C2027: use of undefined type 'CActor'           (xrServer.cpp:1191)
+#
+# Each is one line that names a class the file never named before, in a file that did not include its
+# header. The compiler catches it — 25 minutes later, in CI, after a chain has been queued behind it.
+# This catches it at the commit.
+#
+# WHAT IT CHECKS: every ADDED line in the staged C++ diff, for a type used as
+#   smart_cast<T*> / smart_cast<T&> / dynamic_cast<T*> / static_cast<T*>  (the cast forms), and
+#   T* x = / T& x = / const T* x =                                        (a declaration form)
+# where T is a class DEFINED in this tree. If the file does not reach T's header — directly, or through
+# one level of its own includes — the commit is refused, naming the header.
+#
+# A FORWARD DECLARATION IS NOT ENOUGH and is treated as missing: `class CActor;` lets a pointer compile
+# and a smart_cast fail, which is exactly the error above.
+#
+# Only ADDED lines: the tree has thousands of legacy sites, and blocking every commit until they are all
+# clean would get the hook turned off. A NEW one cannot be introduced.
+#
+# Install: git config core.hooksPath tools/hooks   (versioned; a fresh clone needs the one command)
+set -u
+fail=0
+say() { echo "pre-commit: $*" >&2; }
+
+root=$(git rev-parse --show-toplevel)
+files=$(git diff --cached --name-only --diff-filter=ACM -- '*.cpp' '*.h' '*.inl' | grep -v '^src/3rd party/' || true)
+[ -n "$files" ] || exit 0
+
+# class -> header, built from the tree's definitions ("class X {", "class ENGINE_API X :", ...). A
+# forward declaration ("class X;") is deliberately NOT a definition here.
+map=$(mktemp); trap 'rm -f "$map"' EXIT
+grep -rhoE '^[[:space:]]*(class|struct)[[:space:]]+([A-Z_][A-Za-z0-9_]*[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*(:[^;]|\{|$)' \
+     --include='*.h' --include='*.inl' "$root/src" 2>/dev/null | true > /dev/null
+: > "$map"
+while IFS= read -r h; do
+  rel=${h#"$root"/}
+  case "$rel" in "src/3rd party/"*) continue;; esac
+  sed -nE 's/^[[:space:]]*(class|struct)[[:space:]]+([A-Z_][A-Za-z0-9_]*_API[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*(:.*|\{.*)?$/\3/p' "$h" 2>/dev/null \
+    | while IFS= read -r cls; do [ -n "$cls" ] && printf '%s\t%s\n' "$cls" "$(basename "$rel")"; done
+done < <(find "$root/src" -name '*.h' -o -name '*.inl') >> "$map"
+
+header_for() { awk -F'\t' -v c="$1" '$1==c{print $2; exit}' "$map"; }
+
+# the headers a file reaches: its own includes, plus one level through them (basename matching, which is
+# how this tree includes almost everything)
+reach() {
+  local f="$1" inc lvl2
+  inc=$(grep -hoE '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^">]+[">]' "$f" 2>/dev/null | sed -E 's/.*[<"]([^">]+)[">]/\1/' | xargs -r -n1 basename)
+  printf '%s\n' "$inc"
+  printf '%s\n' "$inc" | while IFS= read -r h; do
+    [ -n "$h" ] || continue
+    lvl2=$(find "$root/src" -name "$h" -print -quit 2>/dev/null)
+    [ -n "$lvl2" ] && grep -hoE '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^">]+[">]' "$lvl2" 2>/dev/null | sed -E 's/.*[<"]([^">]+)[">]/\1/' | xargs -r -n1 basename
+  done
+}
+
+for f in $files; do
+  [ -f "$root/$f" ] || continue
+  # ADDED lines only, comments stripped (a comment naming a class is not a use)
+  added=$(git diff --cached -U0 --diff-filter=ACM -- "$f" | grep '^+' | grep -v '^+++' | sed 's/^+//' \
+          | sed -E 's://.*::' | grep -vE '^[[:space:]]*\*' || true)
+  [ -n "$added" ] || continue
+  types=$(printf '%s\n' "$added" \
+          | grep -oE '(smart_cast|dynamic_cast|static_cast)[[:space:]]*<[[:space:]]*(const[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*[*&]?[[:space:]]*>' \
+          | sed -E 's/.*<[[:space:]]*(const[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*).*/\2/'; \
+          printf '%s\n' "$added" \
+          | grep -oE '^[[:space:]]*(const[[:space:]]+)?[A-Z][A-Za-z0-9_]*[[:space:]]*[*&][[:space:]]*(const[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=' \
+          | sed -E 's/^[[:space:]]*(const[[:space:]]+)?([A-Z][A-Za-z0-9_]*).*/\2/')
+  types=$(printf '%s\n' "$types" | sort -u | grep -vE '^(void|auto|char|int|float|double|bool|u8|u16|u32|s8|s16|s32|LPCSTR|shared_str|Fvector|NET_Packet|string16|string32|string64|string128|string256|string512|string1024|string4096)$' || true)
+  [ -n "$types" ] || continue
+  have=$(reach "$root/$f" | sort -u)
+  # a type the file ALREADY named before this change is not newly introduced by it
+  base=$(git show ":$f" 2>/dev/null || cat "$root/$f")
+  for t in $types; do
+    hdr=$(header_for "$t")
+    [ -n "$hdr" ] || continue                                  # not a class defined in this tree
+    printf '%s\n' "$have" | grep -qix "$hdr" && continue        # reachable: fine
+    # defined in this very file? then it needs no include
+    grep -qE "^[[:space:]]*(class|struct)[[:space:]]+([A-Z_][A-Za-z0-9_]*_API[[:space:]]+)?$t[[:space:]]*(:|\{)" "$root/$f" && continue
+    say "$f: $t: $hdr not included (a forward declaration is not enough: this is the C2027 that cost dd33945f, the scope 2 build and bcdb4ae0)"
+    fail=1
+  done
+done
+
+if [ "$fail" != 0 ]; then
+  say "commit refused. Include the header, or override once with --no-verify if you are certain."
+  exit 1
+fi
+exit 0
