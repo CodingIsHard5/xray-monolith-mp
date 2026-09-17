@@ -360,7 +360,7 @@ public:
 	void coop_consent_answer(xrClientData* CL, u32 request, bool yes);
 	void coop_consent_tick();
 	void coop_npc_cap_tick();   // §16.3: classify and (when on) throttle excess NPCs near players; metrics every 5 s
-	bool coop_assign_player_community(CSE_Abstract* body, LPCSTR why);   // MP fork (§3.4 scope 2, -coop_player_community)
+	bool coop_assign_player_community(CSE_Abstract* body, LPCSTR why);   // MP fork (§3.4 scope 2, default ON, -coop_player_community_off)
 	void coop_saveactor_exclude_tick();   // MP fork (§3.4 object-0 scope, -coop_saveactor_exclude)
 	void coop_player_posfeed_tick();   // MP fork (§3.4): copy each claimed player's CSE position+facing onto the server's own CActor
 	void coop_jump_alive_tick();   // MP fork (§3.4 inc 3, H4 diagnostic): log-only, -coop_jumpdiag

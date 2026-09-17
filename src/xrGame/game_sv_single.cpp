@@ -708,7 +708,7 @@ void game_sv_Single::coop_clone_inventory_for(CSE_ALifeCreatureActor* base, CSE_
 	}
 }
 
-// MP fork (design doc §3.4 scope 2, -coop_player_community, default OFF until its arms pass): a co-op player body carries an actor_<faction>
+// MP fork (design doc §3.4 scope 2, default ON; -coop_player_community_off is the control): a co-op player body carries an actor_<faction>
 // community instead of the plain "actor" it inherits from entity 0's CSE ("actor" is 0 from every faction in game_relations.ltx, so
 // bandits, killers, monolith, army and zombied were neutral to players). Everyone gets actor_stalker, the single-player default; a body that
 // already has an actor_* community (a later faction choice, §9.6) is left alone. Writes the CSE (saved in STATE, sent in the spawn) and, when
@@ -716,9 +716,7 @@ void game_sv_Single::coop_clone_inventory_for(CSE_ALifeCreatureActor* base, CSE_
 // that writes db.actor, one player's body.
 bool game_sv_Single::coop_assign_player_community(CSE_Abstract* body, LPCSTR why)
 {
-	static int s_on = -1;
-	if (s_on < 0) s_on = coop_param("-coop_player_community") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
-	if (!s_on || !body)
+	if (!coop_player_community_on() || !body)
 		return false;
 	CSE_ALifeTraderAbstract* const tr = smart_cast<CSE_ALifeTraderAbstract*>(body);
 	if (!tr)
