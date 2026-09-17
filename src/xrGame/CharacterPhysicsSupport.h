@@ -162,6 +162,12 @@ public:
 	// a player's, with a named line; in_Die, in_NetDestroy and SpawnCharacterCreate are untouched for every other
 	// creature. Returns true when the body is a live character afterwards (including "there was nothing to undo").
 	bool coop_revive(const char* why);
+	// MP fork (§9 R2, read-only test seam): the death state of THIS copy of a body, as bits, so a fixture can say
+	// "the peer still holds it ragdolled" as a value instead of inferring it from the absence of animation.
+	//   1 = esDead   2 = the skeleton is in the shell   4 = a physics shell is held   8 = a walking character exists
+	// Defined in the .cpp: CPHMovementControl is only forward-declared here, so CharacterExist() cannot be called
+	// from this header (that is the C2027 the pre-commit hook exists for, in the one shape it cannot see).
+	u32 coop_state_bits();
 	// Records the animation bone root while the body is still alive, because CreateShell re-roots the skeleton at
 	// bip01_pelvis on death and the original root is not recoverable afterwards (IKinematics has no accessor for
 	// the model's own root). Called from CActor::Die BEFORE the death runs; a no-op once the shell holds the skeleton.

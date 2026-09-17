@@ -14,6 +14,7 @@
 #include "level.h"
 #include "../xrEngine/feel_vision.h"                  // MP fork (§3.4 player acquisition): g_coop_vistrace_owner
 #include "actor.h"
+#include "CharacterPhysicsSupport.h"            // MP fork (§9 R2 test seam): coop_state_bits() needs the complete type
 #include "ai/monsters/telekinesis.h"                 // MP fork (§3.4 inc 2): coop_test_tele
 #include "PhysicsShellHolder.h"
 #include "../xrphysics/PhysicsShell.h"
@@ -514,6 +515,20 @@ LPCSTR coop_player_actor_ids()
 	c.n = 0;
 	Level().Server->ForEachClientDo(c);
 	return s_out;
+}
+
+// MP fork (§9 R2, read-only TEST SEAM): the death state THIS process holds for a body, as bits, so a fixture can say
+// "the peer still holds it ragdolled" as a value rather than inferring it from an absence of animation.
+//   1 = esDead   2 = the skeleton is in the shell   4 = a physics shell is held   8 = a walking character exists
+// Returns -1 when there is no such object or it is not an actor. Read-only: it changes nothing and is safe to poll.
+int coop_body_state(u16 id)
+{
+	if (!g_pGameLevel)
+		return -1;
+	CActor* const a = smart_cast<CActor*>(Level().Objects.net_Find(id));
+	if (!a || !a->character_physics_support())
+		return -1;
+	return int(a->character_physics_support()->coop_state_bits());
 }
 
 CScriptGameObject *coop_controlled_actor()
@@ -3188,6 +3203,7 @@ void CLevel::script_register(lua_State* L)
 			def("object_by_id", ((CScriptGameObject* (*)()) & get_object_by_id)),
 			def("object_by_id", ((CScriptGameObject* (*)(const ::luabind::object&)) & get_object_by_id)),
 			def("coop_controlled_actor", &coop_controlled_actor),
+			def("coop_body_state", &coop_body_state),   // MP fork (§9 R2 test seam): a body's death state as bits
 			def("coop_request_checkpoint", &coop_request_checkpoint),
 			def("coop_send_chat", &coop_send_chat),
 			def("coop_player_actor_ids", &coop_player_actor_ids),

@@ -1509,6 +1509,16 @@ void CCharacterPhysicsSupport::coop_remember_anim_root()
 	m_coop_anim_bone_root = K->LL_GetBoneRoot();
 }
 
+u32 CCharacterPhysicsSupport::coop_state_bits()
+{
+	u32 b = 0;
+	if (m_eState == esDead) b |= 1;
+	if (m_flags.test(fl_skeleton_in_shell)) b |= 2;
+	if (m_pPhysicsShell) b |= 4;
+	if (m_PhysicMovementControl && m_PhysicMovementControl->CharacterExist()) b |= 8;
+	return b;
+}
+
 bool CCharacterPhysicsSupport::coop_revive(const char* why)
 {
 	// THE GUARD. §9 revive is about PLAYERS. Every other creature keeps the stock death path untouched: it dies, it
