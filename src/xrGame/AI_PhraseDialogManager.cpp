@@ -100,7 +100,12 @@ void CAI_PhraseDialogManager::UpdateAvailableDialogs(CPhraseDialogManager* partn
 	m_AvailableDialogs.clear();
 	m_CheckedDialogs.clear();
 
-	if (*m_sStartDialog)
+	// MP fork (2026-09-17, Caden's live crash on 5c0566c3): test the CONTENT, not the pointer. `*m_sStartDialog` is the string's
+	// pointer, which is non-null for an EMPTY start dialog, so an empty id reached CPhraseDialog::Load("") and
+	// CXML_IdToIndex<CPhraseDialog>::GetById aborted with an empty Arguments line — the client died when a conversation opened.
+	// A script sets an empty start dialog whenever a meet condlist picks nothing (xr_meet rejects only nil and "nil"), which co-op
+	// makes likely because those condlists are evaluated against db.actor = object 0 on a thin client.
+	if (m_sStartDialog.size())
 		inherited::AddAvailableDialog(*m_sStartDialog, partner);
 	inherited::AddAvailableDialog("hello_dialog", partner);
 

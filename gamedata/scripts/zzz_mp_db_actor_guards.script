@@ -189,17 +189,34 @@ function on_game_start()
 	-- The guard: after each update, an empty start dialog is undone — the NPC keeps whatever its
 	-- profile default is, exactly as the "nil" branch of the stock code does.
 	-- ===================================================================
+	-- The undo can be DISABLED for one measurement, by a sentinel file `coop_meetdlg_guard_off` in
+	-- $app_data_root$: that is how the ENGINE's own refusal of an empty id is proved separately from
+	-- this script guard (Overseer, 2026-09-17). Absent = the guard is on, which is the shipping state.
+	local guard_off = false
+	pcall(function()
+		local fs = getFS and getFS()
+		guard_off = fs and fs:exist("$app_data_root$", "coop_meetdlg_guard_off") ~= nil or false
+	end)
 	if xr_meet and xr_meet.Cmeet_manager then
 		local org_meet_update = xr_meet.Cmeet_manager.update
 		if org_meet_update then
 			xr_meet.Cmeet_manager.update = function(self, ...)
+				local before = self and self.startdialog
 				local r = org_meet_update(self, ...)
-				if self and self.startdialog == "" then
+				if self and self.startdialog ~= before then
+					-- the VALUE, so a run can say what was set rather than that nothing crashed
+					printf("~ COOP(meetdlg): npc %s start dialog [%s]%s",
+						self.npc and tostring(self.npc:id()) or "?", tostring(self.startdialog),
+						(self.startdialog == "" and guard_off) and " (EMPTY; guard disabled, the engine must refuse it)" or "")
+				end
+				if self and self.startdialog == "" and not guard_off then
 					self.startdialog = nil
 					if self.npc then pcall(function() self.npc:restore_default_start_dialog() end) end
+					printf("~ COOP(meetdlg): npc %s EMPTY start dialog undone by the co-op guard", self.npc and tostring(self.npc:id()) or "?")
 				end
 				return r
 			end
+			printf("~ COOP(meetdlg): xr_meet empty-start-dialog guard %s", guard_off and "DISABLED (sentinel)" or "installed")
 		end
 	end
 

@@ -97,6 +97,16 @@ void CPhraseDialogManager::UpdateAvailableDialogs(CPhraseDialogManager* partner)
 
 bool CPhraseDialogManager::AddAvailableDialog(shared_str dialog_id, CPhraseDialogManager* partner)
 {
+	// MP fork (2026-09-17): the last gate before the loader. An EMPTY id is not a dialog, and loading one aborts the process
+	// (GetById "item not found, id" with an empty Arguments line). Refuse it here with a NAMED line, so the refusal is a value in
+	// the log rather than silence, whatever any script or character list put in front of it.
+	if (!dialog_id.size())
+	{
+		const CGameObject* const who = smart_cast<const CGameObject*>(this);
+		Msg("! COOP(dialog): refused an EMPTY dialog id for %s — not loading it (this would abort in GetById)",
+			who ? who->cName().c_str() : "an unnamed speaker");
+		return false;
+	}
 	//	PHRASE_DIALOG_INDEX dialog_index =  CPhraseDialog::IdToIndex(dialog_id);
 	if (std::find(m_CheckedDialogs.begin(), m_CheckedDialogs.end(), dialog_id) != m_CheckedDialogs.end())
 		return false;
