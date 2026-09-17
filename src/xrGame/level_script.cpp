@@ -468,7 +468,7 @@ bool coop_test_actor_input(int cmd, int kind)
 // could, so the server's validation can be measured (a source it does not own, a position far from the body, a disallowed type, a flood).
 bool coop_test_send_sound(u16 src, u32 type, float x, float y, float z, float range)
 {
-	if (!strstr(Core.Params, "-coop_test_input") || !g_pGameLevel || Level().Server)   // plain literal: App. B key drift check
+	if (!strstr(Core.Params, "-coop_test_input") || !g_pGameLevel || ai().get_alife())   // plain literal: App. B key drift check
 		return false;
 	NET_Packet P;
 	P.w_begin(M_XRNET_COOP_SOUND);

@@ -269,18 +269,40 @@ namespace coop_sound_fwd
 	struct slot { u16 src; u32 type; u32 t; };
 	static slot s_last[16];
 	static u32 s_sent = 0, s_throttled = 0, s_report_t = 0;
+	// H1 run 1 sent nothing with 400 local events: every hook call is now counted by where it stopped, and the 10 s report names them
+	static u32 s_calls = 0, s_rej_shape = 0, s_rej_client = 0, s_rej_noentity = 0, s_rej_notmine = 0;
 }
 
 static void __stdcall coop_sound_forward_hook(CObject* src, u32 type, const Fvector& pos, float range, float volume, float max_ai, bool is_2d)
 {
 	using namespace coop_sound_fwd;
-	if (is_2d || range < 2.f || type == 0 || type == 0xffffffff || !src || !g_pGameLevel || Level().Server)
-		return;
-	CObject* const me = Level().CurrentControlEntity();
-	if (!me || (src != me && src->H_Parent() != me))
-		return;
-	const u32 now = Device.dwTimeGlobal;
+	// H1 run 1 forwarded NOTHING (sent 0 with 400 local events). The suspect is the client test: a co-op client is told apart by having
+	// no A-Life (as coop_request_checkpoint does), not by Level().Server; the source test now reads CurrentEntity(), the object
+	// level.coop_controlled_actor() returns (whose id matched the events)
 	xrCriticalSectionGuard guard(s_cs);
+	++s_calls;
+	if (is_2d || range < 2.f || type == 0 || type == 0xffffffff || !src)
+	{
+		++s_rej_shape;
+		return;
+	}
+	if (!g_pGameLevel || ai().get_alife())
+	{
+		++s_rej_client;
+		return;
+	}
+	CObject* const me = Level().CurrentEntity();
+	if (!me)
+	{
+		++s_rej_noentity;
+		return;
+	}
+	if (src != me && src->H_Parent() != me)
+	{
+		++s_rej_notmine;
+		return;
+	}
+	const u32 now = Device.dwTimeGlobal;
 	slot* free_slot = &s_last[0];
 	for (slot& sl : s_last)
 	{
@@ -300,7 +322,7 @@ static void __stdcall coop_sound_forward_hook(CObject* src, u32 type, const Fvec
 void coop_sound_forward_flush()   // CLevel::OnFrame, game thread
 {
 	using namespace coop_sound_fwd;
-	if (!g_coop_sound_forward || Level().Server)
+	if (!g_coop_sound_forward || ai().get_alife())
 		return;
 	xr_vector<pending> out;
 	{
@@ -322,9 +344,15 @@ void coop_sound_forward_flush()   // CLevel::OnFrame, game thread
 	}
 	if (Device.dwTimeGlobal - s_report_t >= 10000u)
 	{
-		if (s_sent || s_throttled)
-			Msg("- COOP(soundfwd-cl): last 10 s sent %u throttled %u", s_sent, s_throttled);
-		s_sent = s_throttled = 0;
+		xrCriticalSectionGuard guard(s_cs);
+		if (s_sent || s_throttled || s_calls)
+		{
+			CObject* const me = Level().CurrentEntity();
+			Msg("- COOP(soundfwd-cl): last 10 s sent %u throttled %u | hook calls %u, stopped: shape %u, not a client %u, no entity %u, "
+				"not mine %u (current entity %u)", s_sent, s_throttled, s_calls, s_rej_shape, s_rej_client, s_rej_noentity, s_rej_notmine,
+				me ? u32(me->ID()) : 65535u);
+		}
+		s_sent = s_throttled = s_calls = s_rej_shape = s_rej_client = s_rej_noentity = s_rej_notmine = 0;
 		s_report_t = Device.dwTimeGlobal;
 	}
 }
@@ -342,8 +370,11 @@ CLevel::CLevel() :
 		g_coop_sndtrace_watch = coop_sndtrace_watched;
 		Msg("- COOP(sndtrace): sound trace ON (attempts at the sound library, AI events at the level; actors and their items)");
 	}
-	if (strstr(Core.Params, "-coop_sound_forward"))   // plain literal: App. B key drift check. The server ignores this hook (Level().Server).
+	if (strstr(Core.Params, "-coop_sound_forward"))   // plain literal: App. B key drift check. The server's own hook calls stop at "not a client".
+	{
 		g_coop_sound_forward = coop_sound_forward_hook;
+		Msg("- COOP(soundfwd-cl): forwarding hook installed");
+	}
 	game_events = xr_new<NET_Queue_Event>();
 
     eChangeRP = Engine.Event.Handler_Attach("LEVEL:ChangeRP", this);
