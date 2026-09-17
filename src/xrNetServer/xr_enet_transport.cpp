@@ -355,23 +355,53 @@ namespace xr_enet
 	{
 		if (!enet_ref()) return false;
 
-		ENetHost* h = enet_host_create(nullptr, 1, 2, 0, 0);
-		if (!h)
-		{
-			Msg("! XRNET(enet): client host create FAILED");
-			enet_unref();
-			return false;
-		}
-
 		ENetAddress addr;
 		if (enet_address_set_host(&addr, address) != 0)
 		{
 			Msg("! XRNET(enet): cannot resolve '%s'", address);
-			enet_host_destroy(h);
 			enet_unref();
 			return false;
 		}
 		addr.port = (enet_uint16)port;
+
+		// MP fork (harness security, 2026-09-17, ops report 1200 finding 1): the client's own socket. It was created with no address, so it
+		// bound an ephemeral port on EVERY interface (ops saw 0.0.0.0:42200 beside a server correctly on 127.0.0.1:5445). Now:
+		// -coop_bind <ip> binds it to that address (fail closed, as the server does); otherwise a client connecting to a LOOPBACK server
+		// (127.x.x.x — every harness client connects to localhost) binds loopback. A client connecting to a remote server is unchanged.
+		ENetAddress local;
+		local.port = ENET_PORT_ANY;
+		ENetAddress* local_ptr = nullptr;
+		char bind_ip[64] = "";
+		if (const char* bp = strstr(Core.Params, "-coop_bind "))
+		{
+			bp += sizeof("-coop_bind ") - 1;
+			while (*bp == ' ') ++bp;
+			size_t n = 0;
+			while (bp[n] && bp[n] != ' ' && n + 1 < sizeof(bind_ip)) { bind_ip[n] = bp[n]; ++n; }
+			bind_ip[n] = 0;
+			if (!bind_ip[0] || enet_address_set_host_ip(&local, bind_ip) != 0)
+			{
+				Msg("! XRNET(enet): -coop_bind '%s' is not a usable address — REFUSING to connect rather than bind every interface", bind_ip);
+				enet_unref();
+				return false;
+			}
+			local_ptr = &local;
+		}
+		else if ((ENET_NET_TO_HOST_32(addr.host) >> 24) == 127)
+		{
+			enet_address_set_host_ip(&local, "127.0.0.1");
+			local_ptr = &local;
+			xr_strcpy(bind_ip, "127.0.0.1 (loopback server)");
+		}
+
+		ENetHost* h = enet_host_create(local_ptr, 1, 2, 0, 0);
+		if (!h)
+		{
+			Msg("! XRNET(enet): client host create FAILED%s%s", bind_ip[0] ? " on " : "", bind_ip);
+			enet_unref();
+			return false;
+		}
+		Msg("- XRNET(enet): client socket bound to %s", bind_ip[0] ? bind_ip : "every interface (remote server)");
 
 		ENetPeer* p = enet_host_connect(h, &addr, 2, 0);
 		if (!p)
