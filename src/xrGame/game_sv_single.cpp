@@ -25,6 +25,7 @@
 #include "InventoryOwner.h"                        // MP fork (§14 step 8 Q4): HasInfo / CharacterInfo
 #include "character_info.h"                        // MP fork (§14 step 8 Q4): the player's community
 #include "Actor.h"                                 // MP fork (§14 step 8 Q4): tell a player actor apart
+#include "ActorCondition.h"                        // MP fork (§3.4): the feed-tick kill guarantee reads the last hitter
 #include "trade.h"                                 // MP fork (§10.3 S2b): server-side price
 #include "CustomMonster.h"                          // MP fork (§16.3): NPC cap
 #include "ai/monsters/bloodsucker/bloodsucker.h"    // MP fork (§3.4): cloak state
