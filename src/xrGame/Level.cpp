@@ -297,7 +297,10 @@ static void __stdcall coop_sound_forward_hook(CObject* src, u32 type, const Fvec
 		++s_rej_noentity;
 		return;
 	}
-	if (src != me && src->H_Parent() != me)
+	// by ID, not by pointer: H1 run 2 stopped every call here ("not mine" with current entity 30208 and the events' source 30208), so the
+	// sound's source pointer is not the same CObject* the level hands out; the server's check is by ID too
+	CObject* const parent = src->H_Parent();
+	if (src->ID() != me->ID() && !(parent && parent->ID() == me->ID()))
 	{
 		++s_rej_notmine;
 		return;
