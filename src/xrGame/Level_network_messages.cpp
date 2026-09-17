@@ -201,7 +201,13 @@ void CLevel::ClientReceive()
 				Msg("- COOP(death-cl): death received for body %u (%s) killer %u — this client still had it ALIVE; killing it "
 					"now (without this the server's death never reaches here)", u32(actor_id), mine ? "our own body" : "a peer's body",
 					u32(killer_id));
-				actor->KillEntity(killer_id);
+				// Die(), NOT KillEntity(). On a CLIENT, CEntity::KillEntity only records the killer and stamps the death
+				// time — its event send is gated on OnServer(), so Die() never runs — and the body would end up marked as
+				// having died without ever dying: no ragdoll, no co-op death path, no respawn countdown, and AlreadyDie()
+				// already true so the real GE_DIE could not fix it afterwards. That is worse than the defect being fixed.
+				// This mirrors exactly what CEntity::OnEvent does for GE_DIE: resolve the killer object, then Die(who).
+				CObject* const who = Objects.net_Find(killer_id);
+				actor->Die(who);
 			}
 			break;
 		case M_XRNET_COOP_REVIVE:
