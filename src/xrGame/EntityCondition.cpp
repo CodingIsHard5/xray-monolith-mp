@@ -1,4 +1,9 @@
 #include "stdafx.h"
+#include "Actor.h"   // MP fork (§3.4 (A)): COOP(hitmodel)
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§3.4 (A)): COOP(hitmodel)
+#include "inventory_item.h"   // MP fork (§3.4 (A)): COOP(hitmodel)
+#include "ai_space.h"   // MP fork (§3.4 (A)): COOP(hitmodel)
+#include "alife_simulator.h"   // MP fork (§3.4 (A)): COOP(hitmodel)
 #include "entitycondition.h"
 #include "inventoryowner.h"
 #include "customoutfit.h"
@@ -454,6 +459,7 @@ CWound* CEntityCondition::ConditionHit(SHit* pHDS)
 	float hit_power_org = pHDS->damage();
 	float hit_power = hit_power_org;
 	hit_power = HitOutfitEffect(hit_power_org, pHDS->hit_type, pHDS->boneID, pHDS->armor_piercing, bAddWound);
+	const float coop_after_armor = hit_power;   // MP fork (§3.4 (A), measurement): for COOP(hitmodel)
 
 	// demonized: add lua callback before hit but after calculations
 	// don't call if there is no target
@@ -602,6 +608,22 @@ CWound* CEntityCondition::ConditionHit(SHit* pHDS)
 			R_ASSERT2(0, "unknown hit type");
 		}
 		break;
+	}
+
+	// MP fork (§3.4 redesign (A), MEASUREMENT-ONLY, -coop_bodylog): the damage model a PLAYER's server body applied to this hit — power, the
+	// outfit/helmet result, the hit-type immunity, the health part and bone scale, and the health lost — so a single surviving delivery is
+	// shown to run the full conditions model (armour included) rather than bypass it
+	{
+		static int s_hm = -1;
+		if (s_hm < 0) s_hm = (xr_enet::enabled() && ai().get_alife() && strstr(Core.Params, "-coop_bodylog")) ? 1 : 0;   // plain literal: App. B key drift check
+		if (s_hm == 1 && smart_cast<CActor*>(m_object))
+		{
+			const CInventoryOwner* const io = smart_cast<CInventoryOwner*>(m_object);
+			const PIItem outfit = io ? io->inventory().ItemFromSlot(OUTFIT_SLOT) : NULL;
+			Msg("- COOP(hitmodel): %u t %u type %d power %.4f outfit %s after_armor %.4f immunity %.3f health_part %.3f bone_scale %.3f health_lost %.4f path %u",
+				m_object->ID(), Device.dwTimeGlobal, int(pHDS->hit_type), hit_power_org, outfit ? outfit->object().cNameSect().c_str() : "none",
+				coop_after_armor, GetHitImmunity(pHDS->hit_type), m_fHealthHitPart, m_fHitBoneScale, m_fHealthLost, u32(CActor::s_coop_hit_path));
+		}
 	}
 
 	if (bDebug && !is_special_hit_2_self)

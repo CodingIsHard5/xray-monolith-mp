@@ -1,6 +1,9 @@
 #include "pch_script.h"
 #include "GameObject.h"
 #include "Actor.h"   // MP fork (§3.4 (A)): CActor::s_coop_hit_path
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (§3.4 (A)): one delivery per hit
+#include "xrServer.h"   // MP fork (§3.4 (A)): one delivery per hit
+#include "alife_simulator.h"   // MP fork (§3.4 (A)): one delivery per hit
 //#include "../Include/xrRender/RenderVisual.h"
 #include "../Include/xrRender/RenderVisual.h"
 #include "../xrphysics/PhysicsShell.h"
@@ -240,6 +243,24 @@ void CGameObject::OnEvent(NET_Packet& P, u16 type)
 				{
 				}
 				break;
+			}
+			// MP fork (§3.4 redesign (A), -coop_player_proxy): ONE delivery per hit for a CLAIMED PLAYER body on the dedicated server. FIXED2
+			// measured every bite arriving twice — path 1, the §19 GE_HIT hit-apply (game_sv_base.cpp), and 11 ms later this stock delivery —
+			// each lowering health. Path 1 is kept because it carries the kill guarantee a non-Local body needs (the stock self-kill in
+			// CEntityAlive::shedule_Update is Local()-gated); this one is skipped for such a body.
+			if (xr_enet::enabled() && ai().get_alife() && smart_cast<CActor*>(this) && Level().Server)
+			{
+				static int s_proxy = -1;
+				if (s_proxy < 0) s_proxy = strstr(Core.Params, "-coop_player_proxy") ? 1 : 0;   // plain literal: App. B key drift check
+				const CSE_Abstract* const e = s_proxy ? Level().Server->ID_to_entity(ID()) : NULL;
+				if (e && e->owner && e->owner != Level().Server->GetServerClient())
+				{
+					static u32 s_skip = 0;
+					if (++s_skip <= 50 || (s_skip % 200) == 1)
+						Msg("- COOP(hitpath): path 2 (OnEvent GE_HIT) skipped for player body %u t %u power %.4f — path 1 applied it (%u so far)", ID(),
+							Device.dwTimeGlobal, HDS.power, s_skip);
+					break;
+				}
 			}
 			SetHitInfo(Hitter, Weapon, HDS.bone(), HDS.p_in_bone_space, HDS.dir);
 			CActor::s_coop_hit_path = 2;   // MP fork (§3.4 (A), measurement): this delivery is CGameObject::OnEvent(GE_HIT)
