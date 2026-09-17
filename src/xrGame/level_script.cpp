@@ -464,6 +464,24 @@ bool coop_test_actor_input(int cmd, int kind)
 	return true;
 }
 
+// MP fork (§3.4 hearing fix (B) arm H3, TEST SEAM behind -coop_test_input): send a hand-made M_XRNET_COOP_SOUND, as a modified client
+// could, so the server's validation can be measured (a source it does not own, a position far from the body, a disallowed type, a flood).
+bool coop_test_send_sound(u16 src, u32 type, float x, float y, float z, float range)
+{
+	if (!strstr(Core.Params, "-coop_test_input") || !g_pGameLevel || Level().Server)   // plain literal: App. B key drift check
+		return false;
+	NET_Packet P;
+	P.w_begin(M_XRNET_COOP_SOUND);
+	P.w_u16(src);
+	P.w_u32(type);
+	P.w_vec3(Fvector().set(x, y, z));
+	P.w_float(range);
+	P.w_float(1.f);
+	P.w_float(range);
+	Level().Send(P, net_flags(FALSE));
+	return true;
+}
+
 u32 coop_test_money()
 {
 	CActor* const me = g_pGameLevel ? smart_cast<CActor*>(Level().CurrentControlEntity()) : NULL;
@@ -3195,6 +3213,7 @@ void CLevel::script_register(lua_State* L)
 			def("coop_test_sell", &coop_test_sell),
 			def("coop_test_grant", &coop_test_grant),
 			def("coop_test_actor_input", &coop_test_actor_input),
+			def("coop_test_send_sound", &coop_test_send_sound),
 			def("coop_test_money_of", &coop_test_money_of),
 			def("coop_money", &coop_money),
 			def("coop_money_set", &coop_money_set),
