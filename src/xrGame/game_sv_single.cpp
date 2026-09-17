@@ -832,9 +832,12 @@ void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
 	}
 	// LOCAL+ASPLAYER: Process_spawn keeps these for the owner, strips for peers
 	E->s_flags.assign(M_SPAWN_OBJECT_LOCAL | M_SPAWN_OBJECT_ASPLAYER);
-	coop_assign_player_community(E, "spawn");   // §3.4 scope 2: before spawn_end, so the object and every client spawn carry it
+	const bool coop_comm_set = coop_assign_player_community(E, "spawn");   // §3.4 scope 2: before spawn_end, so the object and every client spawn carry it
 
 	CSE_Abstract* N = spawn_end(E, CL->ID); // sets CL->owner = N
+	// the assignment above ran before spawn_end gave the body its id (it logged player 65535, scope 2 fixed arm 1): name the id now
+	if (coop_comm_set && N)
+		Msg("- COOP(community): player %u spawned with actor_stalker (spawn)", u32(N->ID));
 	Msg("- XRNET(dbg): co-op actor spawned for client 0x%08x -> entity id %u (seq %d)",
 		CL->ID.value(), N ? N->ID : u16(-1), s_coop_actor_seq);
 
