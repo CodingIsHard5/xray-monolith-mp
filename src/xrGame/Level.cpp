@@ -271,7 +271,7 @@ namespace coop_sound_fwd
 	static slot s_last[16];
 	static u32 s_sent = 0, s_throttled = 0, s_report_t = 0;
 	// H1 run 1 sent nothing with 400 local events: every hook call is now counted by where it stopped, and the 10 s report names them
-	static u32 s_calls = 0, s_rej_shape = 0, s_rej_client = 0, s_rej_noentity = 0, s_rej_notmine = 0;
+	static u32 s_calls = 0, s_rej_shape = 0, s_rej_client = 0, s_rej_noentity = 0, s_rej_notmine = 0, s_rej_dead = 0;
 }
 
 static void __stdcall coop_sound_forward_hook(CObject* src, u32 type, const Fvector& pos, float range, float volume, float max_ai, bool is_2d)
@@ -300,6 +300,13 @@ static void __stdcall coop_sound_forward_hook(CObject* src, u32 type, const Fvec
 	if (!me)
 	{
 		++s_rej_noentity;
+		return;
+	}
+	// a dead player makes no sound: stop forwarding at our own Die (Overseer, 2026-09-17; the PM refusal was a post-death shot)
+	CActor* const me_actor = smart_cast<CActor*>(me);
+	if (me_actor && !me_actor->g_Alive())
+	{
+		++s_rej_dead;
 		return;
 	}
 	// by ID, not by pointer: H1 run 2 stopped every call here ("not mine" with current entity 30208 and the events' source 30208), so the
@@ -357,10 +364,10 @@ void coop_sound_forward_flush()   // CLevel::OnFrame, game thread
 		{
 			CObject* const me = Level().CurrentEntity();
 			Msg("- COOP(soundfwd-cl): last 10 s sent %u throttled %u | hook calls %u, stopped: shape %u, not a client %u, no entity %u, "
-				"not mine %u (current entity %u)", s_sent, s_throttled, s_calls, s_rej_shape, s_rej_client, s_rej_noentity, s_rej_notmine,
-				me ? u32(me->ID()) : 65535u);
+				"not mine %u, dead %u (current entity %u)", s_sent, s_throttled, s_calls, s_rej_shape, s_rej_client, s_rej_noentity, s_rej_notmine,
+				s_rej_dead, me ? u32(me->ID()) : 65535u);
 		}
-		s_sent = s_throttled = s_calls = s_rej_shape = s_rej_client = s_rej_noentity = s_rej_notmine = 0;
+		s_sent = s_throttled = s_calls = s_rej_shape = s_rej_client = s_rej_noentity = s_rej_notmine = s_rej_dead = 0;
 		s_report_t = Device.dwTimeGlobal;
 	}
 }

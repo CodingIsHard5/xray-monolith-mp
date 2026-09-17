@@ -1140,7 +1140,7 @@ void xrServer::coop_run_sound(NET_Packet& P, ClientID sender)
 	if (s_trace < 0) s_trace = strstr(Core.Params, "-coop_soundtrace") ? 1 : 0;
 	if (!s_on || !g_pGameLevel)
 		return;
-	static u32 s_acc = 0, s_thr = 0, s_rate = 0, s_owner = 0, s_pos = 0, s_type = 0, s_bad = 0, s_rep_t = 0, s_refusal_lines = 0;
+	static u32 s_acc = 0, s_thr = 0, s_rate = 0, s_owner = 0, s_pos = 0, s_type = 0, s_bad = 0, s_dead = 0, s_rep_t = 0, s_refusal_lines = 0;
 	const u32 now = Device.dwTimeGlobal;
 	struct report_on_exit
 	{
@@ -1148,10 +1148,10 @@ void xrServer::coop_run_sound(NET_Packet& P, ClientID sender)
 		~report_on_exit()
 		{
 			if (now - s_rep_t < 10000u) return;
-			if (s_acc || s_thr || s_rate || s_owner || s_pos || s_type || s_bad)
-				Msg("- COOP(soundfwd): last 10 s accepted %u throttled %u rate-capped %u refused owner %u pos %u type %u malformed %u",
-					s_acc, s_thr, s_rate, s_owner, s_pos, s_type, s_bad);
-			s_acc = s_thr = s_rate = s_owner = s_pos = s_type = s_bad = 0;
+			if (s_acc || s_thr || s_rate || s_owner || s_pos || s_type || s_bad || s_dead)
+				Msg("- COOP(soundfwd): last 10 s accepted %u throttled %u rate-capped %u refused owner %u pos %u type %u dead %u malformed %u",
+					s_acc, s_thr, s_rate, s_owner, s_pos, s_type, s_dead, s_bad);
+			s_acc = s_thr = s_rate = s_owner = s_pos = s_type = s_bad = s_dead = 0;
 			s_rep_t = now;
 		}
 	} reporter{now};
@@ -1182,6 +1182,19 @@ void xrServer::coop_run_sound(NET_Packet& P, ClientID sender)
 		refuse(s_bad, "non-finite field", src);
 		return;
 	}
+	// LIVENESS (Overseer, 2026-09-17): a dead player makes no sound. The client stops forwarding at its own Die, and the server refuses
+	// anything that arrives from a body that is dead here — the death camera and a test input clicking after death are exactly what the
+	// PM refusal turned out to be.
+	{
+		const CSE_ALifeCreatureAbstract* const cr = smart_cast<const CSE_ALifeCreatureAbstract*>(CL->owner);
+		CActor* const body_actor = smart_cast<CActor*>(Level().Objects.net_Find(CL->owner->ID));
+		if ((cr && cr->get_health() <= 0.f) || (body_actor && !body_actor->g_Alive()))
+		{
+			refuse(s_dead, "the body is dead", src);
+			return;
+		}
+	}
+
 	// ownership: the client's own body, or an item whose parent is that body
 	const CSE_Abstract* const body = CL->owner;
 	const CSE_Abstract* const se = ID_to_entity(src);
@@ -1204,13 +1217,14 @@ void xrServer::coop_run_sound(NET_Packet& P, ClientID sender)
 	const u32 pose_age = CL->m_coop_pose_t ? (now - CL->m_coop_pose_t) : u32(-1);
 	CObject* const body_obj = Level().Objects.net_Find(body->ID);
 	const Fvector obj_pos = body_obj ? body_obj->Position() : Fvector().set(0.f, 0.f, 0.f);
-	// THE BOUND, set from the measured distribution (PM run, 85 forwarded events on 5c0566c3): a player's own sound sits at the LISTENER,
-	// so its steady-state distance to the body is the eye height — median 1.66 m, accepted max 2.29 m. The one refusal was 6.39 m with a
-	// CSE 402 ms old while the player moved: the check was blind to the AGE of the position it compared against. So the bound is
-	// 5 m (the static margin, ~2x the eye-height spread) plus what a player could cover in that age at 6 m/s (a sprint), capped at 15 m.
-	// A forged position is still bounded tightly, because a fresh CSE (median age 11 ms) allows only the 5 m.
-	const float age_s = (pose_age == u32(-1)) ? 0.f : float(pose_age) / 1000.f;
-	const float bound = _min(5.f + 6.f * age_s, 15.f);
+	// THE BOUND IS 5 m, STATIC (Overseer, 2026-09-17). An age allowance was written and REJECTED before it ran: PM's one refusal (6.39 m,
+	// CSE age 402 ms) was NOT a walking player — A had died 391 ms earlier (server deathorder t 136845, packet t 137236), the M_CL_UPDATE
+	// stream had stopped, and the distance was the death camera against the body. Its horizontal displacement, 6.25 m in 402 ms = 15.5 m/s,
+	// cannot be produced by the 6 m/s sprint the formula claimed, and at that age the allowance would have ACCEPTED a dead player's sound.
+	// What the measurement does support: a living player's own sounds sit at the LISTENER, so the steady-state distance is the eye height
+	// (median 1.66 m, accepted max 2.29 m), and 5 m is about twice that spread. A lag allowance needs a refusal measured with the body
+	// ALIVE and the client actually moving.
+	const float bound = 5.f;
 	if (dist > bound)
 	{
 		++s_pos;
