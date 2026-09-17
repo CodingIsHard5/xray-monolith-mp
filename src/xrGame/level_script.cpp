@@ -1405,8 +1405,11 @@ void remove_complex_effector(int id)
 
 #include "postprocessanimator.h"
 
+// MP fork (§3.4 per-victim balancer, the HUD-null class): the pp-effector bindings act on the LOCAL player's camera. On the dedicated server
+// there is no game UI, and GAMMA's balancer calls add_pp_effector from psi_damage for every telepatic hit it now runs server-side — no-op.
 void add_pp_effector(LPCSTR fn, int id, bool cyclic)
 {
+	if (!CurrentGameUI()) return;
 	CPostprocessAnimator* pp = xr_new<CPostprocessAnimator>(id, cyclic);
 	pp->Load(fn);
 	Actor()->Cameras().AddPPEffector(pp);
@@ -1414,6 +1417,7 @@ void add_pp_effector(LPCSTR fn, int id, bool cyclic)
 
 void remove_pp_effector(int id)
 {
+	if (!CurrentGameUI()) return;   // MP fork (§3.4): no local camera on the dedicated server
 	CPostprocessAnimator* pp = smart_cast<CPostprocessAnimator*>(Actor()->Cameras().GetPPEffector((EEffectorPPType)id));
 
 	if (pp) pp->Stop(1.0f);
@@ -1421,6 +1425,7 @@ void remove_pp_effector(int id)
 
 void set_pp_effector_factor(int id, float f, float f_sp)
 {
+	if (!CurrentGameUI()) return;   // MP fork (§3.4): no local camera on the dedicated server
 	CPostprocessAnimator* pp = smart_cast<CPostprocessAnimator*>(Actor()->Cameras().GetPPEffector((EEffectorPPType)id));
 
 	if (pp) pp->SetDesiredFactor(f, f_sp);
@@ -1428,6 +1433,7 @@ void set_pp_effector_factor(int id, float f, float f_sp)
 
 void set_pp_effector_factor2(int id, float f)
 {
+	if (!CurrentGameUI()) return;   // MP fork (§3.4): no local camera on the dedicated server
 	CPostprocessAnimator* pp = smart_cast<CPostprocessAnimator*>(Actor()->Cameras().GetPPEffector((EEffectorPPType)id));
 
 	if (pp) pp->SetCurrentFactor(f);

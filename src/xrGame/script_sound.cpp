@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
+#include "UIGameCustom.h"   // MP fork (§3.4): CurrentGameUI()
 #include "script_sound.h"
 #include "script_game_object.h"
 #include "gameobject.h"
@@ -67,6 +68,9 @@ void CScriptSound::PlayAtPos(CScriptGameObject* object, const Fvector& position,
 void CScriptSound::PlayNoFeedback(CScriptGameObject* object, u32 flags/*!< Looping */, float delay/*!< Delay */,
                                   Fvector pos, float vol, float freq)
 {
+	// MP fork (§3.4 per-victim balancer): a no-feedback sound is presentation only (no AI event); GAMMA's psi_damage plays a heartbeat
+	// server-side for every telepatic hit — on the dedicated server (no game UI, -nosound) it is skipped before the handle assert
+	if (!CurrentGameUI()) return;
 	THROW3(m_sound._handle(), "There is no sound", *m_caSoundToPlay);
 	m_sound.play_no_feedback((object) ? &object->object() : NULL, flags, delay, &pos, &vol, &freq);
 }
