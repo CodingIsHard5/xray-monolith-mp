@@ -708,6 +708,52 @@ void game_sv_Single::coop_clone_inventory_for(CSE_ALifeCreatureActor* base, CSE_
 	}
 }
 
+// MP fork (design doc §3.4 scope 2, -coop_player_community, default OFF until its arms pass): a co-op player body carries an actor_<faction>
+// community instead of the plain "actor" it inherits from entity 0's CSE ("actor" is 0 from every faction in game_relations.ltx, so
+// bandits, killers, monolith, army and zombied were neutral to players). Everyone gets actor_stalker, the single-player default; a body that
+// already has an actor_* community (a later faction choice, §9.6) is left alone. Writes the CSE (saved in STATE, sent in the spawn) and, when
+// the server game object exists, the object through CInventoryOwner::SetCommunity (character card + team). Not the Lua sim_board path:
+// that writes db.actor, one player's body.
+bool game_sv_Single::coop_assign_player_community(CSE_Abstract* body, LPCSTR why)
+{
+	static int s_on = -1;
+	if (s_on < 0) s_on = coop_param("-coop_player_community") ? 1 : 0;   // plain literal: the App. B key drift check reads flags from source literals
+	if (!s_on || !body)
+		return false;
+	CSE_ALifeTraderAbstract* const tr = smart_cast<CSE_ALifeTraderAbstract*>(body);
+	if (!tr)
+		return false;
+	CHARACTER_COMMUNITY want;
+	want.set(CHARACTER_COMMUNITY::IdToIndex(CHARACTER_COMMUNITY_ID("actor_stalker"), CHARACTER_COMMUNITY_INDEX(-1), true));   // no_assert: a missing id is logged, not fatal
+	if (want.index() < 0)
+	{
+		Msg("! COOP(community): actor_stalker is not a community in this game's configs — player %u left unchanged", u32(body->ID));
+		return false;
+	}
+	CHARACTER_COMMUNITY have;
+	have.set(tr->m_community_index);
+	const bool known = tr->m_community_index != NO_COMMUNITY_INDEX && tr->m_community_index >= 0;
+	shared_str const have_str = known ? have.id() : shared_str("none");   // held: id() returns by value
+	LPCSTR const have_id = have_str.c_str();
+	if (known && have_id && !strncmp(have_id, "actor_", 6))
+	{
+		Msg("- COOP(community): player %u keeps %s (%s)", u32(body->ID), have_id, why);
+		return false;
+	}
+	tr->m_community_index = want.index();
+	u32 old_team = 0xffffffff;
+	if (CSE_ALifeCreatureAbstract* const cr = smart_cast<CSE_ALifeCreatureAbstract*>(body))
+	{
+		old_team = cr->s_team;
+		cr->s_team = want.team();   // as set_character_community does in single player (SetCommunity + ChangeTeam); the object spawns with this team
+	}
+	if (g_pGameLevel && body->ID != 0xffff)
+		if (CInventoryOwner* const io = smart_cast<CInventoryOwner*>(Level().Objects.net_Find(body->ID)))
+			io->SetCommunity(want.index());
+	Msg("- COOP(community): player %u community %s -> actor_stalker index %d team %u -> %u (%s)", u32(body->ID), have_id, want.index(), old_team, u32(want.team()), why);
+	return true;
+}
+
 void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
 {
 	// MP fork (design doc §9.6 "a new player spawns in at a default start"): the CLONE SOURCE. graph().actor() follows the
@@ -786,6 +832,7 @@ void game_sv_Single::coop_spawn_actor_for(xrClientData* CL)
 	}
 	// LOCAL+ASPLAYER: Process_spawn keeps these for the owner, strips for peers
 	E->s_flags.assign(M_SPAWN_OBJECT_LOCAL | M_SPAWN_OBJECT_ASPLAYER);
+	coop_assign_player_community(E, "spawn");   // §3.4 scope 2: before spawn_end, so the object and every client spawn carry it
 
 	CSE_Abstract* N = spawn_end(E, CL->ID); // sets CL->owner = N
 	Msg("- XRNET(dbg): co-op actor spawned for client 0x%08x -> entity id %u (seq %d)",
@@ -4507,6 +4554,8 @@ void game_sv_Single::coop_poll_spawns()
 					child->owner = CL;
 				}
 			}
+
+			coop_assign_player_community(orphan, "claim");   // §3.4 scope 2: before the owner's spawn below, so the client receives it
 
 			// Hand the body over as LOCAL+ASPLAYER so the client takes control of it.
 			// (SendTo bypasses server event processing — only the client acts on it.)
