@@ -159,6 +159,7 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_hpsync_noadopt", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: the first health sync of a connection does not adopt the claim-restored CSE health (returning-player check).
 	{"coop_bodylog", coop_cfg_switch, coop_cfg_diag},   // off | server | Player server-body hit, health-change, hit-model, script-health-write and balancer-shadow logs.
 	{"coop_soundtrace", coop_cfg_switch, coop_cfg_diag},   // off | server, client | §3.4 hearing measurement: sound-library play attempts, AI sound events and weapon shots for actors and their items.
+	{"coop_test_input", coop_cfg_switch, coop_cfg_test},   // off | client | Test seam: level.coop_test_actor_input drives the controlled actor's input handlers (a headless client has no game UI, so level.press_action cannot).
 	{"coop_jumpdiag", coop_cfg_switch, coop_cfg_diag},   // off | server | Per-jump phase and parameter logs for monster leaps.
 	{"coop_jumpdiag_off", coop_cfg_switch, coop_cfg_control},   // off (capture ON) | server | Disables the default-on stuck-jump capture sweep.
 	{"coop_jumpfix_off", coop_cfg_switch, coop_cfg_control},   // off | server | Control arm: the monster jump fix is disabled.

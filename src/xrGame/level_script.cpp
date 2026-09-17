@@ -447,6 +447,23 @@ LPCSTR coop_test_grant(u16 owner_id, LPCSTR section, u32 count)
 	return s_out;
 }
 
+// MP fork (§3.4 hearing measurement arm 2, TEST SEAM behind -coop_test_input): drive the CONTROLLED actor's own input handlers with an
+// action (key_bindings.*). kind 0 press, 1 hold (call every frame while held), 2 release. level.press_action cannot do this on a
+// headless client: CLevel::IR_OnKeyboardPress returns when no game UI exists, and the dedicated exe used as a test client has none.
+// This skips only that gate; the actor's handlers run exactly as for a key. Returns false when the flag is absent or there is no actor.
+bool coop_test_actor_input(int cmd, int kind)
+{
+	static int s_on = -1;
+	if (s_on < 0) s_on = strstr(Core.Params, "-coop_test_input") ? 1 : 0;   // plain literal: App. B key drift check
+	CActor* const me = (s_on == 1 && g_pGameLevel) ? smart_cast<CActor*>(Level().CurrentControlEntity()) : NULL;
+	if (!me)
+		return false;
+	if (kind == 0) me->IR_OnKeyboardPress(cmd);
+	else if (kind == 1) me->IR_OnKeyboardHold(cmd);
+	else me->IR_OnKeyboardRelease(cmd);
+	return true;
+}
+
 u32 coop_test_money()
 {
 	CActor* const me = g_pGameLevel ? smart_cast<CActor*>(Level().CurrentControlEntity()) : NULL;
@@ -3177,6 +3194,7 @@ void CLevel::script_register(lua_State* L)
 			def("coop_trade_quote_now", &coop_trade_quote_now),
 			def("coop_test_sell", &coop_test_sell),
 			def("coop_test_grant", &coop_test_grant),
+			def("coop_test_actor_input", &coop_test_actor_input),
 			def("coop_test_money_of", &coop_test_money_of),
 			def("coop_money", &coop_money),
 			def("coop_money_set", &coop_money_set),
