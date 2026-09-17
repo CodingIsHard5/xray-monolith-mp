@@ -43,6 +43,11 @@ XRSOUND_API extern float snd_efx_environment_change_time;
 XRSOUND_API extern float psSpeedOfSound;
 XRSOUND_API extern int psSoundCacheSizeMB;
 XRSOUND_API extern xr_token* snd_devices_token;
+// MP fork (§3.4 hearing measurement, -coop_soundtrace; MEASUREMENT ONLY): called at the entry of play / play_at_pos / play_no_feedback,
+// BEFORE the device test, so a -nosound process still reports what it tried to play. api: 0 play, 1 play_at_pos, 2 play_no_feedback.
+// game_type is the ref_sound's AI type (-1 when the sound has no data, which is every sound under -nosound). NULL = off.
+typedef void (__stdcall* coop_snd_attempt_fn)(CObject* O, const Fvector* pos, int api, int present, int has_handle, int game_type);
+XRSOUND_API extern coop_snd_attempt_fn g_coop_snd_attempt;
 XRSOUND_API extern xr_string snd_device_name;
 
 // reverb overwrite

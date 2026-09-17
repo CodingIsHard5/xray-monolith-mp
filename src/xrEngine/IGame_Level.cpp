@@ -259,6 +259,8 @@ void IGame_Level::SetViewEntity(CObject* O)
 	pCurrentViewEntity = O;
 }
 
+ENGINE_API bool (*g_coop_sndtrace_watch)(CObject*) = NULL;   // MP fork (§3.4 hearing measurement)
+
 void IGame_Level::SoundEvent_Register(ref_sound_data_ptr S, float range)
 {
 	if (!g_bLoaded) return;
@@ -284,6 +286,9 @@ void IGame_Level::SoundEvent_Register(ref_sound_data_ptr S, float range)
 	VERIFY(_valid(snd_position));
 	VERIFY(_valid(p->max_ai_distance));
 	VERIFY(_valid(p->volume));
+
+	const bool coop_trace = g_coop_sndtrace_watch && S->g_object && g_coop_sndtrace_watch(S->g_object);
+	const u32 coop_events_before = snd_Events.size();
 
 	// Query objects
 	Fvector bb_size = {range, range, range};
@@ -321,6 +326,20 @@ void IGame_Level::SoundEvent_Register(ref_sound_data_ptr S, float range)
 		}
 	}
 	snd_ER.clear_not_free();
+	if (coop_trace)
+	{
+		string256 ids = "";
+		for (u32 k = coop_events_before; k < snd_Events.size() && k < coop_events_before + 8; ++k)
+		{
+			CObject* const R = dynamic_cast<CObject*>(snd_Events[k].dest);
+			string16 one;
+			xr_sprintf(one, "%u ", R ? u32(R->ID()) : 65535u);
+			xr_strcat(ids, one);
+		}
+		Msg("- COOP(sndtrace): event obj %u '%s' type 0x%x range %.1f at %.1f,%.1f,%.1f receivers %u [%s] t %u", u32(S->g_object->ID()),
+			S->g_object->cName().c_str(), u32(S->g_type), range, snd_position.x, snd_position.y, snd_position.z,
+			snd_Events.size() - coop_events_before, ids, Device.dwTimeGlobal);
+	}
 }
 
 void IGame_Level::SoundEvent_Dispatch()

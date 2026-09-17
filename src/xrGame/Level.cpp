@@ -228,6 +228,30 @@ namespace crash_saving {
     }
 }
 
+// MP fork (§3.4 hearing measurement, -coop_soundtrace; MEASUREMENT ONLY, not a fix): watch actors and the items actors hold, on either
+// side, and log what they try to play (xrSound hook) and every AI sound event raised for them (xrEngine trace).
+bool coop_sndtrace_watched(CObject* O)
+{
+	if (!O)
+		return false;
+	if (smart_cast<CActor*>(O))
+		return true;
+	CObject* const parent = O->H_Parent();
+	return parent && smart_cast<CActor*>(parent) != nullptr;
+}
+
+static void __stdcall coop_snd_attempt_log(CObject* O, const Fvector* pos, int api, int present, int has_handle, int game_type)
+{
+	if (!coop_sndtrace_watched(O))
+		return;
+	static const char* const names[] = {"play", "play_at_pos", "play_no_feedback"};
+	const Fvector p = pos ? *pos : O->Position();
+	CObject* const parent = O->H_Parent();
+	Msg("- COOP(sndtrace): attempt %s obj %u '%s' parent %u present %d handle %d type 0x%x at %.1f,%.1f,%.1f t %u",
+		names[(api >= 0 && api <= 2) ? api : 0], u32(O->ID()), O->cName().c_str(), parent ? u32(parent->ID()) : 65535u, present,
+		has_handle, u32(game_type), p.x, p.y, p.z, Device.dwTimeGlobal);
+}
+
 CLevel::CLevel() :
     IPureClient(Device.GetTimerGlobal())
 #ifdef PROFILE_CRITICAL_SECTIONS
@@ -235,6 +259,12 @@ CLevel::CLevel() :
 #endif
 {
 	g_bDebugEvents = strstr(Core.Params, "-debug_ge") != nullptr;
+	if (strstr(Core.Params, "-coop_soundtrace"))   // plain literal: the App. B key drift check reads flags from source literals
+	{
+		g_coop_snd_attempt = coop_snd_attempt_log;
+		g_coop_sndtrace_watch = coop_sndtrace_watched;
+		Msg("- COOP(sndtrace): sound trace ON (attempts at the sound library, AI events at the level; actors and their items)");
+	}
 	game_events = xr_new<NET_Queue_Event>();
 
     eChangeRP = Engine.Event.Handler_Attach("LEVEL:ChangeRP", this);

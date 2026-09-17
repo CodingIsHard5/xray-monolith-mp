@@ -939,8 +939,13 @@ void CWeaponMagazined::PlaySoundShot()
 	m_sounds.PlaySound(m_sSndShotCurrent.c_str(), get_LastFP(), H_Root(), !!GetHUDmode(), false, (u8)-1);
 }
 
+bool coop_sndtrace_watched(CObject* O);   // MP fork (§3.4 hearing measurement): Level.cpp
+
 void CWeaponMagazined::OnShot()
 {
+	if (g_coop_sndtrace_watch && coop_sndtrace_watched(this))   // MP fork (§3.4 hearing measurement, -coop_soundtrace): measurement only
+		Msg("- COOP(sndtrace): onshot weapon %u '%s' parent %u t %u", u32(ID()), cName().c_str(), H_Parent() ? u32(H_Parent()->ID()) : 65535u,
+			Device.dwTimeGlobal);
 	// Shot Sound
 	PlaySoundShot();
 

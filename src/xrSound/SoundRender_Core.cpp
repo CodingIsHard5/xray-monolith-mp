@@ -287,6 +287,8 @@ void CSoundRender_Core::set_geometry_env(IReader* I)
 	xr_free(_data);
 }
 
+XRSOUND_API coop_snd_attempt_fn g_coop_snd_attempt = NULL;   // MP fork (§3.4 hearing measurement)
+
 void CSoundRender_Core::create(ref_sound& S, const char* fName, esound_type sound_type, int game_type)
 {
 	if (!bPresent) return;
@@ -336,6 +338,7 @@ void CSoundRender_Core::clone(ref_sound& S, const ref_sound& from, esound_type s
 
 void CSoundRender_Core::play(ref_sound& S, CObject* O, u32 flags, float delay)
 {
+	if (g_coop_snd_attempt) g_coop_snd_attempt(O, NULL, 0, bPresent ? 1 : 0, S._handle() ? 1 : 0, S._p ? int(S._p->g_type) : -1);
 	if (!bPresent || (0==S._handle())) return;
 	S._p->g_object = O;
 	if (S._feedback()) ((CSoundRender_Emitter*)S._feedback())->rewind();
@@ -352,6 +355,7 @@ void CSoundRender_Core::play(ref_sound& S, CObject* O, u32 flags, float delay)
 
 void CSoundRender_Core::play_no_feedback(ref_sound& S, CObject* O, u32 flags, float delay, Fvector* pos, float* vol, float* freq, Fvector2* range)
 {
+	if (g_coop_snd_attempt) g_coop_snd_attempt(O, pos, 2, bPresent ? 1 : 0, S._handle() ? 1 : 0, S._p ? int(S._p->g_type) : -1);
 	if (!bPresent || (0 == S._handle())) return;
 	ref_sound_data_ptr orig = S._p;
 	S._p = xr_new<ref_sound_data>();
@@ -382,6 +386,7 @@ void CSoundRender_Core::play_no_feedback(ref_sound& S, CObject* O, u32 flags, fl
 
 void CSoundRender_Core::play_at_pos(ref_sound& S, CObject* O, const Fvector &pos, u32 flags, float delay)
 {
+	if (g_coop_snd_attempt) g_coop_snd_attempt(O, &pos, 1, bPresent ? 1 : 0, S._handle() ? 1 : 0, S._p ? int(S._p->g_type) : -1);
 	if (!bPresent || (0 == S._handle())) return;
 	S._p->g_object = O;
 	if (S._feedback()) ((CSoundRender_Emitter*)S._feedback())->rewind();

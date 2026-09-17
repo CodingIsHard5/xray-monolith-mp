@@ -54,6 +54,10 @@ public:
 };
 
 //-----------------------------------------------------------------------------------------------------------
+// MP fork (§3.4 hearing measurement, -coop_soundtrace; MEASUREMENT ONLY): when set, SoundEvent_Register logs the AI sound events whose
+// source object this predicate accepts (xrGame: an actor, or an item held by one), with the receivers found. NULL = off.
+ENGINE_API extern bool (*g_coop_sndtrace_watch)(CObject*);
+
 class ENGINE_API IGame_Level :
 	public DLL_Pure,
 	public IInputReceiver,
