@@ -254,7 +254,7 @@ static void __stdcall coop_snd_attempt_log(CObject* O, const Fvector* pos, int a
 
 // MP fork (§3.4 hearing fix (B), -coop_sound_forward, CLIENT): forward this client's own AI sound events to the server. The hook runs
 // inside the sound library's event path (not necessarily the game thread), so it only QUEUES, under a lock; CLevel::OnFrame sends.
-// Forwarded: 3D events (a 2D HUD twin never), range >= 2 m, a known AI type, whose source is the controlled actor or an item it holds.
+// Forwarded: events with range >= 2 m (the range-1 HUD twin never), a known AI type, whose source is the controlled actor or an item it holds.
 // Throttled here per (source, type) to one per 250 ms: one shot's emitter re-announces several times while it plays (hearing arm 2:
 // 144 events for 16 shots). The server enforces its own cap; this one only saves bandwidth.
 namespace coop_sound_fwd
@@ -281,7 +281,11 @@ static void __stdcall coop_sound_forward_hook(CObject* src, u32 type, const Fvec
 	// level.coop_controlled_actor() returns (whose id matched the events)
 	xrCriticalSectionGuard guard(s_cs);
 	++s_calls;
-	if (is_2d || range < 2.f || type == 0 || type == 0xffffffff || !src)
+	// 2D is NOT a reason to drop: the controlled actor's own steps and shots play in HUD mode (sm_2D) on its own client, positioned at the
+	// listener (the player's camera), which is where they are heard from. H1 run 3's trace: the steps (range 17-21 m) and shots (150 m)
+	// that reached receivers are those; the HUD twins that must never go are the range-1 events, dropped by the range test.
+	(void)is_2d;
+	if (range < 2.f || type == 0 || type == 0xffffffff || !src)
 	{
 		++s_rej_shape;
 		return;
