@@ -7,6 +7,8 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include "Level.h"   // MP fork (§3.4): script health-raise guard
+#include "coop_health_guard.h"   // MP fork (§3.4): script health-raise guard
 // MP fork (§19 co-op): coop_request_client_menu
 #include "xrServer.h"
 #include "../xrNetServer/xr_enet_transport.h"
@@ -158,6 +160,24 @@ static void coop_log_script_health_write(CEntityAlive* e, const char* what, floa
 
 void coop_log_script_health_write_ex(CEntityAlive* e, float value) { coop_log_script_health_write(e, "set_health_ex", value); }
 
+// MP fork (§3.4, Overseer after PVB2): refuse a script health RAISE on a dead claimed player body on the dedicated server (coop_health_guard.h)
+bool coop_refuse_script_health_raise(CEntityAlive* e, const char* what, float after)
+{
+	if (!e || !xr_enet::enabled() || !ai().get_alife() || !smart_cast<CActor*>(e) || !g_pGameLevel || !Level().Server)
+		return false;
+	const CSE_Abstract* const se = Level().Server->ID_to_entity(e->ID());
+	const bool claimed = se && se->owner && se->owner != Level().Server->GetServerClient();
+	const bool dead = !e->g_Alive() || e->AlreadyDie();
+	const float before = e->GetfHealth();
+	if (!coop_should_refuse_health_raise(true, claimed, dead, before, after))
+		return false;
+	static u32 s_n = 0;
+	if (++s_n <= 50 || (s_n % 200) == 1)
+		Msg("- COOP(healthguard): refused script %s on dead player body %u t %u: %.4f -> %.4f (a dead body is revived only by the respawn path) (%u so far)",
+			what, e->ID(), Device.dwTimeGlobal, before, after, s_n);
+	return true;
+}
+
 void CScriptGameObject::SetHealth(float f)
 {
 	CEntityAlive* const l_tpEntity = smart_cast<CEntityAlive*>(&object());
@@ -167,6 +187,7 @@ void CScriptGameObject::SetHealth(float f)
 		return;
 	}
 	coop_log_script_health_write(l_tpEntity, "health=", f);
+	if (coop_refuse_script_health_raise(l_tpEntity, "health=", f)) return;
 	l_tpEntity->conditions().SetHealth(f);
 }
 
@@ -179,6 +200,7 @@ void CScriptGameObject::ChangeHealth(float f)
 		return;
 	}
 	coop_log_script_health_write(l_tpEntity, "change_health", f);
+	if (coop_refuse_script_health_raise(l_tpEntity, "change_health", l_tpEntity->GetfHealth() + f)) return;
 	l_tpEntity->conditions().ChangeHealth(f);
 }
 

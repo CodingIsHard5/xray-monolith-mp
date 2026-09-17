@@ -43,14 +43,19 @@ void CMonsterEnemyManager::init_external(CBaseMonster* M)
 void CMonsterEnemyManager::update()
 {
 	// MP fork (§3.4 object-0 scope): a forced or script-set enemy cannot reach the server's save actor either
-	if ((m_script_enemy && coop_ghost_excluded(m_script_enemy->ID())) || (forced && enemy && coop_ghost_excluded(enemy->ID())))
 	{
-		static u32 s_n = 0;
-		if (++s_n <= 50 || (s_n % 200) == 1)
-			Msg("- COOP(ghost): monster %u had the save actor as its %s enemy — refused (%u so far)", monster ? monster->ID() : 0,
-				m_script_enemy ? "script" : "forced", s_n);
-		m_script_enemy = 0;
-		if (forced) { forced = false; enemy = 0; }
+		// each targeting mode is cleared independently, so a valid target in the other mode is kept (CodeRabbit)
+		const bool script_ghost = m_script_enemy && coop_ghost_excluded(m_script_enemy->ID());
+		const bool forced_ghost = forced && enemy && coop_ghost_excluded(enemy->ID());
+		if (script_ghost || forced_ghost)
+		{
+			static u32 s_n = 0;
+			if (++s_n <= 50 || (s_n % 200) == 1)
+				Msg("- COOP(ghost): monster %u had the save actor as its %s enemy — refused (%u so far)", monster ? monster->ID() : 0,
+					script_ghost ? (forced_ghost ? "script and forced" : "script") : "forced", s_n);
+			if (script_ghost) m_script_enemy = 0;
+			if (forced_ghost) { forced = false; enemy = 0; }
+		}
 	}
 	if (m_script_enemy && (m_script_enemy->getDestroy() || !m_script_enemy->g_Alive()))
 	{

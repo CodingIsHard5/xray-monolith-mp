@@ -445,6 +445,7 @@ void CScriptGameObject::stop_particles(LPCSTR pname, LPCSTR bone)
 }
 
 void coop_log_script_health_write_ex(CEntityAlive* e, float value);   // MP fork (§3.4): defined in script_game_object.cpp
+bool coop_refuse_script_health_raise(CEntityAlive* e, const char* what, float after);   // MP fork (§3.4): defined in script_game_object.cpp
 
 //AVO: directly set entity health instead of going throuhg normal health property which operates on delta
 #ifdef GAME_OBJECT_TESTING_EXPORTS
@@ -454,7 +455,10 @@ void CScriptGameObject::SetHealthEx(float hp)
 	if (!obj) return;
 	clamp(hp, -0.01f, 1.0f);
 	if (CEntityAlive* const ea = smart_cast<CEntityAlive*>(obj))
+	{
 		coop_log_script_health_write_ex(ea, hp);   // MP fork (§3.4, -coop_bodylog): measurement-only, see script_game_object.cpp
+		if (coop_refuse_script_health_raise(ea, "set_health_ex", hp)) return;
+	}
 	obj->SetfHealth(hp);
 }
 

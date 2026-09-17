@@ -2753,6 +2753,21 @@ void game_sv_Single::coop_player_posfeed_tick()
 				return;   // not a player, no body, or the body is not being driven yet (a record, not a player)
 			CSE_ALifeCreatureAbstract* const se = smart_cast<CSE_ALifeCreatureAbstract*>(CL->owner);
 			CActor* const a = smart_cast<CActor*>(Level().Objects.net_Find(CL->owner->ID));
+			// MP fork (§3.4, CodeRabbit on 5c4d487d..a6110c6a): a claimed body whose health reached <= 0 OUTSIDE a hit — a deferred condition
+			// delta (the engine applies hit damage on a scheduler tick) or bleeding — has no Die: the stock self-kill is Local()-gated and the
+			// §19 kill guarantee runs only inside a hit. Kill it here, once, with the last hitter if there was one.
+			// only after this connection's FIRST sync: before it, a returning player's reserved body may still hold a rotted health of 0 that the
+			// first sync replaces with the claim-restored one (the P4 D2 hazard) — killing it here would kill the returning player
+			static int s_kg = -1;
+			if (s_kg < 0) s_kg = strstr(Core.Params, "-coop_player_proxy") ? 1 : 0;   // plain literal: App. B key drift check
+			if (s_kg && se && a && CL->m_coop_hp_sent >= 0.f && !a->g_Alive() && !a->AlreadyDie())
+			{
+				const u16 who = a->conditions().GetWhoHitLastTimeID();
+				Msg("- COOP(hitpath): kill guarantee (feed tick) for %u — health %.4f outside a hit, no Die; killer %d", u32(a->ID()), a->GetfHealth(),
+					who ? int(who) : -1);
+				a->KillEntity(who ? who : a->ID());
+				return;
+			}
 			if (!se || !a || !a->g_Alive())
 				return;
 			// read the pump thread's pose snapshot consistently (sequence counter: retry while a write is in progress or changed)
