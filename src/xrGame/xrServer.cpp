@@ -1129,14 +1129,14 @@ extern float g_fCatchObjectTime;
 // (dialog id, phrase id). CPhraseDialog::Load shares the already-parsed dialog data, so this
 // is a lookup rather than a parse.
 // MP fork (design doc §9.1): a player's request, on the game thread (ProceedDelayedPackets).
-// MP fork (design doc §3.4 hearing fix (B), -coop_sound_forward, default OFF): one AI sound event a client's own actor raised locally.
+// MP fork (design doc §3.4 hearing fix (B), default ON since the flip, -coop_sound_forward_off is the control): one AI sound event a client's own actor raised locally.
 // The dedicated server runs -nosound, so nothing it plays reaches AI hearing (measured: hearing arms 1a/1b); the client's events are
 // real and correctly placed (arm 2). Validated, rate-capped, then delivered to the Feel::Sound receivers in range without the sound
 // library — no occlusion, an interim difference from single player (monsters hear through walls within range).
 void xrServer::coop_run_sound(NET_Packet& P, ClientID sender)
 {
 	static int s_on = -1, s_trace = -1;
-	if (s_on < 0) s_on = coop_token_present("-coop_sound_forward") ? 1 : 0;   // plain literal: App. B key drift check
+	if (s_on < 0) s_on = coop_sound_forward_on() ? 1 : 0;
 	if (s_trace < 0) s_trace = strstr(Core.Params, "-coop_soundtrace") ? 1 : 0;
 	if (!s_on || !g_pGameLevel)
 		return;
@@ -1554,7 +1554,7 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 			// MP fork (§3.4 hearing fix (B)): a forwarded AI sound event; deferred to the game thread like the request below. Dropped
 			// here when the feature is off, so a client cannot fill the delayed-packet queue with messages nobody reads (CodeRabbit)
 			static int s_fwd = -1;
-			if (s_fwd < 0) s_fwd = coop_token_present("-coop_sound_forward") ? 1 : 0;
+			if (s_fwd < 0) s_fwd = coop_sound_forward_on() ? 1 : 0;
 			if (s_fwd)
 				AddDelayedPacket(P, sender);
 		}

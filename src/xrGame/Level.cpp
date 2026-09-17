@@ -41,6 +41,7 @@
 #include "MainMenu.h"
 #include "xrEngine/XR_IOConsole.h"
 #include "actor.h"
+#include "coop_player_flags.h"   // MP fork (§3.4 hearing fix (B)): coop_sound_forward_on
 #include "player_hud.h"
 #include "UI/UIGameTutorial.h"
 #include "file_transfer.h"
@@ -377,7 +378,7 @@ CLevel::CLevel() :
 		g_coop_sndtrace_watch = coop_sndtrace_watched;
 		Msg("- COOP(sndtrace): sound trace ON (attempts at the sound library, AI events at the level; actors and their items)");
 	}
-	if (strstr(Core.Params, "-coop_sound_forward"))   // plain literal: App. B key drift check. The server's own hook calls stop at "not a client".
+	if (coop_sound_forward_on())   // §3.4 hearing fix (B), default ON since the flip; -coop_sound_forward_off is the control. The server's own hook calls stop at "not a client".
 	{
 		g_coop_sound_forward = coop_sound_forward_hook;
 		Msg("- COOP(soundfwd-cl): forwarding hook installed");
