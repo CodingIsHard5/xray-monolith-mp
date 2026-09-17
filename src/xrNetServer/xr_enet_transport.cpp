@@ -364,14 +364,16 @@ namespace xr_enet
 		}
 		addr.port = (enet_uint16)port;
 
-		// MP fork (harness security, 2026-09-17, ops report 1200 finding 1): the client's own socket. It was created with no address, so it
-		// bound an ephemeral port on EVERY interface (ops saw 0.0.0.0:42200 beside a server correctly on 127.0.0.1:5445). Now:
-		// -coop_bind <ip> binds it to that address (fail closed, as the server does); otherwise a client connecting to a LOOPBACK server
-		// (127.x.x.x — every harness client connects to localhost) binds loopback. A client connecting to a remote server is unchanged.
+		// MP fork (harness security, 2026-09-17, ops report 1200 finding 1; Overseer: opt-in exactly like the server side): the client's own
+		// socket. Created with no address it binds an ephemeral port on EVERY interface (ops saw 0.0.0.0:42200 beside a server correctly on
+		// 127.0.0.1:5445). OPT-IN: -coop_bind <ip>, or the COOP_BIND environment variable the harness exports (lib_audio.sh sets 127.0.0.1;
+		// "any" means unchanged), binds it to that address — fail closed on an unparseable address. Without either, unchanged: hosting and
+		// real clients are untouched.
 		ENetAddress local;
 		local.port = ENET_PORT_ANY;
 		ENetAddress* local_ptr = nullptr;
 		char bind_ip[64] = "";
+		const char* src = "";
 		if (const char* bp = strstr(Core.Params, "-coop_bind "))
 		{
 			bp += sizeof("-coop_bind ") - 1;
@@ -379,19 +381,23 @@ namespace xr_enet
 			size_t n = 0;
 			while (bp[n] && bp[n] != ' ' && n + 1 < sizeof(bind_ip)) { bind_ip[n] = bp[n]; ++n; }
 			bind_ip[n] = 0;
+			src = "-coop_bind";
+		}
+		else if (const char* ev = getenv("COOP_BIND"))
+		{
+			strncpy(bind_ip, ev, sizeof(bind_ip) - 1);   // an over-long value is truncated, then fails to parse (fail closed), never overflows
+			bind_ip[sizeof(bind_ip) - 1] = 0;
+			src = "COOP_BIND";
+		}
+		if (src[0] && xr_strcmp(bind_ip, "any"))
+		{
 			if (!bind_ip[0] || enet_address_set_host_ip(&local, bind_ip) != 0)
 			{
-				Msg("! XRNET(enet): -coop_bind '%s' is not a usable address — REFUSING to connect rather than bind every interface", bind_ip);
+				Msg("! XRNET(enet): %s '%s' is not a usable address — REFUSING to connect rather than bind every interface", src, bind_ip);
 				enet_unref();
 				return false;
 			}
 			local_ptr = &local;
-		}
-		else if ((ENET_NET_TO_HOST_32(addr.host) >> 24) == 127)
-		{
-			enet_address_set_host_ip(&local, "127.0.0.1");
-			local_ptr = &local;
-			xr_strcpy(bind_ip, "127.0.0.1 (loopback server)");
 		}
 
 		ENetHost* h = enet_host_create(local_ptr, 1, 2, 0, 0);
@@ -401,7 +407,8 @@ namespace xr_enet
 			enet_unref();
 			return false;
 		}
-		Msg("- XRNET(enet): client socket bound to %s", bind_ip[0] ? bind_ip : "every interface (remote server)");
+		Msg("- XRNET(enet): client socket bound to %s%s%s", local_ptr ? bind_ip : "every interface (no -coop_bind / COOP_BIND)", local_ptr ? " via " : "",
+			local_ptr ? src : "");
 
 		ENetPeer* p = enet_host_connect(h, &addr, 2, 0);
 		if (!p)
