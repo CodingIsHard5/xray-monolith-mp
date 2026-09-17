@@ -1196,10 +1196,25 @@ void xrServer::coop_run_sound(NET_Packet& P, ClientID sender)
 		refuse(s_type, "type is not a player-producible sound", src);
 		return;
 	}
-	// position: within 5 m of the body's server position (the feed keeps it current)
-	if (pos.distance_to(body->o_Position) > 5.f)
+	// position: within 5 m of the body's server position. The CSE o_Position is written straight from each M_CL_UPDATE on the pump thread
+	// (the freshest position the server holds); the game object the position feed drives lags it by up to a feed tick. Every refusal
+	// reports the VALUES (Overseer: a verdict where a value belongs cannot tell feed lag from a stale read): the distance, the packet's
+	// position, the CSE position the check read and its age since the last client update, and the server game object's position.
+	const float dist = pos.distance_to(body->o_Position);
+	const u32 pose_age = CL->m_coop_pose_t ? (now - CL->m_coop_pose_t) : u32(-1);
+	CObject* const body_obj = Level().Objects.net_Find(body->ID);
+	const Fvector obj_pos = body_obj ? body_obj->Position() : Fvector().set(0.f, 0.f, 0.f);
+	if (dist > 5.f)
 	{
-		refuse(s_pos, "position is more than 5 m from the body", src);
+		++s_pos;
+		if (s_refusal_lines < 200)
+		{
+			++s_refusal_lines;
+			Msg("! COOP(soundfwd): refused client 0x%08x src %u type 0x%x: position %.2f m from the body (bound 5.00) — packet %.2f,%.2f,%.2f cse %.2f,%.2f,%.2f "
+				"age %u ms object %.2f,%.2f,%.2f (object to packet %.2f m) t %u", sender.value(), u32(src), type, dist, pos.x, pos.y, pos.z,
+				body->o_Position.x, body->o_Position.y, body->o_Position.z, pose_age, obj_pos.x, obj_pos.y, obj_pos.z,
+				body_obj ? pos.distance_to(obj_pos) : -1.f, now);
+		}
 		return;
 	}
 	// server-side rate cap: per (source, type) one per 200 ms, and 16 accepted per second per client
@@ -1254,8 +1269,8 @@ void xrServer::coop_run_sound(NET_Packet& P, ClientID sender)
 			xr_sprintf(one, "%u ", u32(ids[i]));
 			xr_strcat(list, one);
 		}
-		Msg("- COOP(soundfwd): accept client 0x%08x src %u type 0x%x at %.1f,%.1f,%.1f range %.1f receivers %u [%s] t %u", sender.value(),
-			u32(src), type, pos.x, pos.y, pos.z, range, n, list, now);
+		Msg("- COOP(soundfwd): accept client 0x%08x src %u type 0x%x at %.1f,%.1f,%.1f range %.1f receivers %u [%s] t %u d %.2f age %u", sender.value(),
+			u32(src), type, pos.x, pos.y, pos.z, range, n, list, now, dist, pose_age);
 	}
 }
 
@@ -1743,6 +1758,7 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 								"(client 0x%08x, update #%u)", CL->owner->ID, pos.x, pos.y, pos.z,
 								sender.value(), CL->m_coop_cl_update_count + 1);
 						CL->owner->o_Position = pos;
+						CL->m_coop_pose_t = Device.dwTimeGlobal;   // §3.4 hearing flip: the age a forwarded sound's position check reports
 					}
 					// MP fork (§14 step 7 phase 4 D2, run 2): this client is DRIVING its body —
 					// the position above came from the player, not from the server's own copy.

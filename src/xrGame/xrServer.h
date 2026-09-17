@@ -61,6 +61,9 @@ public:
 	struct coop_snd_slot { u16 src = 0; u32 type = 0; u32 t = 0; };
 	coop_snd_slot m_coop_snd_last[8];
 	u32 m_coop_snd_win_t = 0, m_coop_snd_win_n = 0;
+	// §3.4 hearing flip (Overseer): when the owner's CSE position was last written from an M_CL_UPDATE (pump-thread peek), so a
+	// forwarded sound's position check can report the AGE of the position it compared against, not only a verdict
+	u32 m_coop_pose_t = 0;
 
 	// MP fork (§14 step 7 phase 4 D3.3 / doc §9.4): the health this client last reported, and
 	// when it last went DOWN. The M_CL_UPDATE peek already reads the health field and threw it
