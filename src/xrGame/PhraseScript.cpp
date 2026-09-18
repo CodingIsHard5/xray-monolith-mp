@@ -15,6 +15,36 @@
 #include "alife_simulator.h"                       // MP fork (§14 step 8 Q4): ai().get_alife()
 #include "mp_coop_owner.h"                         // MP fork (§14 step 8 Q4): the acting player
 
+// MP fork (2026-09-18): AN UNRESOLVED FUNCTOR MUST NOT BE CALLED.
+//
+// Every site below had the same shape: ask the script engine for a functor, THROW3 on the result, then invoke it
+// on the next line regardless. THROW3 is VERIFY3 under NON_FATAL_VERIFY (build_config_defines.h:30, comment
+// "don't crash game when VERIFY fails"), and VERIFY3's release definition is `do {} while (0)`. So when the
+// lookup fails nothing stops anything and a DEFAULT-CONSTRUCTED luabind::functor is called, whose m_state is
+// NULL. luabind then reads L->glref to resolve its registry reference and dereferences NULL+8.
+//
+// That is Caden's 2026-09-18 crash, byte for byte: 0xC0000005 at 0x14060FABF accessing 0x0000000000000008, in
+// proxy_functor_caller<bool, CScriptGameObject* const*, CScriptGameObject* const*, char const* const*,
+// char const* const*, char const* const*, luabind::object const*>::operator bool()+0x3f — the five-argument
+// dialog precondition signature. The instruction is `mov 0x8(%r9),%eax` with r9 == 0.
+//
+// The guard is a VALUE, not silence: it names the function that is missing, which is the one thing the crash
+// could never tell us. It is rate-limited per name so a per-frame dialog refresh cannot flood the log.
+static bool coop_functor_missing(LPCSTR what, LPCSTR name)
+{
+	static xr_vector<shared_str> s_seen;
+	shared_str key = name ? name : "<null>";
+	for (u32 i = 0; i < s_seen.size(); ++i)
+		if (s_seen[i] == key)
+			return true;              // already reported; still refuse
+	s_seen.push_back(key);
+	Msg("! COOP(dialog): %s [%s] DOES NOT RESOLVE — refusing to call an unbound functor. "
+		"Without this the engine calls it anyway and dereferences NULL+8 (THROW3 compiles out in release).",
+		what, name ? name : "<null>");
+	return true;
+}
+
+
 
 //загрузка из XML файла
 void CDialogScriptHelper::Load(CUIXml* uiXml, XML_NODE* phrase_node)
@@ -194,35 +224,6 @@ LPCSTR CDialogScriptHelper::GetScriptText(LPCSTR str_to_translate, const CGameOb
 
 	return res;
 #endif
-}
-
-// MP fork (2026-09-18): AN UNRESOLVED FUNCTOR MUST NOT BE CALLED.
-//
-// Every site below had the same shape: ask the script engine for a functor, THROW3 on the result, then invoke it
-// on the next line regardless. THROW3 is VERIFY3 under NON_FATAL_VERIFY (build_config_defines.h:30, comment
-// "don't crash game when VERIFY fails"), and VERIFY3's release definition is `do {} while (0)`. So when the
-// lookup fails nothing stops anything and a DEFAULT-CONSTRUCTED luabind::functor is called, whose m_state is
-// NULL. luabind then reads L->glref to resolve its registry reference and dereferences NULL+8.
-//
-// That is Caden's 2026-09-18 crash, byte for byte: 0xC0000005 at 0x14060FABF accessing 0x0000000000000008, in
-// proxy_functor_caller<bool, CScriptGameObject* const*, CScriptGameObject* const*, char const* const*,
-// char const* const*, char const* const*, luabind::object const*>::operator bool()+0x3f — the five-argument
-// dialog precondition signature. The instruction is `mov 0x8(%r9),%eax` with r9 == 0.
-//
-// The guard is a VALUE, not silence: it names the function that is missing, which is the one thing the crash
-// could never tell us. It is rate-limited per name so a per-frame dialog refresh cannot flood the log.
-static bool coop_functor_missing(LPCSTR what, LPCSTR name)
-{
-	static xr_vector<shared_str> s_seen;
-	shared_str key = name ? name : "<null>";
-	for (u32 i = 0; i < s_seen.size(); ++i)
-		if (s_seen[i] == key)
-			return true;              // already reported; still refuse
-	s_seen.push_back(key);
-	Msg("! COOP(dialog): %s [%s] DOES NOT RESOLVE — refusing to call an unbound functor. "
-		"Without this the engine calls it anyway and dereferences NULL+8 (THROW3 compiles out in release).",
-		what, name ? name : "<null>");
-	return true;
 }
 
 
