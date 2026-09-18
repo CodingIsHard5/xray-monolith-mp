@@ -30,6 +30,14 @@ function on_client_level_start()
 	end)
 	if not ok then printf("! MP co-op: pda.pda_use patch failed: %s", tostring(err)) end
 
+	-- DRIFT PROBE (§14 step 4 increment 1, measure-only): arm BEFORE the registration below,
+	-- because that line COPIES mp_coop_decision_client.on_decision into the global. The probe
+	-- wraps the TABLE FIELD, so the copy carries the wrapper; arming after it would leave the
+	-- global holding the unwrapped original and the probe would look installed while measuring
+	-- nothing. Self-disables without -coop_drift_probe and prints either way.
+	local okdp, errdp = pcall(function() zzz_mp_coop_driftprobe.arm() end)
+	if not okdp then printf("! MP co-op: drift probe arm failed: %s", tostring(errdp)) end
+
 	-- DECISION REPLICATION (§4): register the client-side executor for scheduled server
 	-- decisions. The engine (CLevel::coop_dispatch_due_decisions) calls _G.mp_coop_on_decision
 	-- when a decision fires on the shared clock. on_game_start never runs on the thin client,
@@ -40,11 +48,69 @@ function on_client_level_start()
 	end)
 	if not okd then printf("! MP co-op: mp_coop_on_decision register failed: %s", tostring(errd)) end
 
+	-- LEVEL-TRANSITION CONDITION GUARD: GAMMA's is_actor_inside_lc indexes `actor` as its first
+	-- act, and during a join the condlist is evaluated before the client's actor global is bound,
+	-- so it RAISES — and GAMMA's fallback for a failed condition is to offer the trip, which is
+	-- the "Move to the Darkscape?" modal every co-op join has been meeting. on_game_start never
+	-- runs here, so the guard has to be installed explicitly, exactly like the two above.
+	local oklc, errlc = pcall(function() mp_coop_lc_guard.install_now() end)
+	if not oklc then printf("! MP co-op: lc guard install failed: %s", tostring(errlc)) end
+
+	-- db.actor REBIND ON ACTOR DESTROY: a client holds other players' bodies as actors, and since
+	-- engine 7ea1e152 their net_destroy is delivered, so stock db.del_actor() nils the client's
+	-- db.actor when the server expires an orphan — and the next actor_binder:update kills the
+	-- client (bind_stalker:211). Same wrapper the server installs from on_game_start.
+	local okrb, errrb = pcall(function() mp_coop_actor_rebind.install_now() end)
+	if not okrb then printf("! MP co-op: actor rebind install failed: %s", tostring(errrb)) end
+
+	-- design doc §10.1: "Sleeping does NOT fast-forward the world." The sleep dialog would only pretend (the engine refuses
+	-- the time change on a client), so do not open it: say why instead. Wait/fast travel are refused by the engine alone.
+	local oksl, errsl = pcall(function()
+		if ui_sleep_dialog and ui_sleep_dialog.sleep then
+			ui_sleep_dialog.sleep = function()
+				local str = "Co-op: sleeping cannot skip time. The Zone runs on one clock for everyone."
+				if actor_menu and actor_menu.set_msg then actor_menu.set_msg(1, str, 5) end
+				printf("%s", "- COOP(time): sleep refused on the client (design doc §10.1)")
+			end
+			printf("%s", "~ MP co-op: sleep dialog replaced (no time skip in co-op)")
+		end
+	end)
+	if not oksl then printf("! MP co-op: sleep override failed: %s", tostring(errsl)) end
+
+	-- server notices (crash resume, checkpoint answers): the engine calls _G.mp_coop_on_notice, published here
+	local oknot, errnot = pcall(function() mp_coop_notice.install_now() end)
+	if not oknot then printf("! MP co-op: notice handler install failed: %s", tostring(errnot)) end
+	-- §10.3 item 4: the holder's yes/no prompt for another player's ask (after the notice, whose hook it listens on)
+	local okcui, errcui = pcall(function() mp_coop_consent_ui.install_now() end)
+	if not okcui then printf("! MP co-op: consent prompt install failed: %s", tostring(errcui)) end
+
+	-- mp_api (design doc §13.1): the read-only players surface for a voice-chat companion mod. It fills from the
+	-- server's roster broadcast; on_game_start never runs here, so it is installed explicitly like the guards above.
+	local okapi, errapi = pcall(function() mp_coop_api.install_now() end)
+	if not okapi then printf("! MP co-op: mp_api install failed: %s", tostring(errapi)) end
+
+	-- per-life mod state (arszi_psy's psy meter, ...) reset when a co-op player revives: the engine calls _G.mp_coop_on_respawn
+	local okrr, errrr = pcall(function() mp_coop_respawn.install_now() end)
+	if not okrr then printf("! MP co-op: respawn reset install failed: %s", tostring(errrr)) end
+
+	-- PDA zone chat (design doc §13.4): after mp_api, so mp_api.chat can be published on it
+	local okchat, errchat = pcall(function() mp_coop_chat.install_now() end)
+	if not okchat then printf("! MP co-op: chat install failed: %s", tostring(errchat)) end
+
 	-- xr_effects COMPLETENESS: the flat co-op gamedata lacks xr_effects_addon.script, so stock
 	-- objects using the %=script()% effect nil-error at xr_logic:491. on_game_start never runs on the
 	-- thin client, so define the missing xr_effects.script here too (referencing the module loads it).
 	local oke, erre = pcall(function() zzz_mp_xr_effects_guards.ensure_xr_effects_script() end)
 	if not oke then printf("! MP co-op: xr_effects guard (client) failed: %s", tostring(erre)) end
+
+	-- MEET-DIALOG GUARD (2026-09-17, Caden's live crash): xr_meet's Cmeet_manager:update() can set an EMPTY
+	-- start dialog, which aborts the client in CXML_IdToIndex<CPhraseDialog>::GetById the moment a conversation
+	-- opens. The guard for it lives in zzz_mp_db_actor_guards.on_game_start — which NEVER RUNS ON A THIN CLIENT,
+	-- and the thin client is exactly where the crash happens. Found by test_coop_meetdialog_live.sh reporting
+	-- NOT MEASURED because the guard never announced itself in the client log. Installed explicitly here, like
+	-- every other guard above.
+	local okmd, errmd = pcall(function() zzz_mp_db_actor_guards.install_meet_dialog_guard() end)
+	if not okmd then printf("! MP co-op: meet-dialog guard (client) failed: %s", tostring(errmd)) end
 
 	-- THIN-CLIENT BINDERS: single-player object binders that look the object up in the
 	-- A-Life simulator crash on a co-op client, which owns no A-Life (alife():object()
@@ -121,7 +187,12 @@ function on_client_level_start()
 	local oks, errs = pcall(function()
 		local function coop_block_save(flags, typ, text)
 			if not _G.mp_coop_client then return end -- never affects single-player
-			local str = "Co-op: the server owns the world — local saving is disabled (server-side save/load is a later milestone)."
+			-- Design doc §9.1: in co-op the save a player reaches for IS their checkpoint ("like choosing when to save
+			-- in GAMMA"). The local save is still cancelled; the server is asked to bank a checkpoint where they stand,
+			-- grants it at a campfire, and answers with a notice either way.
+			local str = "Co-op: the server owns the world — local saving is disabled."
+			local ok_req, sent = pcall(function() return level.coop_request_checkpoint and level.coop_request_checkpoint() end)
+			if ok_req and sent then str = "Co-op: asking the server to set your checkpoint here..." end
 			if actor_menu and actor_menu.set_msg then actor_menu.set_msg(1, str, 5) end
 			exec_console_cmd("main_menu off")
 			flags.ret = true -- cancel the save
@@ -130,6 +201,65 @@ function on_client_level_start()
 		printf("~ MP co-op: registered save-block (server owns saves; local save disabled)")
 	end)
 	if not oks then printf("! MP co-op: save-block register failed: %s", tostring(errs)) end
+
+	-- §3c OPEN ITEM 5, LEG 5c: the SAVE path, which the §4.4.ii audit never exercised.
+	-- Inert unless the sentinel file is present (see mp_coop_scenario_client_save.script), so
+	-- every other client suite is untouched by this line. Guarded the same way vmwatch is, so a
+	-- missing script cannot FATAL a client that never wanted the scenario.
+	if mp_coop_scenario_client_save and mp_coop_scenario_client_save.attach then
+		mp_coop_scenario_client_save.attach()
+	end
+
+	-- §3c OPEN ITEM 5, the CLIENT-ACTION axis (§4n). §4m showed xrServer::OnMessage is
+	-- inbound-only — a server-driven world can never put a message on that wire, which is why
+	-- driving a real A-Life boar around added nothing. The one axis left is what a CLIENT SENDS,
+	-- so this drives inventory actions (M_EVENT) from the client's own actor. Same file-armed,
+	-- absent-by-default mechanism as the save scenario above, and guarded the same way so a
+	-- missing script cannot FATAL a client that never wanted it.
+	if mp_coop_scenario_client_action and mp_coop_scenario_client_action.attach then
+		mp_coop_scenario_client_action.attach()
+	end
+
+	-- §4t: the successor arm — a client action against an NPC's CSE (transfer_item ->
+	-- GE_TRADE_SELL/GE_TRADE_BUY), which separates "any A-Life op on a script-wrapped CSE enters
+	-- Lua" from "only a VIRTUAL dispatched through the wrapper does". Same file-armed,
+	-- absent-by-default mechanism; its own sentinel so it cannot arm the §4n scenario or vice versa.
+	if mp_coop_scenario_client_trade and mp_coop_scenario_client_trade.attach then
+		mp_coop_scenario_client_trade.attach()
+	end
+
+	-- bug 3: put the client's actor beside idle NPCs so the walk-in-place verdict has subjects.
+	-- File-armed and absent by default, like the three scenarios above.
+	if mp_coop_scenario_client_goto and mp_coop_scenario_client_goto.attach then
+		mp_coop_scenario_client_goto.attach()
+	end
+
+	-- design doc §10.1 test: try to skip time from the client; file-armed, absent by default.
+	if mp_coop_scenario_client_timeskip and mp_coop_scenario_client_timeskip.attach then
+		mp_coop_scenario_client_timeskip.attach()
+	end
+
+	-- design doc §9.1 test: one checkpoint request 40 s in; file-armed, absent by default.
+	if mp_coop_scenario_client_cpreq and mp_coop_scenario_client_cpreq.attach then
+		mp_coop_scenario_client_cpreq.attach()
+	end
+
+	-- design doc §13.1 test probe: logs mp_api every 10 s; file-armed, absent by default.
+	if mp_coop_scenario_client_apiprobe and mp_coop_scenario_client_apiprobe.attach then
+		mp_coop_scenario_client_apiprobe.attach()
+	end
+	if mp_coop_scenario_client_chat and mp_coop_scenario_client_chat.attach then
+		mp_coop_scenario_client_chat.attach()
+	end
+	if mp_coop_scenario_client_take and mp_coop_scenario_client_take.attach then
+		mp_coop_scenario_client_take.attach()
+	end
+	if mp_coop_scenario_client_s3 and mp_coop_scenario_client_s3.attach then
+		pcall(mp_coop_scenario_client_s3.attach)   -- §10.3 S3 harness (armed by file only)
+	end
+	if mp_coop_scenario_client_buy and mp_coop_scenario_client_buy.attach then
+		mp_coop_scenario_client_buy.attach()
+	end
 
 	-- (future thin-client globals get initialised here — one place, no engine
 	--  rebuild needed to add more.)
@@ -161,6 +291,20 @@ function on_server_game_start()
 		end
 	end)
 	if not okb then printf("! MP co-op: decision export self-check errored: %s", tostring(errb)) end
+
+	-- RPG LAYER (§14 step 8 phase 1 / doc §6): install the two-tier flag routing. Until this
+	-- runs, every flag primitive on the server resolves through db.actor — which is nil here —
+	-- so every world-gate read answers "no" and the world cannot progress. Server-only by
+	-- construction: this hook does not exist on a client.
+	local okf, errf = pcall(function() mp_coop_flags.install() end)
+	if not okf then printf("! MP co-op: flag routing install errored: %s", tostring(errf)) end
+
+	-- RPG LAYER (§14 step 8 phase 4 R2 / doc §8.1): the same treatment for reputation. Personal
+	-- standing already rides the .scop per entity id (R1 measured it); what was missing is the
+	-- subject, because every stock goodwill call site names db.actor:id(). Server-only, and a
+	-- failed install leaves the stock bindings in place rather than a half-routed layer.
+	local okr, errr = pcall(function() mp_coop_rep.install() end)
+	if not okr then printf("! MP co-op: goodwill routing install errored: %s", tostring(errr)) end
 
 	-- DECISION ORIGINATION (§4, first real online-NPC decision site): register the server-side
 	-- per-frame originator. The engine (CLevel::coop_server_decision_tick, under -coop_server_tick)
@@ -227,6 +371,28 @@ function on_server_game_start()
 	end)
 	if not ok_snd then printf("! MP co-op: sound_theme stub failed") end
 
+	-- NEW-GAME STARTING EQUIPMENT ON THE SERVER: itms_manager.actor_on_first_update arms
+	-- CreateTimeEvent(0,"delay_new_game_autosave",4,new_game_equippment) whenever the
+	-- "start_equippment_handled" info portion is absent — which it always is on the co-op
+	-- server, whose actor is the loopback host stand-in rather than a freshly created
+	-- character. new_game_equippment then runs `exec_console_cmd("save <user> - autosave")`,
+	-- and the engine's console save writes a .dds THUMBNAIL via
+	-- MainMenu()->Screenshot(SM_FOR_GAMESAVE, ...). On this renderless server the null-D3D9
+	-- stub returns a success HRESULT with a NULL surface, so CRender::ScreenshotImpl derefs
+	-- it and the whole server dies: 0xC0000005 accessing 0x0 at r__screenshot.cpp:259
+	-- (symbolicated, RVA 0xD2C91C, build 30212914214). That is what blocked the P4 D0
+	-- measurement for two sessions. Neither half of this belongs on a headless server that
+	-- LOADS an existing world: it hands out a new character's kit and it writes a
+	-- single-player save slot. Stub it. The engine keeps its own guard for any other save
+	-- path (screenshot skipped when there is no renderer) — this is the no-rebuild half.
+	local ok_nge = pcall(function()
+		if itms_manager and itms_manager.new_game_equippment then
+			itms_manager.new_game_equippment = function(...) return true end
+			printf("~ MP co-op: stubbed server-side itms_manager.new_game_equippment (save-screenshot AV)")
+		end
+	end)
+	if not ok_nge then printf("! MP co-op: new_game_equippment stub failed") end
+
 	-- CLIENT-HUD SCRIPTS ON THE SERVER: GAMMA ships HUD/UI mods whose callbacks run through
 	-- game_sv_single on the headless server, where there is no HUD (CurrentGameUI() is NULL),
 	-- so they index nil and FATAL. They are purely visual, so no-op them server-side. Each
@@ -238,6 +404,58 @@ function on_server_game_start()
 		-- `local hud = get_hud()` then indexes it; get_hud() is nil on the headless
 		-- server, so it FATALs at actor_effects.script:1309 mid-session.
 		{ "actor_effects", "HUD_mask" },
+		-- Both of these do `get_hud():AddDialogToRender(...)` at level init, so they threw
+		-- on the headless server, the co-op handler swallowed the error mid-callback, and
+		-- the damaged LuaJIT VM crashed ~14 minutes later inside lj_tab_get — the crash that
+		-- ended Caden's 2026-07-26 playtest (dev/SAVE_LOAD_PLAN.md §3c). Not visual polish:
+		-- an unstubbed HUD script here is a delayed-action server crash.
+		{ "axr_companions", "activate_hud" },  -- axr_companions.script:1839 attempt to index nil
+		{ "ui_sidhud_mcm", "activate_hud" },   -- ui_sidhud_mcm.script:85 attempt to index nil
+		-- The rest of the activate_hud/deactivate_hud FAMILY (§14 step 8 Q4, 2026-07-28). Two
+		-- of these were found the expensive way — one crash each — so the remaining ones are
+		-- taken from the list rather than waited for: `grep -l "^function activate_hud"` over
+		-- the deployed scripts names exactly six modules, and every one of them does
+		-- `get_hud():AddDialogToRender(...)`, which is nil here. Stubbing a HUD lifecycle
+		-- function on a server with no HUD cannot lose anything.
+		--
+		-- actor_status.activate_hud (actor_status.script:266) is what killed the server on the
+		-- first Q4 run that got past the dialogue: swallowed as error #1, and the damaged VM
+		-- then FATALed in an unrelated namespace lookup — the same delayed mechanism as above.
+		--
+		-- Note the CASE. The module is `factionID_hud_mcm`, and the entry above spells it
+		-- `factionid_hud_mcm`; Lua is case-sensitive and the namespace is the FILE name, so
+		-- that older entry has never matched anything. Both spellings are listed, because
+		-- removing the wrong one would be a guess about which file GAMMA ships next.
+		{ "actor_status", "activate_hud" },
+		{ "actor_status", "deactivate_hud" },
+		{ "factionID_hud_mcm", "activate_hud" },
+		{ "factionID_hud_mcm", "deactivate_hud" },
+		{ "dynamic_emission_cover_mcm", "activate_hud" },
+		{ "dynamic_emission_cover_mcm", "deactivate_hud" },
+		{ "item_artefact", "activate_hud" },
+		{ "item_artefact", "deactivate_hud" },
+		{ "axr_companions", "deactivate_hud" },
+		{ "ui_sidhud_mcm", "deactivate_hud" },
+		-- news_manager (§14 step 8 phase 3 Q4, 2026-07-28). The PDA news feed: a sound, a
+		-- translated caption, an icon and db.actor:give_talk_message2. All four are client
+		-- things, and the server reaches all of them because news_manager.send_task is
+		-- called from the TASK callbacks — so the moment a co-op player is GIVEN a task the
+		-- headless server runs a UI function.
+		--
+		-- It has a `if db.actor == nil then return false end` guard and the guard did not
+		-- save it, which is the part worth remembering: db.actor is NOT reliably nil on this
+		-- server. A connected player's actor is a real object with a real binder here, so
+		-- bind_stalker sets db.actor to it — meaning every "is there an actor?" guard in
+		-- GAMMA answers YES on the server and then runs client code against whichever
+		-- player's actor was bound last. Measured: monkey_news_manager.script:18
+		-- "attempt to index local 'tsk' (a userdata value)" on a dialogue-routed claim,
+		-- swallowed as error #1, followed by "error in error handling" and a FATAL — the
+		-- same VM-corruption mechanism as the save-callback crash above.
+		{ "news_manager", "send_task" },
+		{ "news_manager", "send_tip" },
+		{ "news_manager", "send_treasure" },
+		{ "news_manager", "relocate_item" },   -- fires on a turn-in's item hand-over
+		{ "news_manager", "relocate_money" },
 	}
 	for _, s in ipairs(hud_stubs) do
 		local mod_name, fn_name = s[1], s[2]
@@ -250,6 +468,23 @@ function on_server_game_start()
 		end)
 		if not ok then printf("! MP co-op: stub failed for %s.%s", mod_name, fn_name) end
 	end
+
+	-- §3c CHARACTERISATION (2026-07-28): arm the VM watcher if it is deployed. It samples
+	-- LuaJIT's heap on the server tick so the long-run instability can be separated into
+	-- "a swallowed error damaged the VM" and "the VM ran out of heap" — two hypotheses that fit
+	-- the same symbolicated crashes and call for opposite fixes. Optional by design: a missing
+	-- file is not an error, because this is a measuring instrument and not a dependency.
+	pcall(function()
+		if mp_coop_vmwatch and mp_coop_vmwatch.attach then mp_coop_vmwatch.attach() end
+	end)
+
+	-- §3c DELIBERATE REPRODUCTION (2026-07-28): publish the race bait if it is deployed. It does
+	-- NOTHING on its own — the engine only calls it under -coop_repro_pumplua / -coop_repro_gamelua,
+	-- which is what decides which THREAD enters the VM. Same optional-by-design rule as the
+	-- watcher above: a missing file is not an error.
+	pcall(function()
+		if mp_coop_racebait and mp_coop_racebait.attach then mp_coop_racebait.attach() end
+	end)
 
 	-- WORLD-SAVE COMPLETENESS (§14 step 7): the server-authoritative autosave
 	-- (game_sv_Single::coop_autosave) serializes the CSE/ALife world. During the save GAMMA

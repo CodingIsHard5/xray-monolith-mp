@@ -752,7 +752,7 @@ void CActor::Hit(SHit* pHDS)
 						// is the tell. Read through a gamedata helper rather than raw Lua: a missing helper is not an error.
 						u32 dbid = u32(-1);
 						::luabind::functor<u32> dbf;
-						if (ai().script_engine().functor("_G.coop_db_actor_id", dbf))
+						if (ai().script_engine().functor("zzz_mp_db_actor_guards.coop_db_actor_id", dbf))
 							dbid = dbf();
 						Msg("- COOP(hitsrc): body %u hit by %d (%s) type %d power %.4f bone %u hp %.4f — before-hit callback %s; "
 							"db.actor %d (victim is db.actor: %d, hitter is db.actor: %d) (%u so far)",
