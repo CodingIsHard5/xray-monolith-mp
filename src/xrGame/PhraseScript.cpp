@@ -179,11 +179,13 @@ LPCSTR CDialogScriptHelper::GetScriptText(LPCSTR str_to_translate, const CGameOb
 		}
 	}
 	bool functor_exists = ai().script_engine().functor(str, lua_function);
-	THROW3(functor_exists, "Cannot find phrase script text ", m_sScriptTextFunc.c_str());
+	if (!functor_exists && coop_functor_missing("phrase script text", m_sScriptTextFunc.c_str()))
+		return "";
 	return lua_function(pSpeakerGO1->lua_game_object(), pSpeakerGO2->lua_game_object(), dialog_id, phrase_id, "", parameters_table);
 #else
 	bool functor_exists = ai().script_engine().functor(m_sScriptTextFunc.c_str(), lua_function);
-	THROW3(functor_exists, "Cannot find phrase script text ", m_sScriptTextFunc.c_str());
+	if (!functor_exists && coop_functor_missing("phrase script text", m_sScriptTextFunc.c_str()))
+		return "";
 
 	LPCSTR res = lua_function(pSpeakerGO1->lua_game_object(),
 	                          pSpeakerGO2->lua_game_object(),
@@ -193,6 +195,36 @@ LPCSTR CDialogScriptHelper::GetScriptText(LPCSTR str_to_translate, const CGameOb
 	return res;
 #endif
 }
+
+// MP fork (2026-09-18): AN UNRESOLVED FUNCTOR MUST NOT BE CALLED.
+//
+// Every site below had the same shape: ask the script engine for a functor, THROW3 on the result, then invoke it
+// on the next line regardless. THROW3 is VERIFY3 under NON_FATAL_VERIFY (build_config_defines.h:30, comment
+// "don't crash game when VERIFY fails"), and VERIFY3's release definition is `do {} while (0)`. So when the
+// lookup fails nothing stops anything and a DEFAULT-CONSTRUCTED luabind::functor is called, whose m_state is
+// NULL. luabind then reads L->glref to resolve its registry reference and dereferences NULL+8.
+//
+// That is Caden's 2026-09-18 crash, byte for byte: 0xC0000005 at 0x14060FABF accessing 0x0000000000000008, in
+// proxy_functor_caller<bool, CScriptGameObject* const*, CScriptGameObject* const*, char const* const*,
+// char const* const*, char const* const*, luabind::object const*>::operator bool()+0x3f — the five-argument
+// dialog precondition signature. The instruction is `mov 0x8(%r9),%eax` with r9 == 0.
+//
+// The guard is a VALUE, not silence: it names the function that is missing, which is the one thing the crash
+// could never tell us. It is rate-limited per name so a per-frame dialog refresh cannot flood the log.
+static bool coop_functor_missing(LPCSTR what, LPCSTR name)
+{
+	static xr_vector<shared_str> s_seen;
+	shared_str key = name ? name : "<null>";
+	for (u32 i = 0; i < s_seen.size(); ++i)
+		if (s_seen[i] == key)
+			return true;              // already reported; still refuse
+	s_seen.push_back(key);
+	Msg("! COOP(dialog): %s [%s] DOES NOT RESOLVE — refusing to call an unbound functor. "
+		"Without this the engine calls it anyway and dereferences NULL+8 (THROW3 compiles out in release).",
+		what, name ? name : "<null>");
+	return true;
+}
+
 
 bool CDialogScriptHelper::Precondition(const CGameObject* pSpeakerGO, LPCSTR dialog_id, LPCSTR phrase_id) const
 {
@@ -212,7 +244,8 @@ bool CDialogScriptHelper::Precondition(const CGameObject* pSpeakerGO, LPCSTR dia
 		::luabind::functor<bool> lua_function;
 		THROW(*Preconditions()[i]);
 		bool functor_exists = ai().script_engine().functor(*Preconditions()[i], lua_function);
-		THROW3(functor_exists, "Cannot find precondition", *Preconditions()[i]);
+		if (!functor_exists && coop_functor_missing("precondition", *Preconditions()[i]))
+			continue;
 		predicate_result = lua_function(pSpeakerGO->lua_game_object());
 		if (!predicate_result)
 		{
@@ -265,7 +298,8 @@ void CDialogScriptHelper::Action(const CGameObject* pSpeakerGO, LPCSTR dialog_id
 		::luabind::functor<void> lua_function;
 		THROW(*Actions()[i]);
 		bool functor_exists = ai().script_engine().functor(*Actions()[i], lua_function);
-		THROW3(functor_exists, "Cannot find phrase dialog script function", *Actions()[i]);
+		if (!functor_exists && coop_functor_missing("dialog action", *Actions()[i]))
+			continue;
 		lua_function(pSpeakerGO->lua_game_object(), dialog_id);
 	}
 	TransferInfo(smart_cast<const CInventoryOwner*>(pSpeakerGO));
@@ -315,12 +349,14 @@ bool CDialogScriptHelper::Precondition(const CGameObject* pSpeakerGO1,
 		string256 lua_function_str = {0};
 		GetLuaFunctionStringAndHeaderFlag(str, lua_function_str, sizeof(lua_function_str), is_positive);
 		bool functor_exists = ai().script_engine().functor(lua_function_str, lua_function);
-		THROW3(functor_exists, "Cannot find phrase precondition", Preconditions()[i].c_str());
+		if (!functor_exists && coop_functor_missing("phrase precondition", Preconditions()[i].c_str()))
+			continue;
 		predicate_result = lua_function(pSpeakerGO1->lua_game_object(), pSpeakerGO2->lua_game_object(), dialog_id, phrase_id, next_phrase_id, parameters_table);
 		predicate_result = (is_positive == true) ? predicate_result : !predicate_result;
 #else
 		bool functor_exists = ai().script_engine().functor(*Preconditions()[i], lua_function);
-		THROW3(functor_exists, "Cannot find phrase precondition", *Preconditions()[i]);
+		if (!functor_exists && coop_functor_missing("phrase precondition", *Preconditions()[i]))
+			continue;
 		predicate_result = lua_function(pSpeakerGO1->lua_game_object(), pSpeakerGO2->lua_game_object(), dialog_id,
 		                                phrase_id, next_phrase_id);
 #endif
@@ -400,7 +436,8 @@ void CDialogScriptHelper::Action(const CGameObject* pSpeakerGO1, const CGameObje
 		string256 lua_function_str = {0};
 		GetLuaFunctionStringAndHeaderFlag(str, lua_function_str, sizeof(lua_function_str), is_positive);
 		bool functor_exists = ai().script_engine().functor(lua_function_str, lua_function);
-		THROW3(functor_exists, "Cannot find phrase dialog script function", Actions()[i].c_str());
+		if (!functor_exists && coop_functor_missing("dialog action", Actions()[i].c_str()))
+			continue;
 		try
 		{
 			lua_function(pSpeakerGO1->lua_game_object(), pSpeakerGO2->lua_game_object(), dialog_id, phrase_id, "", parameters_table);
@@ -410,7 +447,8 @@ void CDialogScriptHelper::Action(const CGameObject* pSpeakerGO1, const CGameObje
 		}
 #else
 		bool functor_exists = ai().script_engine().functor(*Actions()[i], lua_function);
-		THROW3(functor_exists, "Cannot find phrase dialog script function", *Actions()[i]);
+		if (!functor_exists && coop_functor_missing("dialog action", *Actions()[i]))
+			continue;
 		try
 		{
 			lua_function(pSpeakerGO1->lua_game_object(), pSpeakerGO2->lua_game_object(), dialog_id, phrase_id);
