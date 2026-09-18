@@ -71,6 +71,11 @@ namespace mp_anchors
 	}
 
 	void set(u32 idx, const Fvector& position) { reg().set(idx, position); }
+	void set(u32 idx, const Fvector& position, int source, bool stale) { reg().set(idx, position, source, stale); }
+	bool slot_used(u32 idx) { return idx < max_anchors && reg().slots[idx].used; }
+	Fvector slot_position(u32 idx) { return reg().slots[idx].position; }
+	int slot_source(u32 idx) { return idx < max_anchors ? reg().slots[idx].source : -1; }
+	bool slot_stale(u32 idx) { return idx < max_anchors && reg().slots[idx].stale; }
 	void clear(u32 idx) { reg().clear(idx); }
 	void clear_all() { reg().clear_all(); }
 	// MP fork (§4): clear only the per-actor range [0, n), leaving persistent gamedata anchors [n, max).
@@ -85,6 +90,38 @@ namespace mp_anchors
 	{
 		return reg().min_distance_to(pos, fallback_pos, flt_max);
 	}
+}
+
+// MP fork, item (3) diagnostics (2026-09-18) — DUMP ONLY, consulted by nothing.
+// Prints every anchor slot with the position it holds, which client fed it, whether that client's owner had a
+// resolvable game object at the time, and the distance from `pos` to THAT slot specifically. The per-slot
+// distance is the value the [SQSW] line's single best_d cannot show: with any anchor registered,
+// min_distance_to ignores the fallback entirely, so a wrong anchor position is invisible in the aggregate.
+void coop_anchor_dump(const char* tag, u16 id, const Fvector& pos, const Fvector& fallback)
+{
+	if (!strstr(Core.Params, "-coop_anchordump"))
+		return;
+
+	string256 head;
+	xr_sprintf(head, sizeof(head), "[ANCHORS] %s [%d] at %.1f,%.1f,%.1f: slots=%d players=%d emptied=%d",
+		tag, id, VPUSH(pos), mp_anchors::count(), mp_anchors::player_count(), mp_anchors::emptied() ? 1 : 0);
+	Msg("%s", head);
+	Msg("[ANCHORS]   fallback (graph actor / object 0) at %.1f,%.1f,%.1f: d=%.1f",
+		VPUSH(fallback), fallback.distance_to(pos));
+
+	bool any = false;
+	for (u32 i = 0; i < mp_anchors::max_anchors; ++i)
+	{
+		if (!mp_anchors::slot_used(i))
+			continue;
+		any = true;
+		const Fvector p = mp_anchors::slot_position(i);
+		Msg("[ANCHORS]   slot %d %s src %d stale %d at %.1f,%.1f,%.1f: d=%.1f", i,
+			i < mp_anchors::gamedata_anchor_base ? "player " : "gamedata",
+			mp_anchors::slot_source(i), mp_anchors::slot_stale(i) ? 1 : 0, VPUSH(p), p.distance_to(pos));
+	}
+	if (!any)
+		Msg("[ANCHORS]   (no slots in use — the fallback above is what min_distance_to returns)");
 }
 
 #ifdef DEBUG

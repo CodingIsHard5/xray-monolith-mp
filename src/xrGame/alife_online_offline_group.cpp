@@ -16,6 +16,7 @@
 #include "game_level_cross_table.h"
 #include "alife_online_offline_group_brain.h"
 #include "level_graph.h"
+#include "Level.h"          // item (3) diagnostics: Level().Objects.net_Find, to count resolvable members
 #include "alife_monster_movement_manager.h"
 #include "alife_monster_detail_path_manager.h"
 #include "mp_anchors.h" // MP fork: squads switch by anchor distance too
@@ -199,8 +200,42 @@ bool CSE_ALifeOnlineOfflineGroup::synchronize_location()
 	return (true);
 }
 
+// MP fork, item (3) diagnostics (2026-09-18) — DUMP ONLY, gated on -coop_anchordump.
+// The [SQSW] lines say what a decision CONCLUDED; this says what the squad WAS when it concluded it. The open
+// question is whether a squad that went online once and then fell silent is still online as a group while its
+// members have no resolvable game object — so both halves are values here, not inferences.
+static void coop_squad_state_dump(const char* tag, u16 id, LPCSTR nm, bool group_online, bool can_online,
+	const CSE_ALifeOnlineOfflineGroup::MEMBERS& members)
+{
+	if (!strstr(Core.Params, "-coop_anchordump"))
+		return;
+
+	int resolvable = 0;
+	int alive = 0;
+	CSE_ALifeOnlineOfflineGroup::MEMBERS::const_iterator I = members.begin();
+	CSE_ALifeOnlineOfflineGroup::MEMBERS::const_iterator E = members.end();
+	for (; I != E; ++I)
+	{
+		CSE_ALifeOnlineOfflineGroup::MEMBER* const m = (*I).second;
+		if (!m)
+			continue;
+		if (m->g_Alive())
+			++alive;
+		if (Level().Objects.net_Find(m->ID))
+			++resolvable;
+	}
+	Msg("[SQSTATE] %s [%d][%s]: group_online=%d members=%d alive=%d resolvable_game_objects=%d can_switch_online=%d",
+		tag, id, nm, group_online ? 1 : 0, (int)members.size(), alive, resolvable, can_online ? 1 : 0);
+}
+
 void CSE_ALifeOnlineOfflineGroup::try_switch_online()
 {
+	// Item (3): a squad that is VISITED but does nothing is indistinguishable in the log from one never visited.
+	// Record the visit itself, before any gate, so "one decision then silence" separates into the two.
+	if (strstr(Core.Params, "-coop_anchordump"))
+		Msg("[SQVISIT] [%d][%s] try_switch_online entered: group_online=%d members=%d",
+			ID, name_replace(), m_bOnline ? 1 : 0, (int)m_members.size());
+
 	// MP fork (§4 A-Life squad decisions, DIAGNOSTIC): why don't anchored squads switch online?
 	// Log the gate results + the nearest member's anchor distance vs online_distance. -dbg gated,
 	// throttled by a per-object frame stamp so it doesn't spam every switch cycle.
@@ -243,11 +278,20 @@ void CSE_ALifeOnlineOfflineGroup::try_switch_online()
 		}
 		if (mpsw_dbg) Msg("[SQSW] [%d][%s] SWITCHING ONLINE: member d=%.0f <= online_dist=%.0f (anchors=%d)",
 			ID, name_replace(), d, alife().online_distance(), mp_anchors::count());
+		coop_anchor_dump("squad-switching-online", ID, (*I).second->o_Position,
+			alife().graph().actor() ? alife().graph().actor()->o_Position : o_Position);
+		coop_squad_state_dump("switching-online", ID, name_replace(), m_bOnline, can_switch_online(), m_members);
 		inherited1::try_switch_online();
 		return;
 	}
 	if (mpsw_dbg) Msg("[SQSW] [%d][%s] no member in range: best_d=%.0f > online_dist=%.0f (members=%d anchors=%d)",
 		ID, name_replace(), best_d, alife().online_distance(), (int)m_members.size(), mp_anchors::count());
+	// Item (3) diagnostics: best_d is a MINIMUM, so it cannot show which anchor produced it or whether some
+	// anchor is in the wrong place. Dump every slot against this squad's own position, plus the squad's state,
+	// so "the anchor is wrong" separates from "this squad is never re-evaluated". Diagnostic only.
+	coop_anchor_dump("squad-no-member-in-range", ID, o_Position,
+		alife().graph().actor() ? alife().graph().actor()->o_Position : o_Position);
+	coop_squad_state_dump("no-member-in-range", ID, name_replace(), m_bOnline, can_switch_online(), m_members);
 	on_failed_switch_online();
 }
 

@@ -38,7 +38,10 @@ namespace mp_anchors
 	template <class V>
 	struct registry
 	{
-		struct anchor { V position; bool used; };
+		// MP fork (item (3) diagnostics, 2026-09-18): `source` and `stale` are DIAGNOSTIC ONLY and take no part
+		// in any decision — min_distance_to ignores them. source: -1 unknown/gamedata, else the client id that
+		// fed the slot. stale: the feeding client's owner had no resolvable game object when the slot was written.
+		struct anchor { V position; bool used; int source; bool stale; };
 		anchor slots[max_anchors];
 		unsigned n;
 		bool had_player;      // a player anchor has existed at some point
@@ -46,7 +49,7 @@ namespace mp_anchors
 
 		registry() : n(0), had_player(false), empty_offline(true)
 		{
-			for (unsigned i = 0; i < max_anchors; ++i) slots[i].used = false;
+			for (unsigned i = 0; i < max_anchors; ++i) { slots[i].used = false; slots[i].source = -1; slots[i].stale = false; }
 		}
 		void set(unsigned idx, const V& p)
 		{
@@ -55,6 +58,15 @@ namespace mp_anchors
 			slots[idx].position = p;
 			slots[idx].used = true;
 			if (idx < gamedata_anchor_base) had_player = true;
+		}
+		// diagnostic overload: same anchor, plus where it came from. Kept separate so the existing signature
+		// (and dev/harness/native/test_mp_anchors.cpp, which drives it) is untouched.
+		void set(unsigned idx, const V& p, int source, bool stale)
+		{
+			set(idx, p);
+			if (idx >= max_anchors) return;
+			slots[idx].source = source;
+			slots[idx].stale = stale;
 		}
 		void clear(unsigned idx)
 		{
@@ -95,6 +107,12 @@ namespace mp_anchors
 
 #ifndef MP_ANCHORS_PURE_ONLY
 	void set(u32 idx, const Fvector& position); // add or move an anchor
+	void set(u32 idx, const Fvector& position, int source, bool stale); // diagnostic: record where it came from
+	// DIAGNOSTIC-ONLY readers for the anchor dump; none of these is consulted by any switch decision.
+	bool slot_used(u32 idx);
+	Fvector slot_position(u32 idx);
+	int slot_source(u32 idx);
+	bool slot_stale(u32 idx);
 	void clear(u32 idx);
 	void clear_all();
 	void clear_below(u32 n);                     // clear only indices [0, n) — preserves persistent anchors
@@ -110,3 +128,9 @@ namespace mp_anchors
 	float min_distance_to(const Fvector& pos, const Fvector& fallback_pos);
 #endif
 }
+
+#ifndef MP_ANCHORS_PURE_ONLY
+// MP fork, item (3) diagnostics — DUMP ONLY, gated on -coop_anchordump, consulted by no decision.
+// Defined in alife_switch_manager.cpp next to the registry it reads.
+void coop_anchor_dump(const char* tag, u16 id, const Fvector& pos, const Fvector& fallback);
+#endif
