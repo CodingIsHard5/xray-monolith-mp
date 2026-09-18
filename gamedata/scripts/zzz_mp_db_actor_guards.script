@@ -177,6 +177,33 @@ function on_game_start()
 	-- ===================================================================
 	install_meet_dialog_guard()   -- MP fork: extracted so the THIN CLIENT can install it too (see mp_client.on_client_level_start)
 
+	-- ===================================================================
+	-- actor_effects: HUD_fog indexes a nil HUD on a dedicated server (2026-09-18)
+	--   actor_effects.script:1224  local hud = get_hud()        -- nil on a server with no HUD
+	--   actor_effects.script:1232  hud:AddCustomStatic(static)  -- "attempt to index local 'hud' (a nil value)"
+	-- Reached from Update_Fog on the ACTOR UPDATE path, not from any hit path — measured, after I had wrongly
+	-- reported these raises as a side effect of the §9 (i) bypass: they appear with the bypass DISABLED and are
+	-- absent from the arm where it is most active.
+	-- A script error on every affected tick is not free, and a raise can abort whatever else the caller was doing.
+	-- Control: -coop_fogguard_off leaves the stock behaviour, so the raise can be reproduced on the same build.
+	-- ===================================================================
+	if actor_effects and actor_effects.HUD_fog then
+		local fog_off = false
+		pcall(function() fog_off = string.find(command_line() or "", "-coop_fogguard_off", 1, true) ~= nil end)
+		if fog_off then
+			printf("! COOP(fogguard): -coop_fogguard_off SET — HUD_fog is NOT guarded (control arm); the nil-HUD raise stands")
+		else
+			local org_hud_fog = actor_effects.HUD_fog
+			actor_effects.HUD_fog = function(enabled, actor, rect)
+				local hud = nil
+				pcall(function() hud = get_hud() end)
+				if not hud then return end   -- no HUD on this process: nothing to draw, and indexing it raises
+				return org_hud_fog(enabled, actor, rect)
+			end
+			printf("~ COOP(fogguard): HUD_fog guarded — it returns early when there is no HUD")
+		end
+	end
+
 	if axr_companions then
 		local org_setup = axr_companions.setup_companion_logic
 		if org_setup then
