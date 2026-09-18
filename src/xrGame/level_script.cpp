@@ -517,6 +517,26 @@ LPCSTR coop_player_actor_ids()
 	return s_out;
 }
 
+// MP fork (§9 (i) PvP friendly fire, 2026-09-18): is this entity a PLAYER's body?
+//
+// True when its server entity is owned by a client that is NOT the server's own. The script half cannot tell a
+// player body from an NPC reliably, and INFERRING IT FROM THE COMMUNITY IS WHAT CAUSED THE DEFECT THIS SERVES:
+// scope 2 gave players the actor_stalker community, IsStalker() already counts an actor as a stalker, and GAMMA's
+// friendly-stalker guard at _g.script:1221 then dropped every player-to-player hit. Measured, not inferred:
+// "IsStalker true | relation 0 (friend is 0) => the friendly-stalker branch FIRES".
+//
+// SERVER-SIDE ONLY by construction: without Level().Server there is no CSE to ask, and it returns false. That is
+// the side that applies damage — every COOP(pvb) line comes from the server log — so it is the side that decides.
+bool coop_is_player_body(u16 id)
+{
+	if (!g_pGameLevel || !Level().Server || !Level().Server->game)
+		return false;
+	CSE_Abstract* const e = Level().Server->game->get_entity_from_eid(id);
+	if (!e || !e->owner)
+		return false;
+	return e->owner != Level().Server->GetServerClient();
+}
+
 // MP fork (§9 R2, read-only TEST SEAM): the death state THIS process holds for a body, as bits, so a fixture can say
 // "the peer still holds it ragdolled" as a value rather than inferring it from an absence of animation.
 //   1 = esDead   2 = the skeleton is in the shell   4 = a physics shell is held   8 = a walking character exists
@@ -3204,6 +3224,7 @@ void CLevel::script_register(lua_State* L)
 			def("object_by_id", ((CScriptGameObject* (*)(const ::luabind::object&)) & get_object_by_id)),
 			def("coop_controlled_actor", &coop_controlled_actor),
 			def("coop_body_state", &coop_body_state),   // MP fork (§9 R2 test seam): a body's death state as bits
+			def("coop_is_player_body", &coop_is_player_body),   // MP fork (§9 (i)): a PLAYER body, asked of the CSE owner
 			def("coop_request_checkpoint", &coop_request_checkpoint),
 			def("coop_send_chat", &coop_send_chat),
 			def("coop_player_actor_ids", &coop_player_actor_ids),
