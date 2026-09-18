@@ -285,6 +285,10 @@ void CSE_ALifeOnlineOfflineGroup::try_switch_online()
 			alife().graph().actor() ? alife().graph().actor()->o_Position : o_Position);
 		coop_squad_state_dump("switching-online", ID, name_replace(), m_bOnline, can_switch_online(), m_members);
 		inherited1::try_switch_online();
+		// AFTER the attempt, which is the state the "before" dump cannot report. The 2026-09-18 dump printed
+		// group_online=0 at the decision and I could not tell whether that meant the switch had not happened yet
+		// or had failed — the instrument could not answer its own question. Both sides are now values.
+		coop_squad_state_dump("after-switch-attempt", ID, name_replace(), m_bOnline, can_switch_online(), m_members);
 		return;
 	}
 	if (mpsw_dbg) Msg("[SQSW] [%d][%s] no member in range: best_d=%.0f > online_dist=%.0f (members=%d anchors=%d)",
