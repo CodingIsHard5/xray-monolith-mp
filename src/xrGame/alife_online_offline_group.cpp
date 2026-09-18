@@ -210,6 +210,9 @@ static void coop_squad_state_dump(const char* tag, u16 id, LPCSTR nm, bool group
 	if (!strstr(Core.Params, "-coop_anchordump"))
 		return;
 
+	// resolvable is only meaningful with a level: without one it reads 0 for every member, which would look
+	// exactly like the finding under test. The dump says which case it is rather than printing an ambiguous 0.
+	const int have_level = g_pGameLevel ? 1 : 0;
 	int resolvable = 0;
 	int alive = 0;
 	CSE_ALifeOnlineOfflineGroup::MEMBERS::const_iterator I = members.begin();
@@ -221,11 +224,11 @@ static void coop_squad_state_dump(const char* tag, u16 id, LPCSTR nm, bool group
 			continue;
 		if (m->g_Alive())
 			++alive;
-		if (Level().Objects.net_Find(m->ID))
+		if (g_pGameLevel && Level().Objects.net_Find(m->ID))
 			++resolvable;
 	}
-	Msg("[SQSTATE] %s [%d][%s]: group_online=%d members=%d alive=%d resolvable_game_objects=%d can_switch_online=%d",
-		tag, id, nm, group_online ? 1 : 0, (int)members.size(), alive, resolvable, can_online ? 1 : 0);
+	Msg("[SQSTATE] %s [%d][%s]: group_online=%d members=%d alive=%d resolvable_game_objects=%d can_switch_online=%d have_level=%d",
+		tag, id, nm, group_online ? 1 : 0, (int)members.size(), alive, resolvable, can_online ? 1 : 0, have_level);
 }
 
 void CSE_ALifeOnlineOfflineGroup::try_switch_online()

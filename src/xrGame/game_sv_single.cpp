@@ -4811,7 +4811,7 @@ void game_sv_Single::coop_update_anchors()
 			// resolvable game object when it did. A client that has walked far from its spawn may be feeding a
 			// stale o_Position here while a script read of the same entity returns a fresh one — that divergence
 			// is invisible in the aggregate best_d and is exactly what the dump exists to show. Diagnostic only.
-			const bool owner_absent = (Level().Objects.net_Find(CL->owner->ID) == NULL);
+			const bool owner_absent = !g_pGameLevel || (Level().Objects.net_Find(CL->owner->ID) == NULL);
 			mp_anchors::set(idx, CL->owner->o_Position, (int)CL->ID.value(), owner_absent);
 			++idx;
 		}
