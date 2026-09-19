@@ -422,6 +422,8 @@ void CALifeUpdateManager::teleport_object(ALife::_OBJECT_ID id, GameGraph::_GRAP
 #endif
 
 	if (object->m_bOnline)
+		if (strstr(Core.Params, "-coop_anchordump"))
+			Msg("[SQCALLER] switch_offline(object %d) from CALifeUpdateManager", object->ID);
 		switch_offline(object);
 	graph().change(object, object->m_tGraphID, game_vertex_id);
 	object->m_tNodeID = level_vertex_id;

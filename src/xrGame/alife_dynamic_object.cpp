@@ -206,6 +206,12 @@ void CSE_ALifeDynamicObject::try_switch_offline()
 	{
 		if (dbg)
 			Msg("[MPSW] [%d][%s] forced offline: can_switch_online=0", ID, name_replace());
+		// MP fork, item (3): NAME THE CALLER that takes a member offline. Only a group's offline->online
+		// transition ever respawns a member's game object, so whoever switches a member offline individually
+		// has made it unrecoverable for the session. Gated on -coop_anchordump like the rest of the set.
+		if (strstr(Core.Params, "-coop_anchordump"))
+			Msg("[SQCALLER] switch_offline(object %d) from CSE_ALifeDynamicObject::try_switch_offline "
+				"[can_switch_online==false branch]", ID);
 		alife().switch_offline(this);
 		return;
 	}
@@ -220,6 +226,13 @@ void CSE_ALifeDynamicObject::try_switch_offline()
 
 	if (dbg)
 		Msg("[MPSW] [%d][%s] going offline: d=%.0f > offline_dist=%.0f (anchors=%d)", ID, name_replace(), d, alife().offline_distance(), mp_anchors::count());
+	// THE PREDICTED SITE. A member that has drifted back to its smart terrain is far from every anchor and is
+	// switched offline HERE as an individual object — but its group stays online, and only the group's
+	// offline->online transition respawns members, so nothing ever brings it back.
+	if (strstr(Core.Params, "-coop_anchordump"))
+		Msg("[SQCALLER] switch_offline(object %d) from CSE_ALifeDynamicObject::try_switch_offline "
+			"[distance branch] d=%.1f offline_dist=%.1f anchors=%d",
+			ID, d, alife().offline_distance(), mp_anchors::count());
 	alife().switch_offline(this);
 }
 
