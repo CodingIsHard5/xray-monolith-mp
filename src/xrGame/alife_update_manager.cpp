@@ -421,10 +421,20 @@ void CALifeUpdateManager::teleport_object(ALife::_OBJECT_ID id, GameGraph::_GRAP
 	}
 #endif
 
+	// THE BRACES ARE LOAD-BEARING. Without them this reads as
+	//     if (m_bOnline) { if (anchordump) Msg(...); }  switch_offline(object);   // UNCONDITIONAL
+	// and switch_offline runs on an already-offline object, tripping its own R_ASSERT(m_bOnline). That is
+	// exactly what shipped in CI 35412777771 and crashed the dedicated server 6 boots out of 6, ~40 s in, on
+	// both arms — the flag gated only the Msg, never the call. The same bug also SUPPRESSED its own log line
+	// (m_bOnline false -> outer if false -> no Msg), which is why the run showed zero [SQCALLER] lines and I
+	// misread that as a fifth, uninstrumented caller. A diagnostic that changes control flow is not a
+	// diagnostic. Introduced by me in 808a1d18, whose message claimed "no behaviour change".
 	if (object->m_bOnline)
+	{
 		if (strstr(Core.Params, "-coop_anchordump"))
 			Msg("[SQCALLER] switch_offline(object %d) from CALifeUpdateManager", object->ID);
 		switch_offline(object);
+	}
 	graph().change(object, object->m_tGraphID, game_vertex_id);
 	object->m_tNodeID = level_vertex_id;
 	object->o_Position = position;
