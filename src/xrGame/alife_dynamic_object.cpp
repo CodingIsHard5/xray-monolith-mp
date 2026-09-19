@@ -126,7 +126,8 @@ static bool coop_watch_members()
 }
 
 // true if THIS object is the one under observation.
-static bool coop_is_watched(const CSE_ALifeDynamicObject* object)
+// Non-static: the registry trace in alife_level_registry_inline.h needs it (same pattern as coop_functor_missing).
+bool coop_is_watched(const CSE_ALifeDynamicObject* object)
 {
 	int const wid = coop_watch_id();
 	if (wid >= 0)

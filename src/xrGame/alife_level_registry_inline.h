@@ -20,10 +20,34 @@ IC GameGraph::_LEVEL_ID CALifeLevelRegistry::level_id() const
 	return (m_level_id);
 }
 
+// MP fork, item (3): defined in alife_dynamic_object.cpp. Same extern pattern as coop_functor_missing.
+extern bool coop_is_watched(const CSE_ALifeDynamicObject* object);
+
 IC void CALifeLevelRegistry::add(CSE_ALifeDynamicObject* object)
 {
+	// THE SUSPECTED DROP. This registry is what the A-Life switch scan walks, and an object whose graph vertex
+	// belongs to a DIFFERENT level is discarded here without a word. A grouped member teleported to a job on a
+	// neighbouring level would therefore never be scanned, never reach try_switch_online, and never come back —
+	// which is exactly the measured state: member 29958 sat 3.2 m from a player, offline, and produced no
+	// [SYNCLOC] and no [SWON] line at all while 24 other grouped members were scanned normally.
 	if (ai().game_graph().vertex(object->m_tGraphID)->level_id() != level_id())
+	{
+		if (coop_is_watched(object))
+		{
+			GameGraph::_LEVEL_ID const target = ai().game_graph().vertex(object->m_tGraphID)->level_id();
+			Msg("[LVLREG] %d DROPPED from level registry: vertex %d is on level %d [%s], current level is %d [%s]",
+				object->ID, (int)object->m_tGraphID, (int)target,
+				*(ai().game_graph().header().level(target).name()),
+				(int)level_id(), *(ai().game_graph().header().level(level_id()).name()));
+		}
 		return;
+	}
+	if (coop_is_watched(object))
+	{
+		Msg("[LVLREG] %d ADDED to level registry: vertex %d, level %d [%s]",
+			object->ID, (int)object->m_tGraphID, (int)level_id(),
+			*(ai().game_graph().header().level(level_id()).name()));
+	}
 
 #ifdef DEBUG
 	if (psAI_Flags.test(aiALife)) {

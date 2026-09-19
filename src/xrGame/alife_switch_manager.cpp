@@ -20,6 +20,20 @@
 #include "../xrNetServer/xr_enet_transport.h"   // MP fork (§15 diag): xr_enet::enabled()
 #include "xrServer_Objects_ALife_Monsters.h"      // MP fork (§10.3 S3a): trader switch log
 
+// MP fork, item (3): defined in alife_dynamic_object.cpp (same extern pattern as coop_functor_missing).
+extern bool coop_is_watched(const CSE_ALifeDynamicObject* object);
+
+// MP fork, item (3): is the A-Life switch/anchor trace asked for? Resolved ONCE. try_switch_offline records
+// that a per-call strstr over the whole command line was a measured cost on exactly this path, so the sink
+// log points below must not reintroduce one.
+static bool coop_anchordump_enabled()
+{
+	static int s_anchordump = -1;
+	if (s_anchordump < 0)
+		s_anchordump = strstr(Core.Params, "-coop_anchordump") ? 1 : 0;
+	return (s_anchordump == 1);
+}
+
 // MP fork (design doc §10.3 S3a): every online/offline switch of a trader NPC on the co-op server, with the connected player
 // nearest to it (the anchor that explains the switch) and the stock it carries across.
 struct coop_nearest_player_finder
@@ -190,7 +204,7 @@ void CALifeSwitchManager::remove_online(CSE_ALifeDynamicObject* object, bool upd
 		// document once cited a 0 here as evidence of an out-of-band clear; that was tautological and is
 		// corrected. The informative value is the OTHER one: was online=1 means this is a DIRECT entry that did
 		// NOT come through switch_offline, which is the case worth naming.
-		if (strstr(Core.Params, "-coop_anchordump"))
+		if (coop_anchordump_enabled())
 		{
 			CSE_ALifeMonsterAbstract* const monster = smart_cast<CSE_ALifeMonsterAbstract*>(object);
 			Msg("[SVOFFLINE] remove_online id %d [%s] (was online=%d group=%d) entry=%s",
@@ -252,7 +266,10 @@ void CALifeSwitchManager::switch_offline(CSE_ALifeDynamicObject* object)
 	// m_bOnline is read BEFORE the call, because switch_offline clears it on its own first line — reading it
 	// afterwards (as [SVOFFLINE] in remove_online does) can only ever return 0 and says nothing. online=0 HERE
 	// is the assert's precondition and the thing worth catching.
-	if (strstr(Core.Params, "-coop_anchordump"))
+	// Resolved ONCE, not per object per switch tick. try_switch_offline carries a comment recording that a
+	// per-call strstr over the whole command line was a measured cost on exactly this path; a fresh one here
+	// would reintroduce what that change removed.
+	if (coop_anchordump_enabled())
 	{
 		// m_group_id lives on CSE_ALifeMonsterAbstract, NOT on CSE_ALifeDynamicObject — assuming otherwise cost
 		// a build (C2039) once already. -1 means "not a monster/stalker", 65535 means "a monster in no group".
@@ -378,8 +395,17 @@ void CALifeSwitchManager::try_switch_offline(CSE_ALifeDynamicObject* I)
 
 void CALifeSwitchManager::switch_object(CSE_ALifeDynamicObject* I)
 {
+	// MP fork, item (3): ASSERT "not scanned" AT THE SCAN. The previous round inferred it from the absence of
+	// [SYNCLOC] lines, which is one step removed — synchronize_location could have been skipped for its own
+	// reasons. This is the scan's own entry point, so a watched object that produces no [SWOBJ] line was
+	// genuinely never offered to the switch logic.
+	if (coop_is_watched(I))
+		Msg("[SWOBJ] %d entered switch_object online=%d graph=%d", I->ID, I->m_bOnline ? 1 : 0, (int)I->m_tGraphID);
+
 	if (I->redundant())
 	{
+		if (coop_is_watched(I))
+			Msg("[SWOBJ] %d REDUNDANT -> released", I->ID);
 		release(I);
 		return;
 	}
