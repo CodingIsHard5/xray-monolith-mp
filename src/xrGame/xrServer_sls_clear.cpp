@@ -8,6 +8,17 @@
 
 void xrServer::Perform_destroy(CSE_Abstract* object, u32 mode)
 {
+	// MP fork, item (3) diagnostics (2026-09-18). THE CHOKEPOINT. 233 call sites can destroy a server entity;
+	// instrumenting each would be a week and would still miss one. The open question is narrow — what destroys
+	// a squad member's game object while its CSE stays m_bOnline — and every server-side answer must pass
+	// through here. One line per destroy, with the id, the name and whether the CSE thought it was online, so
+	// the run says whether our member came through at all. If it does NOT appear, the destruction is not
+	// server-side and the search moves to the client, which is the registered red.
+	if (object && strstr(Core.Params, "-coop_anchordump"))
+		Msg("[SVDESTROY] id %d [%s] online=%d parent=%d children=%d mode=%u",
+			object->ID, object->name_replace(), object->m_bOnline ? 1 : 0,
+			(int)object->ID_Parent, (int)object->children.size(), mode);
+
 	R_ASSERT(object);
 	if (object->ID_Parent != 0xffff)
 	{

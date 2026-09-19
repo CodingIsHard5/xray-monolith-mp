@@ -181,6 +181,12 @@ void CALifeSwitchManager::add_online(CSE_ALifeDynamicObject* object, bool update
 void CALifeSwitchManager::remove_online(CSE_ALifeDynamicObject* object, bool update_registries)
 {
 	START_PROFILE("ALife/switch/remove_online")
+		// The A-Life route to losing a game object. If our member's object dies HERE, m_bOnline is cleared with
+		// it and switch_online would respawn it — so this path CANNOT explain a gone object with the flag still
+		// true. Logged anyway, because ruling it out by value beats ruling it out by argument.
+		if (strstr(Core.Params, "-coop_anchordump"))
+			Msg("[SVOFFLINE] remove_online id %d [%s] (was online=%d)",
+				object->ID, object->name_replace(), object->m_bOnline ? 1 : 0);
 		object->m_bOnline = false;
 
 		// Drop client-only children (m_bALifeControl=false, e.g. an online npc's
