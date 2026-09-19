@@ -91,18 +91,63 @@ void CSE_ALifeDynamicObject::add_offline(const xr_vector<ALife::_OBJECT_ID>& sav
 	alife().graph().add(this, m_tGraphID, false);
 }
 
+// Watched by id so the cost is one integer compare on a hot path: -coop_watch_id <id>.
+static int coop_watch_id()
+{
+	static int s_watch = -2;
+	if (s_watch == -2)
+	{
+		s_watch = -1;
+		LPCSTR const p = strstr(Core.Params, "-coop_watch_id");
+		if (p)
+			sscanf(p + xr_strlen("-coop_watch_id"), "%d", &s_watch);
+	}
+	return s_watch;
+}
+
 bool CSE_ALifeDynamicObject::synchronize_location()
 {
-	if (!ai().level_graph().valid_vertex_id(m_tNodeID)) return false;
+	// MP fork, item (3): does A-Life OVERRULE a co-op placement? `placenear` assigns o_Position directly, and
+	// switch_object runs this function BEFORE try_switch_online. If this snapped the position back to the
+	// NPC's job vertex, every placement-based arm in this item has been reporting a value that was reverted
+	// before anything read it. Reading says it does NOT snap back — it follows o_Position and recomputes
+	// m_tNodeID/m_tGraphID from it — so this trace exists to REFUTE that hypothesis with values rather than
+	// leave it standing on my reading. Each early return is named, because "returned true" is three different
+	// situations with different consequences.
+	bool const coop_watch = ((int)ID == coop_watch_id());
+	Fvector const coop_pos_in = o_Position;
+	u32 const coop_node_in = m_tNodeID;
+	GameGraph::_GRAPH_ID const coop_graph_in = m_tGraphID;
+
+	if (!ai().level_graph().valid_vertex_id(m_tNodeID))
+	{
+		if (coop_watch)
+			Msg("[SYNCLOC] %d RET-false invalid node=%d (switch_object returns early, try_switch_online NOT reached)",
+				ID, (int)m_tNodeID);
+		return false;
+	}
 
 	if (!ai().level_graph().valid_vertex_position(o_Position) || ai().level_graph().inside(
 		ai().level_graph().vertex(m_tNodeID),
 		o_Position))
+	{
+		if (coop_watch)
+			Msg("[SYNCLOC] %d RET-true-A pos unchanged %.1f,%.1f,%.1f (valid_pos=%d inside_node=%d) node=%d graph=%d",
+				ID, VPUSH(o_Position), ai().level_graph().valid_vertex_position(o_Position) ? 1 : 0,
+				ai().level_graph().inside(ai().level_graph().vertex(m_tNodeID), o_Position) ? 1 : 0,
+				(int)m_tNodeID, (int)m_tGraphID);
 		return (true);
+	}
 
 	u32 const new_vertex_id = ai().level_graph().vertex(m_tNodeID, o_Position);
 	if (!m_bOnline && !ai().level_graph().inside(new_vertex_id, o_Position))
+	{
+		if (coop_watch)
+			Msg("[SYNCLOC] %d RET-true-B offline and pos %.1f,%.1f,%.1f not inside nearest vertex %d — "
+				"node/graph LEFT STALE at %d/%d",
+				ID, VPUSH(o_Position), (int)new_vertex_id, (int)coop_node_in, (int)coop_graph_in);
 		return (true);
+	}
 
 	m_tNodeID = new_vertex_id;
 	GameGraph::_GRAPH_ID tGraphID = ai().cross_table().vertex(m_tNodeID).game_vertex_id();
@@ -128,11 +173,34 @@ bool CSE_ALifeDynamicObject::synchronize_location()
 
 	m_fDistance = ai().cross_table().vertex(m_tNodeID).distance();
 
+	if (coop_watch)
+	{
+		bool const moved = !coop_pos_in.similar(o_Position);
+		Msg("[SYNCLOC] %d RET-true-C pos %.1f,%.1f,%.1f -> %.1f,%.1f,%.1f (%s) node %d -> %d graph %d -> %d",
+			ID, VPUSH(coop_pos_in), VPUSH(o_Position), moved ? "POSITION REWRITTEN BY A-LIFE" : "position kept",
+			(int)coop_node_in, (int)m_tNodeID, (int)coop_graph_in, (int)m_tGraphID);
+	}
 	return (true);
 }
 
+// MP fork, item (3): WHICH EXIT does a grouped member take when it fails to come back online?
+//
+// A member switched offline by CALifeUpdateManager::teleport_object is put BACK into the scheduled and graph
+// registries (remove_online defaults update_registries=true), so the ordinary individual path below should
+// re-online it when a player is near. Measured, it never does: across the 27 evidence runs that sampled a
+// member's online state there is not one 0->1 recovery, and across the 10 carrying [SQSPAWN] no member was
+// ever spawned twice. Nothing on this route overrides anything for group membership, so the reason is one of
+// the four exits — and none of them was instrumented. [SQVISIT] is the GROUP's try_switch_online, not this
+// one, and reading its zero as a statement about a member is a mistake already made once in this item.
+//
 void CSE_ALifeDynamicObject::try_switch_online()
 {
+	bool const coop_watch = ((int)ID == coop_watch_id());
+	if (coop_watch)
+	{
+		Msg("[SWON] %d ENTER online=%d pos=%.1f,%.1f,%.1f graph=%d node=%d",
+			ID, m_bOnline ? 1 : 0, VPUSH(o_Position), (int)m_tGraphID, (int)m_tNodeID);
+	}
 	CSE_ALifeSchedulable* schedulable = smart_cast<CSE_ALifeSchedulable*>(this);
 	// checking if the abstract monster has just died
 	if (schedulable)
@@ -148,24 +216,38 @@ void CSE_ALifeDynamicObject::try_switch_online()
 
 	if (!can_switch_online())
 	{
+		if (coop_watch)
+			Msg("[SWON] %d EXIT-A can_switch_online=0 (stays offline)", ID);
 		on_failed_switch_online();
 		return;
 	}
 
 	if (!can_switch_offline())
 	{
+		if (coop_watch)
+			Msg("[SWON] %d EXIT-B can_switch_offline=0 -> switch_online", ID);
 		alife().switch_online(this);
 		return;
 	}
 
 	// MP fork (§5.1): min distance to ANY attention anchor; with no
 	// anchors registered this degrades to the legacy actor distance
-	if (mp_anchors::min_distance_to(o_Position, alife().graph().actor()->o_Position) > alife().online_distance())
+	// Hoisted into a named value ONLY so it can be logged; the comparison below is unchanged.
+	float const coop_d = mp_anchors::min_distance_to(o_Position, alife().graph().actor()->o_Position);
+	if (coop_d > alife().online_distance())
 	{
+		if (coop_watch)
+		{
+			Msg("[SWON] %d EXIT-C too far: d=%.1f > online_dist=%.1f (anchors=%d players=%d) pos=%.1f,%.1f,%.1f",
+				ID, coop_d, alife().online_distance(), mp_anchors::count(), mp_anchors::player_count(),
+				VPUSH(o_Position));
+		}
 		on_failed_switch_online();
 		return;
 	}
 
+	if (coop_watch)
+		Msg("[SWON] %d EXIT-D -> switch_online d=%.1f <= online_dist=%.1f", ID, coop_d, alife().online_distance());
 	alife().switch_online(this);
 }
 
