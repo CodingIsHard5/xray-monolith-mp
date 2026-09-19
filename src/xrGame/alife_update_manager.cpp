@@ -432,7 +432,33 @@ void CALifeUpdateManager::teleport_object(ALife::_OBJECT_ID id, GameGraph::_GRAP
 	if (object->m_bOnline)
 	{
 		if (strstr(Core.Params, "-coop_anchordump"))
-			Msg("[SQCALLER] switch_offline(object %d) from CALifeUpdateManager", object->ID);
+		{
+			// IS THE GROUP A VICTIM OR A PARTICIPANT? CSE_ALifeOnlineOfflineGroup::synchronize_location copies
+			// o_Position, m_tNodeID and m_tGraphID FROM ITS FIRST MEMBER. If the member teleporting off-level is
+			// that first member, the group's own vertex may follow it — and a group whose vertex is off-level
+			// would itself be dropped from the level registry, which is a second and larger defect. Log both
+			// sides at the moment of the teleport so the question is answered by values.
+			CSE_ALifeMonsterAbstract* const monster = smart_cast<CSE_ALifeMonsterAbstract*>(object);
+			int grp = -1, grp_vertex = -1, grp_level = -1, grp_online = -1;
+			if (monster && (monster->m_group_id != 0xffff))
+			{
+				grp = (int)monster->m_group_id;
+				CSE_ALifeDynamicObject* const g = objects().object(monster->m_group_id, true);
+				if (g)
+				{
+					grp_vertex = (int)g->m_tGraphID;
+					grp_level = (int)ai().game_graph().vertex(g->m_tGraphID)->level_id();
+					grp_online = g->m_bOnline ? 1 : 0;
+				}
+			}
+			Msg("[SQCALLER] switch_offline(object %d) from CALifeUpdateManager: "
+				"member vertex %d level %d -> TARGET vertex %d level %d [%s]; group %d vertex %d level %d online %d",
+				object->ID, (int)object->m_tGraphID,
+				(int)ai().game_graph().vertex(object->m_tGraphID)->level_id(),
+				(int)game_vertex_id, (int)ai().game_graph().vertex(game_vertex_id)->level_id(),
+				*(ai().game_graph().header().level(ai().game_graph().vertex(game_vertex_id)->level_id()).name()),
+				grp, grp_vertex, grp_level, grp_online);
+		}
 		switch_offline(object);
 	}
 	graph().change(object, object->m_tGraphID, game_vertex_id);

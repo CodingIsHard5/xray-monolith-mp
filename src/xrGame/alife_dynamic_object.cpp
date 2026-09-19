@@ -125,6 +125,15 @@ static bool coop_watch_members()
 	return (s_members == 1);
 }
 
+// Is the [LVLREG] positive control asked for? Shares -coop_anchordump so no new flag is needed.
+bool coop_lvlreg_control()
+{
+	static int s_on = -1;
+	if (s_on < 0)
+		s_on = strstr(Core.Params, "-coop_anchordump") ? 1 : 0;
+	return (s_on == 1);
+}
+
 // true if THIS object is the one under observation.
 // Non-static: the registry trace in alife_level_registry_inline.h needs it (same pattern as coop_functor_missing).
 bool coop_is_watched(const CSE_ALifeDynamicObject* object)

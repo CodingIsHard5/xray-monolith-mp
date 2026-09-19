@@ -22,14 +22,23 @@ IC GameGraph::_LEVEL_ID CALifeLevelRegistry::level_id() const
 
 // MP fork, item (3): defined in alife_dynamic_object.cpp. Same extern pattern as coop_functor_missing.
 extern bool coop_is_watched(const CSE_ALifeDynamicObject* object);
+extern bool coop_lvlreg_control();
 
 IC void CALifeLevelRegistry::add(CSE_ALifeDynamicObject* object)
 {
-	// THE SUSPECTED DROP. This registry is what the A-Life switch scan walks, and an object whose graph vertex
-	// belongs to a DIFFERENT level is discarded here without a word. A grouped member teleported to a job on a
-	// neighbouring level would therefore never be scanned, never reach try_switch_online, and never come back —
-	// which is exactly the measured state: member 29958 sat 3.2 m from a player, offline, and produced no
-	// [SYNCLOC] and no [SWON] line at all while 24 other grouped members were scanned normally.
+	// THE DROP, now measured rather than suspected. This registry is what the A-Life switch scan walks, and an
+	// object whose graph vertex belongs to a DIFFERENT level is discarded here without a word:
+	//
+	//   [LVLREG] 29953 DROPPED from level registry: vertex 228 is on level 1 [k00_marsh],
+	//                                               current level is 2 [l01_escape]
+	//
+	// A group member is removed from this registry by register_member and is never re-added, so the ONE chance
+	// it has to return is graph().change() during a job teleport — refused here when the job is off-level. It
+	// is then offline, unscanned, and its group is still online on this level, so nothing restores it.
+	//
+	// (An earlier version of this comment said 24 other grouped members "were scanned normally". That was
+	// wrong: [SWOBJ] fired zero times, and those [SYNCLOC] lines came from a group iterating its own members,
+	// not from the switch scan. Members are never individually scanned at all.)
 	if (ai().game_graph().vertex(object->m_tGraphID)->level_id() != level_id())
 	{
 		if (coop_is_watched(object))
@@ -42,11 +51,21 @@ IC void CALifeLevelRegistry::add(CSE_ALifeDynamicObject* object)
 		}
 		return;
 	}
-	if (coop_is_watched(object))
+	// POSITIVE CONTROL. The previous run produced exactly one [LVLREG] line and it was a DROPPED, so the ADDED
+	// branch was never exercised and the trace could not be shown to discriminate rather than only ever print
+	// DROPPED. Members are removed from this registry when they join a group and are never re-added, so no
+	// watched object can supply the control — it has to come from ordinary objects. Rate-limited to the first
+	// few, because setup_current_level adds thousands at boot.
+	static int s_added_shown = 0;
+	bool const watched = coop_is_watched(object);
+	if (watched || (s_added_shown < 5 && coop_lvlreg_control()))
 	{
-		Msg("[LVLREG] %d ADDED to level registry: vertex %d, level %d [%s]",
+		if (!watched)
+			++s_added_shown;
+		Msg("[LVLREG] %d ADDED to level registry: vertex %d, level %d [%s]%s",
 			object->ID, (int)object->m_tGraphID, (int)level_id(),
-			*(ai().game_graph().header().level(level_id()).name()));
+			*(ai().game_graph().header().level(level_id()).name()),
+			watched ? "" : "   (positive control: an ordinary object, not a watched member)");
 	}
 
 #ifdef DEBUG
