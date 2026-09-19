@@ -8,6 +8,9 @@
 #include "script_game_object.h"
 #include "actor.h"
 
+// Defined in PhraseScript.cpp — one refusal line and one rate limit shared across the dialog files.
+extern bool coop_functor_missing(LPCSTR what, LPCSTR name);
+
 
 //предикат для сортировки вектора фраз
 static bool PhraseGoodwillPred(const CPhrase* phrase1, const CPhrase* phrase2)
@@ -208,7 +211,9 @@ LPCSTR CPhraseDialog::GetPhraseText(const shared_str& phrase_id, bool current_sp
 			}
 
 			bool functor_exists = ai().script_engine().functor(str, lua_function);
-			THROW3(functor_exists, "Cannot find phrase script text ", (ph->m_script_text_id.length() == 0) ? ph->GetText() : ph->m_script_text_id.c_str());
+			if (!functor_exists && coop_functor_missing("phrase script text",
+					(ph->m_script_text_id.length() == 0) ? ph->GetText() : ph->m_script_text_id.c_str()))
+				return ph->GetText();
 			ph->m_script_text_val = lua_function(pSpeakerGO1->lua_game_object(), pSpeakerGO2->lua_game_object(), m_DialogId.c_str(), phrase_id.c_str(), "", parameters_table);
 			return ph->m_script_text_val.c_str();
 		}
@@ -219,7 +224,13 @@ LPCSTR CPhraseDialog::GetPhraseText(const shared_str& phrase_id, bool current_sp
     {
         ::luabind::functor<LPCSTR> lua_function;
         bool functor_exists = ai().script_engine().functor(ph->m_script_text_id.c_str(), lua_function);
-        THROW3(functor_exists, "Cannot find function", ph->m_script_text_id.c_str());
+        // Caden's 2026-09-18 crash: 0xC0000005 at 0x14060B8DF accessing 0x8, symbolicated to
+        // proxy_functor_caller<char const*, CScriptGameObject* const*, char const* const*, char const* const*>
+        // — THIS call. The precondition/action guards went into PhraseScript.cpp and this file was missed: I
+        // fixed a FILE when the defect is a PATTERN. THROW3 is VERIFY3 under NON_FATAL_VERIFY and compiles to
+        // nothing in release, so a missing script-text function reaches luabind with m_state NULL.
+        if (!functor_exists && coop_functor_missing("phrase script text", ph->m_script_text_id.c_str()))
+            return ph->GetText();          // the untranslated text: a visible phrase beats a dead client
 
         ph->m_script_text_val = lua_function((pSpeakerGO) ? pSpeakerGO->lua_game_object() : NULL, m_DialogId.c_str(),phrase_id.c_str());
         return ph->m_script_text_val.c_str();
@@ -275,7 +286,8 @@ void CPhraseDialog::load_shared(LPCSTR)
 
 		::luabind::functor<void> lua_function;
 		bool functor_exists = ai().script_engine().functor(func, lua_function);
-		THROW3(functor_exists, "Cannot find precondition", func);
+		if (!functor_exists && coop_functor_missing("dialog init callback", func))
+			return;                        // nothing to run; the dialog proceeds without it
 		lua_function(this);
 		return;
 	}

@@ -30,7 +30,9 @@
 //
 // The guard is a VALUE, not silence: it names the function that is missing, which is the one thing the crash
 // could never tell us. It is rate-limited per name so a per-frame dialog refresh cannot flood the log.
-static bool coop_functor_missing(LPCSTR what, LPCSTR name)
+// NOT static: PhraseDialog.cpp needs the same refusal, with the SAME rate limit, so one missing function does
+// not print twice under two names. Declared extern at its use site.
+bool coop_functor_missing(LPCSTR what, LPCSTR name)
 {
 	static xr_vector<shared_str> s_seen;
 	shared_str key = name ? name : "<null>";
