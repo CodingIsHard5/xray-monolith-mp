@@ -16,6 +16,9 @@
 #include "inventory.h"
 #include "alife_simulator.h"
 #include "alife_object_registry.h"
+#include "alife_graph_registry.h"                 // MP fork item (3): graph().actor() for the anchor fallback
+#include "game_graph.h"                           // MP fork item (3): vertex()->level_id(), header().level().name()
+#include "mp_anchors.h"                           // MP fork item (3): min_distance_to over connected players
 #include "stalker_decision_space.h"
 #include "cover_manager.h"
 #include "cover_evaluators.h"
@@ -219,6 +222,56 @@ void CStalkerActionSmartTerrain::finalize()
 	object().movement().game_selector().set_selection_type(eSelectionTypeRandomBranching);
 }
 
+// MP fork, item (3) FIX (a) — gate and rationale at the call site below.
+//
+// Behind -coop_hold_offlevel_job so the SAME build carries both arms: flag off reproduces the defect
+// (the DROPPED line), flag on is the fix. A within-build control beats comparing two builds.
+//
+// The gate is deliberately narrow. Every condition that is NOT met leaves stock behaviour untouched:
+//   * not a group member            -> an ordinary NPC may leave the level, which is correct and by design
+//   * job is on this level          -> untouched
+//   * the group is offline          -> stock A-Life is managing it; not our case
+//   * no player within online_distance -> nobody is watching, and shape (b) covers that case honestly
+static bool coop_hold_offlevel_job(CSE_ALifeHumanAbstract* stalker, GameGraph::_GRAPH_ID target)
+{
+	static int s_on = -1;
+	if (s_on < 0)
+		s_on = strstr(Core.Params, "-coop_hold_offlevel_job") ? 1 : 0;
+	if (s_on != 1 || !stalker)
+		return false;
+
+	if (stalker->m_group_id == 0xffff)
+		return false;
+	if (!ai().game_graph().valid_vertex_id(target) || !ai().game_graph().valid_vertex_id(stalker->m_tGraphID))
+		return false;
+
+	GameGraph::_LEVEL_ID const target_level = ai().game_graph().vertex(target)->level_id();
+	GameGraph::_LEVEL_ID const here_level = ai().game_graph().vertex(stalker->m_tGraphID)->level_id();
+	if (target_level == here_level)
+		return false;
+
+	CSE_ALifeDynamicObject* const group = ai().alife().objects().object(stalker->m_group_id, true);
+	if (!group || !group->m_bOnline)
+		return false;
+
+	float const d = mp_anchors::min_distance_to(stalker->o_Position, ai().alife().graph().actor()->o_Position);
+	if (d > ai().alife().online_distance())
+		return false;
+
+	// Rate-limited: this action runs every tick and the hold is permanent while the gate holds, so an
+	// unbounded line here would be the 1650-lines-a-second mistake recorded in alife_dynamic_object.cpp.
+	static u32 s_holds = 0;
+	++s_holds;
+	if (s_holds <= 5 || (s_holds % 200) == 0)
+		Msg("[HOLDJOB] %d held: off-level job vertex %d on level %d [%s], staying on level %d [%s] "
+			"(group %d online, nearest player %.1f m <= %.1f) hold #%d",
+			stalker->ID, (int)target, (int)target_level,
+			*(ai().game_graph().header().level(target_level).name()),
+			(int)here_level, *(ai().game_graph().header().level(here_level).name()),
+			(int)stalker->m_group_id, d, ai().alife().online_distance(), s_holds);
+	return true;
+}
+
 void CStalkerActionSmartTerrain::execute()
 {
 	inherited::execute();
@@ -238,6 +291,28 @@ void CStalkerActionSmartTerrain::execute()
 	THROW2(task, "Smart terrain is assigned but returns no task");
 	if (object().ai_location().game_vertex_id() != task->game_vertex_id())
 	{
+		// MP fork, item (3) FIX (a): HOLD AN OFF-LEVEL JOB while this member's group is online and a player is
+		// near. Taking it is what loses the NPC for the rest of the session:
+		//
+		//   [SQCALLER] member vertex 627 level 2 -> TARGET vertex 228 level 1 [k00_marsh];
+		//              group 29952 vertex 627 level 2 online 1
+		//   [LVLREG]   29958 DROPPED from level registry: vertex 228 is on level 1, current level is 2
+		//
+		// A game path to another level is walked by teleport (movement_manager_game.cpp:126), which switches the
+		// member offline as an individual and hands it to graph().change(); level().add then refuses it for the
+		// wrong level. register_member already removed it from that registry, so that refused add was its only
+		// route back, and its group — which stays online here — is the only thing that could respawn it and
+		// never does. Measured: offline on 61 of 61 samples, 3 m from the player, 60 re-placements ignored.
+		//
+		// Held HERE, at the job, rather than at the teleport: refusing the teleport leaves the path state
+		// machine re-selecting the same intermediate vertex every tick. Declining the destination means no path
+		// is ever built, so there is nothing to retry.
+		if (coop_hold_offlevel_job(stalker, task->game_vertex_id()))
+		{
+			object().movement().set_path_type(MovementManager::ePathTypeLevelPath);
+			object().movement().set_level_dest_vertex(object().ai_location().level_vertex_id());
+			return;
+		}
 		object().movement().set_path_type(MovementManager::ePathTypeGamePath);
 		object().movement().set_game_dest_vertex(task->game_vertex_id());
 		return;
