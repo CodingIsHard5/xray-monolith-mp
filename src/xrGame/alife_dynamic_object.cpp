@@ -8,6 +8,7 @@
 
 #include "stdafx.h"
 #include "xrServer_Objects_ALife.h"
+#include "xrServer_Objects_ALife_Monsters.h"   // CSE_ALifeMonsterAbstract::m_group_id (the watched population)
 #include "alife_simulator.h"
 #include "mp_anchors.h"
 #include "alife_schedule_registry.h"
@@ -91,7 +92,18 @@ void CSE_ALifeDynamicObject::add_offline(const xr_vector<ALife::_OBJECT_ID>& sav
 	alife().graph().add(this, m_tGraphID, false);
 }
 
-// Watched by id so the cost is one integer compare on a hot path: -coop_watch_id <id>.
+// WHICH OBJECT IS WATCHED.
+//
+// -coop_watch_id <id>   one object by id.
+// -coop_watch_members   every member of an online/offline group.
+//
+// The id form alone is not usable for this measurement: the squad is created by the fixture at RUNTIME, so its
+// member ids are not known when the server is launched, and a flag that has to be set before the subject exists
+// cannot watch it. The membership form is the actual population of interest and needs nothing known in advance.
+//
+// Cost: with neither flag the test is one integer compare against -1, which no ID matches. The smart_cast is
+// paid only when -coop_watch_members is given, because try_switch_online runs for every offline object in the
+// level registry on every scan tick and this file already carries a comment about a per-call cost on this path.
 static int coop_watch_id()
 {
 	static int s_watch = -2;
@@ -105,6 +117,26 @@ static int coop_watch_id()
 	return s_watch;
 }
 
+static bool coop_watch_members()
+{
+	static int s_members = -1;
+	if (s_members < 0)
+		s_members = strstr(Core.Params, "-coop_watch_members") ? 1 : 0;
+	return (s_members == 1);
+}
+
+// true if THIS object is the one under observation.
+static bool coop_is_watched(const CSE_ALifeDynamicObject* object)
+{
+	int const wid = coop_watch_id();
+	if (wid >= 0)
+		return ((int)object->ID == wid);
+	if (!coop_watch_members())
+		return false;
+	const CSE_ALifeMonsterAbstract* const monster = smart_cast<const CSE_ALifeMonsterAbstract*>(object);
+	return (monster && (monster->m_group_id != 0xffff));
+}
+
 bool CSE_ALifeDynamicObject::synchronize_location()
 {
 	// MP fork, item (3): does A-Life OVERRULE a co-op placement? `placenear` assigns o_Position directly, and
@@ -114,7 +146,7 @@ bool CSE_ALifeDynamicObject::synchronize_location()
 	// m_tNodeID/m_tGraphID from it — so this trace exists to REFUTE that hypothesis with values rather than
 	// leave it standing on my reading. Each early return is named, because "returned true" is three different
 	// situations with different consequences.
-	bool const coop_watch = ((int)ID == coop_watch_id());
+	bool const coop_watch = coop_is_watched(this);
 	Fvector const coop_pos_in = o_Position;
 	u32 const coop_node_in = m_tNodeID;
 	GameGraph::_GRAPH_ID const coop_graph_in = m_tGraphID;
@@ -195,7 +227,7 @@ bool CSE_ALifeDynamicObject::synchronize_location()
 //
 void CSE_ALifeDynamicObject::try_switch_online()
 {
-	bool const coop_watch = ((int)ID == coop_watch_id());
+	bool const coop_watch = coop_is_watched(this);
 	if (coop_watch)
 	{
 		Msg("[SWON] %d ENTER online=%d pos=%.1f,%.1f,%.1f graph=%d node=%d",
