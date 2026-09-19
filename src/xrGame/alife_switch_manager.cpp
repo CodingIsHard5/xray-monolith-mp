@@ -184,9 +184,20 @@ void CALifeSwitchManager::remove_online(CSE_ALifeDynamicObject* object, bool upd
 		// The A-Life route to losing a game object. If our member's object dies HERE, m_bOnline is cleared with
 		// it and switch_online would respawn it — so this path CANNOT explain a gone object with the flag still
 		// true. Logged anyway, because ruling it out by value beats ruling it out by argument.
+		//
+		// HOW TO READ "was online": switch_offline sets m_bOnline = false on the line BEFORE it calls in here,
+		// so anything arriving that way reads 0 BY CONSTRUCTION and carries no information. The proposal
+		// document once cited a 0 here as evidence of an out-of-band clear; that was tautological and is
+		// corrected. The informative value is the OTHER one: was online=1 means this is a DIRECT entry that did
+		// NOT come through switch_offline, which is the case worth naming.
 		if (strstr(Core.Params, "-coop_anchordump"))
-			Msg("[SVOFFLINE] remove_online id %d [%s] (was online=%d)",
-				object->ID, object->name_replace(), object->m_bOnline ? 1 : 0);
+		{
+			CSE_ALifeMonsterAbstract* const monster = smart_cast<CSE_ALifeMonsterAbstract*>(object);
+			Msg("[SVOFFLINE] remove_online id %d [%s] (was online=%d group=%d) entry=%s",
+				object->ID, object->name_replace(), object->m_bOnline ? 1 : 0,
+				monster ? (int)monster->m_group_id : -1,
+				object->m_bOnline ? "DIRECT (not via switch_offline)" : "via switch_offline");
+		}
 		object->m_bOnline = false;
 
 		// Drop client-only children (m_bALifeControl=false, e.g. an online npc's
@@ -231,11 +242,36 @@ void CALifeSwitchManager::switch_online(CSE_ALifeDynamicObject* object)
 void CALifeSwitchManager::switch_offline(CSE_ALifeDynamicObject* object)
 {
 	START_PROFILE("ALife/switch/switch_offline")
+	// MP fork, item (3): THE SINK. Every route to switch_offline passes through here.
+	//
+	// This replaces four per-call-site [SQCALLER] log points that produced ZERO lines on 2026-09-18 while
+	// CSE_ALifeDynamicObject::switch_offline demonstrably ran — its own R_ASSERT(m_bOnline) fired and took the
+	// server down. The live caller was a fifth path none of the four covered: instrumenting call sites has the
+	// same bypass property as guarding them. [SVDESTROY] already worked this way for destruction; this matches it.
+	//
+	// m_bOnline is read BEFORE the call, because switch_offline clears it on its own first line — reading it
+	// afterwards (as [SVOFFLINE] in remove_online does) can only ever return 0 and says nothing. online=0 HERE
+	// is the assert's precondition and the thing worth catching.
+	if (strstr(Core.Params, "-coop_anchordump"))
+	{
+		// m_group_id lives on CSE_ALifeMonsterAbstract, NOT on CSE_ALifeDynamicObject — assuming otherwise cost
+		// a build (C2039) once already. -1 means "not a monster/stalker", 65535 means "a monster in no group".
+		CSE_ALifeMonsterAbstract* const monster = smart_cast<CSE_ALifeMonsterAbstract*>(object);
+		Msg("[SWSINK] switch_offline id %d [%s] online=%d group=%d%s",
+			object->ID, object->name_replace(), object->m_bOnline ? 1 : 0,
+			monster ? (int)monster->m_group_id : -1,
+			object->m_bOnline ? "" : "   <-- ALREADY OFFLINE: R_ASSERT(m_bOnline) IS ABOUT TO FAIL");
+	}
 	// MP fork: was #ifdef DEBUG only (see switch_online above)
+	// NOTE: the braces below are new. The `if` was unbraced, so only the Msg was ever gated on -dbg while the
+	// two statements under it always ran. That is what the code intends, but the indentation says otherwise and
+	// the next edit here would inherit the trap. Behaviour is unchanged.
 	if (strstr(Core.Params, "-dbg"))
+	{
 		Msg							("[LSS][%d] Going offline [%d][%s][%d] ([%f][%f][%f] : [%f][%f][%f]), on '%s'",Device.dwFrame,Device.dwTimeGlobal,object->name_replace(), object->ID,VPUSH(graph().actor()->o_Position),VPUSH(object->o_Position), "*SERVER*");
-		coop_trader_switch_log(object, false, &server(), online_distance(), offline_distance());
-		object->switch_offline();
+	}
+	coop_trader_switch_log(object, false, &server(), online_distance(), offline_distance());
+	object->switch_offline();
 	STOP_PROFILE
 }
 
