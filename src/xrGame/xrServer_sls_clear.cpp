@@ -2,6 +2,7 @@
 #include "game_sv_single.h"
 #include "alife_simulator.h"
 #include "xrServer_Objects.h"
+#include "xrServer_Objects_ALife_Monsters.h"   // CSE_ALifeDynamicObject (the ALife.h header only forward-declares it)
 #include "xrServer.h"
 #include "xrmessages.h"
 #include "ai_space.h"
@@ -15,9 +16,12 @@ void xrServer::Perform_destroy(CSE_Abstract* object, u32 mode)
 	// the run says whether our member came through at all. If it does NOT appear, the destruction is not
 	// server-side and the search moves to the client, which is the registered red.
 	if (object && strstr(Core.Params, "-coop_anchordump"))
+	{
+		CSE_ALifeDynamicObject* const dyn = smart_cast<CSE_ALifeDynamicObject*>(object);
 		Msg("[SVDESTROY] id %d [%s] online=%d parent=%d children=%d mode=%u",
-			object->ID, object->name_replace(), object->m_bOnline ? 1 : 0,
+			object->ID, object->name_replace(), dyn ? (dyn->m_bOnline ? 1 : 0) : -1,
 			(int)object->ID_Parent, (int)object->children.size(), mode);
+	}
 
 	R_ASSERT(object);
 	if (object->ID_Parent != 0xffff)
