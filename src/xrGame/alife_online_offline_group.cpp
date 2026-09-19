@@ -304,6 +304,13 @@ void CSE_ALifeOnlineOfflineGroup::try_switch_online()
 
 void CSE_ALifeOnlineOfflineGroup::try_switch_offline()
 {
+	// MP fork, item (3) diagnostics (2026-09-18). An ONLINE group takes THIS branch, not try_switch_online, so
+	// [SQVISIT] could never see it — which is why "our squad 1 visit, all squads 13,000" looked like a result
+	// and was not. This is the missing half.
+	const bool sqdbg = strstr(Core.Params, "-coop_anchordump") != nullptr;
+	if (sqdbg)
+		Msg("[SQOFF] [%d][%s] try_switch_offline entered: members=%d online=%d",
+			ID, name_replace(), (int)m_members.size(), m_bOnline ? 1 : 0);
 	if (m_members.empty())
 		return;
 
@@ -329,10 +336,23 @@ void CSE_ALifeOnlineOfflineGroup::try_switch_offline()
 		        "Incorrect situation : some of the OnlineOffline group members cannot be switched online due to their personal properties",
 		        (*I).second->name_replace());
 
-		if (mp_anchors::min_distance_to((*I).second->o_Position, alife().graph().actor()->o_Position) <= alife().offline_distance())
+		// THE DECISION, AS A VALUE. "returns to its smart terrain and goes offline there" is where the co-op
+		// question sits: with a client 6 m away the anchors should hold it online, and this line is what says
+		// whether the anchors were consulted for THIS group at all. min_distance_to uses the anchor registry
+		// and falls back to the graph actor ONLY when the registry is empty, so the anchor count is the tell.
+		const float d_off = mp_anchors::min_distance_to((*I).second->o_Position, alife().graph().actor()->o_Position);
+		if (sqdbg)
+			Msg("[SQOFF]   member %d at %.1f,%.1f,%.1f: d=%.1f vs offline_dist=%.1f (anchors=%d players=%d) -> %s",
+				(*I).second->ID, VPUSH((*I).second->o_Position), d_off, alife().offline_distance(),
+				mp_anchors::count(), mp_anchors::player_count(),
+				(d_off <= alife().offline_distance()) ? "STAYS ONLINE" : "would go offline");
+		if (d_off <= alife().offline_distance())
 			return;
 	}
 
+	if (sqdbg)
+		Msg("[SQOFF] [%d][%s] SWITCHING OFFLINE: no member within offline_dist=%.1f (anchors=%d players=%d)",
+			ID, name_replace(), alife().offline_distance(), mp_anchors::count(), mp_anchors::player_count());
 	alife().switch_offline(this);
 }
 
@@ -346,7 +366,15 @@ void CSE_ALifeOnlineOfflineGroup::switch_online()
 	for (; I != E; ++I)
 	{
 		if ((*I).second->m_bOnline == false)
+		{
+			// "the member got a game object" has only ever been INFERRED from a placement succeeding. Name it.
+			// The object is created through server().Process_spawn and is NOT synchronous, so this records the
+			// REQUEST; whether an object exists is a separate question the probe answers.
+			if (strstr(Core.Params, "-coop_anchordump"))
+				Msg("[SQSPAWN] group %d: add_online requested for member %d at %.1f,%.1f,%.1f",
+					ID, (*I).second->ID, VPUSH((*I).second->o_Position));
 			alife().add_online((*I).second, false);
+		}
 	}
 
 	alife().scheduled().remove(this);
@@ -356,6 +384,9 @@ void CSE_ALifeOnlineOfflineGroup::switch_online()
 void CSE_ALifeOnlineOfflineGroup::switch_offline()
 {
 	R_ASSERT(m_bOnline);
+	if (strstr(Core.Params, "-coop_anchordump"))
+		Msg("[SQOFF] [%d][%s] switch_offline: group going OFFLINE with %d member(s)",
+			ID, name_replace(), (int)m_members.size());
 	m_bOnline = false;
 
 	if (!m_members.empty())
