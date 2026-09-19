@@ -717,11 +717,40 @@ BOOL CAI_Stalker::net_Spawn(CSE_Abstract* DC)
 	if (ai().game_graph().valid_vertex_id(tpHuman->m_tGraphID))
 		ai_location().game_vertex(tpHuman->m_tGraphID);
 
+	// MP fork, item (3): A STALKER ADOPTS ITS OFF-LEVEL A-LIFE DESTINATION AT SPAWN, AND NOTHING STOPS IT.
+	//
+	// CCustomMonster::net_Spawn guards the identical assignment with a level test:
+	//     valid_vertex_id(...) && vertex(...)->level_id() == ai().level_graph().level_id() && accessible(...)
+	// This one does not. A squad member spawned by its group's switch_online therefore takes an m_tNextGraphID
+	// that A-Life set while the squad was travelling, walks a game path to it, and crosses the level boundary
+	// by teleport — which switches it offline as an individual and drops it from the level registry for being
+	// on the wrong level. Its group stays online here, so nothing ever restores it.
+	//
+	// This explains what two earlier fix attempts could not: the destination is taken AT SPAWN, before any
+	// scheme runs, which is why a guard on CStalkerActionSmartTerrain and a guard on axr_beh's beh_move both
+	// measured ZERO hits while the defect reproduced around them.
+	//
+	// [GDEST] logs every off-level destination taken here. The refusal is behind -coop_hold_offlevel_job so one
+	// build carries both arms: flag off reproduces, flag on applies the same level test the monster path has.
 	if (ai().game_graph().valid_vertex_id(tpHuman->m_tNextGraphID) && movement().restrictions().accessible(
 		ai().game_graph().vertex(
 			     tpHuman->m_tNextGraphID)->
 		     level_point()))
-		movement().set_game_dest_vertex(tpHuman->m_tNextGraphID);
+	{
+		GameGraph::_LEVEL_ID const coop_next_level = ai().game_graph().vertex(tpHuman->m_tNextGraphID)->level_id();
+		bool const coop_offlevel = (coop_next_level != ai().level_graph().level_id());
+		static int s_hold = -1;
+		if (s_hold < 0)
+			s_hold = strstr(Core.Params, "-coop_hold_offlevel_job") ? 1 : 0;
+
+		if (coop_offlevel)
+			Msg("[GDEST] %d takes game dest vertex %d on level %d, current level %d — %s",
+				ID(), (int)tpHuman->m_tNextGraphID, (int)coop_next_level, (int)ai().level_graph().level_id(),
+				(s_hold == 1) ? "REFUSED (-coop_hold_offlevel_job)" : "allowed (stock)");
+
+		if (!coop_offlevel || s_hold != 1)
+			movement().set_game_dest_vertex(tpHuman->m_tNextGraphID);
+	}
 
 	R_ASSERT2(
 		ai().get_game_graph() &&
