@@ -90,4 +90,13 @@ if [ "$fail" != 0 ]; then
   say "commit refused. Include the header, or override once with --no-verify if you are certain."
   exit 1
 fi
+
+# RULE 2 — THE DANGLING BODY. A statement inserted under an unbraced if/for/while stops being guarded while
+# still looking guarded. 808a1d18 did exactly that to switch_offline and crashed the dedicated server on 6
+# boots out of 6, ~40 s in, while suppressing the very log line it had been added to print. Only sites that
+# are NEW relative to HEAD are refused; the tree's legacy instances are left alone.
+if ! python3 "$root/tools/hooks/dangling_if_guard.py"; then
+  say "commit refused (dangling body). Add the braces, or override once with --no-verify if you are certain."
+  exit 1
+fi
 exit 0
