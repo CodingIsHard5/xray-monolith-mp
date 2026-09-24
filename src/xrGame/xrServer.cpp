@@ -17,6 +17,7 @@
 #include "game_sv_mp.h"
 #include "game_cl_base_weapon_usage_statistic.h"
 #include "ai_space.h"
+#include "alife_simulator.h"                       // MP fork (security H-1): switch_distance() in the refusal line
 #include "../xrEngine/IGame_Persistent.h"
 #include "string_table.h"
 #include "object_broker.h"
@@ -1496,6 +1497,51 @@ struct coop_pump_msg_scope
 };
 }
 
+// MP fork (security H-1, 2026-09-24): WORLD COMMANDS ARE THE HOST'S, NOT ANY CLIENT'S.
+//
+// Stock X-Ray is single-player here: the only client that ever sent M_SWITCH_DISTANCE, M_CHANGE_LEVEL, M_SAVE_GAME,
+// M_LOAD_GAME, M_RELOAD_GAME, M_SAVE_PACKET or M_CHANGE_LEVEL_GAME was the in-process one, so none of the handlers
+// read `sender`. On the co-op server every remote player is an ENet peer, and each of those messages let ANY of
+// them set the server's switch distance, change the level for everyone, save or load the world, make every client
+// reload (M_RELOAD_GAME and M_CHANGE_LEVEL_GAME are rebroadcast unconditionally), or crash the server outright
+// (Process_save R_ASSERTs bLocal, and R_ASSERT is live in release).
+//
+// The test is the transport's own ownership, the same one AttachNewClient uses to classify a client: an id ENet owns
+// is remote. The in-process host client (a -mp_host listen server, and the dedicated server's own client) is
+// unaffected. -coop_h1_off restores stock behaviour for a trusted LAN session and for the control arm; it logs every
+// message it lets through so an open server is never silent about being open.
+
+// The same first-20-then-every-100th policy for every H-1 line, because a hostile client can send as fast as it likes.
+static bool coop_h1_say(u32& seen)
+{
+	++seen;
+	return (seen <= 20) || (seen % 100) == 0;
+}
+
+bool xrServer::coop_h1_refuse(ClientID sender, LPCSTR what)
+{
+	if (!(m_enet && m_enet->running() && m_enet->owns(sender.value())))
+		return false;
+	static int s_open = -1;
+	if (s_open < 0)
+		s_open = strstr(Core.Params, "-coop_h1_off") ? 1 : 0;
+	static u32 s_seen = 0;
+	bool const say = coop_h1_say(s_seen);
+	// M_SAVE_PACKET is refused from a remote peer EVEN WITH -coop_h1_off: Process_save R_ASSERTs bLocal, so letting
+	// it through would not "open" anything, it would only crash the server.
+	if (s_open == 1 && 0 != xr_strcmp(what, "M_SAVE_PACKET"))
+	{
+		if (say)
+			Msg("! COOP(H-1): ALLOWED %s from remote client 0x%08x (-coop_h1_off; world commands are open) [#%u]",
+			    what, sender.value(), s_seen);
+		return false;
+	}
+	if (say)
+		Msg("! COOP(H-1): REFUSED %s from remote client 0x%08x — only the host may issue world commands [#%u]",
+		    what, sender.value(), s_seen);
+	return true;
+}
+
 u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadcasting with "flags" as returned
 {
 	u16 type;
@@ -1851,7 +1897,19 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 		break;
 	case M_SWITCH_DISTANCE:
 		{
+			if (coop_h1_refuse(sender, "M_SWITCH_DISTANCE"))
+			{
+				static u32 s_stay = 0;
+				float const asked = P.r_float();
+				if (coop_h1_say(s_stay))
+					Msg("! COOP(H-1): switch distance stays %.1f (a client asked for %.1f)",
+					    ai().get_alife() ? ai().alife().switch_distance() : -1.f, asked);
+				break;
+			}
 			game->switch_distance(P, sender);
+			static u32 s_set = 0;
+			if (ai().get_alife() && m_enet && m_enet->running() && coop_h1_say(s_set))
+				Msg("- COOP(H-1): switch distance now %.1f (set by client 0x%08x)", ai().alife().switch_distance(), sender.value());
 #ifdef DEBUG
 			VERIFY(verify_entities());
 #endif
@@ -1859,6 +1917,8 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 		break;
 	case M_CHANGE_LEVEL:
 		{
+			if (coop_h1_refuse(sender, "M_CHANGE_LEVEL"))
+				break;
 			if (game->change_level(P, sender))
 			{
 				SendBroadcast(BroadcastCID, P, net_flags(TRUE,TRUE));
@@ -1870,6 +1930,8 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 		break;
 	case M_SAVE_GAME:
 		{
+			if (coop_h1_refuse(sender, "M_SAVE_GAME"))
+				break;
 			game->save_game(P, sender);
 #ifdef DEBUG
 			VERIFY(verify_entities());
@@ -1878,6 +1940,10 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 		break;
 	case M_LOAD_GAME:
 		{
+			// the refusal must cover the rebroadcast below too: stock sends M_LOAD_GAME to every client
+			// whether or not the load happened
+			if (coop_h1_refuse(sender, "M_LOAD_GAME"))
+				break;
 			game->load_game(P, sender);
 			SendBroadcast(BroadcastCID, P, net_flags(TRUE,TRUE));
 #ifdef DEBUG
@@ -1887,6 +1953,8 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 		break;
 	case M_RELOAD_GAME:
 		{
+			if (coop_h1_refuse(sender, "M_RELOAD_GAME"))
+				break;
 			SendBroadcast(BroadcastCID, P, net_flags(TRUE,TRUE));
 #ifdef DEBUG
 			VERIFY(verify_entities());
@@ -1895,6 +1963,9 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 		break;
 	case M_SAVE_PACKET:
 		{
+			// Process_save R_ASSERTs that the sender is local: from a remote client this was a server crash
+			if (coop_h1_refuse(sender, "M_SAVE_PACKET"))
+				break;
 			Process_save(P, sender);
 #ifdef DEBUG
 			VERIFY(verify_entities());
@@ -1926,6 +1997,8 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 		break;
 	case M_CHANGE_LEVEL_GAME:
 		{
+			if (coop_h1_refuse(sender, "M_CHANGE_LEVEL_GAME"))
+				break;
 			ClientID CID;
 			CID.set(0xffffffff);
 			SendBroadcast(CID, P, net_flags(TRUE,TRUE));

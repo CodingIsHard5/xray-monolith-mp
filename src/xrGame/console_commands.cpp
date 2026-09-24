@@ -469,6 +469,83 @@ public:
 	}
 };
 
+// MP fork (security H-1 test instrument): "coop_h1_send <kind> [arg]" sends, FROM THIS CLIENT, one of the world
+// commands the server must refuse from a remote peer. It exists only so the refusal can be driven by a real ENet
+// client; it does nothing without -coop_test_h1. It proves nothing a hostile client could not already do: the
+// packets are the stock ones, built the way the stock senders build them.
+//   switch <metres> | save <name> | load <name> | reload | changelevel | savepacket | changelevelgame
+class CCC_CoopH1Send : public IConsole_Command
+{
+public:
+	CCC_CoopH1Send(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = FALSE; }
+	virtual void Execute(LPCSTR args)
+	{
+		if (!strstr(Core.Params, "-coop_test_h1"))
+		{
+			Msg("! coop_h1_send: needs -coop_test_h1");
+			return;
+		}
+		if (!g_pGameLevel)
+		{
+			Msg("! coop_h1_send: no level");
+			return;
+		}
+		string64 kind = "";
+		string256 arg = "";
+		sscanf(args, "%63s %255s", kind, arg);
+		NET_Packet P;
+		if (0 == xr_strcmp(kind, "switch"))
+		{
+			P.w_begin(M_SWITCH_DISTANCE);
+			P.w_float((float)atof(arg));
+		}
+		else if (0 == xr_strcmp(kind, "save"))
+		{
+			P.w_begin(M_SAVE_GAME);
+			P.w_stringZ(arg);
+			P.w_u8(0);
+		}
+		else if (0 == xr_strcmp(kind, "load"))
+		{
+			P.w_begin(M_LOAD_GAME);
+			P.w_stringZ(arg);
+		}
+		else if (0 == xr_strcmp(kind, "reload"))
+			P.w_begin(M_RELOAD_GAME);
+		else if (0 == xr_strcmp(kind, "changelevel"))
+		{
+			u16 gv = 0;   // GameGraph::_GRAPH_ID
+			u32 lv = 0;
+			Fvector v;
+			v.set(0.f, 0.f, 0.f);
+			P.w_begin(M_CHANGE_LEVEL);
+			P.w(&gv, sizeof(gv));
+			P.w(&lv, sizeof(lv));
+			P.w_vec3(v);
+			P.w_vec3(v);
+		}
+		else if (0 == xr_strcmp(kind, "savepacket"))
+		{
+			P.w_begin(M_SAVE_PACKET);
+			P.w_u16(0);
+			P.w_u16(0);
+		}
+		else if (0 == xr_strcmp(kind, "changelevelgame"))
+		{
+			P.w_begin(M_CHANGE_LEVEL_GAME);
+			P.w_stringZ("l01_escape");
+			P.w_stringZ("");
+		}
+		else
+		{
+			Msg("! coop_h1_send: unknown kind '%s'", kind);
+			return;
+		}
+		Level().Send(P, net_flags(TRUE, TRUE));
+		Msg("~ COOP(h1-cl): sent %s %s", kind, arg);
+	}
+};
+
 class CCC_MemStats : public IConsole_Command
 {
 public:
@@ -2758,6 +2835,7 @@ void CCC_RegisterCommands()
 
 	CMD1(CCC_MemStats, "stat_memory");
 	CMD1(CCC_CoopChat, "coop_chat");
+	CMD1(CCC_CoopH1Send, "coop_h1_send");   // MP fork (security H-1): test instrument, inert without -coop_test_h1
 
 	// MP fork (§19 co-op): deliberately OUTSIDE #ifdef DEBUG. It first went in next to
 	// dump_infos, which is DEBUG-only, so the release build reported "Unknown command" and

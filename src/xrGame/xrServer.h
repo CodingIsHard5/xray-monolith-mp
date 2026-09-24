@@ -307,6 +307,9 @@ public:
 	                            CSE_Abstract* tpExistedEntity = 0);
 	void Process_update(NET_Packet& P, ClientID sender);
 	void Process_save(NET_Packet& P, ClientID sender);
+	// MP fork (security H-1): true when `sender` is a REMOTE ENet client and the world command `what` must be refused.
+	// Only the in-process host client may change level, save, load, reload or set the A-Life switch distance.
+	bool coop_h1_refuse(ClientID sender, LPCSTR what);
 	void Process_event(NET_Packet& P, ClientID sender);
 	void Process_event_ownership(NET_Packet& P, ClientID sender, u32 time, u16 ID, BOOL bForced = FALSE);
 	bool Process_event_reject(NET_Packet& P, const ClientID sender, const u32 time, const u16 id_parent,
