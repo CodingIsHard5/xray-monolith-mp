@@ -287,13 +287,48 @@ void NET_Packet::r_sdir(Fvector& A)
 	A.mul(s);
 }
 
+// MP fork (security, found by security-da 2026-09-18, fixed 2026-09-24): EVERY r_stringZ variant ran xr_strlen on
+// &B.data[r_pos] with no bound. B.data is a fixed NET_PacketSizeLimit array and B.count is how much of it this packet
+// filled, so a packet whose string runs to its end with no NUL made strlen read past the packet (and past the array,
+// into the rest of NET_Packet and beyond), and r_advance then moved r_pos by that over-read length. Worse than an
+// over-read in two places: r_stringZ(LPSTR) COPIED len+1 bytes into a caller buffer of unknown size, and
+// r_stringZ_s's R_ASSERT2 on an overlong string (live in release) was a one-packet server kill. Every network-reachable
+// string read — 96 call sites in xrGame, 214 engine-wide — goes through these four, which is why it is fixed here and
+// not at call sites. A malformed string now reads as EMPTY and consumes the rest of the packet, so the next read hits
+// eof rather than reinterpreting whatever followed; the fact is logged, rate-limited, because only a hostile or
+// broken sender produces it.
+static void coop_net_malformed(LPCSTR what, u32 pos, u32 count)
+{
+	static u32 s_seen = 0;
+	++s_seen;
+	if (s_seen <= 20 || (s_seen % 100) == 0)
+		Msg("! NET: malformed string in %s at %u of %u bytes (no terminator / too long) — read as empty [#%u]",
+		    what, pos, count, s_seen);
+}
+
+u32 NET_Packet::coop_bounded_strlen()
+{
+	if (r_pos >= B.count || B.count > NET_PacketSizeLimit)
+		return u32(-1);
+	const void* const nul = memchr(&B.data[r_pos], 0, B.count - r_pos);
+	if (!nul)
+		return u32(-1);
+	return u32(static_cast<const BYTE*>(nul) - &B.data[r_pos]);
+}
+
 void NET_Packet::r_stringZ(LPSTR S)
 {
 	if (!inistream)
 	{
-		LPCSTR data = LPCSTR(&B.data[r_pos]);
-		size_t len = xr_strlen(data);
-		r(S, (u32)len + 1);
+		u32 const len = coop_bounded_strlen();
+		if (len == u32(-1))
+		{
+			coop_net_malformed("r_stringZ", r_pos, B.count);
+			S[0] = 0;
+			r_pos = B.count;
+			return;
+		}
+		r(S, len + 1);
 	}
 	else
 	{
@@ -305,8 +340,16 @@ void NET_Packet::r_stringZ(xr_string& dest)
 {
 	if (!inistream)
 	{
-		dest = LPCSTR(&B.data[r_pos]);
-		r_advance(u32(dest.size() + 1));
+		u32 const len = coop_bounded_strlen();
+		if (len == u32(-1))
+		{
+			coop_net_malformed("r_stringZ(xr_string)", r_pos, B.count);
+			dest.clear();
+			r_pos = B.count;
+			return;
+		}
+		dest.assign(LPCSTR(&B.data[r_pos]), len);
+		r_advance(len + 1);
 	}
 	else
 	{
@@ -320,8 +363,16 @@ void NET_Packet::r_stringZ(shared_str& dest)
 {
 	if (!inistream)
 	{
-		dest = LPCSTR(&B.data[r_pos]);
-		r_advance(dest.size() + 1);
+		u32 const len = coop_bounded_strlen();
+		if (len == u32(-1))
+		{
+			coop_net_malformed("r_stringZ(shared_str)", r_pos, B.count);
+			dest = "";
+			r_pos = B.count;
+			return;
+		}
+		dest = LPCSTR(&B.data[r_pos]);   // NUL-terminated inside the packet: proven above
+		r_advance(len + 1);
 	}
 	else
 	{
@@ -335,8 +386,13 @@ void NET_Packet::skip_stringZ()
 {
 	if (!inistream)
 	{
-		LPCSTR data = LPCSTR(&B.data[r_pos]);
-		u32 len = xr_strlen(data);
+		u32 const len = coop_bounded_strlen();
+		if (len == u32(-1))
+		{
+			coop_net_malformed("skip_stringZ", r_pos, B.count);
+			r_pos = B.count;
+			return;
+		}
 		r_advance(len + 1);
 	}
 	else
@@ -372,8 +428,19 @@ void NET_Packet::r_stringZ_s(LPSTR string, u32 const size)
 		return;
 	}
 
-	LPCSTR data = LPCSTR(B.data + r_pos);
-	u32 length = xr_strlen(data);
-	R_ASSERT2((length + 1) <= size, "buffer overrun");
+	// the R_ASSERT2 that stood here protected the WRITE, but xr_strlen had already over-read, and the assert itself
+	// was a remote kill switch: one overlong string from any client stopped the server
+	u32 const length = coop_bounded_strlen();
+	if (length == u32(-1) || (length + 1) > size)
+	{
+		coop_net_malformed("r_stringZ_s", r_pos, B.count);
+		if (size)
+			string[0] = 0;
+		if (length == u32(-1))
+			r_pos = B.count;
+		else
+			r_advance(length + 1);   // skip the overlong string whole, so the fields after it stay aligned
+		return;
+	}
 	r(string, length + 1);
 }

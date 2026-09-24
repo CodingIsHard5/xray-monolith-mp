@@ -473,7 +473,7 @@ public:
 // commands the server must refuse from a remote peer. It exists only so the refusal can be driven by a real ENet
 // client; it does nothing without -coop_test_h1. It proves nothing a hostile client could not already do: the
 // packets are the stock ones, built the way the stock senders build them.
-//   switch <metres> | save <name> | load <name> | reload | changelevel | savepacket | changelevelgame
+//   switch <metres> | save <name> | load <name> | reload | changelevel | savepacket | changelevelgame | badstring
 class CCC_CoopH1Send : public IConsole_Command
 {
 public:
@@ -529,6 +529,14 @@ public:
 			P.w_begin(M_SAVE_PACKET);
 			P.w_u16(0);
 			P.w_u16(0);
+		}
+		else if (0 == xr_strcmp(kind, "badstring"))
+		{
+			// the r_stringZ fix's positive control: a remote-reachable handler that reads strings
+			// (M_REMOTE_CONTROL_AUTH reads user, then pass) given a payload with NO terminator
+			P.w_begin(M_REMOTE_CONTROL_AUTH);
+			for (int i = 0; i < 64; ++i)
+				P.w_u8('A');
 		}
 		else if (0 == xr_strcmp(kind, "changelevelgame"))
 		{

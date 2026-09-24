@@ -336,6 +336,10 @@ public:
 	void r_dir(Fvector& A);
 
 	void r_sdir(Fvector& A);
+	// MP fork (security, r_stringZ over-read): the terminator is searched for only inside [r_pos, B.count). Returns
+	// the string length, or u32(-1) for a string with NO terminator in the packet — which the readers below treat as
+	// malformed: empty result, and the rest of the packet is consumed so later reads see eof instead of garbage.
+	u32 coop_bounded_strlen();
 	void r_stringZ(LPSTR S);
 	void r_stringZ(xr_string& dest);
 	void r_stringZ(shared_str& dest);
