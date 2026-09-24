@@ -15,18 +15,34 @@
 #include "../Trade.h"
 #include "../Entity.h"
 #include "../Actor.h"
+#include "../GameObject.h"                        // MP fork (item 5 trade diagnostic): CGameObject::ID
 #include "../Weapon.h"
 #include "../trade_parameters.h"
 #include "../inventory_item_object.h"
 #include "../string_table.h"
 #include "../ai/monsters/BaseMonster/base_monster.h"
 #include "../ai_space.h"
+#include "../../xrNetServer/xr_enet_transport.h"   // MP fork (item 5 trade diagnostic): xr_enet::enabled()
 #include "../../xrServerEntities/script_engine.h"
 #include "../UIGameSP.h"
 #include "UITalkWnd.h"
 #include "eatable_item.h"
 
 // -------------------------------------------------
+
+// MP fork, item (5) of Caden's 2026-09-18 session ("trade asymmetry"): DIAGNOSTIC. Neither client's log carried a
+// single trade line, so the asymmetry could not be read at all. On a thin co-op client, log the trade window opening
+// and every Buy/Sell with the prices, balances and which branch the button took. Values, not verdicts.
+static bool coop_trade_cl_log()
+{
+	return xr_enet::enabled() && !ai().get_alife();
+}
+
+static u16 coop_trade_id(CInventoryOwner* o)
+{
+	CGameObject* const g = smart_cast<CGameObject*>(o);
+	return g ? g->ID() : u16(-1);
+}
 
 void CUIActorMenu::InitTradeMode()
 {
@@ -64,6 +80,11 @@ void CUIActorMenu::InitTradeMode()
 	// MP fork (design doc §10.3 S2c): ask the server for its prices; they replace the local ones as they arrive
 	if (CGameObject* const partner_obj = smart_cast<CGameObject*>(m_pPartnerInvOwner))
 		CTrade::coop_request_quotes(partner_obj->ID());
+
+	if (coop_trade_cl_log())
+		Msg("~ COOP(trade-cl): window OPEN actor %u money %u, partner %u money %u, partner stock %u, quotes requested",
+		    coop_trade_id(m_pActorInvOwner), (u32)m_pActorInvOwner->get_money(), coop_trade_id(m_pPartnerInvOwner),
+		    (u32)m_pPartnerInvOwner->get_money(), (u32)m_pPartnerInvOwner->inventory().m_all.size());
 
 	UpdatePrices();
 }
@@ -562,6 +583,13 @@ void CUIActorMenu::OnBtnPerformTradeBuy(CUIWindow* w, void* d)
 	actor_money += delta_price;
 	partner_money -= delta_price;
 
+	if (coop_trade_cl_log())
+		Msg("~ COOP(trade-cl): BUY actor %u partner %u items %u price %d; actor money after %d -> %s",
+		    coop_trade_id(m_pActorInvOwner), coop_trade_id(m_pPartnerInvOwner), (u32)m_pTradePartnerList->ItemsCount(),
+		    partner_price, actor_money,
+		    ((actor_money >= 0) && (actor_price >= 0 || partner_price > 0)) ? "PERFORMED"
+		    : (actor_money < 0 ? "not_enough_money_actor" : "trade_dont_make"));
+
 	if ((actor_money >= 0) /*&& ( partner_money >= 0 )*/ && (actor_price >= 0 || partner_price > 0))
 	{
 		m_partner_trade->OnPerformTrade(partner_price, actor_price);
@@ -623,6 +651,13 @@ void CUIActorMenu::OnBtnPerformTradeSell(CUIWindow* w, void* d)
 	int delta_price = actor_price - partner_price;
 	actor_money += delta_price;
 	partner_money -= delta_price;
+
+	if (coop_trade_cl_log())
+		Msg("~ COOP(trade-cl): SELL actor %u partner %u items %u price %d; partner money after %d -> %s",
+		    coop_trade_id(m_pActorInvOwner), coop_trade_id(m_pPartnerInvOwner), (u32)m_pTradeActorList->ItemsCount(),
+		    actor_price, partner_money,
+		    ((actor_money >= 0) && (partner_money >= 0) && (actor_price >= 0 || partner_price > 0)) ? "PERFORMED"
+		    : (partner_money < 0 ? "not_enough_money_partner" : "trade_dont_make"));
 
 	if ((actor_money >= 0) && (partner_money >= 0) && (actor_price >= 0 || partner_price > 0))
 	{
