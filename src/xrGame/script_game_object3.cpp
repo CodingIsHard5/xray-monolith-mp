@@ -568,7 +568,10 @@ void CScriptGameObject::set_dest_game_vertex_id(GameGraph::_GRAPH_ID game_vertex
 #endif
 			return;
 		}
+		extern LPCSTR g_coop_gdest_caller;   // MP fork, item (3) diagnostic: movement_manager.cpp
+		g_coop_gdest_caller = "lua:set_dest_game_vertex_id";
 		stalker->movement().set_game_dest_vertex(game_vertex_id);
+		g_coop_gdest_caller = "other";
 	}
 }
 

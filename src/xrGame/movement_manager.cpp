@@ -128,8 +128,26 @@ CMovementManager::EPathType CMovementManager::path_type() const
 	return (m_path_type);
 }
 
+// MP fork, item (3) DIAGNOSTIC (2026-09-24): WHO GIVES A SQUAD MEMBER ITS OFF-LEVEL DESTINATION?
+//
+// Three guards at three named setters measured zero hits while the member was dropped around them
+// (CStalkerActionSmartTerrain, axr_beh's beh_move, CAI_Stalker::net_Spawn's [GDEST]). This is the chokepoint every
+// C++ setter passes through, so it is traced here instead of guessing a fourth. The caller tag is set by the sites
+// that call it (see g_coop_gdest_caller's writers); "other" means a site nobody tagged, which is itself the answer.
+// Logged only when the destination CHANGES to an off-level vertex, so a scheme re-issuing it per frame is one line.
+LPCSTR g_coop_gdest_caller = "other";
+
 void CMovementManager::set_game_dest_vertex(const GameGraph::_GRAPH_ID& game_vertex_id)
 {
+	if (ai().game_graph().valid_vertex_id(game_vertex_id) && ai().get_level_graph()
+	    && game_vertex_id != GameGraph::_GRAPH_ID(game_path().dest_vertex_id()))
+	{
+		GameGraph::_LEVEL_ID const to_level = ai().game_graph().vertex(game_vertex_id)->level_id();
+		if (to_level != ai().level_graph().level_id())
+			Msg("[GDEST2] %d [%s] set_game_dest_vertex %d on level %d, current level %d, was %d, caller %s",
+			    object().ID(), object().cName().c_str(), (int)game_vertex_id, (int)to_level,
+			    (int)ai().level_graph().level_id(), (int)game_path().dest_vertex_id(), g_coop_gdest_caller);
+	}
 	game_path().set_dest_vertex(game_vertex_id);
 	m_path_actuality = m_path_actuality && game_path().actual();
 }

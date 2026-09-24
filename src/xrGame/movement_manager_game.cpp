@@ -119,6 +119,20 @@ void CMovementManager::process_game_path()
 				                                                                                     ->level_id())
 				{
 					m_path_state = ePathStateTeleport;
+					// MP fork, item (3) DIAGNOSTIC: the decision to cross a level, with the destination that caused it.
+					// [SQCALLER] sees only the teleport's target (the next hop); this names the path's END, which is
+					// what [GDEST2] lines are compared against.
+					{
+						u32 const coop_dest = game_path().dest_vertex_id();
+						bool const coop_dest_ok = ai().game_graph().valid_vertex_id(coop_dest);
+						Msg("[GTELE] %d [%s] crosses: at %d (level %d) next %d (level %d); path end %d (level %d), path size %d",
+						    object().ID(), object().cName().c_str(), (int)object().ai_location().game_vertex_id(),
+						    (int)ai().game_graph().vertex(object().ai_location().game_vertex_id())->level_id(),
+						    (int)game_path().intermediate_vertex_id(),
+						    (int)ai().game_graph().vertex(game_path().intermediate_vertex_id())->level_id(),
+						    (int)coop_dest, coop_dest_ok ? (int)ai().game_graph().vertex(coop_dest)->level_id() : -1,
+						    (int)game_path().path().size());
+					}
 					VERIFY(ai().get_alife());
 					VERIFY(
 						ai().alife().graph().level().level_id() == ai().game_graph().vertex(object().ai_location().

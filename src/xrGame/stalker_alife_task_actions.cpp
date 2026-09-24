@@ -239,7 +239,10 @@ void CStalkerActionSmartTerrain::execute()
 	if (object().ai_location().game_vertex_id() != task->game_vertex_id())
 	{
 		object().movement().set_path_type(MovementManager::ePathTypeGamePath);
+		extern LPCSTR g_coop_gdest_caller;   // MP fork, item (3) diagnostic: movement_manager.cpp
+		g_coop_gdest_caller = "smart_terrain_task:242";
 		object().movement().set_game_dest_vertex(task->game_vertex_id());
+		g_coop_gdest_caller = "other";
 		return;
 	}
 
