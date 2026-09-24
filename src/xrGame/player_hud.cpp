@@ -8,6 +8,10 @@
 #include "actoreffector.h"
 #include "../xrEngine/IGame_Persistent.h"
 #include "inventory_item.h"
+#include "level.h"                              // MP fork (item 5 HUD guard): Level().CurrentEntity()
+#include "../xrEngine/xr_object.h"             // MP fork (item 5 HUD guard): CObject (H_Parent, ID)
+#include "ai_space.h"                           // MP fork (item 5 HUD guard): ai().get_alife()
+#include "../xrNetServer/xr_enet_transport.h"   // MP fork (item 5 HUD guard): xr_enet::enabled()
 #include "weapon.h"
 #include "script_attachment_manager.h"
 #include "../xrEngine/CameraBase.h"
@@ -1689,8 +1693,56 @@ bool player_hud::allow_activation(CHudItem* item)
 }
 
 shared_str current_player_hud_sect;
+// MP fork, item (5) of Caden's 2026-09-18 session: "changing client 1's gun would play an animation on client 2's
+// screen on client 2's character". The first-person HUD is THIS player's hands, but every caller decides to attach
+// with CHudItem::ParentIsActor(), which is true for ANY actor — in single player there is only one. On a co-op
+// client a peer's weapon receiving GE_WPN_STATE_CHANGE -> eShowing reaches switch2_Showing / OnStateSwitch and
+// attaches the PEER's weapon to OUR hands, then plays its show motion there. Devices, flashlights, the PDA and flares
+// attach on eShowing with no actor test at all. So the guard is here, where every caller converges: on a thin co-op
+// client an item held by an actor that is not the one this client controls is never attached to the local HUD; it
+// plays as a simulated item instead, exactly as an NPC's weapon does. -coop_hudguard_off is the control arm: the
+// attach is allowed and logged, so the arm can show the foreign attach happening.
+static bool coop_hud_foreign(CHudItem* item, u16& parent_id, u16& local_id)
+{
+	if (!xr_enet::enabled() || ai().get_alife() || !g_pGameLevel)
+		return false;
+	CObject* const parent = item->object().H_Parent();
+	if (!parent || !smart_cast<CActor*>(parent))
+		return false;
+	CObject* const local = Level().CurrentEntity();
+	parent_id = parent->ID();
+	local_id = local ? local->ID() : u16(-1);
+	if (parent == local)
+	{
+		// the POSITIVE control: our own item must still attach, or the guard broke the local player's hands
+		static u32 s_own = 0;
+		if (++s_own <= 20)
+			Msg("~ COOP(hudguard): item %d [%s] held by the local actor %d — attached [#%u]", item->object().ID(),
+			    item->object().cNameSect().c_str(), local_id, s_own);
+		return false;
+	}
+	return true;
+}
+
 void player_hud::attach_item(CHudItem* item)
 {
+	{
+		u16 parent_id = u16(-1), local_id = u16(-1);
+		if (coop_hud_foreign(item, parent_id, local_id))
+		{
+			static int s_off = -1;
+			if (s_off < 0)
+				s_off = strstr(Core.Params, "-coop_hudguard_off") ? 1 : 0;
+			static u32 s_seen = 0;
+			++s_seen;
+			if (s_seen <= 20 || (s_seen % 100) == 0)
+				Msg("%s COOP(hudguard): item %d [%s] held by actor %d, local actor %d — %s [#%u]",
+				    s_off == 1 ? "!" : "~", item->object().ID(), item->object().cNameSect().c_str(), parent_id, local_id,
+				    s_off == 1 ? "ATTACHED to the local HUD (-coop_hudguard_off)" : "NOT attached to the local HUD", s_seen);
+			if (s_off != 1)
+				return;
+		}
+	}
 	attachable_hud_item* pi = item->HudItemData();
 	int item_idx = pi->m_attach_place_idx;
 

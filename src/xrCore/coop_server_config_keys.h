@@ -188,4 +188,5 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_ffbypass_off", coop_cfg_switch, coop_cfg_control},   // off (the bypass is ON) | server | Gamedata control arm: GAMMA's friendly-fire guard is not bypassed for player-sourced hits (§9 (i)).
 	{"coop_fogguard_off", coop_cfg_switch, coop_cfg_control},   // off (the guard is ON) | server | Gamedata control arm: the fog db.actor guard (zzz_mp_db_actor_guards) is not installed.
 	{"coop_hitchain", coop_cfg_switch, coop_cfg_diag},   // off | server | Gamedata mp_coop_trade_server: log the before-hit callback chain per hit.
+	{"coop_hudguard_off", coop_cfg_switch, coop_cfg_control},   // off (the guard is ON) | client | Control arm (item 5): a peer's held item may be attached to this client's first-person HUD again, logged.
 };
