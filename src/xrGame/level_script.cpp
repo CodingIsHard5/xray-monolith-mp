@@ -551,6 +551,14 @@ int coop_body_state(u16 id)
 	return int(a->character_physics_support()->coop_state_bits());
 }
 
+// MP fork (2026-09-25, Overseer ruling): the ENGINE decides whether mp_coop_reach_wait is on by default. Gamedata is
+// redeployed from the repo after every harness chain, so a gamedata-side default would change a confirmed build that
+// predates the ruling. This export exists from the proposal build onward; an engine without it leaves the script opt-in.
+bool coop_reach_wait_default()
+{
+	return true;
+}
+
 CScriptGameObject *coop_controlled_actor()
 {
 	CActor *l_tpActor = smart_cast<CActor*>(Level().CurrentEntity());
@@ -3223,6 +3231,7 @@ void CLevel::script_register(lua_State* L)
 			def("object_by_id", ((CScriptGameObject* (*)()) & get_object_by_id)),
 			def("object_by_id", ((CScriptGameObject* (*)(const ::luabind::object&)) & get_object_by_id)),
 			def("coop_controlled_actor", &coop_controlled_actor),
+			def("coop_reach_wait_default", &coop_reach_wait_default),
 			def("coop_body_state", &coop_body_state),   // MP fork (§9 R2 test seam): a body's death state as bits
 			def("coop_is_player_body", &coop_is_player_body),   // MP fork (§9 (i)): a PLAYER body, asked of the CSE owner
 			def("coop_request_checkpoint", &coop_request_checkpoint),
