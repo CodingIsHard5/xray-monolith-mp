@@ -57,6 +57,11 @@
 
 #include "Torch.h"
 #include "Flashlight.h"
+#include "alife_simulator.h"   // MP fork, item (3) shape (a): the member/group/player test at the Lua binding
+#include "alife_object_registry.h"
+#include "alife_graph_registry.h"
+#include "mp_anchors.h"
+#include "xrServer_Objects_ALife_Monsters.h"
 
 namespace MemorySpace
 {
@@ -553,6 +558,38 @@ void CScriptGameObject::set_dest_level_vertex_id(u32 level_vertex_id)
 	}
 }
 
+// MP fork, item (3) — FOUND 2026-09-25 00:0x (gdest3, CI 36058965739): the member's off-level destination arrives HERE,
+// from Lua. The dropped member's own line, immediately after the fixture placed it:
+//     [GDEST2] 29702 set_game_dest_vertex 2198 on level 10, current level 2, was 627, caller lua:set_dest_game_vertex_id
+//     [GTELE]  29702 crosses: at 365 (level 2) next 228 (level 1); path end 2198 (level 10)
+//     [LVLREG] 29702 DROPPED ...
+// Three earlier guards sat at call sites that never ran; this is the binding every Lua caller passes through.
+//
+// SHAPE (a) — item 19, the Overseer's design call: "members keep on-level jobs while players are near". On the co-op
+// server, a member of an ONLINE group whose nearest player is within the online distance does not accept an off-level
+// game destination; everything else is stock. Behind -coop_hold_offlevel_job so one build carries both arms.
+// The retry-loop risk (a scheme re-issuing the destination every tick) is COUNTED per member, and the first calls
+// print the Lua stack, so the script doing it is named instead of inferred.
+static bool coop_offlevel_member_near_player(CAI_Stalker* stalker, GameGraph::_GRAPH_ID v, int& group, float& d)
+{
+	group = -1;
+	d = -1.f;
+	if (!ai().get_alife() || !ai().get_level_graph())
+		return false;
+	if (ai().game_graph().vertex(v)->level_id() == ai().level_graph().level_id())
+		return false;
+	CSE_ALifeMonsterAbstract* const m = smart_cast<CSE_ALifeMonsterAbstract*>(ai().alife().objects().object(stalker->ID(), true));
+	if (!m || m->m_group_id == 0xffff)
+		return false;
+	CSE_ALifeDynamicObject* const g = ai().alife().objects().object(m->m_group_id, true);
+	if (!g || !g->m_bOnline)
+		return false;
+	group = (int)m->m_group_id;
+	CSE_ALifeCreatureActor* const fallback = ai().alife().graph().actor();
+	d = mp_anchors::min_distance_to(stalker->Position(), fallback ? fallback->o_Position : stalker->Position());
+	return d <= ai().alife().online_distance();
+}
+
 void CScriptGameObject::set_dest_game_vertex_id(GameGraph::_GRAPH_ID game_vertex_id)
 {
 	CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(&object());
@@ -567,6 +604,29 @@ void CScriptGameObject::set_dest_game_vertex_id(GameGraph::_GRAPH_ID game_vertex
 			ai().script_engine().script_log				(ScriptStorage::eLuaMessageTypeError,"CAI_Stalker : invalid vertex id being setup by action %s!",stalker->brain().CStalkerPlanner::current_action().m_action_name);
 #endif
 			return;
+		}
+		{
+			int grp = -1;
+			float d = -1.f;
+			if (coop_offlevel_member_near_player(stalker, game_vertex_id, grp, d))
+			{
+				static int s_hold = -1;
+				if (s_hold < 0)
+					s_hold = strstr(Core.Params, "-coop_hold_offlevel_job") ? 1 : 0;
+				static xr_map<u16, u32> s_count;   // per member: a count that keeps climbing is the retry loop
+				u32 const n = ++s_count[stalker->ID()];
+				static u32 s_total = 0;
+				++s_total;
+				if (n <= 3 || (n % 100) == 0)
+					Msg("[HOLDLUA] %d [%s] off-level dest %d (level %d) from Lua; group %d online, nearest player %.1f m <= %.1f — %s [#%u for this id]",
+					    stalker->ID(), stalker->cName().c_str(), (int)game_vertex_id,
+					    (int)ai().game_graph().vertex(game_vertex_id)->level_id(), grp, d, ai().alife().online_distance(),
+					    s_hold == 1 ? "HELD (-coop_hold_offlevel_job)" : "allowed (stock)", n);
+				if (s_total <= 3)
+					ai().script_engine().print_stack();   // name the script, once or twice, not every tick
+				if (s_hold == 1)
+					return;
+			}
 		}
 		extern LPCSTR g_coop_gdest_caller;   // MP fork, item (3) diagnostic: movement_manager.cpp
 		g_coop_gdest_caller = "lua:set_dest_game_vertex_id";
