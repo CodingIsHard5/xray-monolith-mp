@@ -557,9 +557,13 @@ int coop_body_state(u16 id)
 // FALSE since 2026-09-25 ~10:5x (Overseer, after the corpse correction): the "idle" cost reach-wait was built to remove
 // was measured on boar-killed partners, so reach-wait stays OPT-IN (-coop_reach_wait) until a live A/B shows a benefit
 // over the hold. Flipping it later is this one line, with no gamedata change.
+// TRUE since 2026-09-25 ~15:4x (Overseer rule: flip if a second live pair agrees). Two live pairs, both members alive
+// for the whole window: held alone a member roams (81.6 / 99.0 / 124.5 m from its first sample, and asks to leave the
+// map ~1,500 times); with reach-wait it hangs around (24.1 / 23.8 m from where it started waiting); 0 dropped in every
+// arm; neither takes an on-level job. -coop_reach_wait_off is Caden's switch; the engine hold stays underneath.
 bool coop_reach_wait_default()
 {
-	return false;
+	return true;
 }
 
 CScriptGameObject *coop_controlled_actor()
