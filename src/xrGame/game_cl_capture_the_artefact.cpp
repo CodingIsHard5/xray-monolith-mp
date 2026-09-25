@@ -1302,8 +1302,8 @@ void game_cl_CaptureTheArtefact::OnVoteStart(NET_Packet& P)
 		args[i] = static_cast<char*>(_alloca(psize + 1));
 	}
 
-	P.r_stringZ(command);
-	P.r_stringZ(player);
+	P.r_stringZ_s(command, psize);   // MP fork (security): the unsized r_stringZ(LPSTR) is gone; these are _alloca(psize)
+	P.r_stringZ_s(player, psize);
 
 	m_dwVoteEndTime = Level().timeServer() + P.r_u32();
 

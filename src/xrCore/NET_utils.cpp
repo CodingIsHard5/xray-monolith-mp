@@ -316,25 +316,7 @@ u32 NET_Packet::coop_bounded_strlen()
 	return u32(static_cast<const BYTE*>(nul) - &B.data[r_pos]);
 }
 
-void NET_Packet::r_stringZ(LPSTR S)
-{
-	if (!inistream)
-	{
-		u32 const len = coop_bounded_strlen();
-		if (len == u32(-1))
-		{
-			coop_net_malformed("r_stringZ", r_pos, B.count);
-			S[0] = 0;
-			r_pos = B.count;
-			return;
-		}
-		r(S, len + 1);
-	}
-	else
-	{
-		inistream->r_string(S, 4096); //???
-	}
-}
+// r_stringZ(LPSTR) removed 2026-09-25: see net_utils.h. Arrays go through r_stringZ_s(S, N) via the template there.
 
 void NET_Packet::r_stringZ(xr_string& dest)
 {

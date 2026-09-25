@@ -340,7 +340,16 @@ public:
 	// the string length, or u32(-1) for a string with NO terminator in the packet — which the readers below treat as
 	// malformed: empty result, and the rest of the packet is consumed so later reads see eof instead of garbage.
 	u32 coop_bounded_strlen();
-	void r_stringZ(LPSTR S);
+	// MP fork (security, 2026-09-25, from security-07): THE UNSIZED r_stringZ(LPSTR) IS GONE. Bounding its read by the
+	// PACKET (coop_bounded_strlen) still let it copy up to ~16 KiB into a caller's fixed buffer — a remote stack smash
+	// via e.g. GE_GAME_EVENT -> GAME_EVENT_PLAYER_DISCONNECTED -> r_stringZ(string1024). A char ARRAY now binds here
+	// and is bounded by its own size through r_stringZ_s; a bare pointer no longer compiles, so a caller cannot
+	// silently reintroduce the unsized copy — it must call r_stringZ_s(ptr, size) and say how big its buffer is.
+	template <u32 N>
+	void r_stringZ(char (&S)[N])
+	{
+		r_stringZ_s(S, N);
+	}
 	void r_stringZ(xr_string& dest);
 	void r_stringZ(shared_str& dest);
 
