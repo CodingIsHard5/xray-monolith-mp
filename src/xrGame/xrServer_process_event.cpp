@@ -50,6 +50,16 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
 		{
 			u16 game_event_type;
 			P.r_u16(game_event_type);
+			// MP fork, 2026-09-25 — MEASUREMENT for security-07's optional gate (refuse remote game-event types other
+			// than the ones clients legitimately send). Before refusing anything, census what normal remote clients
+			// actually send: one line per (type) the first time, then every 100th. Counts only; nothing is refused.
+			if (m_enet && m_enet->running() && m_enet->owns(sender.value()))
+			{
+				static xr_map<u16, u32> s_ge;
+				u32 const c = ++s_ge[game_event_type];
+				if (c == 1 || (c % 100) == 0)
+					Msg("[GEVENT] remote client 0x%08x sent game event type %u (count %u)", sender.value(), (u32)game_event_type, c);
+			}
 			game->AddDelayedEvent(P, game_event_type, timestamp, sender);
 		}
 		break;

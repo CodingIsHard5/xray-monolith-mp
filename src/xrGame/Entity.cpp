@@ -17,6 +17,8 @@
 #include "ai_space.h"
 #include "alife_simulator.h"
 #include "alife_time_manager.h"
+#include "alife_object_registry.h"   // MP fork, fixture diagnostic: [HITSRC]/[KILLSRC] on watched group members
+#include "../xrServerEntities/script_engine.h"
 #include "../Layers/xrRender/xrRender_console.h"
 #include "InventoryOwner.h"
 #include "Inventory.h"
@@ -114,11 +116,30 @@ float CEntity::CalcCondition(float hit)
 }
 
 //void CEntity::Hit			(float perc, Fvector &dir, CObject* who, s16 element,Fvector position_in_object_space, float impulse, ALife::EHitType hit_type)
+// MP fork, 2026-09-25 — FIXTURE DIAGNOSTIC: the placement self-kill. Twice a squad partner died straight after the
+// fixture's placenear, "Die ... victim=X killer=X", with no XRNET(hit) naming it, so the damage came in by a local path
+// (a physics impact hit carries the victim as its own source; a script can also kill an NPC directly). On the server,
+// with -coop_watch_members, every hit and every KillEntity on a member of a group is logged with its source, type and
+// power, and a kill also carries the Lua frames that issued it. Diagnostic only; nothing is changed.
+static bool coop_watch_hitsrc(CEntity* e)
+{
+	static int s_on = -1;
+	if (s_on < 0)
+		s_on = strstr(Core.Params, "-coop_watch_members") ? 1 : 0;
+	if (s_on != 1 || !ai().get_alife())
+		return false;
+	CSE_ALifeMonsterAbstract* const m = smart_cast<CSE_ALifeMonsterAbstract*>(ai().alife().objects().object(e->ID(), true));
+	return m && m->m_group_id != 0xffff;
+}
+
 void CEntity::Hit(SHit* pHDS)
 {
 	//	if (bDebug)				Log("Process HIT: ", *cName());
 
 	// *** process hit calculations
+	if (coop_watch_hitsrc(this))
+		Msg("[HITSRC] victim %d [%s] who %d type %d power %.3f bone %d health %.3f",
+		    ID(), cName().c_str(), (int)pHDS->whoID, (int)pHDS->hit_type, pHDS->power, (int)pHDS->boneID, GetfHealth());
 	// Calc impulse
 	Fvector vLocalDir;
 	float m = pHDS->dir.magnitude();
@@ -276,6 +297,22 @@ void CEntity::net_Destroy()
 
 void CEntity::KillEntity(u16 whoID, BOOL bypass_actor_check /*AVO: added for actor_before_death callback*/)
 {
+	if (coop_watch_hitsrc(this))
+	{
+		string1024 frames = "";
+		lua_State* const L = ai().script_engine().lua();
+		lua_Debug ar;
+		for (int lvl = 0; L && lvl < 8 && lua_getstack(L, lvl, &ar); ++lvl)
+		{
+			if (!lua_getinfo(L, "Sln", &ar))
+				break;
+			string256 one;
+			xr_sprintf(one, "%s:%d(%s) < ", ar.short_src, ar.currentline, ar.name ? ar.name : "?");
+			xr_strcat(frames, one);
+		}
+		Msg("[KILLSRC] victim %d [%s] killer %d health %.3f frames: %s", ID(), cName().c_str(), (int)whoID, GetfHealth(),
+		    frames[0] ? frames : "<no Lua frames: engine-side kill>");
+	}
 	//AVO: allow scripts to process actor condition and prevent actor's death or kill him if desired.
 	//IMPORTANT: if you wish to kill actor you need to call db.actor:kill(level:object_by_id(whoID), true) in actor_before_death callback, to ensure all objects are properly destroyed
 	// this will bypass below if block and go to normal KillEntity routine.

@@ -617,15 +617,28 @@ void CScriptGameObject::set_dest_game_vertex_id(GameGraph::_GRAPH_ID game_vertex
 					s_hold = strstr(Core.Params, "-coop_hold_offlevel_job_off") ? 0 : 1;
 				static xr_map<u16, u32> s_count;   // per member: a count that keeps climbing is the retry loop
 				u32 const n = ++s_count[stalker->ID()];
-				static u32 s_total = 0;
-				++s_total;
 				if (n <= 3 || (n % 100) == 0)
 					Msg("[HOLDLUA] %d [%s] off-level dest %d (level %d) from Lua; group %d online, nearest player %.1f m <= %.1f — %s [#%u for this id]",
 					    stalker->ID(), stalker->cName().c_str(), (int)game_vertex_id,
 					    (int)ai().game_graph().vertex(game_vertex_id)->level_id(), grp, d, ai().alife().online_distance(),
 					    s_hold == 1 ? "HELD (default; -coop_hold_offlevel_job_off to allow)" : "allowed (-coop_hold_offlevel_job_off)", n);
-				if (s_total <= 3)
-					ai().script_engine().print_stack();   // name the script, once or twice, not every tick
+				// NAME THE CALLER. print_stack() printed nothing visible in release (2026-09-25); walk the Lua frames
+				// directly and put them on one line, first call per id only, so the script is read, not inferred.
+				if (n == 1)
+				{
+					string1024 frames = "";
+					lua_State* const L = ai().script_engine().lua();
+					lua_Debug ar;
+					for (int lvl = 0; L && lvl < 8 && lua_getstack(L, lvl, &ar); ++lvl)
+					{
+						if (!lua_getinfo(L, "Sln", &ar))
+							break;
+						string256 one;
+						xr_sprintf(one, "%s:%d(%s) < ", ar.short_src, ar.currentline, ar.name ? ar.name : "?");
+						xr_strcat(frames, one);
+					}
+					Msg("[HOLDLUA-CALLER] %d frames: %s", stalker->ID(), frames[0] ? frames : "<no Lua frames on the main state>");
+				}
 				if (s_hold == 1)
 					return;
 			}
