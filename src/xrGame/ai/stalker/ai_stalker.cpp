@@ -730,26 +730,21 @@ BOOL CAI_Stalker::net_Spawn(CSE_Abstract* DC)
 	// scheme runs, which is why a guard on CStalkerActionSmartTerrain and a guard on axr_beh's beh_move both
 	// measured ZERO hits while the defect reproduced around them.
 	//
-	// [GDEST] logs every off-level destination taken here. The refusal is behind -coop_hold_offlevel_job so one
-	// build carries both arms: flag off reproduces, flag on applies the same level test the monster path has.
+	// [GDEST] logs every off-level destination taken here. (The refusal that stood here was removed 2026-09-25: it never
+	// fired. THE READING ABOVE WAS WRONG: the member's destination is set later, from Lua — see [HOLDLUA].)
 	if (ai().game_graph().valid_vertex_id(tpHuman->m_tNextGraphID) && movement().restrictions().accessible(
 		ai().game_graph().vertex(
 			     tpHuman->m_tNextGraphID)->
 		     level_point()))
 	{
 		GameGraph::_LEVEL_ID const coop_next_level = ai().game_graph().vertex(tpHuman->m_tNextGraphID)->level_id();
-		bool const coop_offlevel = (coop_next_level != ai().level_graph().level_id());
-		static int s_hold = -1;
-		if (s_hold < 0)
-			s_hold = strstr(Core.Params, "-coop_hold_offlevel_job") ? 1 : 0;
-
-		if (coop_offlevel)
-			Msg("[GDEST] %d takes game dest vertex %d on level %d, current level %d — %s",
-				ID(), (int)tpHuman->m_tNextGraphID, (int)coop_next_level, (int)ai().level_graph().level_id(),
-				(s_hold == 1) ? "REFUSED (-coop_hold_offlevel_job)" : "allowed (stock)");
-
-		if (!coop_offlevel || s_hold != 1)
-			movement().set_game_dest_vertex(tpHuman->m_tNextGraphID);
+		// LOG ONLY since 2026-09-25: this refusal never fired in any run on record (0 [GDEST] lines); the member's
+		// off-level destination comes from Lua (CScriptGameObject::set_dest_game_vertex_id, [HOLDLUA]), so the hold
+		// lives there. Kept as a trace so a spawn-time off-level destination would still be visible.
+		if (coop_next_level != ai().level_graph().level_id())
+			Msg("[GDEST] %d takes game dest vertex %d on level %d, current level %d — allowed (stock; the hold is at the Lua binding)",
+				ID(), (int)tpHuman->m_tNextGraphID, (int)coop_next_level, (int)ai().level_graph().level_id());
+		movement().set_game_dest_vertex(tpHuman->m_tNextGraphID);
 	}
 
 	R_ASSERT2(

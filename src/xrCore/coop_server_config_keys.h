@@ -180,7 +180,8 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	// ---- registered 2026-09-24 (security H-1 build; the drift check had 8 unregistered flags from 09-18/09-19 work)
 	{"coop_h1_off", coop_cfg_switch, coop_cfg_control},   // off (world commands are HOST-ONLY) | server | Control arm / trusted LAN: remote clients may again set the switch distance, change level, save, load, reload (security H-1); every such message is logged.
 	{"coop_test_h1", coop_cfg_switch, coop_cfg_test},   // off | client | Enables the coop_h1_send console command, which sends one world command from this client (security H-1 arm).
-	{"coop_hold_offlevel_job", coop_cfg_switch, coop_cfg_control},   // off | server | Item (3): a stalker refuses an OFF-LEVEL game destination at net_Spawn ([GDEST]); gamedata mp_coop_offlevel_guard also keys on it.
+	{"coop_hold_offlevel_job_off", coop_cfg_switch, coop_cfg_control},   // off (the hold is ON) | server | Item (3) / design item 19: turns OFF the default hold at CScriptGameObject::set_dest_game_vertex_id, which keeps a member of an online group near a player from taking an off-level destination ([HOLDLUA]). Control arm and Caden's one switch.
+	{"coop_offlevel_luaguard", coop_cfg_switch, coop_cfg_diag},   // off | server | Gamedata mp_coop_offlevel_guard: the axr_beh beh_move wrapper (measured: never on the path; kept opt-in and inert).
 	{"coop_anchordump", coop_cfg_switch, coop_cfg_diag},   // off | server | Item (3): switch-centre anchor dump and the [LVLREG] positive control.
 	{"coop_watch_members", coop_cfg_switch, coop_cfg_diag},   // off | server | Item (3): trace switch/registry events for every member of an online/offline group.
 	{"coop_watch_id", coop_cfg_value, coop_cfg_diag},   // off | server | Item (3): trace switch/registry events for one object id.

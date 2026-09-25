@@ -567,7 +567,9 @@ void CScriptGameObject::set_dest_level_vertex_id(u32 level_vertex_id)
 //
 // SHAPE (a) — item 19, the Overseer's design call: "members keep on-level jobs while players are near". On the co-op
 // server, a member of an ONLINE group whose nearest player is within the online distance does not accept an off-level
-// game destination; everything else is stock. Behind -coop_hold_offlevel_job so one build carries both arms.
+// game destination; everything else is stock. DEFAULT ON since 2026-09-25 (Overseer ruling, after c17cedcf's arms:
+// control DROPPED, fixed online 21/21 and seen 20/20). -coop_hold_offlevel_job_off restores stock: the control arm,
+// and Caden's one switch. Known cost: a held member gets no new on-level job and idles; the calling script is unnamed.
 // The retry-loop risk (a scheme re-issuing the destination every tick) is COUNTED per member, and the first calls
 // print the Lua stack, so the script doing it is named instead of inferred.
 static bool coop_offlevel_member_near_player(CAI_Stalker* stalker, GameGraph::_GRAPH_ID v, int& group, float& d)
@@ -612,7 +614,7 @@ void CScriptGameObject::set_dest_game_vertex_id(GameGraph::_GRAPH_ID game_vertex
 			{
 				static int s_hold = -1;
 				if (s_hold < 0)
-					s_hold = strstr(Core.Params, "-coop_hold_offlevel_job") ? 1 : 0;
+					s_hold = strstr(Core.Params, "-coop_hold_offlevel_job_off") ? 0 : 1;
 				static xr_map<u16, u32> s_count;   // per member: a count that keeps climbing is the retry loop
 				u32 const n = ++s_count[stalker->ID()];
 				static u32 s_total = 0;
@@ -621,7 +623,7 @@ void CScriptGameObject::set_dest_game_vertex_id(GameGraph::_GRAPH_ID game_vertex
 					Msg("[HOLDLUA] %d [%s] off-level dest %d (level %d) from Lua; group %d online, nearest player %.1f m <= %.1f — %s [#%u for this id]",
 					    stalker->ID(), stalker->cName().c_str(), (int)game_vertex_id,
 					    (int)ai().game_graph().vertex(game_vertex_id)->level_id(), grp, d, ai().alife().online_distance(),
-					    s_hold == 1 ? "HELD (-coop_hold_offlevel_job)" : "allowed (stock)", n);
+					    s_hold == 1 ? "HELD (default; -coop_hold_offlevel_job_off to allow)" : "allowed (-coop_hold_offlevel_job_off)", n);
 				if (s_total <= 3)
 					ai().script_engine().print_stack();   // name the script, once or twice, not every tick
 				if (s_hold == 1)
