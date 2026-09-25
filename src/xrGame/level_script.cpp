@@ -554,9 +554,12 @@ int coop_body_state(u16 id)
 // MP fork (2026-09-25, Overseer ruling): the ENGINE decides whether mp_coop_reach_wait is on by default. Gamedata is
 // redeployed from the repo after every harness chain, so a gamedata-side default would change a confirmed build that
 // predates the ruling. This export exists from the proposal build onward; an engine without it leaves the script opt-in.
+// FALSE since 2026-09-25 ~10:5x (Overseer, after the corpse correction): the "idle" cost reach-wait was built to remove
+// was measured on boar-killed partners, so reach-wait stays OPT-IN (-coop_reach_wait) until a live A/B shows a benefit
+// over the hold. Flipping it later is this one line, with no gamedata change.
 bool coop_reach_wait_default()
 {
-	return true;
+	return false;
 }
 
 CScriptGameObject *coop_controlled_actor()
