@@ -1439,6 +1439,30 @@ void CWeapon::UpdateCL()
 		// walks around empty-handed while its rifle sits invisible inside it.
 		CInventoryOwner* owner = smart_cast<CInventoryOwner*>(H_Parent());
 		CGameObject* peer = smart_cast<CGameObject*>(H_Parent());
+		// MP fork (§19 co-op, "client 1 can't see client 2's weapons" 2026-09-29) — measurement only, -coop_peerwpn_trace:
+		// for every weapon held by an ACTOR other than the one we control, log when (remote, active, visible, active id)
+		// changes. The show path below is gated on Remote(); this says whether a peer's gun ever reaches it on each side.
+		static int s_peerwpn_on = -1;
+		if (s_peerwpn_on < 0)
+			s_peerwpn_on = strstr(Core.Params, "-coop_peerwpn_trace") ? 1 : 0;
+		if ((s_peerwpn_on == 1) && owner && peer && smart_cast<CActor*>(peer) && (peer != Level().CurrentControlEntity()))
+		{
+			{
+				static xr_map<u16, u32> s_last;
+				static u32 s_lines = 0;
+				PIItem const act_item = owner->inventory().ActiveItem();
+				const u32 key = (peer->Remote() ? 1u : 0u) | ((act_item == this) ? 2u : 0u) | (getVisible() ? 4u : 0u) |
+				                (u32(act_item ? act_item->object().ID() : 0xffff) << 8);
+				auto it = s_last.find(ID());
+				if ((it == s_last.end() || it->second != key) && (++s_lines <= 300))
+				{
+					s_last[ID()] = key;
+					Msg("~ COOP(peerwpn): wpn %u [%s] parent %u remote %d active %d visible %d parent-active-item %d slot %d",
+					    ID(), cNameSect().c_str(), peer->ID(), peer->Remote() ? 1 : 0, (act_item == this) ? 1 : 0,
+					    getVisible() ? 1 : 0, act_item ? int(act_item->object().ID()) : -1, int(owner->inventory().GetActiveSlot()));
+				}
+			}
+		}
 		if (owner && peer && peer->Remote())
 		{
 			const bool active = (owner->inventory().ActiveItem() == this);

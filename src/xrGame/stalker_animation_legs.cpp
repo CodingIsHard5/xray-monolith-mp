@@ -153,6 +153,22 @@ MotionID CStalkerAnimationManager::legs_move_animation()
 		(movement.mental_state() != eMentalStateFree)
 	);
 
+	// MP fork (§19 co-op, NPC shuffling 2026-09-29): on a client this is reached because standing() said "moving", and
+	// standing() answers from the server's DEBOUNCED standing bit (ai_stalker.cpp, 200 ms latch) while movement_type()
+	// is the server's RAW value from the same packet. For up to 200 ms at every start/stop the two disagree: "moving"
+	// with movement type STAND. m_movement.A[eMovementTypeStand] has no walk animations, so the lookups below read a
+	// null MotionID vector (COOP(av) legs_move_animation+0xd0 / +0x63b on 95155ea6, dev/evidence/anim-av-95155ea6-1),
+	// CStalkerAnimationManager::update catches it as "! error in stalker with visual ...", and resets EVERY track: the
+	// NPC restarts its animation, over and over, in place. A puppet that is moving moves at walk speed or faster, so
+	// index the walk set. -coop_legs_standfix_off is the control arm (the old lookup, faults and all).
+	static int s_standfix_off = -1;
+	if (s_standfix_off < 0)
+		s_standfix_off = strstr(Core.Params, "-coop_legs_standfix_off") ? 1 : 0;
+	const MonsterSpace::EMovementType move_type =
+		(movement.replicated_state() && (movement.movement_type() == eMovementTypeStand) && (s_standfix_off != 1))
+			? eMovementTypeWalk
+			: movement.movement_type();
+
 	if (eMentalStateDanger != movement.mental_state())
 	{
 		m_target_speed = movement.speed(eMovementDirectionForward);
@@ -162,7 +178,7 @@ MotionID CStalkerAnimationManager::legs_move_animation()
 		if (movement.movement_type() == eMovementTypeRun && movement.mental_state() == eMentalStatePanic)
 			return (m_data_storage->m_part_animations.A[eBodyStateStand].m_movement.A[2].A[4].A[0]);
 
-		return (m_data_storage->m_part_animations.A[body_state()].m_movement.A[movement.movement_type()].A[
+		return (m_data_storage->m_part_animations.A[body_state()].m_movement.A[move_type].A[
 				eMovementDirectionForward].A[1]
 		);
 	}
@@ -245,7 +261,7 @@ MotionID CStalkerAnimationManager::legs_move_animation()
 		m_data_storage->m_part_animations.A[
 			body_state()
 		].m_movement.A[
-			movement.movement_type()
+			move_type
 		].A[
 			speed_direction
 		].A[

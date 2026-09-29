@@ -23,6 +23,7 @@
 #include "actor.h"
 #include "ai/monsters/basemonster/base_monster.h"
 #include "script_game_object.h"
+bool coop_bullettrace_on();   // MP fork (§19 co-op): ShootingObject.cpp, -coop_bullettrace
 
 //константы ShootFactor, определяющие 
 //поведение пули при столкновении с объектом
@@ -171,6 +172,22 @@ BOOL CBulletManager::test_callback(const collide::ray_defs& rd, CObject* object,
 void CBulletManager::FireShotmark(SBullet* bullet, const Fvector& vDir, const Fvector& vEnd, collide::rq_result& R,
                                   u16 target_material, const Fvector& vNormal, bool ShowMark)
 {
+	// MP fork (§19 co-op, bullet holes 2026-09-29) — measurement only, -coop_bullettrace (ShootingObject.cpp): where this
+	// process's bullet struck (where the hole goes, if one is drawn), and whose bullet it was. Pairs with the
+	// COOP(bullet) fire lines. An impact, not a drawn mark: marks=0 when ShowMark is off or the target is our own body
+	// (the early return below), and a dedicated/headless process never draws one at all.
+	if (coop_bullettrace_on())
+	{
+		static u32 s_n = 0;
+		if (++s_n <= 400)
+		{
+			const bool on_self = R.O && Level().CurrentEntity() && (Level().CurrentEntity()->ID() == R.O->ID());
+			Msg("~ COOP(bullet): impact #%u t=%u parent %u wpn %u end %.2f %.2f %.2f start %.2f %.2f %.2f on %s %u marks %d",
+			    s_n, Device.dwTimeGlobal, bullet->parent_id, bullet->weapon_id, vEnd.x, vEnd.y, vEnd.z,
+			    bullet->start_position.x, bullet->start_position.y, bullet->start_position.z,
+			    R.O ? "object" : "static", R.O ? u32(R.O->ID()) : 0u, (ShowMark && !on_self) ? 1 : 0);
+		}
+	}
 	SGameMtlPair* mtl_pair = GMLib.GetMaterialPair(bullet->bullet_material_idx, target_material);
 	Fvector particle_dir = vNormal;
 

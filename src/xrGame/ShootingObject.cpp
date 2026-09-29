@@ -19,6 +19,15 @@
 #include "ai_space.h"                              // MP fork (§19 co-op): ai().get_alife()
 #include "../xrNetServer/xr_enet_transport.h"      // MP fork (§19 co-op): xr_enet::enabled()
 
+// MP fork (§19 co-op, bullet holes 2026-09-29): -coop_bullettrace, log-only. Shared with Level_bullet_manager_firetrace.cpp.
+bool coop_bullettrace_on()
+{
+	static int s_on = -1;
+	if (s_on < 0)
+		s_on = strstr(Core.Params, "-coop_bullettrace") ? 1 : 0;
+	return s_on == 1;
+}
+
 #define HIT_POWER_EPSILON 0.05f
 #define WALLMARK_SIZE 0.04f
 
@@ -498,6 +507,24 @@ void CShootingObject::FireBullet(const Fvector& pos,
 	m_vCurrentShootDir = dir;
 	m_vCurrentShootPos = pos;
 	m_iCurrentParentID = parent_id;
+
+	// MP fork (§19 co-op, bullet holes 2026-09-29) — measurement only, -coop_bullettrace: every bullet this process
+	// launches, whose it is, and (for our own) where our camera looked. The shooter's line is the one the server's hits
+	// follow (only the controlled actor sends hits, SendHitAllowed); a watcher's line for the same shot says whether
+	// the holes it draws follow the real trajectory or a puppet's.
+	if (coop_bullettrace_on())
+	{
+		static u32 s_n = 0;
+		if (++s_n <= 400)
+		{
+			const bool ctrl = g_pGameLevel && Level().CurrentControlEntity() && (Level().CurrentControlEntity()->ID() == parent_id);
+			Msg("~ COOP(bullet): fire #%u t=%u parent %u wpn %u ctrl %d send_hit %d pos %.2f %.2f %.2f dir %.4f %.4f %.4f "
+			    "aim %.4f %.4f %.4f cam %.2f %.2f %.2f camdir %.4f %.4f %.4f", s_n, Device.dwTimeGlobal, parent_id, weapon_id,
+			    ctrl ? 1 : 0, send_hit ? 1 : 0, pos.x, pos.y, pos.z, dir.x, dir.y, dir.z, shot_dir.x, shot_dir.y, shot_dir.z,
+			    Device.vCameraPosition.x, Device.vCameraPosition.y, Device.vCameraPosition.z,
+			    Device.vCameraDirection.x, Device.vCameraDirection.y, Device.vCameraDirection.z);
+		}
+	}
 
 	bool aim_bullet = false;
 	/*if (m_bUseAimBullet)
