@@ -17,6 +17,8 @@
 #include "missile.h"
 #include "inventory.h"
 #include "stalker_animation_manager_impl.h"
+#include "../xrEngine/xr_object.h"   // MP fork (§19 co-op): CObject for -coop_legstrace
+#include "level.h"   // MP fork (§19 co-op): -coop_legstrace distance to the controlled actor
 
 const float right_forward_angle = PI_DIV_4;
 const float left_forward_angle = PI_DIV_4;
@@ -337,6 +339,49 @@ MotionID CStalkerAnimationManager::legs_no_move_animation()
 	return (animation[3]);
 }
 
+// MP fork (§19 co-op, NPC shuffling round 2, 2026-10-01) — measurement only, -coop_legstrace: Caden still sees NPCs
+// shuffle on his rendering clients with the legs_move_animation fault gone (0 "error in stalker" on both clients,
+// dev/evidence/human-20261001-1603). Log, for each replicated NPC within 40 m of the actor this client controls, every
+// change of the chosen LEGS animation, with what the server sent (standing bit, speed, movement type, mental, body state)
+// and the yaw inputs of the turn-in-place choice. A shuffle is the client changing its pick while the server's state
+// holds still, or a turn/move pick on an NPC the server says is standing.
+static void coop_legstrace(CAI_Stalker& obj, stalker_movement_manager_smart_cover& movement, bool standing_pick,
+                           const MotionID& result, const xr_vector<MotionID>& in_place)
+{
+	static int s_on = -1;
+	if (s_on < 0)
+		s_on = strstr(Core.Params, "-coop_legstrace") ? 1 : 0;
+	if (s_on != 1 || !movement.replicated_state() || !g_pGameLevel)
+		return;
+	CObject* const me = Level().CurrentControlEntity();
+	if (!me || (me->Position().distance_to(obj.Position()) > 40.f))
+		return;
+	const char* branch = "move";
+	if (standing_pick)
+	{
+		branch = "turn";
+		for (u32 i = 0; i < 2 && i < in_place.size(); ++i)
+			if (in_place[i] == result)
+				branch = "idle";
+	}
+	static xr_map<u16, u32> s_last;
+	static u32 s_lines = 0;
+	const u32 key = (u32(result.slot) << 24) ^ (u32(result.idx) << 8) ^ (standing_pick ? 1u : 0u) ^ (u32(movement.body_state()) << 4);
+	auto it = s_last.find(obj.ID());
+	if (it != s_last.end() && it->second == key)
+		return;
+	s_last[obj.ID()] = key;
+	if (++s_lines > 3000)
+		return;
+	Msg("~ COOP(legs): t=%u npc %u %s anim %u.%u | net standing %d speed %.2f moving %d | type %d mental %d body %d | "
+	    "yaw cur %.2f tgt %.2f head-tgt %.2f turning %d dist %.1f",
+	    Device.dwTimeGlobal, obj.ID(), branch, u32(result.slot), u32(result.idx), int(obj.coop_net_standing()),
+	    obj.coop_net_speed(), obj.coop_net_moving() ? 1 : 0, int(movement.movement_type()), int(movement.mental_state()),
+	    int(movement.body_state()), movement.body_orientation().current.yaw, movement.body_orientation().target.yaw,
+	    movement.head_orientation().target.yaw, obj.sight().turning_in_place() ? 1 : 0,
+	    me->Position().distance_to(obj.Position()));
+}
+
 MotionID CStalkerAnimationManager::assign_legs_animation()
 {
 	MotionID result;
@@ -345,6 +390,8 @@ MotionID CStalkerAnimationManager::assign_legs_animation()
 		result = legs_no_move_animation();
 		if (!result.valid())
 			legs_no_move_animation();
+		coop_legstrace(object(), object().movement(), true, result,
+		               m_data_storage->m_part_animations.A[body_state()].m_in_place->A);
 		return (result);
 	}
 
@@ -352,5 +399,7 @@ MotionID CStalkerAnimationManager::assign_legs_animation()
 	if (!result.valid())
 		legs_move_animation();
 
+	coop_legstrace(object(), object().movement(), false, result,
+	               m_data_storage->m_part_animations.A[body_state()].m_in_place->A);
 	return (result);
 }
