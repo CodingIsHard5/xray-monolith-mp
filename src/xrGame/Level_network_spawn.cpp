@@ -12,6 +12,44 @@
 #include "../xrEngine/xr_object.h"
 #include "../xrEngine/IGame_Persistent.h"
 #include "entity_alive.h"                          // MP fork (§14 step 7 P4 D2): actor-spawn diag
+#include "actor.h"                                 // MP fork (§19 co-op): -coop_spawntrace peer-actor test
+
+// MP fork (§19 co-op, peer weapons 2026-10-03) — measurement only, -coop_spawntrace, CLIENT: reproduced headless with a DX11
+// rendering client (dev/evidence/peerwpn-dx11-2): the EARLIER client never has the LATER joiner's items. For every spawn whose
+// parent is missing when it arrives, or is an actor this client does not control: received / created or failed / attached to
+// which parent after ownership-take. Names which of "never arrives", "fails to spawn", "spawns without its owner" it is.
+static bool coop_spawntrace_on()
+{
+	static int s_on = -1;
+	if (s_on < 0)
+		s_on = strstr(Core.Params, "-coop_spawntrace") ? 1 : 0;
+	return (s_on == 1) && xr_enet::enabled() && !ai().get_alife();
+}
+
+static bool coop_spawntrace_wants(CLevel& L, CSE_Abstract* E, const char*& why)
+{
+	if (!coop_spawntrace_on() || (0xffff == E->ID_Parent))
+		return false;
+	CObject* const parent = L.Objects.net_Find(E->ID_Parent);
+	if (!parent)
+	{
+		why = "parent NOT present";
+		return true;
+	}
+	if (smart_cast<CActor*>(parent) && (parent != L.CurrentControlEntity()))
+	{
+		why = "parent is a peer actor";
+		return true;
+	}
+	return false;
+}
+
+static void coop_spawntrace_msg(const char* stage, CSE_Abstract* E, const char* detail)
+{
+	static u32 s_lines = 0;
+	if (++s_lines <= 1500)
+		Msg("~ COOP(spawncl): %s id %u [%s] parent %u — %s", stage, u32(E->ID), E->s_name.c_str(), u32(E->ID_Parent), detail);
+}
 
 void CLevel::cl_Process_Spawn(NET_Packet& P)
 {
@@ -29,6 +67,11 @@ void CLevel::cl_Process_Spawn(NET_Packet& P)
 	E->Spawn_Read(P);
 	if (E->s_flags.is(M_SPAWN_UPDATE))
 		E->UPDATE_Read(P);
+	{
+		const char* why = "";
+		if (coop_spawntrace_wants(*this, E, why))
+			coop_spawntrace_msg("RX", E, why);
+	}
 
 	// MP fork (§ world-NPC-replication Phase 1): -coop_npcdiag — does an ambient A-Life NPC spawn
 	// ever REACH this co-op client? Log every NON-actor creature spawn received (id/section/flags);
@@ -47,6 +90,11 @@ void CLevel::cl_Process_Spawn(NET_Packet& P)
 
 	if (!E->match_configuration())
 	{
+		{
+			const char* why = "";
+			if (coop_spawntrace_wants(*this, E, why))
+				coop_spawntrace_msg("REJECTED by match_configuration", E, why);   // (CodeRabbit: say why a received spawn stopped)
+		}
 		F_entity_Destroy(E);
 		return;
 	}
@@ -184,8 +232,12 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
 #ifdef DEBUG_MEMORY_MANAGER
 	mem_alloc_gather_stats		(false);
 #endif // DEBUG_MEMORY_MANAGER
+	const char* coop_why = "";
+	const bool coop_trace = coop_spawntrace_wants(*this, E, coop_why);
 	if (0 == O || (!O->net_Spawn(E)))
 	{
+		if (coop_trace)
+			coop_spawntrace_msg("FAILED net_Spawn", E, coop_why);
 		O->net_Destroy();
 		if (!g_dedicated_server)
 			client_spawn_manager().clear(O->ID());
@@ -277,6 +329,13 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
 			GEN.w_u16(u16(O->ID()));
 			cl_Process_Event(E->ID_Parent, GE_OWNERSHIP_TAKE, GEN);
 			//*/
+			if (coop_trace)
+			{
+				string128 d;
+				xr_sprintf(d, "created; after ownership-take its parent is %d (%s)", O->H_Parent() ? int(O->H_Parent()->ID()) : -1,
+				           (O->H_Parent() && (O->H_Parent()->ID() == E->ID_Parent)) ? "ATTACHED" : "NOT attached");
+				coop_spawntrace_msg("SPAWNED", E, d);
+			}
 		}
 
 #ifdef NET_SPAWN_AFTER_CALLBACKS
