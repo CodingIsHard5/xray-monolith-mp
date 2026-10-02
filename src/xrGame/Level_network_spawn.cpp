@@ -18,6 +18,8 @@
 // rendering client (dev/evidence/peerwpn-dx11-2): the EARLIER client never has the LATER joiner's items. For every spawn whose
 // parent is missing when it arrives, or is an actor this client does not control: received / created or failed / attached to
 // which parent after ownership-take. Names which of "never arrives", "fails to spawn", "spawns without its owner" it is.
+extern ENGINE_API BOOL g_bootComplete;   // MP fork (§19 co-op): -coop_spawntrace logs parented spawns after boot
+
 static bool coop_spawntrace_on()
 {
 	static int s_on = -1;
@@ -39,6 +41,13 @@ static bool coop_spawntrace_wants(CLevel& L, CSE_Abstract* E, const char*& why)
 	if (smart_cast<CActor*>(parent) && (parent != L.CurrentControlEntity()))
 	{
 		why = "parent is a peer actor";
+		return true;
+	}
+	// (Overseer 2026-10-03: test the broader inference) any other parented spawn arriving AFTER boot — e.g. the weapons of an
+	// NPC squad spawned mid-play, which the antifreeze also dropped on clients
+	if (g_bootComplete)
+	{
+		why = "parented spawn after boot";
 		return true;
 	}
 	return false;

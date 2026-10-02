@@ -203,4 +203,5 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_spawntrace", coop_cfg_switch, coop_cfg_diag},   // off | client | Peer weapons: log spawns whose parent is missing or a peer actor: received / created or failed / attached after ownership-take.
 	{"coop_peercrow_off", coop_cfg_switch, coop_cfg_control},   // off (the fix is ON) | client | Control arm (peer weapons): a peer's slotted items are no longer always-crow, so a rendering client may never update (show) them.
 	{"coop_clframetrace", coop_cfg_switch, coop_cfg_diag},   // off | both | Log this process's frame time once a second (p50/p99/max) — the peer-crow cost measure.
+	{"coop_spawnaf_check_on", coop_cfg_switch, coop_cfg_control},   // off (the fix is ON) | client | Control arm (peer weapons): spawn antifreeze again asks the (absent) local A-Life about a postponed spawn's parent and drops it.
 };

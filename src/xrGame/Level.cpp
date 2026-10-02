@@ -836,6 +836,45 @@ void CLevel::ProcessSpawnEvents()
 			goto spawn;
 		}
 
+        // MP fork (§19 co-op, peer weapons 2026-10-03 — THE cause, peercrow7): the two checks below ask the LOCAL A-Life
+        // whether the object and its parent still exist, and drop the spawn when they do not. A co-op client has no local
+        // A-Life (the world lives on the server), so the parent check read nullptr and SILENTLY DROPPED every parented item
+        // spawned after boot — the later joiner's 47 items on the earlier client (only a bolt, exempt above, got through),
+        // and any item spawned with a parent during play. The server is authoritative there: it sent the spawn, so spawn
+        // it. The prefetch itself (the antifreeze) is kept. -coop_spawnaf_check_on restores the old drop (control arm).
+        static int s_af_check = -1;
+        if (s_af_check < 0)
+            s_af_check = strstr(Core.Params, "-coop_spawnaf_check_on") ? 1 : 0;
+        if (!ai().get_alife() && (s_af_check != 1))
+        {
+            // Overseer 2026-10-03: a PARENTED spawn whose parent is not on this client yet must stay queued and retry —
+            // never spawn an orphan (ownership-take would find no parent) or dereference a missing one. Re-queued for the
+            // next frame, up to ~10 s of retries, each deferral and any give-up logged (COOP(spawnaf)).
+            static xr_map<u16, u32> s_retries;
+            static u32 s_lines = 0;
+            if ((parent_id != 0xffff) && !Objects.net_Find(parent_id))
+            {
+                u32& tries = s_retries[obj_id];
+                if (++tries <= 600)
+                {
+                    if ((tries == 1) && (++s_lines <= 2000))
+                        Msg("~ COOP(spawnaf): DEFERRED id %u [%s] — parent %u not on this client yet", u32(obj_id), section.c_str(), u32(parent_id));
+                    xrSRWLockGuard g(prefetch_lock);
+                    spawn_events->insert(P);
+                    auto d = spawn_events_data_copy.find(obj_id);
+                    if (d != spawn_events_data_copy.end())
+                        spawn_events_data->emplace(d->first, d->second);
+                    continue;
+                }
+                if (++s_lines <= 2000)
+                    Msg("! COOP(spawnaf): GAVE UP id %u [%s] — parent %u never arrived (600 retries); not spawned", u32(obj_id), section.c_str(), u32(parent_id));
+                s_retries.erase(obj_id);
+                continue;
+            }
+            s_retries.erase(obj_id);   // spawning now: a reused id must start from 0 (CodeRabbit), and the map must not grow
+            goto spawn;
+        }
+
         // If the object was in alife, but now its absent, skip it
         auto spawn_data_it = spawn_events_data_copy.find(obj_id);
         if (spawn_data_it != spawn_events_data_copy.end())
