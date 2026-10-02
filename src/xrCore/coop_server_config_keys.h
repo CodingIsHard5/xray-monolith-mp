@@ -199,4 +199,5 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_peerwpn_trace", coop_cfg_switch, coop_cfg_diag},   // off | client | Peer weapons: log each peer actor's weapon remote/active/visible state when it changes.
 	{"coop_legstrace", coop_cfg_switch, coop_cfg_diag},   // off | client | NPC shuffling: log each change of a near replicated NPC's legs animation with the server state it was chosen from.
 	{"coop_legs_dwell_off", coop_cfg_switch, coop_cfg_control},   // off (the dwell is ON) | client | Control arm (NPC shuffling round 2): a replicated NPC's legs follow stand/move, gait and direction changes frame by frame again.
+	{"coop_sv_standtrace", coop_cfg_switch, coop_cfg_diag},   // off | server | NPC shuffling round 4: log the server's own standing-bit changes, speed and update interval for stalkers near the spawn, and its frame time.
 };

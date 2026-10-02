@@ -1315,6 +1315,60 @@ void CAI_Stalker::destroy_anim_mov_ctrl()
 	movement().update(0);
 }
 
+// MP fork (§19 co-op, NPC shuffling round 4, 2026-10-03) — measurement only, -coop_sv_standtrace, SERVER: is GAMMA's
+// stop-and-go (the server's own standing bit changed 571 times in peerfix5-fixed3) normal AI, or made by multiplayer?
+// For stalkers within 60 m of the save actor (the spawn, where the fixture's squads are placed): every change of the
+// exported standing bit, a 200 ms sample of the server's own speed with the interval since this NPC's previous UpdateCL
+// (its update rate), and once a second the server's frame time. Run with 0 and with 2 clients, the same fixture.
+static void coop_sv_standtrace(CAI_Stalker& npc, s8 before, s8 raw)
+{
+	static int s_on = -1;
+	if (s_on < 0)
+		s_on = strstr(Core.Params, "-coop_sv_standtrace") ? 1 : 0;
+	if (s_on != 1)
+		return;
+	const u32 now = Device.dwTimeGlobal;
+	// frame time, once per frame, reported once a second
+	{
+		static u32 s_frame = 0, s_n = 0, s_since = 0;
+		static float s_sum = 0.f, s_max = 0.f;
+		if (Device.dwFrame != s_frame)
+		{
+			s_frame = Device.dwFrame;
+			const float dt = Device.fTimeDelta * 1000.f;
+			s_sum += dt; ++s_n; if (dt > s_max) s_max = dt;
+			if (!s_since) s_since = now;
+			if (now - s_since >= 1000)
+			{
+				static u32 s_lines = 0;
+				if (++s_lines <= 4000)
+					Msg("~ COOP(svframe): t=%u frames %u avg %.1f ms max %.1f ms", now, s_n, s_n ? s_sum / s_n : 0.f, s_max);
+				s_sum = 0.f; s_n = 0; s_max = 0.f; s_since = now;
+			}
+		}
+	}
+	if (!g_actor || (g_actor->Position().distance_to(npc.Position()) > 60.f))
+		return;
+	static xr_map<u16, u32> s_last_upd, s_last_sample;
+	u32 upd_dt = 0;
+	auto u = s_last_upd.find(npc.ID());
+	if (u != s_last_upd.end())
+		upd_dt = now - u->second;
+	s_last_upd[npc.ID()] = now;
+	const float speed = npc.movement().speed(npc.character_physics_support()->movement());
+	const s8 bit = npc.coop_sv_standing_latched();
+	static u32 s_bits = 0, s_samples = 0;   // separate caps: samples must never starve the bit events
+	if ((before >= 0) && (bit != before) && (++s_bits <= 20000))
+		Msg("~ COOP(svbit): t=%u npc %u bit %d speed %.2f raw %d type %d", now, npc.ID(), int(bit), speed, int(raw),
+		    int(npc.movement().movement_type()));
+	auto sm = s_last_sample.find(npc.ID());
+	if ((sm == s_last_sample.end() || now - sm->second >= 200) && (++s_samples <= 200000))
+	{
+		s_last_sample[npc.ID()] = now;
+		Msg("~ COOP(svss): t=%u npc %u speed %.2f bit %d upd_dt %u", now, npc.ID(), speed, int(bit), upd_dt);
+	}
+}
+
 void CAI_Stalker::UpdateCL()
 {
 	START_PROFILE("stalker")
@@ -1340,10 +1394,12 @@ void CAI_Stalker::UpdateCL()
 					m_coop_raw_since = now_ms;
 					++m_coop_raw_flips;
 				}
+				const s8 sv_before = m_coop_sv_standing;
 				if (m_coop_sv_standing < 0)
 					m_coop_sv_standing = raw;
 				else if ((raw != m_coop_sv_standing) && ((now_ms - m_coop_raw_since) >= 200))
 					m_coop_sv_standing = raw;
+				coop_sv_standtrace(*this, sv_before, raw); // NPC shuffling round 4: no-op without -coop_sv_standtrace
 			}
 			coop_animdiag_sample(); // MP fork (bug 3 instrument): no-op without -coop_animdiag
 

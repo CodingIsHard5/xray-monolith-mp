@@ -205,6 +205,7 @@ public:
 	void coop_apply_animation_state(u8 packed);
 	void coop_animx_log(bool server_side, u32 ts, u8 packed);
 	IC s8 coop_net_standing() const { return m_coop_net_standing; }
+	IC s8 coop_sv_standing_latched() const { return m_coop_sv_standing; }   // MP fork: the exported (200 ms latched) server standing bit
 	// MP fork (bug 3 instrument, -coop_animdiag): one line per stalker per second, on BOTH sides,
 	// carrying the animation-selection inputs and (client) what the legs are actually playing.
 	void coop_animdiag_sample();

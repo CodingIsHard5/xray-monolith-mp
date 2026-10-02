@@ -34,6 +34,7 @@ CStalkerAnimationManager::CStalkerAnimationManager(CAI_Stalker* object) :
 	m_start_new_script_animation(false)
 {
 	m_coop_speed_state = -1;
+	m_coop_slow_since = 0;
 }
 
 void CStalkerAnimationManager::reinit()
@@ -47,6 +48,7 @@ void CStalkerAnimationManager::reinit()
 
 	m_no_move_actual = false;
 	m_coop_speed_state = -1;
+	m_coop_slow_since = 0;
 
 	m_script_animations.clear();
 
@@ -170,10 +172,25 @@ bool CStalkerAnimationManager::standing() const
 		const float sp = object().coop_net_speed();
 		if (m_coop_speed_state < 0)
 			m_coop_speed_state = raw ? 1 : 0;
+		// round 4 (the 1.5 s LAG tail of round 3): start moving at 0.3 m/s when the server already says moving, without
+		// waiting for the replicated speed to clear 0.8 m/s. With the server saying moving the band collapses to one
+		// threshold, so stopping then needs the speed below 0.3 for 300 ms (CodeRabbit: no dither around 0.3 m/s); with
+		// the server saying standing, below 0.3 stops at once.
+		const bool sv_moving = (obj.coop_net_standing() == 0);
+		const u32 now = Device.dwTimeGlobal;
 		if (sp < 0.3f)
-			m_coop_speed_state = 1;
-		else if (sp > 0.8f)
-			m_coop_speed_state = 0;
+		{
+			if (!m_coop_slow_since)
+				m_coop_slow_since = now ? now : 1;
+			if (!sv_moving || (now - m_coop_slow_since >= 300))
+				m_coop_speed_state = 1;
+		}
+		else
+		{
+			m_coop_slow_since = 0;
+			if ((sp > 0.8f) || sv_moving)
+				m_coop_speed_state = 0;
+		}
 		return (m_coop_speed_state == 1);
 	}
 

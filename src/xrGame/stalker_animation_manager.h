@@ -95,6 +95,7 @@ public:
 	};
 
 private:
+	mutable u32 m_coop_slow_since;   // round 4: when the replicated speed went under 0.3 m/s (0 = not slow)
 	mutable int m_coop_speed_state;   // v2 stand/move from replicated speed with hysteresis: -1 unknown, 1 standing, 0 moving
 	coop_latch m_coop_type_latch;
 	coop_latch m_coop_dir_latch;
