@@ -63,25 +63,39 @@ public:
 	// run, which direction) follows what the network says frame by frame, and peerfix3 measured it flipping every ~360 ms
 	// (dev/evidence/peerfix3fc-fixed: 420 gait, 251 direction, 376 stand/move flips on one client in ~4 min), each flip
 	// restarting the legs cycle. A latch accepts a new value only once it has held for a dwell. -coop_legs_dwell_off.
+	// v2 (2026-10-03, peerfix4): switch on TIME-IN-STATE. v1 required an uninterrupted hold, so a state that was mostly B with
+	// brief A blips never switched (skating). Now a blip back to the current value only cancels the pending switch if it
+	// lasts half the dwell.
 	struct coop_latch
 	{
 		int value;
 		int pending;
 		u32 since;
-		coop_latch() : value(-1), pending(-1), since(0) {}
-		void reset() { value = -1; pending = -1; since = 0; }
+		u32 back;
+		coop_latch() : value(-1), pending(-1), since(0), back(0) {}
+		void reset() { value = -1; pending = -1; since = 0; back = 0; }
+		void force(int v) { value = v; pending = -1; back = 0; }
 		int get(int raw, u32 now, u32 dwell)
 		{
-			if (value < 0) { value = raw; pending = -1; return value; }
-			if (raw == value) { pending = -1; return value; }
+			if (value < 0) { force(raw); return value; }
+			if (raw == value)
+			{
+				if (pending >= 0)
+				{
+					if (!back) back = now ? now : 1;
+					if (now - back >= dwell / 2) { pending = -1; back = 0; }
+				}
+				return value;
+			}
+			back = 0;
 			if (raw != pending) { pending = raw; since = now; }
-			if (now - since >= dwell) { value = raw; pending = -1; }
+			if (now - since >= dwell) force(raw);
 			return value;
 		}
 	};
 
 private:
-	mutable coop_latch m_coop_standing_latch;
+	mutable int m_coop_speed_state;   // v2 stand/move from replicated speed with hysteresis: -1 unknown, 1 standing, 0 moving
 	coop_latch m_coop_type_latch;
 	coop_latch m_coop_dir_latch;
 

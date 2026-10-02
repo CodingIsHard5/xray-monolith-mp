@@ -33,6 +33,7 @@ CStalkerAnimationManager::CStalkerAnimationManager(CAI_Stalker* object) :
 	m_script(object),
 	m_start_new_script_animation(false)
 {
+	m_coop_speed_state = -1;
 }
 
 void CStalkerAnimationManager::reinit()
@@ -45,6 +46,7 @@ void CStalkerAnimationManager::reinit()
 	m_looking_back = 0;
 
 	m_no_move_actual = false;
+	m_coop_speed_state = -1;
 
 	m_script_animations.clear();
 
@@ -158,10 +160,21 @@ bool CStalkerAnimationManager::standing() const
 			raw = true;
 		else
 			raw = (eMovementTypeStand == movement.movement_type());
-		// NPC shuffling round 2: hold a stand/move change for 300 ms before the legs follow it (see coop_latch)
+		// NPC shuffling round 2: -coop_legs_dwell_off restores the frame-by-frame choice (the control arm)
 		if (!coop_legs_dwell_on())
 			return (raw);
-		return (m_coop_standing_latch.get(raw ? 1 : 0, Device.dwTimeGlobal, 300) == 1);
+		// v2 (2026-10-03, Overseer's option 3, chosen over the bit latch + a no-skate patch because it is simpler and cannot
+		// skate by construction): stand/move follows the NPC's REPLICATED SPEED — the motion the viewer actually sees — with
+		// hysteresis: standing below 0.3 m/s, moving above 0.8 m/s, and between them the previous state holds. The server's
+		// standing bit only seeds the first frame.
+		const float sp = object().coop_net_speed();
+		if (m_coop_speed_state < 0)
+			m_coop_speed_state = raw ? 1 : 0;
+		if (sp < 0.3f)
+			m_coop_speed_state = 1;
+		else if (sp > 0.8f)
+			m_coop_speed_state = 0;
+		return (m_coop_speed_state == 1);
 	}
 
 	if (movement.speed(obj.character_physics_support()->movement()) < EPS_L)
