@@ -1411,11 +1411,36 @@ void CActor::UpdateCL()
 					it->object().MakeMeCrow();
 					++crowed;
 				}
-			static u32 s_said = 0;
-			if (crowed && (s_said < 4) && strstr(Core.Params, "-coop_peerwpn_trace"))
+		}
+		// the per-peer SNAPSHOT (crow v2 failed with no way to tell why): every 5 s per peer actor, where its items sit on THIS
+		// client and whether the slotted ones are processing-enabled and actually updated. Per-actor caps.
+		static int s_snap = -1;
+		if (s_snap < 0)
+			s_snap = strstr(Core.Params, "-coop_peerwpn_trace") ? 1 : 0;
+		if (s_snap == 1)
+		{
+			static xr_map<u16, u32> s_next, s_count;
+			u32& next = s_next[ID()];
+			u32& cnt = s_count[ID()];
+			if ((Device.dwTimeGlobal >= next) && (cnt < 40))
 			{
-				++s_said;
-				Msg("~ COOP(peercrow): peer actor %u — %u slotted item(s) marked for update this frame", ID(), crowed);
+				next = Device.dwTimeGlobal + 5000;
+				++cnt;
+				u32 nslot = 0;
+				string512 det; det[0] = 0;
+				for (u16 slot = inventory().FirstSlot(); slot <= inventory().LastSlot(); ++slot)
+					if (PIItem it = inventory().ItemFromSlot(slot))
+					{
+						++nslot;
+						string64 one;
+						xr_sprintf(one, " [s%u id %u en %d upd-age %d]", u32(slot), u32(it->object().ID()),
+						           it->object().processing_enabled() ? 1 : 0,
+						           it->object().dwFrame_UpdateCL ? int(Device.dwFrame - it->object().dwFrame_UpdateCL) : -1);
+						xr_strcat(det, one);
+					}
+				Msg("~ COOP(peersnap): peer %u active-slot %d active-item %d | slots %u belt %u ruck %u all %u |%s",
+				    ID(), int(inventory().GetActiveSlot()), inventory().ActiveItem() ? int(inventory().ActiveItem()->object().ID()) : -1,
+				    nslot, u32(inventory().m_belt.size()), u32(inventory().m_ruck.size()), u32(inventory().m_all.size()), det);
 			}
 		}
 	}
