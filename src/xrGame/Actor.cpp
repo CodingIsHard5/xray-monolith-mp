@@ -1392,6 +1392,33 @@ static u32 s_coop_revive_ms = 0;
 
 void CActor::UpdateCL()
 {
+	// MP fork (§19 co-op, peer weapons 2026-10-03, crow fix v2). peercrow-fixed FAILED with v1 (AlwaysTheCrow alone): an object
+	// consults AlwaysTheCrow only at the END of its own UpdateCL and at net_Spawn (before ownership-take gives it a parent), so
+	// an item that never got its first update never asks. The PEER ACTOR does get UpdateCL (it is interpolated and rendered),
+	// so it marks its own slotted items as crows each frame: they get UpdateCL, CWeapon::UpdateCL shows the active one on the
+	// hand (§17) and hides the rest. Slots only. -coop_peercrow_off is the control.
+	if (xr_enet::enabled() && !ai().get_alife() && Remote() && (this != Level().CurrentControlEntity()))
+	{
+		static int s_off = -1;
+		if (s_off < 0)
+			s_off = strstr(Core.Params, "-coop_peercrow_off") ? 1 : 0;
+		if (s_off != 1)
+		{
+			u32 crowed = 0;
+			for (u16 slot = inventory().FirstSlot(); slot <= inventory().LastSlot(); ++slot)
+				if (PIItem it = inventory().ItemFromSlot(slot))
+				{
+					it->object().MakeMeCrow();
+					++crowed;
+				}
+			static u32 s_said = 0;
+			if (crowed && (s_said < 4) && strstr(Core.Params, "-coop_peerwpn_trace"))
+			{
+				++s_said;
+				Msg("~ COOP(peercrow): peer actor %u — %u slotted item(s) marked for update this frame", ID(), crowed);
+			}
+		}
+	}
 	// MP fork (diag): a revived player dies again in the next frame, self-credited, with an empty Lua stack, even after the
 	// pending deltas are dropped. Trace the conditions frame by frame for 5 s after a revive and whenever health is low, so
 	// the value that goes to 0 (or the write that sets it) can be named.
