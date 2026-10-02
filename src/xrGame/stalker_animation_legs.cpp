@@ -389,6 +389,28 @@ static void coop_legstrace(CAI_Stalker& obj, stalker_movement_manager_smart_cove
 			if (in_place[i] == result)
 				branch = "idle";
 	}
+	// (round 2 verify, Overseer 2026-10-02) two things a dwell cannot fake: SLIDE, legs standing while the NPC travels (or
+	// moving while it stands), integrated over a 200 ms sample; and LAG, from the server's standing bit changing (exact,
+	// logged as it changes) to the legs following (the change lines below)
+	{
+		static xr_map<u16, int> s_bit;
+		static xr_map<u16, u32> s_sample;
+		static u32 s_bits = 0, s_samples = 0;   // separate caps: samples must never starve the bit events
+		const int bit = int(obj.coop_net_standing());
+		auto b = s_bit.find(obj.ID());
+		if ((b == s_bit.end() || b->second != bit) && (++s_bits <= 6000))
+		{
+			s_bit[obj.ID()] = bit;
+			Msg("~ COOP(legsbit): t=%u npc %u bit %d speed %.2f", Device.dwTimeGlobal, obj.ID(), bit, obj.coop_net_speed());
+		}
+		auto sm = s_sample.find(obj.ID());
+		if ((sm == s_sample.end() || Device.dwTimeGlobal - sm->second >= 200) && (++s_samples <= 40000))
+		{
+			s_sample[obj.ID()] = Device.dwTimeGlobal;
+			Msg("~ COOP(legss): t=%u npc %u %s speed %.2f bit %d", Device.dwTimeGlobal, obj.ID(), standing_pick ? "stand" : "move",
+			    obj.coop_net_speed(), bit);
+		}
+	}
 	static xr_map<u16, u32> s_last;
 	static u32 s_lines = 0;
 	const u32 key = (u32(result.slot) << 24) ^ (u32(result.idx) << 8) ^ (standing_pick ? 1u : 0u) ^ (u32(movement.body_state()) << 4);
