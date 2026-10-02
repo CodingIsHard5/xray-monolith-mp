@@ -9,10 +9,6 @@
 //#include "stdafx.h"
 #include "pch_script.h"
 #include "inventory_item_object.h"
-#include "../xrEngine/xr_object.h"                // MP fork (§19 co-op): CObject complete for AlwaysTheCrow
-#include "actor.h"                                 // MP fork (§19 co-op): AlwaysTheCrow peer test
-#include "ai_space.h"                              // MP fork: ai().get_alife()
-#include "../xrNetServer/xr_enet_transport.h"     // MP fork: xr_enet::enabled()
 
 
 CInventoryItemObject::CInventoryItemObject()
@@ -212,27 +208,4 @@ bool CInventoryItemObject::NeedToDestroyObject() const
 bool CInventoryItemObject::Useful() const
 {
 	return (CInventoryItem::Useful());
-}
-
-// MP fork (§19 co-op, peer weapons 2026-10-03). Reproduced with a DX11 rendering client (dev/evidence/peerwpn-dx11-3): the
-// later joiner's items were received, spawned and ATTACHED to its body on the earlier client, yet never got UpdateCL — the
-// engine updates an object only while it is a "crow" (xrEngine CObjectList::Update / CObject::UpdateCL: parent is the view
-// entity, AlwaysTheCrow, the camera within CROW_RADIUS, recently rendered, or shedule-updated), and a peer's held weapon is
-// none of those, so the UpdateCL that makes it visible (CWeapon::UpdateCL, §17) never ran: a deadlock. Headless dedicated-exe
-// clients update it anyway, which is why no headless test ever saw it. While its owner is a REMOTE actor on a co-op client,
-// an inventory item is always a crow (CMissile already always is). -coop_peercrow_off is the control arm.
-BOOL CInventoryItemObject::AlwaysTheCrow()
-{
-	static int s_off = -1;
-	if (s_off < 0)
-		s_off = strstr(Core.Params, "-coop_peercrow_off") ? 1 : 0;
-	if ((s_off != 1) && xr_enet::enabled() && !ai().get_alife())
-	{
-		// SLOTS ONLY (Overseer 2026-10-03): the active weapon and the other slotted items are what the peer's hands and
-		// slot visibility read; a GAMMA backpack can hold 100+ items, all hidden, and a weapon's UpdateCL does real work
-		CObject* const owner = H_Parent();
-		if (owner && owner->Remote() && (CurrPlace() == eItemPlaceSlot) && smart_cast<CActor*>(owner))
-			return TRUE;
-	}
-	return CPhysicItem::AlwaysTheCrow();
 }

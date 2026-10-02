@@ -1392,26 +1392,10 @@ static u32 s_coop_revive_ms = 0;
 
 void CActor::UpdateCL()
 {
-	// MP fork (§19 co-op, peer weapons 2026-10-03, crow fix v2). peercrow-fixed FAILED with v1 (AlwaysTheCrow alone): an object
-	// consults AlwaysTheCrow only at the END of its own UpdateCL and at net_Spawn (before ownership-take gives it a parent), so
-	// an item that never got its first update never asks. The PEER ACTOR does get UpdateCL (it is interpolated and rendered),
-	// so it marks its own slotted items as crows each frame: they get UpdateCL, CWeapon::UpdateCL shows the active one on the
-	// hand (§17) and hides the rest. Slots only. -coop_peercrow_off is the control.
+	// MP fork (§19 co-op, peer weapons 2026-10-03) — measurement only. (The crow fix that was here is REMOVED: the cause was
+	// spawn antifreeze dropping a peer's items on clients — Level.cpp ProcessSpawnEvents — and spawnaf-crowoff passed without it.)
 	if (xr_enet::enabled() && !ai().get_alife() && Remote() && (this != Level().CurrentControlEntity()))
 	{
-		static int s_off = -1;
-		if (s_off < 0)
-			s_off = strstr(Core.Params, "-coop_peercrow_off") ? 1 : 0;
-		if (s_off != 1)
-		{
-			u32 crowed = 0;
-			for (u16 slot = inventory().FirstSlot(); slot <= inventory().LastSlot(); ++slot)
-				if (PIItem it = inventory().ItemFromSlot(slot))
-				{
-					it->object().MakeMeCrow();
-					++crowed;
-				}
-		}
 		// the per-peer SNAPSHOT (crow v2 failed with no way to tell why): every 5 s per peer actor, where its items sit on THIS
 		// client and whether the slotted ones are processing-enabled and actually updated. Per-actor caps.
 		static int s_snap = -1;

@@ -24,9 +24,6 @@ public:
 	virtual CPhysicsShellHolder* cast_physics_shell_holder() { return this; }
 	virtual CInventoryItem* cast_inventory_item() { return this; }
 	virtual CAttachableItem* cast_attachable_item() { return this; }
-	// MP fork (§19 co-op, peer weapons 2026-10-03): a peer's held item is never a "crow" on a rendering client (not the view
-	// entity's, out of the spatial DB with a stale transform, never rendered), so it never gets the UpdateCL that shows it.
-	virtual BOOL AlwaysTheCrow();
 	virtual CWeapon* cast_weapon() { return 0; }
 	virtual CFoodItem* cast_food_item() { return 0; }
 	virtual CMissile* cast_missile() { return 0; }
