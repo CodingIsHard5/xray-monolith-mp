@@ -1420,6 +1420,31 @@ void coop_sound_forward_flush();   // MP fork (§3.4 hearing fix (B))
 void CLevel::OnFrame()
 {
 	coop_sound_forward_flush();
+	// MP fork (§19 co-op, peer weapons 2026-10-03) — measurement only, -coop_clframetrace: once a second, this process's
+	// frame-time distribution (p50 / p99 / max over that second's frames), so the peer-crow fix's per-frame cost is measured.
+	{
+		static int s_on = -1;
+		if (s_on < 0)
+			s_on = strstr(Core.Params, "-coop_clframetrace") ? 1 : 0;
+		if (s_on == 1)
+		{
+			static xr_vector<float> s_dt;
+			static u32 s_since = 0, s_lines = 0;
+			s_dt.push_back(Device.fTimeDelta * 1000.f);
+			if (!s_since)
+				s_since = Device.dwTimeGlobal;
+			if (Device.dwTimeGlobal - s_since >= 1000)
+			{
+				std::sort(s_dt.begin(), s_dt.end());
+				const u32 n = u32(s_dt.size());
+				if (n && (++s_lines <= 7200))
+					Msg("~ COOP(clframe): t=%u frames %u p50 %.2f p99 %.2f max %.2f ms", Device.dwTimeGlobal, n, s_dt[n / 2],
+					    s_dt[((n * 99 + 99) / 100) - 1], s_dt[n - 1]);
+				s_dt.clear();
+				s_since = Device.dwTimeGlobal;
+			}
+		}
+	}
 	// MP fork (bug 3 clock probe, -coop_animdiag): the client renders NPC positions ~18.5 s behind the packets
 	// it holds (StalkerMPMod npc-anim-lag1: lag=newest ts - own timeServer() median 18540 ms, 552 buffered
 	// samples, moving NPCs drawn 14 m from their newest position). Its CLOCK_SYNC delta and the server's

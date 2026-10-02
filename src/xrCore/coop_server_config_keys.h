@@ -201,4 +201,6 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_legs_dwell_off", coop_cfg_switch, coop_cfg_control},   // off (the dwell is ON) | client | Control arm (NPC shuffling round 2): a replicated NPC's legs follow stand/move, gait and direction changes frame by frame again.
 	{"coop_sv_standtrace", coop_cfg_switch, coop_cfg_diag},   // off | server | NPC shuffling round 4: log the server's own standing-bit changes, speed and update interval for stalkers near the spawn, and its frame time.
 	{"coop_spawntrace", coop_cfg_switch, coop_cfg_diag},   // off | client | Peer weapons: log spawns whose parent is missing or a peer actor: received / created or failed / attached after ownership-take.
+	{"coop_peercrow_off", coop_cfg_switch, coop_cfg_control},   // off (the fix is ON) | client | Control arm (peer weapons): a peer's slotted items are no longer always-crow, so a rendering client may never update (show) them.
+	{"coop_clframetrace", coop_cfg_switch, coop_cfg_diag},   // off | both | Log this process's frame time once a second (p50/p99/max) — the peer-crow cost measure.
 };
