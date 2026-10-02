@@ -58,6 +58,33 @@ private:
 	int m_crouch_state;
 	bool m_no_move_actual;
 
+public:
+	// MP fork (§19 co-op, NPC shuffling round 2, 2026-10-02): a replicated NPC's legs choice (standing or moving, walk or
+	// run, which direction) follows what the network says frame by frame, and peerfix3 measured it flipping every ~360 ms
+	// (dev/evidence/peerfix3fc-fixed: 420 gait, 251 direction, 376 stand/move flips on one client in ~4 min), each flip
+	// restarting the legs cycle. A latch accepts a new value only once it has held for a dwell. -coop_legs_dwell_off.
+	struct coop_latch
+	{
+		int value;
+		int pending;
+		u32 since;
+		coop_latch() : value(-1), pending(-1), since(0) {}
+		void reset() { value = -1; pending = -1; since = 0; }
+		int get(int raw, u32 now, u32 dwell)
+		{
+			if (value < 0) { value = raw; pending = -1; return value; }
+			if (raw == value) { pending = -1; return value; }
+			if (raw != pending) { pending = raw; since = now; }
+			if (now - since >= dwell) { value = raw; pending = -1; }
+			return value;
+		}
+	};
+
+private:
+	mutable coop_latch m_coop_standing_latch;
+	coop_latch m_coop_type_latch;
+	coop_latch m_coop_dir_latch;
+
 private:
 	CAI_Stalker* m_object;
 	IRenderVisual* m_visual;

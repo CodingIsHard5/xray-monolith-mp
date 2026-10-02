@@ -129,6 +129,8 @@ void CStalkerAnimationManager::play_fx(float power_factor, int fx_index)
 		m_data_storage->m_part_animations.A[object().movement().body_state()].m_global.A[0].A[fx_index], power_factor);
 }
 
+bool coop_legs_dwell_on();   // MP fork (§19 co-op): stalker_animation_legs.cpp, -coop_legs_dwell_off
+
 bool CStalkerAnimationManager::standing() const
 {
 	CAI_Stalker& obj = object();
@@ -145,15 +147,21 @@ bool CStalkerAnimationManager::standing() const
 	// cycle on the spot — reported from play as "all playing a walking animation".
 	if (movement.replicated_state())
 	{
+		bool raw;
 		// Bug 3: the server's own answer, when it sent one (ai_stalker.cpp coop_pack_animation_state).
 		if (obj.coop_net_standing() >= 0)
-			return (obj.coop_net_standing() == 1);
+			raw = (obj.coop_net_standing() == 1);
 		// A real threshold, not EPS_L (0.001 m/s). Replicated positions carry a little noise,
 		// and at a millimetre per second every standing NPC read as "moving" and played a walk
 		// cycle on the spot. 0.15 m/s is well below any actual gait and well above the jitter.
-		if (object().coop_net_speed() < 0.15f)
-			return (true);
-		return (eMovementTypeStand == movement.movement_type());
+		else if (object().coop_net_speed() < 0.15f)
+			raw = true;
+		else
+			raw = (eMovementTypeStand == movement.movement_type());
+		// NPC shuffling round 2: hold a stand/move change for 300 ms before the legs follow it (see coop_latch)
+		if (!coop_legs_dwell_on())
+			return (raw);
+		return (m_coop_standing_latch.get(raw ? 1 : 0, Device.dwTimeGlobal, 300) == 1);
 	}
 
 	if (movement.speed(obj.character_physics_support()->movement()) < EPS_L)

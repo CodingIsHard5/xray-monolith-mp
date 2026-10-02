@@ -198,4 +198,5 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_dbactor_spawnfix_off", coop_cfg_switch, coop_cfg_control},   // off (the fix is ON) | client | Gamedata control arm (trade): mp_coop_actor_rebind leaves db.actor on the last actor body that spawned, as stock.
 	{"coop_peerwpn_trace", coop_cfg_switch, coop_cfg_diag},   // off | client | Peer weapons: log each peer actor's weapon remote/active/visible state when it changes.
 	{"coop_legstrace", coop_cfg_switch, coop_cfg_diag},   // off | client | NPC shuffling: log each change of a near replicated NPC's legs animation with the server state it was chosen from.
+	{"coop_legs_dwell_off", coop_cfg_switch, coop_cfg_control},   // off (the dwell is ON) | client | Control arm (NPC shuffling round 2): a replicated NPC's legs follow stand/move, gait and direction changes frame by frame again.
 };

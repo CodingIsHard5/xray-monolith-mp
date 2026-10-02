@@ -20,6 +20,8 @@
 #include "../xrEngine/xr_object.h"   // MP fork (§19 co-op): CObject for -coop_legstrace
 #include "level.h"   // MP fork (§19 co-op): -coop_legstrace distance to the controlled actor
 
+bool coop_legs_dwell_on();   // MP fork (§19 co-op, NPC shuffling round 2): defined below
+
 const float right_forward_angle = PI_DIV_4;
 const float left_forward_angle = PI_DIV_4;
 //const float standing_turn_angle			= PI_DIV_6;
@@ -163,13 +165,17 @@ MotionID CStalkerAnimationManager::legs_move_animation()
 	// CStalkerAnimationManager::update catches it as "! error in stalker with visual ...", and resets EVERY track: the
 	// NPC restarts its animation, over and over, in place. A puppet that is moving moves at walk speed or faster, so
 	// index the walk set. -coop_legs_standfix_off is the control arm (the old lookup, faults and all).
+	const bool coop_dwell = movement.replicated_state() && coop_legs_dwell_on();
 	static int s_standfix_off = -1;
 	if (s_standfix_off < 0)
 		s_standfix_off = strstr(Core.Params, "-coop_legs_standfix_off") ? 1 : 0;
-	const MonsterSpace::EMovementType move_type =
+	const MonsterSpace::EMovementType move_type_raw =
 		(movement.replicated_state() && (movement.movement_type() == eMovementTypeStand) && (s_standfix_off != 1))
 			? eMovementTypeWalk
 			: movement.movement_type();
+	// NPC shuffling round 2: a walk<->run change must hold 400 ms before the legs switch gait (see coop_latch)
+	const MonsterSpace::EMovementType move_type =
+		coop_dwell ? MonsterSpace::EMovementType(m_coop_type_latch.get(int(move_type_raw), Device.dwTimeGlobal, 400)) : move_type_raw;
 
 	if (eMentalStateDanger != movement.mental_state())
 	{
@@ -242,6 +248,11 @@ MotionID CStalkerAnimationManager::legs_move_animation()
 		}
 	}
 
+	// NPC shuffling round 2: a direction change (forward/left/right/back, from a heading derived from noisy network position
+	// deltas) must hold 400 ms before the legs switch to it (see coop_latch)
+	if (coop_dwell)
+		speed_direction = EMovementDirection(m_coop_dir_latch.get(int(speed_direction), Device.dwTimeGlobal, 400));
+
 	if (m_previous_speed_direction != speed_direction)
 	{
 		if (m_change_direction_time < Device.dwTimeGlobal)
@@ -287,6 +298,11 @@ MotionID CStalkerAnimationManager::legs_no_move_animation()
 	}
 
 	m_change_direction_time = Device.dwTimeGlobal;
+
+	// NPC shuffling round 2: standing ends a moving stint, so the next one starts from what the network says, not from the
+	// gait and direction this NPC had minutes ago
+	m_coop_type_latch.reset();
+	m_coop_dir_latch.reset();
 
 	EBodyState body_state = this->body_state();
 	const xr_vector<MotionID>& animation = m_data_storage->m_part_animations.A[body_state].m_in_place->A;
@@ -337,6 +353,15 @@ MotionID CStalkerAnimationManager::legs_no_move_animation()
 		return (animation[5]);
 
 	return (animation[3]);
+}
+
+// MP fork (§19 co-op, NPC shuffling round 2, 2026-10-02): the dwell latches (stalker_animation_manager.h coop_latch)
+bool coop_legs_dwell_on()
+{
+	static int s_off = -1;
+	if (s_off < 0)
+		s_off = strstr(Core.Params, "-coop_legs_dwell_off") ? 1 : 0;
+	return s_off != 1;
 }
 
 // MP fork (§19 co-op, NPC shuffling round 2, 2026-10-01) — measurement only, -coop_legstrace: Caden still sees NPCs
