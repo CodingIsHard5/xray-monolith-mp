@@ -10,7 +10,7 @@
 // Categories (v1):
 //   build    the commit the engine was built from (coop_build_commit.h, stamped by CI)          must match
 //   coopset  CONTENTS of the co-op scripts (mp_*.script, zzz_mp_*.script)                       must match
-//   scripts  path + size of every file under $game_scripts$                                     must match
+//   scripts  path + size of every root-level *.script under $game_scripts$ (as fsgame.ltx declares it)  must match
 //   configs  path + size of every file under $game_config$ (item, weapon, ammo, NPC sections)    must match
 //   modlist  the enabled mods, in order, of the MO2 profile given by -coop_modlist <path>        must match when both
 //            sides have one; a side without one is a WARNING, never a refusal (Overseer: degrade gracefully)
@@ -55,7 +55,21 @@ inline bool coop_script_name(LPCSTR n)
 }
 
 // every file under an FS alias, sorted by lower-cased name; hash = name + (content | size)
-inline entry list_entry(LPCSTR cat, LPCSTR alias, bool coop_only, bool content)
+// The FS index is NOT a stable picture of an install: $game_scripts$ is declared non-recursive with mask *.script
+// (fsgame.ltx), yet a mod's loader can mount a subfolder at runtime (illish\lib\*.lua, 29 entries), and whether that has
+// happened depends on process state. iddump-match (2026-10-03): the client listed 1358 entries, the server 1329 — every
+// difference one of those runtime-mounted .lua files — so an identical install was REFUSED. "scripts" therefore hashes the
+// alias AS DECLARED: root-level *.script files only. What a mod mounts at runtime is outside B; option C (content hashes
+// of the physical tree) covers it.
+inline bool coop_root_script(LPCSTR n)
+{
+	if (strchr(n, '\\') || strchr(n, '/'))
+		return false;
+	const size_t l = xr_strlen(n);
+	return (l > 7) && (0 == _stricmp(n + l - 7, ".script"));
+}
+
+inline entry list_entry(LPCSTR cat, LPCSTR alias, bool coop_only, bool content, bool root_scripts_only = false)
 {
 	entry e;
 	e.cat = cat;
@@ -69,7 +83,7 @@ inline entry list_entry(LPCSTR cat, LPCSTR alias, bool coop_only, bool content)
 		return e;
 	xr_vector<xr_string> names;
 	for (LPSTR n : *lst)
-		if (!coop_only || coop_script_name(n))
+		if ((!coop_only || coop_script_name(n)) && (!root_scripts_only || coop_root_script(n)))
 		{
 			xr_string s = n;
 			for (char& c : s) c = (char)tolower((unsigned char)c);
@@ -172,7 +186,7 @@ inline void compute(xr_vector<entry>& out)
 	b.files = 0;
 	out.push_back(b);
 	out.push_back(list_entry("coopset", "$game_scripts$", true, true));
-	out.push_back(list_entry("scripts", "$game_scripts$", false, false));
+	out.push_back(list_entry("scripts", "$game_scripts$", false, false, true));
 	out.push_back(list_entry("configs", "$game_config$", false, false));
 	out.push_back(modlist_entry());
 	// TEST HOOK (clearly a test): -coop_test_identity_skew <category> flips that category's hash, to stand in for a
