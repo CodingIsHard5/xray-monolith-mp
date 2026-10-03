@@ -77,8 +77,17 @@ inline entry list_entry(LPCSTR cat, LPCSTR alias, bool coop_only, bool content)
 		}
 	FS.file_list_close(lst);
 	std::sort(names.begin(), names.end());
+	// -coop_identity_dump (diagnostic): this category's list, as hashed, to <logs>/coop_identity_<cat>.txt
+	IWriter* dump = strstr(Core.Params, "-coop_identity_dump") ? FS.w_open("$logs$", (xr_string("coop_identity_") + cat + ".txt").c_str()) : nullptr;
 	for (const xr_string& n : names)
 	{
+		if (dump)
+		{
+			string_path ln;
+			const CLocatorAPI::file* df = content ? nullptr : FS.exist(alias, n.c_str());
+			xr_sprintf(ln, "%s %u", n.c_str(), df ? df->size_real : 0u);
+			dump->w_string(ln);
+		}
 		e.hash = fnv_str(n.c_str(), e.hash);
 		if (content)
 		{
@@ -96,6 +105,8 @@ inline entry list_entry(LPCSTR cat, LPCSTR alias, bool coop_only, bool content)
 		}
 		++e.files;
 	}
+	if (dump)
+		FS.w_close(dump);
 	e.present = e.files ? 1 : 0;
 	return e;
 }

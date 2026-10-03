@@ -1759,7 +1759,8 @@ void game_sv_Single::coop_identity_receive(NET_Packet& P, xrClientData* CL)
 		else if (t->hash != o.hash)
 		{
 			if (o.cat == "build")
-				xr_sprintf(one, "Different co-op build (you '%s', server '%s'). ", commit, COOP_BUILD_COMMIT);
+				xr_sprintf(one, (0 == xr_strcmp(commit, COOP_BUILD_COMMIT)) ? "Your co-op build reports as modified (same commit '%s'). " :
+				           "Different co-op build (you '%s', server '%s'). ", commit, COOP_BUILD_COMMIT);
 			else if (o.cat == "coopset")
 				xr_sprintf(one, "Different co-op scripts (you %u files, server %u). ", t->files, o.files);
 			else if (o.cat == "scripts")
