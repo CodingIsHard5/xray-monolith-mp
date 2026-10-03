@@ -203,4 +203,9 @@ static const coop_cfg_key coop_server_config_keys[] = {
 	{"coop_spawntrace", coop_cfg_switch, coop_cfg_diag},   // off | client | Peer weapons: log spawns whose parent is missing or a peer actor: received / created or failed / attached after ownership-take.
 	{"coop_clframetrace", coop_cfg_switch, coop_cfg_diag},   // off | both | Log this process's frame time once a second (p50/p99/max) — the peer-crow cost measure.
 	{"coop_spawnaf_check_on", coop_cfg_switch, coop_cfg_control},   // off (the fix is ON) | client | Control arm (peer weapons): spawn antifreeze again asks the (absent) local A-Life about a postponed spawn's parent and drops it.
+	{"coop_identity_warn", coop_cfg_switch, coop_cfg_control},   // off (REFUSE) | server | Mod enforcement B: admit a client whose install differs, with a warning naming what differs, instead of refusing it.
+	{"coop_modlist", coop_cfg_value, coop_cfg_diag},   // off | both | Mod enforcement B: path of this side's MO2 modlist.txt; its enabled mods are part of the join identity (absent on either side = a warning).
+	{"coop_test_identity_skew", coop_cfg_value, coop_cfg_diag},   // off | client | TEST: report one identity category as modified (stands in for a different install on a shared-tree machine).
+	{"coop_hitclamp_off", coop_cfg_switch, coop_cfg_control},   // off (the clamp is ON) | server | Control arm: a player's bullet hit is applied with the power its client sent, unclamped.
+	{"coop_test_hitpower", coop_cfg_switch, coop_cfg_diag},   // off | client | TEST: enables the coop_test_hitpower console command (sends a bullet hit of a chosen power).
 };

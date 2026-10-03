@@ -38,6 +38,11 @@ jobs:
       with:
         msbuild-architecture: "x64"
 
+    - name: Stamp co-op build commit
+      # MP fork (mod enforcement B): the "build" identity a co-op client sends at join (src/xrCore/coop_build_commit.h)
+      shell: bash
+      run: echo "#define COOP_BUILD_COMMIT \"${GITHUB_SHA::8}\"" > src/xrCore/coop_build_commit.h
+
     - name: Build DX11 with DEDICATED_SERVER defined
       continue-on-error: true
       env:
@@ -85,6 +90,11 @@ jobs:
       uses: microsoft/setup-msbuild@v1.3.1
       with:
         msbuild-architecture: "x64"
+
+    - name: Stamp co-op build commit
+      # MP fork (mod enforcement B): the "build" identity a co-op client sends at join (src/xrCore/coop_build_commit.h)
+      shell: bash
+      run: echo "#define COOP_BUILD_COMMIT \"${GITHUB_SHA::8}\"" > src/xrCore/coop_build_commit.h
 
     - name: Build DX8 with DEDICATED_SERVER defined
       continue-on-error: true
@@ -141,6 +151,11 @@ jobs:
       uses: microsoft/setup-msbuild@v1.3.1
       with:
         msbuild-architecture: "x64"
+
+    - name: Stamp co-op build commit
+      # MP fork (mod enforcement B): the "build" identity a co-op client sends at join (src/xrCore/coop_build_commit.h)
+      shell: bash
+      run: echo "#define COOP_BUILD_COMMIT \"${GITHUB_SHA::8}\"" > src/xrCore/coop_build_commit.h
 
     - name: Build DX11 client (no DEDICATED_SERVER; ENet is in xrNetServer)
       continue-on-error: true

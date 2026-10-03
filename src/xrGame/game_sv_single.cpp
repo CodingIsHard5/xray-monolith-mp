@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "coop_identity.h"   // MP fork (mod enforcement B)
 #include "coop_ghost.h"   // MP fork (§3.4 object-0 scope)
 #include "game_sv_single.h"
 #include "xrserver_objects_alife_monsters.h"
@@ -1651,6 +1652,133 @@ void game_sv_Single::coop_mark_dirty()
 // it has the body it resumed into. The client logs it unconditionally and passes it to gamedata
 // through the mp_api seam; nothing on either side DECIDES anything on it. That is the point: D3
 // is where the flag stops being a fact only the server log knows.
+// MP fork (mod enforcement B, 2026-10-03 — dev/MOD-ENFORCEMENT-SCOPE.md). A joining client's install against ours.
+// Default: REFUSE on a difference, naming what differs, then kick it ~3 s later; -coop_identity_warn admits it with a
+// warning instead (the Overseer: refuse by default, a server switch to warn). A side without an MO2 mod list is only a
+// warning. No body is given until the identity is admitted (coop_poll_spawns).
+static bool coop_identity_warn_mode()
+{
+	static int s_w = -1;
+	if (s_w < 0)
+		s_w = strstr(Core.Params, "-coop_identity_warn") ? 1 : 0;
+	return s_w == 1;
+}
+
+static const xr_vector<coop_identity::entry>& coop_identity_ours()
+{
+	static xr_vector<coop_identity::entry> s_ours;
+	static bool s_done = false;
+	if (!s_done)
+	{
+		s_done = true;
+		coop_identity::compute(s_ours);
+		string1024 line; line[0] = 0;
+		for (const coop_identity::entry& e : s_ours)
+		{
+			string128 one;
+			xr_sprintf(one, " %s=%016I64x%s(%u)", e.cat.c_str(), e.hash, e.present ? "" : "[absent]", e.files);
+			xr_strcat(line, one);
+		}
+		Msg("- COOP(identity): server is build '%s' |%s%s", COOP_BUILD_COMMIT, line,
+		    coop_identity_warn_mode() ? " | mode WARN (-coop_identity_warn)" : " | mode REFUSE");
+	}
+	return s_ours;
+}
+
+void game_sv_Single::coop_identity_decide(xrClientData* CL, s8 verdict, LPCSTR reason)
+{
+	if (!CL)
+		return;
+	m_coop_identity[CL->ID.value()] = verdict;
+	LPCSTR name = coop_player_name(CL);
+	if (verdict == 2)
+	{
+		m_coop_identity_refused_at[CL->ID.value()] = Device.dwTimeGlobal;
+		Msg("! COOP(identity): REFUSED client 0x%08x ('%s'): %s", CL->ID.value(), name ? name : "?", reason);
+		string1024 t;
+		xr_sprintf(t, "Cannot join: your game does not match the server. %s", reason);
+		coop_send_notice(CL, 40, t);
+	}
+	else if (verdict == 1)
+	{
+		Msg("~ COOP(identity): ADMITTED WITH WARNING client 0x%08x ('%s'): %s", CL->ID.value(), name ? name : "?", reason);
+		string1024 t;
+		xr_sprintf(t, "Warning: %s", reason);
+		coop_send_notice(CL, 41, t);
+	}
+	else
+		Msg("- COOP(identity): ADMITTED client 0x%08x ('%s'): identical install", CL->ID.value(), name ? name : "?");
+}
+
+void game_sv_Single::coop_identity_receive(NET_Packet& P, xrClientData* CL)
+{
+	const xr_vector<coop_identity::entry>& ours = coop_identity_ours();
+	const u16 ver = P.r_u16();
+	string256 commit;
+	P.r_stringZ_s(commit);
+	const u8 n = P.r_u8();
+	xr_vector<coop_identity::entry> theirs;
+	for (u8 i = 0; i < n && i < 32; ++i)
+	{
+		string64 cat;
+		P.r_stringZ_s(cat);
+		coop_identity::entry e;
+		e.cat = cat;
+		P.r_u64(e.hash);
+		e.present = P.r_u8();
+		e.files = P.r_u32();
+		theirs.push_back(e);
+	}
+	string1024 refuse; refuse[0] = 0;
+	string1024 warn; warn[0] = 0;
+	if (ver != coop_identity::format_version)
+		xr_sprintf(refuse, "identity format v%u, the server speaks v%u. ", u32(ver), u32(coop_identity::format_version));
+	for (const coop_identity::entry& o : ours)
+	{
+		const coop_identity::entry* t = nullptr;
+		for (const coop_identity::entry& x : theirs)
+			if (x.cat == o.cat)
+				t = &x;
+		string256 one; one[0] = 0;
+		if (o.cat == "modlist")
+		{
+			if (!t || !t->present || !o.present)
+			{
+				xr_sprintf(one, "MO2 mod list not checked (%s has none). ", (!o.present) ? "the server" : "your game");
+				xr_strcat(warn, one);
+			}
+			else if (t->hash != o.hash)
+			{
+				xr_sprintf(one, "Your MO2 mod list differs (you %u enabled mods, server %u). ", t->files, o.files);
+				xr_strcat(refuse, one);
+			}
+			continue;
+		}
+		if (!t)
+			xr_sprintf(one, "Your game sent no '%s' (an older co-op build?). ", o.cat.c_str());
+		else if (t->hash != o.hash)
+		{
+			if (o.cat == "build")
+				xr_sprintf(one, "Different co-op build (you '%s', server '%s'). ", commit, COOP_BUILD_COMMIT);
+			else if (o.cat == "coopset")
+				xr_sprintf(one, "Different co-op scripts (you %u files, server %u). ", t->files, o.files);
+			else if (o.cat == "scripts")
+				xr_sprintf(one, "Different game scripts (you %u files, server %u, or same count with different sizes). ", t->files, o.files);
+			else if (o.cat == "configs")
+				xr_sprintf(one, "Different game configs, e.g. weapons or items (you %u files, server %u, or same count with different sizes). ", t->files, o.files);
+			else
+				xr_sprintf(one, "'%s' differs. ", o.cat.c_str());
+		}
+		xr_strcat(refuse, one);
+	}
+	if (refuse[0])
+		coop_identity_decide(CL, coop_identity_warn_mode() ? 1 : 2, refuse);
+	else if (warn[0])
+		coop_identity_decide(CL, 1, warn);
+	else
+		coop_identity_decide(CL, 0, "");
+}
+
 void game_sv_Single::coop_send_notice(xrClientData* CL, u8 code, LPCSTR text)
 {
 	if (!m_server || !CL || !text || !xr_strlen(text))
@@ -4361,6 +4489,7 @@ void game_sv_Single::coop_poll_spawns()
 		game_sv_Single* self;
 		u32 now;
 		xr_vector<xrClientData*> pending;
+		xr_vector<xrClientData*> kick;   // mod enforcement B: refused clients whose notice has had time to arrive
 		void operator()(IClient* client)
 		{
 			xrClientData* CL = static_cast<xrClientData*>(client);
@@ -4369,11 +4498,35 @@ void game_sv_Single::coop_poll_spawns()
 			u32& seen = self->m_coop_seen[CL->ID.value()];
 			if (seen == 0) { seen = now; return; }               // first sighting: start grace
 			if (now - seen < 6000) return;                       // still loading
+			// MP fork (mod enforcement B): no body before the join identity is admitted
+			auto id = self->m_coop_identity.find(CL->ID.value());
+			if (id == self->m_coop_identity.end())
+			{
+				if (now - seen < 20000) return;                  // its identity is still on the way
+				self->coop_identity_decide(CL, coop_identity_warn_mode() ? 1 : 2,
+					"Your game sent no identity (an older co-op build?). ");
+				if (!coop_identity_warn_mode()) return;
+			}
+			else if (id->second == 2)
+			{
+				auto at = self->m_coop_identity_refused_at.find(CL->ID.value());
+				if (at != self->m_coop_identity_refused_at.end() && (now - at->second >= 3000))
+				{
+					self->m_coop_identity_refused_at.erase(at);
+					kick.push_back(CL);   // not here: kicking inside ForEachClientDo would mutate the list it walks
+				}
+				return;
+			}
 			pending.push_back(CL);
 		}
 	};
 	collector c; c.self = this; c.now = now;
 	m_server->ForEachClientDo(c);
+	for (xrClientData* CL : c.kick)
+	{
+		Msg("! COOP(identity): kicking refused client 0x%08x", CL->ID.value());
+		m_server->DisconnectClient(CL, "co-op identity mismatch");
+	}
 	for (xrClientData* CL : c.pending)
 	{
 		// MP fork (§9.3/9.4 co-op reconnection): check if this client matches an orphaned

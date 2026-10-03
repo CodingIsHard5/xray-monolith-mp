@@ -20,6 +20,8 @@
 #include "ai/stalker/ai_stalker.h"           // MP fork (§19 co-op): coop_talk_nearest
 #include "GametaskManager.h"                                   // MP fork (§19 co-op): coop console commands
 #include "Hit.h"                                   // MP fork (§19 co-op): coop console commands
+#include "Inventory.h"                             // MP fork (mod enforcement): coop_test_hit reads the active weapon
+#include "inventory_item.h"
 #include "Actor_Flags.h"
 #include "customzone.h"
 #include "script_engine.h"
@@ -474,6 +476,52 @@ public:
 // client; it does nothing without -coop_test_h1. It proves nothing a hostile client could not already do: the
 // packets are the stock ones, built the way the stock senders build them.
 //   switch <metres> | save <name> | load <name> | reload | changelevel | savepacket | changelevelgame | badstring
+// MP fork (mod enforcement test instrument, 2026-10-03): "coop_test_hitpower <target id> <power>" sends, FROM THIS CLIENT, one
+// bullet hit on <target> from the controlled actor's active weapon with the given power — exactly what a client with an
+// edited weapon config does. Inert without -coop_test_hitpower (its own key: -coop_test_hit is an older probe). The server
+// must clamp it (COOP(hitclamp)).
+class CCC_CoopTestHit : public IConsole_Command
+{
+public:
+	CCC_CoopTestHit(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = FALSE; }
+	virtual void Execute(LPCSTR args)
+	{
+		if (!strstr(Core.Params, "-coop_test_hitpower"))
+		{
+			Msg("! coop_test_hitpower: needs -coop_test_hitpower");
+			return;
+		}
+		if (!g_pGameLevel)
+			return;
+		u32 target = 0;
+		float power = 0.f;
+		if (sscanf(args, "%u %f", &target, &power) != 2)
+		{
+			Msg("! coop_test_hitpower: usage coop_test_hitpower <target id> <power>");
+			return;
+		}
+		CActor* const me = smart_cast<CActor*>(Level().CurrentControlEntity());
+		PIItem const w = me ? me->inventory().ActiveItem() : NULL;
+		if (!me || !w)
+		{
+			Msg("! coop_test_hitpower: no controlled actor or no active weapon");
+			return;
+		}
+		Fvector dir; dir.set(0.f, 0.f, 1.f);
+		Fvector pos; pos.set(0.f, 0.f, 0.f);
+		SHit h(power, dir, NULL, 0, pos, 0.f, ALife::eHitTypeFireWound, 0.f, false);
+		h.whoID = me->ID();
+		h.weaponID = w->object().ID();
+		h.BulletID = 0;
+		h.GenHeader(GE_HIT, u16(target));
+		NET_Packet np;
+		h.Write_Packet(np);
+		CGameObject::u_EventSend(np);
+		Msg("~ coop_test_hitpower: sent a hit of power %.3f on %u from weapon %u [%s]", power, target, u32(w->object().ID()),
+		    w->object().cNameSect().c_str());
+	}
+};
+
 class CCC_CoopH1Send : public IConsole_Command
 {
 public:
@@ -2843,6 +2891,7 @@ void CCC_RegisterCommands()
 
 	CMD1(CCC_MemStats, "stat_memory");
 	CMD1(CCC_CoopChat, "coop_chat");
+	CMD1(CCC_CoopTestHit, "coop_test_hitpower");   // MP fork (mod enforcement): test instrument, inert without -coop_test_hitpower
 	CMD1(CCC_CoopH1Send, "coop_h1_send");   // MP fork (security H-1): test instrument, inert without -coop_test_h1
 
 	// MP fork (§19 co-op): deliberately OUTSIDE #ifdef DEBUG. It first went in next to

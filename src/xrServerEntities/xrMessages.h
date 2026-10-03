@@ -196,6 +196,10 @@ enum
 	// KillEntity on the server; a death reached any other way (a script writing health, a deferred condition) left the
 	// owner alive on its own machine and its body dead on the server, for the rest of the session. Sent once per life.
 	M_XRNET_COOP_DEATH,
+	// MP fork (mod enforcement B, 2026-10-03): client -> server at join, what this install is (xrGame/coop_identity.h,
+	// format v1). The server answers with M_XRNET_COOP_NOTICE code 40 (refused, then a kick) or 41 (warning), and gives
+	// no body to a client whose identity it has not admitted.
+	M_XRNET_COOP_IDENTITY,
 
 	MSG_FORCEDWORD = u32(-1)
 };

@@ -1068,6 +1068,14 @@ u32 xrServer::OnDelayedMessage(NET_Packet& P, ClientID sender) // Non-Zero means
 			coop_run_request(P, sender);
 		}
 		break;
+	case M_XRNET_COOP_IDENTITY:   // mod enforcement B: on the game thread (it reads the FS and decides who gets a body)
+		{
+			xrClientData* const CL = ID_to_client(sender);
+			game_sv_Single* const single = smart_cast<game_sv_Single*>(game);
+			if (CL && single)
+				single->coop_identity_receive(P, CL);
+		}
+		break;
 	case M_XRNET_COOP_SOUND:   // §3.4 hearing fix (B): delivery touches the spatial database and AI objects, so the game thread
 		{
 			coop_run_sound(P, sender);
@@ -1640,6 +1648,12 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
 			if (s_fwd < 0) s_fwd = coop_sound_forward_on() ? 1 : 0;
 			if (s_fwd)
 				AddDelayedPacket(P, sender);
+		}
+		break;
+	case M_XRNET_COOP_IDENTITY:
+		{
+			// MP fork (mod enforcement B): deferred to the game thread like the request below
+			AddDelayedPacket(P, sender);
 		}
 		break;
 	case M_XRNET_COOP_REQUEST:

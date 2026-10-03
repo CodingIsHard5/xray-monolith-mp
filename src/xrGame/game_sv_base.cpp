@@ -21,6 +21,7 @@
 // MP fork (§19 co-op): apply hits to the server's own objects. Must come AFTER the block
 // above — hit.h needs the ALife namespace, which those headers bring in.
 #include "hit.h"
+#include "Weapon.h"   // MP fork (mod enforcement): the server-side hit clamp reads the weapon and its ammo types
 #include "GameObject.h"
 #include "entity_alive.h"                          // MP fork (§19 co-op): GetfHealth/g_Alive
 #include "game_sv_single.h"                        // MP fork (§14 step 7 C3): checkpoint rollback
@@ -759,6 +760,62 @@ void game_sv_GameState::OnHit(u16 id_hitter, u16 id_hitted, NET_Packet& P)
 	};
 }
 
+// MP fork (mod enforcement, 2026-10-03 — dev/MOD-ENFORCEMENT-SCOPE.md §4): hits are CLIENT-authoritative (the shooter's
+// client sends GE_HIT with a power computed from ITS weapon config), so an edited config deals more damage. Clamp a player's
+// bullet hit to what the weapon can do by the SERVER's configs: power = hit_power (per difficulty) x the cartridge's k_hit,
+// scaled down by distance, so the ceiling is max(hit_power) x max(k_hit over its ammo types) x 1.5 (a margin for script
+// adjustments). Bullets only (fire wounds); a clamp is logged. -coop_hitclamp_off is the control arm.
+static void coop_clamp_player_hit(SHit& hit)
+{
+	static int s_off = -1;
+	if (s_off < 0)
+		s_off = strstr(Core.Params, "-coop_hitclamp_off") ? 1 : 0;
+	if (s_off == 1 || !xr_enet::enabled() || hit.hit_type != ALife::eHitTypeFireWound)
+		return;
+	if (!smart_cast<CActor*>(hit.who))
+		return;
+	// FAIL CLOSED (CodeRabbit, CWE-602): the client controls weaponID. A hit whose weapon is not a weapon HELD BY THE SHOOTER
+	// (unknown id, a non-weapon, someone else's rifle) is dropped, not trusted.
+	CWeapon* const w = smart_cast<CWeapon*>(Level().Objects.net_Find(hit.weaponID));
+	if (!w || (w->H_Parent() != hit.who))
+	{
+		static u32 s_d = 0;
+		if (++s_d <= 200 || (s_d % 200) == 0)
+			Msg("! COOP(hitclamp): player %u hit with weapon id %u that it does not hold — DROPPED (power %.3f -> 0) (#%u)",
+			    u32(hit.whoID), u32(hit.weaponID), hit.power, s_d);
+		hit.power = 0.f;
+		return;
+	}
+	const LPCSTR sect = w->cNameSect().c_str();
+	float hp = 0.f;
+	if (pSettings->line_exist(sect, "hit_power"))
+	{
+		LPCSTR v = pSettings->r_string(sect, "hit_power");
+		for (int k = 0, n = _GetItemCount(v); k < n; ++k)
+		{
+			string64 tok;
+			_GetItem(v, k, tok);
+			hp = _max(hp, (float)atof(tok));
+		}
+	}
+	float kh = 0.f;
+	for (const shared_str& am : w->m_ammoTypes)
+		if (pSettings->section_exist(am) && pSettings->line_exist(am, "k_hit"))
+			kh = _max(kh, pSettings->r_float(am, "k_hit"));
+	// no ceiling in the configs (no hit_power / no k_hit): a conservative global one, never "unlimited" (CodeRabbit)
+	const bool from_config = (hp > 0.f) && (kh > 0.f);
+	const float ceiling = from_config ? hp * kh * 1.5f : 2.0f;
+	if (hit.power > ceiling)
+	{
+		static u32 s_n = 0;
+		if (++s_n <= 200 || (s_n % 200) == 0)
+			Msg("! COOP(hitclamp): player %u weapon %u [%s] hit power %.3f > ceiling %.3f (%s) — CLAMPED (#%u)",
+			    u32(hit.whoID), u32(hit.weaponID), sect, hit.power, ceiling,
+			    from_config ? "hit_power x k_hit x 1.5" : "global 2.0: the configs give no ceiling", s_n);
+		hit.power = ceiling;
+	}
+}
+
 void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, ClientID sender)
 {
 	switch (type)
@@ -839,6 +896,7 @@ void game_sv_GameState::OnEvent(NET_Packet& tNetPacket, u16 type, u32 time, Clie
 				hit.PACKET_TYPE = GE_HIT;
 				hit.Read_Packet_Cont(local);
 				hit.who = Level().Objects.net_Find(hit.whoID);
+				coop_clamp_player_hit(hit);   // MP fork (mod enforcement, 2026-10-03): a player's bullet cannot exceed its weapon
 
 				CGameObject* const target = smart_cast<CGameObject*>(Level().Objects.net_Find(id_dest));
 

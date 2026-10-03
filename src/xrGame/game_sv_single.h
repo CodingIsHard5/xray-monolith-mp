@@ -199,6 +199,12 @@ private:
 	// player currently learns nothing at all, which means a resume at the WRONG position looks
 	// exactly like a resume at the right one from where they are standing.
 	void coop_send_notice(xrClientData* CL, u8 code, LPCSTR text);
+	// MP fork (mod enforcement B, 2026-10-03): the join identity check (coop_identity.h). State per client id:
+	// absent = not received yet, 0 admitted, 1 admitted with a warning, 2 refused (kicked ~3 s after its notice).
+	void coop_identity_receive(NET_Packet& P, xrClientData* CL);
+	void coop_identity_decide(xrClientData* CL, s8 verdict, LPCSTR reason);
+	xr_map<u32, s8> m_coop_identity;
+	xr_map<u32, u32> m_coop_identity_refused_at;
 	struct coop_pending_trade
 	{
 		u16 item, payer, payee;   // payee = 0xffff for a sale not yet taken (the trader is known only at the take)

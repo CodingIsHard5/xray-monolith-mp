@@ -5,6 +5,9 @@
 #include "MainMenu.h"
 #include "string_table.h"
 #include "../xrEngine/xr_ioconsole.h"
+#include "ai_space.h"                              // MP fork: ai().get_alife()
+#include "../xrNetServer/xr_enet_transport.h"     // MP fork: xr_enet::enabled()
+#include "coop_identity.h"                        // MP fork (mod enforcement B)
 
 static const u32 r_buffer_size = 131072; //128 Kb
 void CLevel::CalculateLevelCrc32()
@@ -122,6 +125,25 @@ bool CLevel::synchronize_client()
 		{
 			m_xrnet_dbg_configured_logged = true;
 			Msg("- XRNET(dbg): game_configured -> proceeding to spawn");
+			// MP fork (mod enforcement B, 2026-10-03): tell the server what this install is, once, before it gives us a
+			// body; it refuses (or warns) on a difference and names what differs (coop_identity.h)
+			if (xr_enet::enabled() && !ai().get_alife())
+			{
+				xr_vector<coop_identity::entry> id;
+				coop_identity::compute(id);
+				NET_Packet IP;
+				IP.w_begin(M_XRNET_COOP_IDENTITY);
+				coop_identity::write(IP, id);
+				Send(IP, net_flags(TRUE, TRUE));
+				string1024 line; line[0] = 0;
+				for (const coop_identity::entry& e : id)
+				{
+					string128 one;
+					xr_sprintf(one, " %s=%016I64x%s(%u)", e.cat.c_str(), e.hash, e.present ? "" : "[absent]", e.files);
+					xr_strcat(line, one);
+				}
+				Msg("- COOP(identity): sent build '%s' |%s", COOP_BUILD_COMMIT, line);
+			}
 		}
 		deny_m_spawn = FALSE;
 		return true;
