@@ -393,6 +393,65 @@ void CUIActorMenu::OnInventoryAction(PIItem pItem, u16 action_type)
 	UpdateConditionProgressBars();
 }
 
+// MP fork (co-op; Caden 2026-09-18, "(c) loot view does not refresh live"). The open loot window was told when an
+// item ENTERS the container being searched (CInventory::Take / CInventoryBox GE_OWNERSHIP_TAKE call OnInventoryAction),
+// but never when one LEAVES it by somebody else's hand: single player has no somebody else, and the local player's own
+// take moves the cell in the UI code before the event comes back. In co-op the other player's take arrived, the item
+// was reparented, and this window kept showing a cell for an item the container no longer holds until it was reopened.
+// Called from CInventory::DropItem (a corpse/NPC partner) and CInventoryBox::OnEvent (a box) when the owner is the
+// container this window is searching. It touches ONLY the container's list: OnInventoryAction(REJECT) would also pull
+// the cell out of the actor's own lists, which is wrong for the local player's take (cell already moved there).
+// Returns true when a cell was removed. -coop_lootrefresh_off = control: detect and log, remove nothing.
+bool CUIActorMenu::OnPartnerItemLeft(PIItem pItem)
+{
+	if (m_currMenuMode != mmDeadBodySearch || !pItem || !m_pDeadBodyBagList)
+	{
+		return false;
+	}
+	CUICellItem* ci = NULL;
+	if (!FindItemInList(m_pDeadBodyBagList, pItem, ci))
+	{
+		return false; // the local player's own take: the UI moved the cell before the event arrived
+	}
+	static const bool s_off = (0 != strstr(Core.Params, "-coop_lootrefresh_off"));
+	static u32 s_logged = 0;
+	if (s_off)
+	{
+		if (++s_logged <= 64)
+		{
+			Msg("! COOP(lootrefresh): item %u [%s] left the searched container; -coop_lootrefresh_off SET, stale cell KEPT (control)",
+			    (u32)pItem->object_id(), pItem->m_section_id.c_str());
+		}
+		return false;
+	}
+	// a drag in progress whose cell IS this item: end the drag before the cell dies under it
+	if (CUIDragDropListEx::m_drag_item)
+	{
+		CUIInventoryCellItem* drag_ici = smart_cast<CUIInventoryCellItem*>(CUIDragDropListEx::m_drag_item->ParentItem());
+		if (drag_ici && drag_ici->object() == pItem && drag_ici->OwnerList())
+		{
+			drag_ici->OwnerList()->DestroyDragItem();
+		}
+	}
+	// the selection (and its info window / properties box) may point at the cell about to be deleted, or at a stack
+	// root whose data is about to be swapped: drop it rather than reason about which
+	if (m_pCurrentCellItem && m_pCurrentCellItem->OwnerList() == m_pDeadBodyBagList)
+	{
+		SetCurrentItem(NULL);
+	}
+	const bool removed = RemoveItemFromList(m_pDeadBodyBagList, pItem);
+	if (removed)
+	{
+		UpdateDeadBodyBag(); // the container's weight line
+	}
+	if (++s_logged <= 64)
+	{
+		Msg("~ COOP(lootrefresh): item %u [%s] left the searched container; cell removed=%d, cells now %u",
+		    (u32)pItem->object_id(), pItem->m_section_id.c_str(), removed ? 1 : 0, m_pDeadBodyBagList->ItemsCount());
+	}
+	return removed;
+}
+
 void CUIActorMenu::AttachAddon(PIItem item_to_upgrade)
 {
 	PlaySnd(eAttachAddon);

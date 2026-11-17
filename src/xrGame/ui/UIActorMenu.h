@@ -345,6 +345,7 @@ public:
 	void xr_stdcall OnMesBoxNo(CUIWindow*, void*);
 
 	void OnInventoryAction(PIItem pItem, u16 action_type);
+	bool OnPartnerItemLeft(PIItem pItem); // MP fork (co-op): an item left the searched container by another hand
 	void ShowRepairButton(bool status);
 	bool SetInfoCurUpgrade(Upgrade_type* upgrade_type, CInventoryItem* inv_item);
 	void SeparateUpgradeItem();

@@ -345,7 +345,18 @@ bool CInventory::DropItem(CGameObject* pObj, bool just_before_destroy, bool dont
 		CObject* pActor_owner = smart_cast<CObject*>(m_pOwner);
 
 		if (Level().CurrentViewEntity() == pActor_owner)
+		{
 			CurrentGameUI()->OnInventoryAction(pIItem, GE_OWNERSHIP_REJECT);
+		}
+		else if (CurrentGameUI()->GetActorMenu().GetMenuMode() == mmDeadBodySearch)
+		{
+			// MP fork (co-op): the mirror of the TAKE branch in CInventory::Take: an item LEFT the corpse/NPC this
+			// client is searching (another player took it). See CUIActorMenu::OnPartnerItemLeft.
+			if (m_pOwner == CurrentGameUI()->GetActorMenu().GetPartner())
+			{
+				CurrentGameUI()->GetActorMenu().OnPartnerItemLeft(pIItem);
+			}
+		}
 	};
 	if (smart_cast<CWeapon*>(pObj))
 	{

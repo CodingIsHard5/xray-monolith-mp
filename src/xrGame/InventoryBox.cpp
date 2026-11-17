@@ -79,6 +79,17 @@ void CInventoryBox::OnEvent(NET_Packet& P, u16 type)
 
 			itm->H_SetParent(NULL, dont_create_shell);
 
+			// MP fork (co-op): the mirror of the TAKE case above: an item LEFT the box this client is searching
+			// (another player took it). See CUIActorMenu::OnPartnerItemLeft.
+			if (CurrentGameUI() && CurrentGameUI()->GetActorMenu().GetMenuMode() == mmDeadBodySearch
+				&& this == CurrentGameUI()->GetActorMenu().GetInvBox())
+			{
+				if (CInventoryItem* left_item = smart_cast<CInventoryItem*>(itm))
+				{
+					CurrentGameUI()->GetActorMenu().OnPartnerItemLeft(left_item);
+				}
+			}
+
 			if (m_in_use)
 			{
 				CGameObject* GO = smart_cast<CGameObject*>(itm);
