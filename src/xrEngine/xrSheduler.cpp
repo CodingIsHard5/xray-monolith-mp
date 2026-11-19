@@ -69,6 +69,29 @@ void CSheduler::internal_Registration()
 		final_states[R.Object] = it;
 	}
 
+#ifdef XRCORE_PROFILER_AGG
+	// -det_mode (test-only): the map above is keyed by object pointer, so walking it applies the requests in
+	// heap-address order, which differs run to run and decides the order of same-time scheduler updates.
+	// Apply them in the order the requests were made instead (ISheduled carries no object id).
+	if (xr_det_mode())
+	{
+		xr_vector<u32> order;
+		order.reserve(final_states.size());
+		for (const auto& [object, it] : final_states)
+			order.push_back(it);
+		std::sort(order.begin(), order.end());
+		for (u32 it : order)
+		{
+			ItemReg& R = Registration[it];
+			if (R.OP)
+				internal_Register(R.Object, R.RT);
+			else
+				internal_Unregister(R.Object, R.RT);
+		}
+		Registration.clear();
+		return;
+	}
+#endif
 	for (const auto& [object, it] : final_states)
 	{
 		ItemReg& R = Registration[it];

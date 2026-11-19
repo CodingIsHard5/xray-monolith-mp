@@ -189,6 +189,13 @@ void XRay::Engine::GameThread()
 
         } while (Device.isRendering && Device.LuaGCCount < psLua_ParallelGC_CallAmount);
     };
+#ifdef XRCORE_PROFILER_AGG
+    if (psLua_ParallelGC && Device.LuaGC && xr_det_mode())
+    {
+        LuaGC(); // test-only serial mode: same number of GC steps every frame, on this thread
+        return;
+    }
+#endif
     if (psLua_ParallelGC && Device.LuaGC)
         Device.secondary_tasks.run(LuaGC);
 }

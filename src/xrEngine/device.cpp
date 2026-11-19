@@ -328,6 +328,14 @@ void mt_FreezeThread(void *ptr) {
 	}
 }
 
+// -det_mode (test-only, Overseer ruling 2026-11-19): the exact equivalence check runs the per-frame worker tasks
+// inline on the main thread, in their launch order, so gameplay is serial. Threading is judged separately.
+#ifdef XRCORE_PROFILER_AGG
+#define DET_SERIAL() xr_det_mode()
+#else
+#define DET_SERIAL() false
+#endif
+
 #if XRCORE_PROFILER == PROFILER_AGG
 // Scripted capture for repeatable measurements:
 //   -perf_capture <warmup_frames>,<frames>[,<tag>]  start automatically once a level is loaded and running
@@ -481,7 +489,10 @@ void CRenderDevice::on_idle()
         PROF_EVENT("Update Particles");
         g_pGamePersistent->UpdateParticles();
     }
-    secondary_tasks.run(&XRay::Engine::PreRenderThread);
+    if (DET_SERIAL())
+    	XRay::Engine::PreRenderThread();
+    else
+    	secondary_tasks.run(&XRay::Engine::PreRenderThread);
 
 	// Precache
 	if (dwPrecacheFrame)
@@ -558,8 +569,11 @@ void CRenderDevice::on_idle()
 	STOP_PROFILE;
 
     // TODO: Try to move this upper
-    secondary_tasks.run(&XRay::Engine::PreRenderPostTransformsThread);
-	if (mt_calc_bones)
+    if (DET_SERIAL())
+    	XRay::Engine::PreRenderPostTransformsThread();
+    else
+    	secondary_tasks.run(&XRay::Engine::PreRenderPostTransformsThread);
+	if (mt_calc_bones && !DET_SERIAL())
 		secondary_tasks.run(&XRay::Engine::CalculateBonesThread);
 	else
 		XRay::Engine::CalculateBonesThread();
@@ -568,7 +582,10 @@ void CRenderDevice::on_idle()
 	Device.LuaGCDone = false;
 	Device.LuaGCCount = 0;
 
-	secondary_tasks.run(&XRay::Engine::GameThread);
+	if (DET_SERIAL())
+		XRay::Engine::GameThread();
+	else
+		secondary_tasks.run(&XRay::Engine::GameThread);
 	
 #ifdef ECO_RENDER // ECO_RENDER START
 	if (Device.Paused() || IsMainMenuActive() || ps_framelimiter)
