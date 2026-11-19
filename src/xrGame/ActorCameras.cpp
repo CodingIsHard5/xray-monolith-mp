@@ -596,6 +596,9 @@ void CActor::cam_Update(float dt, float fFOV)
 		cameras[eacFirstEye]->Update(point, dangle);
 		cameras[eacFirstEye]->f_fov = fFOV;
 	}
+	// GammaVR diagnostic: the camera point before the wall push-out (logged as 'precol' by -vr_dbg_base); writes only g_vr_base
+	if (vr_m3_vr() || vr_dbg_base_flat())
+		g_vr_base.cam_point = cameras[eacFirstEye]->vPosition;
 	if (Level().CurrentEntity() == this)
 	{
 		collide_camera(*cameras[eacFirstEye], _viewport_near, this);
@@ -681,7 +684,7 @@ void CActor::cam_Update(float dt, float fFOV)
 	// GammaVR diagnostic, flat run only (-vr_dbg_base_flat, VR path not configured): the -vr_dbg_base line from the
 	// normal frame, after the camera effects were applied. Frame = number of this actor's camera updates since the
 	// first one (0-based); it does NOT match the VR frame counter exactly (align runs on the logged events). Logging only.
-	if (!vr_m3_vr() && Level().CurrentControlEntity() == this && strstr(Core.Params, "-vr_dbg_base_flat"))
+	if (!vr_m3_vr() && Level().CurrentControlEntity() == this && vr_dbg_base_flat())
 	{
 		static u32 s_flat_frame = 0;
 		vr_dbg_base_log(true, s_flat_frame++);

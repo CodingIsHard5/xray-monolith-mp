@@ -1981,9 +1981,10 @@ void vr_dbg_base_log(bool flat, u32 frame)
 	// actor aim (first-eye camera direction, before effects): yaw = atan2(x, z), pitch = asin(y), radians
 	const Fvector& ad = g_actor->cam_FirstEye()->vDirection;
 	const float aim_yaw = atan2f(ad.x, ad.z), aim_pitch = asinf(_max(-1.f, _min(1.f, ad.y)));
-	Msg("* [vr3dbg] frame %u cam %.4f %.4f %.4f dir %.5f %.5f %.5f cambase %.4f %.4f %.4f actor %.4f %.4f %.4f t2w %s mstate 0x%08x hud_state %u motion %s effs %u%s p2 %s base %s yaw %s aim %.5f %.5f ammo %d health %.4f",
+	Msg("* [vr3dbg] frame %u cam %.4f %.4f %.4f dir %.5f %.5f %.5f cambase %.4f %.4f %.4f actor %.4f %.4f %.4f t2w %s mstate 0x%08x hud_state %u motion %s effs %u%s p2 %s base %s yaw %s aim %.5f %.5f ammo %d health %.4f lookout %.4f camh %.4f precol %.4f %.4f %.4f",
 		frame, cp.x, cp.y, cp.z, cd.x, cd.y, cd.z, bp.x, bp.y, bp.z, ap.x, ap.y, ap.z, t_txt,
-		g_actor->MovingState(), hud_st, motion, n, effs, p2_txt, base_txt, yaw_txt, aim_yaw, aim_pitch, ammo, g_actor->GetfHealth());
+		g_actor->MovingState(), hud_st, motion, n, effs, p2_txt, base_txt, yaw_txt, aim_yaw, aim_pitch, ammo, g_actor->GetfHealth(),
+		g_actor->m_fLookoutFactor, g_actor->CurrentHeight, g_vr_base.cam_point.x, g_vr_base.cam_point.y, g_vr_base.cam_point.z);
 }
 
 void player_hud::render_hud(IDSGraphManager* DM)

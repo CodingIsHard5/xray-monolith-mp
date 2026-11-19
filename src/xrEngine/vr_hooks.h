@@ -160,8 +160,15 @@ struct vr_base_state
 	float aim_heading, aim_pitch;
 	bool yaw_set;
 	float yaw;
+	Fvector cam_point; // diagnostic: the flat first-eye camera point BEFORE the wall push-out (collide_camera), lean included
 };
 extern ENGINE_API vr_base_state g_vr_base;
+// -vr_dbg_base_flat: the -vr_dbg_base line is logged from the flat frame (flat run S3); logging only
+inline bool vr_dbg_base_flat()
+{
+	static const bool v = !!strstr(Core.Params, "-vr_dbg_base_flat");
+	return v;
+}
 inline void vr_base_set_yaw(float heading)
 {
 	g_vr_base.yaw = heading;
