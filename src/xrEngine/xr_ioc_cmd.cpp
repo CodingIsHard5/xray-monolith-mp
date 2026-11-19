@@ -1108,6 +1108,9 @@ extern int g_ai_unlimited_ammo;
 float g_AimLookFactor = 1.f;
 
 int ps_framelimiter = 0;
+// VR spike: 0 = mono, 1 = naive stereo (whole scene render twice per frame, one pass per eye)
+ENGINE_API int ps_r_stereo_bench = 0;
+ENGINE_API float ps_r_stereo_ipd = 0.064f;
 extern u32 g_crosshair_color;
 float g_freelook_z_offset;
 float g_ironsights_factor = 1.25f;
@@ -1343,6 +1346,8 @@ void CCC_Register()
 	CMD1(CCC_HideConsole, "hide");
 
 	CMD4(CCC_Integer, "r__framelimit", &ps_framelimiter, 0, 500);
+	CMD4(CCC_Integer, "r_stereo_bench", &ps_r_stereo_bench, 0, 1);
+	CMD4(CCC_Float, "r_stereo_ipd", &ps_r_stereo_ipd, 0.f, 0.2f);
 	CMD3(CCC_Mask, "rs_refresh_60hz", &psDeviceFlags, rsRefresh60hz);
 	CMD3(CCC_Mask, "dbg_ph_shapes", &psDeviceFlags2, rsDBGDrawPHShapes);
 	CMD3(CCC_Mask, "dbg_ph_bones", &psDeviceFlags2, rsDBGDrawPHBones);
