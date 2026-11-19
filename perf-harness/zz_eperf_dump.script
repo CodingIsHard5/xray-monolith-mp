@@ -149,7 +149,10 @@ local function on_update()
 		-- issued at the same update in every run; quitting waits so the save is on disk first.
 		if dosave then get_console():execute("save det_" .. tag .. "_" .. done) end
 		if done >= total then quit_at = upd + (dosave and 120 or 0) end
+		get_console():execute("flush")
 	end
+	-- keep the log on disk so a hard stop still leaves evidence (log only, no sim state)
+	if upd % 300 == 0 then get_console():execute("flush") end
 	if quit_at and upd >= quit_at then
 		quit_at = nil
 		get_console():execute("quit")

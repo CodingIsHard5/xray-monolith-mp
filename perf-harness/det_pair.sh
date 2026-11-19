@@ -11,6 +11,6 @@ trap '"$T/quiet-required.sh" release $W >/dev/null 2>&1' EXIT
 first=""
 for pair in "$@"; do
   exe="${pair%%:*}"; tag="${pair##*:}"; tag="${tag,,}"
-  DET_NOCLAIM=1 BENCH_TIMEOUT="${DET_TIMEOUT:-480}" "$P/tools/det_run.sh" "$exe" "$tag" "$INT" "$N" 2>&1 | tail -1 || true
+  DET_NOCLAIM=1 BENCH_TIMEOUT="${DET_TIMEOUT:-480}" "$P/tools/det_run.sh" "$exe" "$tag" "$INT" "$N" 2>&1 | grep -aE '^rc=|engine exited|TIMEOUT|ABORT|CRASH|REFUSED|checkpoint' | tail -4 || true
   if [ -z "$first" ]; then first="$tag"; else echo "--- $first vs $tag"; python3 "$P/tools/det_diff.py" "$P/out/det_$first" "$P/out/det_$tag" | cut -c1-230; fi
 done
