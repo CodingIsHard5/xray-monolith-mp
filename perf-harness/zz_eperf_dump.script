@@ -29,11 +29,22 @@ local stream_sites = {}
 local counters_on = string.find(cl, "-det_counters", 1, true) ~= nil
 local stream_cnt, stream_hash, stream_seed = { alife = 0, weather = 0 }, { alife = 7, weather = 7 }, nil
 local stream_draw = nil
+-- -det_passes a,b,c: checkpoint k fires when the k-th listed number of A-Life scheduler passes (counted from the start
+-- point) has run, instead of at a time. A pass = a frame in which a scheduled squad/smart script update ran.
+-- world-process test (stage 0, 2026-11-19): -det_noonline keeps everything offline (switch distance 0.5 m, re-applied);
+-- -det_noalife is its negative control (0 scheduled objects per pass, re-applied): A-Life must then look dead.
+local noonline = string.find(cl, "-det_noonline", 1, true) ~= nil
+local noalife = string.find(cl, "-det_noalife", 1, true) ~= nil
+local pass_at = {}
+for v in string.gmatch(string.match(cl, "%-det_passes%s+(%S+)") or "", "%d+") do pass_at[#pass_at + 1] = tonumber(v) end
+if #pass_at > 0 then total = #pass_at end
 local sq_cnt = {} -- [squad id] = { updates, target choices, action/target changes, member deaths }
 local info_cnt = { register = 0, unregister = 0 }
 local dosave = string.find(cl, "-det_save", 1, true) ~= nil
 local quit_at = nil
 local start_t, done, upd = nil, 0, 0
+local pass_count, pass_last_upd = 0, -1
+local function note_pass() if start_t and upd ~= pass_last_upd then pass_last_upd = upd pass_count = pass_count + 1 end end
 
 local function g(f, ...) local ok, v = pcall(f, ...) if ok then return v end return nil end
 local function s(v) if v == nil then return "-" end return tostring(v) end
@@ -108,6 +119,14 @@ local function on_update()
 		if trace > 0 then dump(0) end -- state at the reseed point: tells "started different" from "diverged later"
 	end
 	upd = upd + 1
+	if noonline and (upd == 1 or upd % 100 == 0) then
+		alife():set_switch_distance(0.5)
+		if upd == 1 then printf("* det_noonline: switch distance set to 0.5 m") end
+	end
+	if noalife then
+		alife():set_objects_per_update(0)
+		if upd == 1 then printf("* det_noalife: objects per update set to 0") end
+	end
 	if perturb == "draw" and not perturbed and time_global() - start_t >= perturb_at then
 		perturbed = true
 		printf(string.format("* det_perturb draw: one extra math.random at update %d -> %d", upd, math.random(1, 1000000000)))
@@ -135,7 +154,10 @@ local function on_update()
 		get_console():execute("det_rng_state u" .. upd)
 		printf(string.format("* det_lua_state u%d: %d", upd, math.random(1, 1000000000)))
 	end
-	if done < total and time_global() - start_t >= (times[done + 1] or (done + 1) * interval) then
+	local due
+	if #pass_at > 0 then due = pass_count >= (pass_at[done + 1] or math.huge)
+	else due = time_global() - start_t >= (times[done + 1] or (done + 1) * interval) end
+	if done < total and due then
 		done = done + 1
 		get_console():execute("det_rng_state cp" .. done)
 		printf(string.format("* det_lua_state cp%d: %d", done, math.random(1, 1000000000)))
@@ -170,6 +192,7 @@ local function on_update()
 					local r, o = sq_cnt[id], sim:object(id)
 					f:write(string.format("sq %d %d %d %d %d %s\n", id, r[1], r[2], r[3], r[4], o and (o.online and "1" or "0") or "-"))
 				end
+				f:write("info passes ", pass_count, "\n", "info time_ms ", time_global() - start_t, "\n")
 				f:write("info register ", info_cnt.register, "\n", "info unregister ", info_cnt.unregister, "\n")
 				f:close()
 			end
@@ -267,6 +290,7 @@ function on_game_start()
 		cls.update = function(self, ...)
 			local r = rec(self.id)
 			r[1] = r[1] + 1
+			if not self.online then note_pass() end
 			local before = sig(self)
 			local a, b = counted_update(self, ...)
 			if sig(self) ~= before then r[3] = r[3] + 1 end
@@ -275,6 +299,11 @@ function on_game_start()
 		if cls.on_npc_death then
 			local real_death = cls.on_npc_death
 			cls.on_npc_death = function(self, ...) local r = rec(self.id) r[4] = r[4] + 1 return real_death(self, ...) end
+		end
+		local st = smart_terrain and smart_terrain.se_smart_terrain
+		if st and st.update then
+			local smart_update = st.update
+			st.update = function(self, ...) if not self.online then note_pass() end return smart_update(self, ...) end
 		end
 		local bcls = sim_board and sim_board.simulation_board
 		if bcls and bcls.get_squad_target then
