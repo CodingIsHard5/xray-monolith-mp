@@ -11,7 +11,6 @@ extern ENGINE_API int ps_r_stereo_bench;
 extern ENGINE_API int g_stereo_bench_eye;
 #ifdef USE_DX11
 static ID3D11Texture2D* s_stereo_smap_depth[8] = {};
-static ID3D11Texture2D* s_stereo_smap_surf[8] = {};
 static bool s_stereo_smap_tsh[8] = {};
 // to_saved: live shadow map -> per-cascade copy; otherwise copy -> live shadow map
 static void stereo_smap_copy(ID3D11Texture2D*& saved, ID3D11Texture2D* live, bool to_saved)
@@ -363,7 +362,6 @@ void CRender::render_sun_cascade(u32 cascade_ind)
 		if (stereo_save)
 		{
 			stereo_smap_copy(s_stereo_smap_depth[cascade_ind], Target->rt_smap_depth->pSurface, true);
-			stereo_smap_copy(s_stereo_smap_surf[cascade_ind], Target->rt_smap_surf->pSurface, true);
 			s_stereo_smap_tsh[cascade_ind] = fuckingsun->X.D.transluent;
 		}
 #endif
@@ -377,7 +375,6 @@ void CRender::render_sun_cascade(u32 cascade_ind)
 		fuckingsun->X.D.transluent = s_stereo_smap_tsh[cascade_ind];
 		Target->phase_accumulator(); // unbind the shadow map before copying into it
 		stereo_smap_copy(s_stereo_smap_depth[cascade_ind], Target->rt_smap_depth->pSurface, false);
-		stereo_smap_copy(s_stereo_smap_surf[cascade_ind], Target->rt_smap_surf->pSurface, false);
 	}
 #endif
 
