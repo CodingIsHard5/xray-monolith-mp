@@ -637,6 +637,9 @@ void CRenderDevice::on_idle()
 	Device.isRendering = false;
 
 	secondary_tasks.wait();
+#ifdef XRCORE_PROFILER_AGG
+	xr_det_set_role(1); // render phase over: anything the main thread does outside it (level load, spawns) is gameplay
+#endif
 
 	if (psLua_ParallelGC_debug && psLua_ParallelGC && Device.LuaGCDebug)
 	{

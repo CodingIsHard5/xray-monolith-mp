@@ -54,10 +54,12 @@ XRCORE_API bool xr_det_alt_draw(s32& result)
 
 XRCORE_API void xr_det_trace_draw(void* return_address)
 {
+	if (xr_det_trace_armed == 2 && GetCurrentThreadId() != g_det_main_thread)
+		return;
 	const long i = InterlockedIncrement(&g_det_draw_count) - 1;
 	if (i >= DET_DRAWS_MAX)
 		return;
-	g_det_draws[i].frame = Core.dwFrame;
+	g_det_draws[i].frame = (Core.dwFrame & 0x00ffffffu) | (u32(t_det_role & 0xff) << 24); // role in the top byte
 	g_det_draws[i].thread = GetCurrentThreadId();
 	g_det_draws[i].ret = return_address;
 }
@@ -66,6 +68,8 @@ XRCORE_API void xr_det_trace_start()
 {
 	if (!g_det_draws)
 		g_det_draws = (DetDraw*)malloc(sizeof(DetDraw) * DET_DRAWS_MAX);
+	if (xr_det_trace_armed == 2)
+		return; // early trace (-det_early) already running since process start: keep it
 	g_det_main_thread = GetCurrentThreadId();
 	g_det_draw_count = 0;
 	xr_det_trace_armed = 1;
@@ -127,7 +131,8 @@ XRCORE_API void xr_det_trace_dump(const char* path)
 	const size_t base = (size_t)GetModuleHandle(NULL);
 	fprintf(f, "#draws %ld recorded %ld\n", total, n);
 	for (long i = 0; i < n; ++i)
-		fprintf(f, "%u %c 0x%llx\n", g_det_draws[i].frame, g_det_draws[i].thread == g_det_main_thread ? 'M' : 'W',
+		fprintf(f, "%u %c%u 0x%llx\n", g_det_draws[i].frame & 0x00ffffffu, g_det_draws[i].thread == g_det_main_thread ? 'M' : 'W',
+		        g_det_draws[i].frame >> 24,
 		        (unsigned long long)((size_t)g_det_draws[i].ret - base + 0x140000000ull));
 	fclose(f);
 }
@@ -269,6 +274,14 @@ void initialize()
     {
         xr_det_set_role(1); // this is the main thread
         xr_det_split_armed = 1;
+        if (strstr(Core.Params, "-det_early"))
+        {
+            // diagnosis: trace every main-thread ::Random draw from process start, all streams, with its role
+            g_det_draws = (DetDraw*)malloc(sizeof(DetDraw) * DET_DRAWS_MAX);
+            g_det_main_thread = GetCurrentThreadId();
+            g_det_draw_count = 0;
+            xr_det_trace_armed = g_det_draws ? 2 : 0;
+        }
     }
 #endif
 }

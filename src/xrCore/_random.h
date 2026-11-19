@@ -61,13 +61,15 @@ public:
 #ifdef XRCORE_PROFILER_AGG
 		if (this == &Random)
 		{
+			if (xr_det_trace_armed == 2) // early diagnosis trace: every stream
+				xr_det_trace_draw(_ReturnAddress());
 			if (xr_det_split_armed)
 			{
 				s32 alt;
 				if (xr_det_alt_draw(alt))
 					return alt;
 			}
-			if (xr_det_trace_armed)
+			if (xr_det_trace_armed == 1)
 				xr_det_trace_draw(_ReturnAddress());
 		}
 #endif
