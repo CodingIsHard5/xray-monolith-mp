@@ -222,6 +222,9 @@ private:
 
 	void Invalidate();
 public:
+	void vr_invalidate() { Invalidate(); } // GammaVR: per-eye history swaps surfaces behind bound textures
+private:
+public:
 	struct _stats
 	{
 		u32 polys;

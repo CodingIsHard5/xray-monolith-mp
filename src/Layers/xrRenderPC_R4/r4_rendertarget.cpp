@@ -1605,5 +1605,5 @@ void CRenderTarget::vr_history_select(int eye)
 	for (u32 i = 0; i < vr_hist_count; i++)
 		if (vr_hist_live[i]->_get() && rt_vr_hist[i]._get()) vr_hist_live[i]->_get()->vr_swap(*rt_vr_hist[i]._get());
 	vr_hist_eye = want;
-	RCache.Invalidate(); // bound-texture cache holds the old views
+	RCache.vr_invalidate(); // bound-texture cache holds the old views
 }
