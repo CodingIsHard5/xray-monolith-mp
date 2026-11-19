@@ -837,7 +837,8 @@ void CRenderTarget::phase_ssfx_sss_ext(light_Package& LP)
 				if (!LightSlot[slot]->flags.bActive || Remove)
 				{
                     // demonized: keep the light pointer for some frames to eliminate flicker, but also check if its actually been disabled
-                    if (g_stereo_bench_eye != 1) LightSlot[slot]->sss_remove_latency++; // GammaVR: once per frame, not once per eye
+                    static const bool dbg_lat = !!strstr(Core.Params, "-vr_dbg_lat");
+                    if (g_stereo_bench_eye != 1 || dbg_lat) LightSlot[slot]->sss_remove_latency++; // GammaVR: once per frame, not once per eye
                     if (!LightSlot[slot]->flags.bActive || LightSlot[slot]->sss_remove_latency > 5)
                     {
                         if (LightSlot[slot]->flags.type == IRender_Light::OMNIPART)

@@ -128,3 +128,10 @@ inline bool vr_preset()
 	static const bool v = strstr(Core.Params, "-vr_openxr") || strstr(Core.Params, "-vr_preset");
 	return v;
 }
+
+// Diagnostic switches for milestone 2b attempt 2: each turns ONE of its four changes back off.
+// -vr_dbg_noseed (a), -vr_dbg_lat (b), -vr_dbg_sky (c), -vr_dbg_prev (d). Not for normal use.
+inline bool vr_dbg(const char* sw)
+{
+	return !!strstr(Core.Params, sw);
+}

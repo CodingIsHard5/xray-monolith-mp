@@ -329,7 +329,8 @@ void dxEnvironmentRender::RenderSky(CEnvironment& env, bool OnlyMV)
 
 	if (OnlyMV)
 	{
-		Fmatrix& mSky_prev = mSky_prev_eye[g_stereo_bench_eye == 1 ? 1 : 0];
+		static const bool dbg_sky = !!strstr(Core.Params, "-vr_dbg_sky");
+		Fmatrix& mSky_prev = mSky_prev_eye[(g_stereo_bench_eye == 1 && !dbg_sky) ? 1 : 0];
 		RCache.set_xform_world_prev(mSky_prev);
 		mSky_prev = mSky;
 

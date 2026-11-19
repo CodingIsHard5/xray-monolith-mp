@@ -297,7 +297,9 @@ void IGame_Level::OnRender()
 					Device.mProjectHud._31 = -side * 0.08f;
 				}
 				Device.mView.build_camera_dir(Device.vCameraPosition, Device.vCameraDirection, Device.vCameraTop);
-				Device.mInvView.invert(Device.mView);
+				static const bool dbg_prev = !!strstr(Core.Params, "-vr_dbg_prev");
+				if (!dbg_prev || vr_frame) Device.mInvView.invert(Device.mView);
+				if (!dbg_prev)
 				{
 					const bool have_prev = eye_saved_frame[eye] && eye_saved_frame[eye] + 1 == Device.dwFrame;
 					Device.mView_prev = have_prev ? eye_view_saved[eye] : Device.mView;

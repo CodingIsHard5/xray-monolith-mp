@@ -1602,6 +1602,8 @@ void CRenderTarget::vr_history_select(int eye)
 {
 	const int want = (eye == 1) ? 1 : 0;
 	if (want == vr_hist_eye || !vr_hist_count) return;
+	static const bool dbg_noseed = vr_dbg("-vr_dbg_noseed");
+	if (dbg_noseed) vr_hist_seeded = true;
 	if (!vr_hist_seeded)
 	{
 		// equal start: the first eye's history was filled during loading, the second eye's set is still empty
