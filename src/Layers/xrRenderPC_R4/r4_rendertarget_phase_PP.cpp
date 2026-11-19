@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "../../xrEngine/vr_hooks.h"
 #include "r4_rendertarget.h"
 
 void CRenderTarget::u_calc_tc_noise(Fvector2& p0, Fvector2& p1)
@@ -63,7 +64,7 @@ BOOL CRenderTarget::u_need_PP()
 {
 	bool _blur = (param_blur > 0.001f);
 	bool _gray = (param_gray > 0.001f);
-	bool _noise = (param_noise > 0.001f);
+	bool _noise = (param_noise > 0.001f) && !vr_plain();
 	bool _dual = (param_duality_h > 0.001f) || (param_duality_v > 0.001f);
 
 	// bool	_menu_pp= g_pGamePersistent?g_pGamePersistent->OnRenderPPUI_query():false;

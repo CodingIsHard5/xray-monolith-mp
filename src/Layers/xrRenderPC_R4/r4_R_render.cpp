@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "../../xrEngine/vr_hooks.h"
 #include "../../xrEngine/igame_persistent.h"
 #include "../xrRender/FBasicVisual.h"
 #include "../../xrEngine/customhud.h"
@@ -245,7 +246,7 @@ void CRender::Render()
 			static bool sss_rendered, sss_extended_rendered;
 
 			// SSS Shadows
-			if (ps_ssfx_sss_quality.z > 0)
+			if (ps_ssfx_sss_quality.z > 0 && !vr_plain())
 			{
 				Target->phase_ssfx_sss();
 				sss_rendered = true;
@@ -260,7 +261,7 @@ void CRender::Render()
 				}
 			}
 
-			if (ps_ssfx_sss_quality.w > 0)
+			if (ps_ssfx_sss_quality.w > 0 && !vr_plain())
 			{
 				// Extra lights
 				Target->phase_ssfx_sss_ext(RImplementation.LP_normal);
@@ -343,7 +344,7 @@ void CRender::Render()
 	}
 
 	{
-		if (RImplementation.o.ssfx_volumetric)
+		if (RImplementation.o.ssfx_volumetric && !vr_plain())
 			Target->phase_ssfx_volumetric_blur();
 	}
 

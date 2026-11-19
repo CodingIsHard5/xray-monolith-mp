@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "../../xrEngine/vr_hooks.h"
 #include "../../xrEngine/igame_persistent.h"
 #include "../../xrEngine/environment.h"
 
@@ -113,13 +114,13 @@ void CRenderTarget::phase_combine()
 			HW.pContext->ClearRenderTargetView(rt_ssfx_temp->pRT, ColorRGBA);
 			HW.pContext->ClearRenderTargetView(rt_ssfx_temp2->pRT, ColorRGBA);
 
-			if (RImplementation.o.ssfx_ao && ps_ssfx_ao.y > 0)
+			if (RImplementation.o.ssfx_ao && ps_ssfx_ao.y > 0 && !vr_plain())
 			{
 				ssfx_PrevPos_Requiered = true;
 				phase_ssfx_ao(); // [SSFX] - New AO Phase
 			}
 
-			if (RImplementation.o.ssfx_il && ps_ssfx_il.y > 0)
+			if (RImplementation.o.ssfx_il && ps_ssfx_il.y > 0 && !vr_plain())
 			{
 				ssfx_PrevPos_Requiered = true;
 				phase_ssfx_il(); // [SSFX] - New IL Phase
@@ -334,7 +335,7 @@ void CRenderTarget::phase_combine()
 	else
 		HW.pContext->CopyResource(rt_Generic_temp->pTexture->surface_get(), rt_Generic_0_r->pTexture->surface_get());
 
-	if (RImplementation.o.ssfx_ssr && !Device.m_SecondViewport.IsSVPFrame())
+	if (RImplementation.o.ssfx_ssr && !Device.m_SecondViewport.IsSVPFrame() && !vr_plain())
 	{
 		PIX_EVENT(phase_ssfx_ssr);
 		ssfx_PrevPos_Requiered = true;
@@ -342,7 +343,7 @@ void CRenderTarget::phase_combine()
 	}
 
 	// [SSFX] - Water SSR rendering
-	if (RImplementation.o.ssfx_water && !Device.m_SecondViewport.IsSVPFrame())
+	if (RImplementation.o.ssfx_water && !Device.m_SecondViewport.IsSVPFrame() && !vr_plain())
 	{
 		FLOAT ColorRGBA[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
 		HW.pContext->ClearRenderTargetView(rt_ssfx_temp->pRT, ColorRGBA);
@@ -524,7 +525,7 @@ void CRenderTarget::phase_combine()
 		phase_ssfx_fog_scattering();
 	}
 
-	if (RImplementation.o.ssfx_motionblur && ps_ssfx_motionblur.y > 0)
+	if (RImplementation.o.ssfx_motionblur && ps_ssfx_motionblur.y > 0 && !vr_plain())
 	{
 		PIX_EVENT(phase_ssfx_motion_blur);
 		phase_ssfx_motion_blur();
@@ -596,7 +597,7 @@ void CRenderTarget::phase_combine()
         RCache.set_Stencil(FALSE);
     }    
 	
-	if (RImplementation.o.ssfx_taa && ps_ssfx_taa.x > 0)
+	if (RImplementation.o.ssfx_taa && ps_ssfx_taa.x > 0 && !vr_plain())
 	{
 		phase_ssfx_taa();
 	}
