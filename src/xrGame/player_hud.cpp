@@ -13,6 +13,7 @@
 #include "script_attachment_manager.h"
 #include "../xrEngine/CameraBase.h"
 #include "../xrEngine/vr_hooks.h"
+#include "../xrEngine/bone.h"
 
 extern int g_nearwall;
 
@@ -357,11 +358,12 @@ bool attachable_hud_item::need_renderable()
 	return m_parent_hud_item->need_renderable();
 }
 
-void attachable_hud_item::render(IDSGraphManager* DM)
+void attachable_hud_item::render(IDSGraphManager* DM, Fmatrix* draw_xform)
 {
 	m_parent_hud_item->render_hud_mode();
 	if (m_parent_hud_item->m_instance_holder_hud && !m_parent_hud_item->m_instance_holder_hud->ModelInstanceMultirender()) return;
-	DM->add_Dynamic(m_model->dcast_RenderVisual(), &m_item_transform);
+	// draw_xform (GammaVR -vr_vis_rot test control) must stay valid until the pass is drawn: the HUD graph keeps the pointer
+	DM->add_Dynamic(m_model->dcast_RenderVisual(), draw_xform ? draw_xform : &m_item_transform);
 	if (!m_parent_hud_item->has_object()) return;
 
 		for (auto& pair : *m_parent_hud_item->object().GetAttachments())
@@ -1406,6 +1408,150 @@ void player_hud::vr_log_gun_pixels()
 		Device.dwWidth, Device.dwHeight);
 }
 
+// GammaVR milestone 3b (Amendment 10 note 3) test switches, parsed once.
+struct vr_3b_switches
+{
+	float vis_rot_deg = 0.f;  // -vr_vis_rot <deg>
+	bool vis_rot = false;
+	string64 rear, front;     // -vr_barrel_bones <rear> <front>
+	bool barrel = false;
+	vr_3b_switches()
+	{
+		rear[0] = front[0] = 0;
+		if (LPCSTR p = strstr(Core.Params, "-vr_vis_rot "))
+			vis_rot = sscanf(p + 12, "%f", &vis_rot_deg) == 1;
+		if (LPCSTR p = strstr(Core.Params, "-vr_barrel_bones "))
+			barrel = sscanf(p + 17, "%63s %63s", rear, front) == 2;
+	}
+};
+static const vr_3b_switches& vr_3b()
+{
+	static const vr_3b_switches s;
+	return s;
+}
+
+// bone id by name, case-insensitive (BI_NONE if absent)
+static u16 vr_find_bone(IKinematics* K, LPCSTR name)
+{
+	for (u16 i = 0, n = K->LL_BoneCount(); i < n; ++i)
+	{
+		LPCSTR b = K->LL_BoneName_dbg(i);
+		if (b && !stricmp(b, name))
+			return i;
+	}
+	return BI_NONE;
+}
+
+// -vr_vis_rot <deg>: test control. Only the DRAWN item models are rotated: yaw to the right by <deg> about the grip pose's
+// vertical axis through the item origin (the grip point). After the placement the item's own axes are the grip axes, so
+// this is the item-local rotation about y: draw = m_item_transform * rotateY (rotateY takes (0,0,1) to (sin a, 0, cos a),
+// i.e. to the right for a > 0). The same world rotation is applied to every attached item (scope) so they stay together.
+// m_item_transform itself is not changed, so gun_axis / gun_muzzle / gun_px / mask origin come from the unrotated
+// transform. The arms (m_transform, m_transform_2) and script HUD attachments are NOT rotated.
+// True when the draw transforms m_vr_draw_xform[] are to be used this pass.
+bool player_hud::vr_update_vis_rot()
+{
+	const vr_3b_switches& S = vr_3b();
+	static bool s_logged = false;
+	if (!s_logged)
+	{
+		s_logged = true;
+		if (S.vis_rot)
+			Msg("* [vr3] visual-only rotation: %.2f deg", S.vis_rot_deg);
+		else
+			Msg("* [vr3] visual-only rotation: none");
+	}
+	if (!S.vis_rot)
+		return false;
+	attachable_hud_item* item = m_attached_items[0] ? m_attached_items[0] : m_attached_items[1];
+	if (!item)
+		return false;
+	Fmatrix rot, item_inv, W;
+	rot.rotateY(deg2rad(S.vis_rot_deg));
+	item_inv.invert(item->m_item_transform);
+	W.mul_43(item->m_item_transform, rot);
+	W.mulB_43(item_inv); // W = item * rot * inverse(item): world rotation about the grip's y axis through the item origin
+	for (int i = 0; i < 3; ++i)
+		if (m_attached_items[i])
+			m_vr_draw_xform[i].mul_43(W, m_attached_items[i]->m_item_transform);
+	return true;
+}
+
+// Milestone 3b: (a) once, and again when the held item's section changes, the bone list (names and parents only) of
+// the held item's own model; (b) with -vr_barrel_bones, every 100 frames the visible barrel axis from two bones of the
+// model AS DRAWN: world position of a bone = draw transform (m_item_transform, or m_vr_draw_xform under -vr_vis_rot)
+// * LL_GetTransform(bone).c, where LL_GetTransform is the bone's model-space matrix from the last CalculateBones(),
+// done in attachable_hud_item::update() this frame; the HUD draw does not recalculate bones
+// (r__dsgraph_build.cpp, add_Dynamic, MT_SKELETON_ANIM: CalculateBones only for UI3D).
+void player_hud::vr_log_gun_bones()
+{
+	const int idx = m_attached_items[0] ? 0 : 1;
+	attachable_hud_item* item = m_attached_items[idx];
+	if (!item || !item->m_model)
+		return;
+	IKinematics* K = item->m_model;
+	static shared_str s_listed;
+	if (s_listed != item->m_sect_name)
+	{
+		s_listed = item->m_sect_name;
+		const u16 n = K->LL_BoneCount();
+		Msg("* [vr3] gun_bones section %s count %u", item->m_sect_name.c_str(), (u32)n);
+		for (u16 i = 0; i < n; ++i)
+		{
+			LPCSTR name = K->LL_BoneName_dbg(i);
+			const u16 par = K->LL_GetData(i).GetParentID();
+			LPCSTR pname = par == BI_NONE ? "none" : K->LL_BoneName_dbg(par);
+			Msg("* [vr3] gun_bone %u name %s parent %s", (u32)i, name ? name : "?", pname ? pname : "?");
+		}
+	}
+
+	const vr_3b_switches& S = vr_3b();
+	static u32 s_logged_frame = u32(-1);
+	if (!S.barrel || g_vr_track.frame % 100 != 0 || s_logged_frame == g_vr_track.frame)
+		return;
+	s_logged_frame = g_vr_track.frame;
+	const u16 br = vr_find_bone(K, S.rear), bf = vr_find_bone(K, S.front);
+	static bool s_warned_r = false, s_warned_f = false;
+	if (br == BI_NONE && !s_warned_r)
+	{
+		s_warned_r = true;
+		Msg("! [vr3] barrel bone not found: %s", S.rear);
+	}
+	if (bf == BI_NONE && !s_warned_f)
+	{
+		s_warned_f = true;
+		Msg("! [vr3] barrel bone not found: %s", S.front);
+	}
+	if (br == BI_NONE || bf == BI_NONE)
+	{
+		Msg("* [vr3] frame %u gun_vis_axis track nan nan nan world nan nan nan rear %s front %s", g_vr_track.frame, S.rear, S.front);
+		Msg("* [vr3] frame %u gun_vis_pts track nan nan nan nan nan nan", g_vr_track.frame);
+		return;
+	}
+	const Fmatrix& D = vr_3b().vis_rot ? m_vr_draw_xform[idx] : item->m_item_transform;
+	Fvector rw, fw, aw, rt, ft, at;
+	D.transform_tiny(rw, K->LL_GetTransform(br).c);
+	D.transform_tiny(fw, K->LL_GetTransform(bf).c);
+	aw.sub(fw, rw);
+	Fmatrix world_to_track;
+	world_to_track.invert(g_vr_track.track_to_world);
+	world_to_track.transform_tiny(rt, rw);
+	world_to_track.transform_tiny(ft, fw);
+	at.sub(ft, rt);
+	if (aw.magnitude() < EPS || at.magnitude() < EPS)
+	{
+		Msg("* [vr3] frame %u gun_vis_axis track nan nan nan world nan nan nan rear %s front %s", g_vr_track.frame, S.rear, S.front);
+	}
+	else
+	{
+		aw.normalize();
+		at.normalize();
+		Msg("* [vr3] frame %u gun_vis_axis track %.5f %.5f %.5f world %.5f %.5f %.5f rear %s front %s", g_vr_track.frame,
+			at.x, at.y, at.z, aw.x, aw.y, aw.z, S.rear, S.front);
+	}
+	Msg("* [vr3] frame %u gun_vis_pts track %.4f %.4f %.4f %.4f %.4f %.4f", g_vr_track.frame, rt.x, rt.y, rt.z, ft.x, ft.y, ft.z);
+}
+
 bool player_hud::vr_place_at_grip()
 {
 	attachable_hud_item* item = m_attached_items[0] ? m_attached_items[0] : m_attached_items[1];
@@ -1499,6 +1645,7 @@ void player_hud::render_hud(IDSGraphManager* DM)
 	if (!b_r0 && !b_r1) return;
 
 	// GammaVR milestone 3: in the eyes of a VR frame the held item is drawn at the controller grip pose
+	bool vis_rot = false;
 	if (g_vr_track.active)
 	{
 		if (vr_nogun())
@@ -1513,20 +1660,24 @@ void player_hud::render_hud(IDSGraphManager* DM)
 			}
 		}
 		else
+		{
 			vr_log_gun_pixels(); // milestone 3b: in every eye pass, with the item's final transform of this frame
+			vis_rot = vr_update_vis_rot(); // milestone 3b test control: rotates only what is drawn
+			vr_log_gun_bones();
+		}
 	}
 
 	DM->add_Dynamic(m_model->dcast_RenderVisual(), &m_transform);
 	DM->add_Dynamic(m_model_2->dcast_RenderVisual(), &m_transform_2);
 
 	if (m_attached_items[0])
-		m_attached_items[0]->render(DM);
+		m_attached_items[0]->render(DM, vis_rot ? &m_vr_draw_xform[0] : nullptr);
 
 	if (m_attached_items[1])
-		m_attached_items[1]->render(DM);
+		m_attached_items[1]->render(DM, vis_rot ? &m_vr_draw_xform[1] : nullptr);
 
 	if (m_attached_items[SCOPE_ATTACH_IDX])
-		m_attached_items[SCOPE_ATTACH_IDX]->render(DM);
+		m_attached_items[SCOPE_ATTACH_IDX]->render(DM, vis_rot ? &m_vr_draw_xform[SCOPE_ATTACH_IDX] : nullptr);
 
 	if (script_anim_item_model)
 	{

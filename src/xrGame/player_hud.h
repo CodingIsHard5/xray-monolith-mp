@@ -326,7 +326,7 @@ struct attachable_hud_item
 	void update(bool bForce);
 	void update_attachments_xform();
 	void setup_firedeps(firedeps& fd);
-	void render(IDSGraphManager* DM);
+	void render(IDSGraphManager* DM, Fmatrix* draw_xform = nullptr); // GammaVR 3b: draw_xform = -vr_vis_rot test transform
 	void render_item_ui();
 	bool render_item_ui_query();
 	bool need_renderable();
@@ -383,6 +383,8 @@ public:
 	void render_hud(IDSGraphManager* DM);
 	bool vr_place_at_grip(); // GammaVR milestone 3: moves the whole HUD rig so the held item sits at the controller grip pose
 	void vr_log_gun_pixels(); // GammaVR milestone 3b: logging only (pixels of the held item's origin and muzzle per eye)
+	bool vr_update_vis_rot(); // GammaVR milestone 3b: -vr_vis_rot test control (rotates only the drawn item models)
+	void vr_log_gun_bones(); // GammaVR milestone 3b: bone list of the held item and the -vr_barrel_bones visible axis
 	void render_item_ui();
 	bool render_item_ui_query();
 	u32 anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotionDef*& md, float speed, u16 override_part = u16(-1));
@@ -457,6 +459,7 @@ private:
 	shared_str m_sect_name;
 	xr_vector<u16> m_ancors;
 	attachable_hud_item* m_attached_items[3];
+	Fmatrix m_vr_draw_xform[3]; // GammaVR 3b: per attached item, the transform it is DRAWN with under -vr_vis_rot
 	static void _BCL FingerCallback(CBoneInstance* B);
 
 public:
