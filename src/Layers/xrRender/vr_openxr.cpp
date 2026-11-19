@@ -64,6 +64,8 @@ namespace
 		bool grip_located = false;
 		int gun_hand = 1;         // -vr_gun_hand left|right
 		bool gun_on_head = false; // -vr_gun_on_head
+		bool grip_rot = false;    // -vr_grip_rot <yaw> <pitch> (milestone 3b, criterion 7e: engine-injected rotation)
+		float grip_rot_q[4] = { 0.f, 0.f, 0.f, 1.f }; // q_inject x, y, z, w (engine axes)
 		bool profiles_logged = false;
 
 		PFN_xrGetInstanceProcAddr GetInstanceProcAddr = nullptr;
@@ -427,6 +429,37 @@ namespace
 			vr.gun_on_head = !!strstr(Core.Params, "-vr_gun_on_head");
 			Msg("* [vr3] gun hand %c, nogun %d, gun on head %d (DELIBERATELY BROKEN test mode if 1)",
 				vr.gun_hand ? 'R' : 'L', vr_nogun() ? 1 : 0, vr.gun_on_head ? 1 : 0);
+			// -vr_grip_rot <yaw_deg> <pitch_deg>: the gun's grip orientation becomes q_inject * q_runtime, where q_inject
+			// (engine axes, x right, y up, z forward) pitches UP by <pitch> about x first, then yaws RIGHT by <yaw> about y.
+			// With vr_quat_rotate (v' = q v q*): q = (sin(a/2), 0, 0, cos(a/2)) takes (0,0,1) to (0, -sin a, cos a), so
+			// pitch up = a = -pitch; q = (0, sin(b/2), 0, cos(b/2)) takes (0,0,1) to (sin b, 0, cos b), so yaw right = b = yaw.
+			// q_inject = q_yaw * q_pitch = (-cy*sp, sy*cp, sy*sp, cy*cp) with cy/sy = cos/sin(yaw/2), cp/sp = cos/sin(pitch/2).
+			// Checked numerically with the same formula as vr_quat_rotate: yaw 30, pitch 15 gives
+			// q = (-0.12608, 0.25660, 0.03378, 0.95766) and R*(0,0,1) = (0.48296, 0.25882, 0.83652) as registered.
+			// not applied in the -vr_gun_on_head mode (the gun pose there is the head pose)
+			LPCSTR r = vr.gun_on_head ? nullptr : strstr(Core.Params, "-vr_grip_rot ");
+			if (r)
+			{
+				float yaw = 0.f, pitch = 0.f;
+				if (sscanf(r + 13, "%f %f", &yaw, &pitch) == 2)
+				{
+					const float hy = deg2rad(yaw) * 0.5f, hp = deg2rad(pitch) * 0.5f;
+					const float cy = _cos(hy), sy = _sin(hy), cp = _cos(hp), sp = _sin(hp);
+					vr.grip_rot_q[0] = -cy * sp;
+					vr.grip_rot_q[1] = sy * cp;
+					vr.grip_rot_q[2] = sy * sp;
+					vr.grip_rot_q[3] = cy * cp;
+					vr.grip_rot = true;
+					Fvector f, rf;
+					f.set(0.f, 0.f, 1.f);
+					vr_quat_rotate(vr.grip_rot_q[0], vr.grip_rot_q[1], vr.grip_rot_q[2], vr.grip_rot_q[3], f, rf);
+					Msg("* [vr3] grip rotation injected: yaw %.2f pitch %.2f deg, R*(0,0,1) = %.5f %.5f %.5f", yaw, pitch, rf.x, rf.y, rf.z);
+				}
+				else
+					Msg("! [vr3] -vr_grip_rot needs two numbers (yaw pitch, degrees); ignored");
+			}
+			if (!vr.grip_rot)
+				Msg("* [vr3] grip rotation injected: none");
 			vr.ok = vr_init();
 			Msg(vr.ok ? "* [vr] OpenXR bring-up complete" : "! [vr] OpenXR bring-up FAILED; VR path disabled for this run");
 			Msg("* [vr] eye offset scale %.3f, dump %d, mono twin eye %d", vr.eye_scale, vr.dump ? 1 : 0, g_vr_mono_eye);
@@ -527,7 +560,19 @@ namespace
 			out->gun.pos.add(vr.head_e.pos, o);
 		}
 		else
+		{
 			out->gun = out->runtime;
+			if (vr.grip_rot)
+			{
+				// test switch -vr_grip_rot: orientation = q_inject * q_runtime (Hamilton product), position untouched
+				const float x1 = vr.grip_rot_q[0], y1 = vr.grip_rot_q[1], z1 = vr.grip_rot_q[2], w1 = vr.grip_rot_q[3];
+				const vr_pose& R = out->runtime;
+				out->gun.qx = w1 * R.qx + x1 * R.qw + y1 * R.qz - z1 * R.qy;
+				out->gun.qy = w1 * R.qy - x1 * R.qz + y1 * R.qw + z1 * R.qx;
+				out->gun.qz = w1 * R.qz + x1 * R.qy - y1 * R.qx + z1 * R.qw;
+				out->gun.qw = w1 * R.qw - x1 * R.qx - y1 * R.qy - z1 * R.qz;
+			}
+		}
 		return true;
 	}
 
