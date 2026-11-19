@@ -382,6 +382,7 @@ public:
 	void clear_hand_pose(u8 hand, float accrue = 0.f, float falloff = 0.f);
 	void render_hud(IDSGraphManager* DM);
 	bool vr_place_at_grip(); // GammaVR milestone 3: moves the whole HUD rig so the held item sits at the controller grip pose
+	void vr_log_gun_pixels(); // GammaVR milestone 3b: logging only (pixels of the held item's origin and muzzle per eye)
 	void render_item_ui();
 	bool render_item_ui_query();
 	u32 anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotionDef*& md, float speed, u16 override_part = u16(-1));

@@ -1337,6 +1337,75 @@ void player_hud::finalize_hands_ik()
 // C so that the held item's model origin lands on the grip pose mapped to the world through the same tracking-to-world
 // mapping as the camera (g_vr_track.track_to_world). C maps the item's current transform onto the target, so a second
 // call in the same frame (second eye) gives C = identity. The arms stay attached to the item as they are.
+// GammaVR milestone 3b (Amendment 10), logging only. The held item's muzzle (fire point) and barrel axis (direction of
+// fire) in the world, from the item's CURRENT transform (i.e. after the grip placement of this frame). Same derivation as
+// attachable_hud_item::setup_firedeps(), done locally because setup_firedeps() calls update() and runs from the weapon
+// update, not after the placement: muzzle = m_item_transform * (fire bone transform * m_fire_point_offset),
+// axis = m_item_transform rotation * m_fire_direction (item model space, default (0,0,1)), normalized.
+// False when the item has no fire bone data (no fire_bone line, or the bone is missing).
+static bool vr_gun_fire_world(attachable_hud_item* item, Fvector& muzzle, Fvector& axis)
+{
+	const hud_item_measures& M = item->m_measures;
+	if (!M.m_prop_flags.test(hud_item_measures::e_fire_point) || M.m_fire_bone == BI_NONE || !item->m_model)
+		return false;
+	const Fmatrix& fire_mat = item->m_model->LL_GetTransform(M.m_fire_bone);
+	fire_mat.transform_tiny(muzzle, M.m_fire_point_offset);
+	item->m_item_transform.transform_tiny(muzzle);
+	item->m_item_transform.transform_dir(axis, M.m_fire_direction);
+	if (axis.magnitude() < EPS)
+		return false;
+	axis.normalize();
+	return true;
+}
+
+// pixel (x right, y down, origin top-left) of world point p in this eye's render target, projected with the matrix the
+// HUD pass draws with (CHudInitializer::SetHudMode: Device.mFullTransformHud = mProjectHud * mView of this eye).
+// False when the point is behind the camera (w <= 0).
+static bool vr_hud_pixel(const Fvector& p, float& px, float& py)
+{
+	const Fmatrix& T = Device.mFullTransformHud;
+	const float w = p.x * T._14 + p.y * T._24 + p.z * T._34 + T._44;
+	if (!(w > 0.f))
+		return false;
+	const float x = (p.x * T._11 + p.y * T._21 + p.z * T._31 + T._41) / w;
+	const float y = (p.x * T._12 + p.y * T._22 + p.z * T._32 + T._42) / w;
+	px = (x * 0.5f + 0.5f) * float(Device.dwWidth);
+	py = (0.5f - y * 0.5f) * float(Device.dwHeight);
+	return true;
+}
+
+extern ENGINE_API int g_stereo_bench_eye;
+
+// Milestone 3b: on stereo frames 200 and 300 (same counter as the -vr_dump pictures and masks), for each eye pass,
+// log the pixels of the item's origin (the point placed on the grip) and of its muzzle, after the placement.
+void player_hud::vr_log_gun_pixels()
+{
+	if (!g_vr_track.active || (g_vr_track.frame != 200 && g_vr_track.frame != 300))
+		return;
+	attachable_hud_item* item = m_attached_items[0] ? m_attached_items[0] : m_attached_items[1];
+	if (!item)
+		return;
+	static u32 s_logged_frame[2] = { u32(-1), u32(-1) };
+	const int eye = g_stereo_bench_eye;
+	const int slot = eye == 1 ? 1 : 0;
+	if (s_logged_frame[slot] == g_vr_track.frame)
+		return;
+	s_logged_frame[slot] = g_vr_track.frame;
+	string64 o_txt, m_txt;
+	float ox, oy, mx, my;
+	if (vr_hud_pixel(item->m_item_transform.c, ox, oy))
+		xr_sprintf(o_txt, "%.2f %.2f", ox, oy);
+	else
+		xr_strcpy(o_txt, "nan nan");
+	Fvector muzzle, axis;
+	if (vr_gun_fire_world(item, muzzle, axis) && vr_hud_pixel(muzzle, mx, my))
+		xr_sprintf(m_txt, "%.2f %.2f", mx, my);
+	else
+		xr_strcpy(m_txt, "nan nan");
+	Msg("* [vr3] frame %u eye %d gun_px origin %s muzzle %s size %u %u", g_vr_track.frame, eye, o_txt, m_txt,
+		Device.dwWidth, Device.dwHeight);
+}
+
 bool player_hud::vr_place_at_grip()
 {
 	attachable_hud_item* item = m_attached_items[0] ? m_attached_items[0] : m_attached_items[1];
@@ -1400,6 +1469,24 @@ bool player_hud::vr_place_at_grip()
 		world_to_track.transform_tiny(t, w);
 		Msg("* [vr3] frame %u gun_world pos %.4f %.4f %.4f", g_vr_track.frame, w.x, w.y, w.z);
 		Msg("* [vr3] frame %u gun_track pos %.4f %.4f %.4f", g_vr_track.frame, t.x, t.y, t.z);
+		// milestone 3b: barrel axis and muzzle, after the placement above (world and tracking space, engine axes)
+		Fvector muzzle, axis;
+		if (vr_gun_fire_world(item, muzzle, axis))
+		{
+			Fvector axis_t, muzzle_t;
+			world_to_track.transform_dir(axis_t, axis);
+			axis_t.normalize_safe();
+			world_to_track.transform_tiny(muzzle_t, muzzle);
+			Msg("* [vr3] frame %u gun_axis track %.5f %.5f %.5f world %.5f %.5f %.5f", g_vr_track.frame,
+				axis_t.x, axis_t.y, axis_t.z, axis.x, axis.y, axis.z);
+			Msg("* [vr3] frame %u gun_muzzle track %.4f %.4f %.4f world %.4f %.4f %.4f", g_vr_track.frame,
+				muzzle_t.x, muzzle_t.y, muzzle_t.z, muzzle.x, muzzle.y, muzzle.z);
+		}
+		else
+		{
+			Msg("* [vr3] frame %u gun_axis track nan nan nan world nan nan nan", g_vr_track.frame);
+			Msg("* [vr3] frame %u gun_muzzle track nan nan nan world nan nan nan", g_vr_track.frame);
+		}
 	}
 	return true;
 }
@@ -1425,6 +1512,8 @@ void player_hud::render_hud(IDSGraphManager* DM)
 				Msg("! [vr3] frame %u held item NOT placed at the grip (no item in hand 0/1, no grip pose, or bad scale)", g_vr_track.frame);
 			}
 		}
+		else
+			vr_log_gun_pixels(); // milestone 3b: in every eye pass, with the item's final transform of this frame
 	}
 
 	DM->add_Dynamic(m_model->dcast_RenderVisual(), &m_transform);
