@@ -1108,8 +1108,11 @@ extern int g_ai_unlimited_ammo;
 float g_AimLookFactor = 1.f;
 
 int ps_framelimiter = 0;
-// VR spike: 0 = mono, 1 = naive stereo (whole scene render twice per frame, one pass per eye)
+// VR spike: 0 = mono, 1 = naive stereo (whole scene render twice per frame, one pass per eye),
+// 2 = as 1, but the sun shadow maps are rendered for the first eye only and reused for the second
 ENGINE_API int ps_r_stereo_bench = 0;
+// eye being rendered inside the stereo loop (0/1), -1 outside it
+ENGINE_API int g_stereo_bench_eye = -1;
 ENGINE_API float ps_r_stereo_ipd = 0.064f;
 extern u32 g_crosshair_color;
 float g_freelook_z_offset;
@@ -1346,7 +1349,7 @@ void CCC_Register()
 	CMD1(CCC_HideConsole, "hide");
 
 	CMD4(CCC_Integer, "r__framelimit", &ps_framelimiter, 0, 500);
-	CMD4(CCC_Integer, "r_stereo_bench", &ps_r_stereo_bench, 0, 1);
+	CMD4(CCC_Integer, "r_stereo_bench", &ps_r_stereo_bench, 0, 2);
 	CMD4(CCC_Float, "r_stereo_ipd", &ps_r_stereo_ipd, 0.f, 0.2f);
 	CMD3(CCC_Mask, "rs_refresh_60hz", &psDeviceFlags, rsRefresh60hz);
 	CMD3(CCC_Mask, "dbg_ph_shapes", &psDeviceFlags2, rsDBGDrawPHShapes);

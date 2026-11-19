@@ -7,6 +7,28 @@
 
 constexpr float tweak_COP_initial_offs = 1200.f;
 
+extern ENGINE_API int ps_r_stereo_bench;
+extern ENGINE_API int g_stereo_bench_eye;
+#ifdef USE_DX11
+static ID3D11Texture2D* s_stereo_smap_depth[8] = {};
+static ID3D11Texture2D* s_stereo_smap_surf[8] = {};
+static bool s_stereo_smap_tsh[8] = {};
+// to_saved: live shadow map -> per-cascade copy; otherwise copy -> live shadow map
+static void stereo_smap_copy(ID3D11Texture2D*& saved, ID3D11Texture2D* live, bool to_saved)
+{
+	if (!live) return;
+	if (!saved)
+	{
+		if (!to_saved) return;
+		D3D11_TEXTURE2D_DESC d;
+		live->GetDesc(&d);
+		if (FAILED(HW.pDevice->CreateTexture2D(&d, nullptr, &saved))) { saved = nullptr; return; }
+	}
+	if (to_saved) HW.pContext->CopyResource(saved, live);
+	else HW.pContext->CopyResource(live, saved);
+}
+#endif
+
 float OLES_SUN_LIMIT_27_01_07 = 100.f;
 
 //////////////////////////////////////////////////////////////////////////
@@ -83,12 +105,18 @@ void CRender::render_sun_cascade(u32 cascade_ind)
 	PROF_EVENT("Render Cascade");
 	light* fuckingsun = (light*)Lights.sun_adapted._get();
 	sun::cascade& cascade = m_sun_cascades[cascade_ind];
+	// VR spike, r_stereo_bench 2: first eye renders and saves each cascade's shadow map, second eye reuses it
+	// (same cascade matrices, so the prepass that derives them from the camera is skipped as well).
+	const bool stereo_shared = ps_r_stereo_bench == 2 && cascade_ind < 8;
+	const bool stereo_save = stereo_shared && g_stereo_bench_eye == 0;
+	const bool stereo_reuse = stereo_shared && g_stereo_bench_eye == 1;
 
 	CFrustum& cull_frustum = cascade.cull_frustum;
 	xr_vector<Fplane> cull_planes;
 	Fvector3& cull_COP = cascade.cull_COP;
 	Fmatrix& cull_xform = cascade.cull_xform;
 
+	if (!stereo_reuse)
 	{
 		PROF_EVENT("Render Cascade: Prepass");
 
@@ -283,6 +311,8 @@ void CRender::render_sun_cascade(u32 cascade_ind)
 		}
 	}
 
+	if (!stereo_reuse)
+	{
 	// Begin SMAP-render
     {
         PROF_EVENT("Render Cascade: SMAP traverse");
@@ -329,6 +359,27 @@ void CRender::render_sun_cascade(u32 cascade_ind)
 
         // End SMAP-render
     }	
+#ifdef USE_DX11
+		if (stereo_save)
+		{
+			stereo_smap_copy(s_stereo_smap_depth[cascade_ind], Target->rt_smap_depth->pSurface, true);
+			stereo_smap_copy(s_stereo_smap_surf[cascade_ind], Target->rt_smap_surf->pSurface, true);
+			s_stereo_smap_tsh[cascade_ind] = fuckingsun->X.D.transluent;
+		}
+#endif
+	}
+#ifdef USE_DX11
+	else
+	{
+		// second eye: put back the shadow map the first eye rendered for this cascade
+		PROF_EVENT("Render Cascade: reuse first-eye SMAP");
+		fuckingsun->X.D.combine = cull_xform;
+		fuckingsun->X.D.transluent = s_stereo_smap_tsh[cascade_ind];
+		Target->phase_accumulator(); // unbind the shadow map before copying into it
+		stereo_smap_copy(s_stereo_smap_depth[cascade_ind], Target->rt_smap_depth->pSurface, false);
+		stereo_smap_copy(s_stereo_smap_surf[cascade_ind], Target->rt_smap_surf->pSurface, false);
+	}
+#endif
 
 	// Accumulate
 	PROF_EVENT("Render Cascade: Accumulate");

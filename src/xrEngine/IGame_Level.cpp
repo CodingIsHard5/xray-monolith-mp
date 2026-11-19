@@ -185,7 +185,8 @@ void IGame_Level::OnRender()
 	{
 		extern ENGINE_API int ps_r_stereo_bench;
 		extern ENGINE_API float ps_r_stereo_ipd;
-		if (ps_r_stereo_bench == 1 && g_pGameLevel && !Device.m_SecondViewport.IsSVPFrame())
+		extern ENGINE_API int g_stereo_bench_eye;
+		if (ps_r_stereo_bench >= 1 && g_pGameLevel && !Device.m_SecondViewport.IsSVPFrame())
 		{
 			// VR spike, naive stereo: the full scene pipeline runs once per eye.
 			// Each eye is offset half the IPD along camera right and gets an off-centre projection.
@@ -194,6 +195,7 @@ void IGame_Level::OnRender()
 			const Fmatrix view0 = Device.mView, proj0 = Device.mProject, projHud0 = Device.mProjectHud;
 			for (int eye = 0; eye < 2; ++eye)
 			{
+				g_stereo_bench_eye = eye;
 				const float side = eye ? 1.f : -1.f;
 				Device.vCameraPosition.mad(pos0, Device.vCameraRight, side * ps_r_stereo_ipd * 0.5f);
 				Device.mView.build_camera_dir(Device.vCameraPosition, Device.vCameraDirection, Device.vCameraTop);
@@ -216,6 +218,7 @@ void IGame_Level::OnRender()
 					Render->Render();
 				}
 			}
+			g_stereo_bench_eye = -1;
 			// restore the centre camera for everything drawn after the scene (UI, debug)
 			{
 				Device.vCameraPosition = pos0;
