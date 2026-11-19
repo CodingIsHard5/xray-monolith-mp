@@ -143,3 +143,39 @@ inline bool vr_m3()
 	static const bool v = !!strstr(Core.Params, "-vr_m3");
 	return v;
 }
+
+// Milestone 3s (Amendment 13): the VR BASE the tracking frame hangs on, instead of the game camera after effects.
+// Filled by xrGame (CActor::cam_Update) each frame when the VR m3 path is configured (-vr_m3 and -vr_openxr):
+// pos = the actor's eye position before the camera-effector loop, with crouch-height smoothing, stair smoothing and the
+// IK height shift kept, and with lean (lookout pivot and roll) and the wall push-out (collide_camera) left out.
+// aim_heading/aim_pitch = the actor's first-eye camera direction this frame (heading = atan2(x, z), pitch = asin(y),
+// radians, engine axes x right, y up, z forward), used ONLY to initialise 'yaw' once and for logging.
+// yaw = the VR-owned facing (heading as above): set once at the first VR frame from aim_heading, afterwards only by
+// vr_base_set_yaw() (deliberate turning / teleports), never again from the actor camera.
+struct vr_base_state
+{
+	bool valid;        // pos/aim filled this engine frame (dev_frame == Device.dwFrame)
+	u32 dev_frame;
+	Fvector pos;
+	float aim_heading, aim_pitch;
+	bool yaw_set;
+	float yaw;
+};
+extern ENGINE_API vr_base_state g_vr_base;
+inline void vr_base_set_yaw(float heading)
+{
+	g_vr_base.yaw = heading;
+	g_vr_base.yaw_set = true;
+}
+// the VR m3 path is configured for this run (flat runs never take any branch guarded by this)
+inline bool vr_m3_vr()
+{
+	static const bool v = vr_m3() && !!strstr(Core.Params, "-vr_openxr");
+	return v;
+}
+// -vr_base_old: control mode, the tracking frame hangs on the game camera after effects (milestone 3 behaviour)
+inline bool vr_base_old()
+{
+	static const bool v = !!strstr(Core.Params, "-vr_base_old");
+	return v;
+}

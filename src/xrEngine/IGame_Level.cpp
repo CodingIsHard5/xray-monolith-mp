@@ -230,7 +230,40 @@ void IGame_Level::OnRender()
 						s_head0.pos.x, s_head0.pos.y, s_head0.pos.z, s_head0.qx, s_head0.qy, s_head0.qz, s_head0.qw);
 				}
 				Fmatrix game_cam, head0, head0_inv, head_now, head_world;
-				game_cam.set(right0, top0, dir0, pos0);
+				// milestone 3s (Amendment 13): the tracking frame hangs on the VR base (actor eye before the camera
+				// effects, no lean, no wall push-out; facing = the VR-owned yaw, latched once), not on the camera after
+				// effects. -vr_base_old (control), or no VR base this frame: the camera after effects, as before.
+				static bool s_base_logged = false;
+				if (!s_base_logged)
+				{
+					s_base_logged = true;
+					Msg(vr_base_old() ? "* [vr3] tracking base: OLD (camera after effects)" : "* [vr3] tracking base: VR base (before effects)");
+				}
+				const bool use_base = !vr_base_old() && g_vr_base.valid && g_vr_base.dev_frame == Device.dwFrame;
+				if (use_base)
+				{
+					if (!g_vr_base.yaw_set)
+					{
+						vr_base_set_yaw(g_vr_base.aim_heading);
+						Msg("* [vr3] VR base yaw latched at frame %u: %.5f rad (actor aim heading)", vr_info.frame, g_vr_base.yaw);
+					}
+					game_cam.rotateY(g_vr_base.yaw); // k = (sin yaw, 0, cos yaw): yaw only, no pitch, no roll
+					game_cam.c.set(g_vr_base.pos);
+				}
+				else
+				{
+					if (!vr_base_old())
+					{
+						static bool s_fallback_logged = false;
+						if (!s_fallback_logged)
+						{
+							s_fallback_logged = true;
+							Msg("! [vr3] frame %u: no VR base this frame (valid %d, base frame %u, device frame %u); camera after effects used",
+								vr_info.frame, g_vr_base.valid ? 1 : 0, g_vr_base.dev_frame, Device.dwFrame);
+						}
+					}
+					game_cam.set(right0, top0, dir0, pos0);
+				}
 				vr_pose_matrix(s_head0, head0);
 				head0_inv.invert(head0);
 				g_vr_track.track_to_world.mul_43(game_cam, head0_inv); // head0_inv first, then the game camera

@@ -29,6 +29,7 @@
 #include "Missile.h"
 
 #include "EffectorBobbing.h"
+#include "../xrEngine/vr_hooks.h"
 class CFPCamEffector;
 
 ENGINE_API extern float psHUD_FOV;
@@ -599,6 +600,20 @@ void CActor::cam_Update(float dt, float fFOV)
 	{
 		collide_camera(*cameras[eacFirstEye], _viewport_near, this);
 	}
+	// GammaVR milestone 3s (Amendment 13): VR base for the tracking frame. Only with -vr_m3 -vr_openxr; writes nothing
+	// but g_vr_base. Position = the same eye point as 'point' above but without lean (cam_Lookout / r_torso.roll via
+	// calc_point) and without the wall push-out (collide_camera): actor origin + up * (smoothed crouch height + IK shift
+	// + stair smoothing offset). The yaw-only xform does not move a point on its y axis, so no rotation is needed.
+	if (vr_m3_vr() && Level().CurrentControlEntity() == this)
+	{
+		const Fvector& o = XFORM().c;
+		g_vr_base.pos.set(o.x, o.y + CurrentHeight + current_ik_cam_shift + (fPrevCamPos - flCurrentPlayerY), o.z);
+		const Fvector& d = cameras[eacFirstEye]->vDirection;
+		g_vr_base.aim_heading = atan2f(d.x, d.z);
+		g_vr_base.aim_pitch = asinf(_max(-1.f, _min(1.f, d.y)));
+		g_vr_base.dev_frame = Device.dwFrame;
+		g_vr_base.valid = true;
+	}
 
     static bool firstPersonDeathDied = false;
 	if (cam_active == eacFirstEye) {
@@ -663,6 +678,14 @@ void CActor::cam_Update(float dt, float fFOV)
 	//if( psActorFlags.test(AF_PSP) )
 	//{
 	Cameras().UpdateFromCamera(C);
+	// GammaVR diagnostic, flat run only (-vr_dbg_base_flat, VR path not configured): the -vr_dbg_base line from the
+	// normal frame, after the camera effects were applied. Frame = number of this actor's camera updates since the
+	// first one (0-based); it does NOT match the VR frame counter exactly (align runs on the logged events). Logging only.
+	if (!vr_m3_vr() && Level().CurrentControlEntity() == this && strstr(Core.Params, "-vr_dbg_base_flat"))
+	{
+		static u32 s_flat_frame = 0;
+		vr_dbg_base_log(true, s_flat_frame++);
+	}
 	//}else
 	//{
 	//	Cameras().UpdateFromCamera			(cameras[eacFirstEye]);

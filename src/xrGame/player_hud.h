@@ -533,3 +533,5 @@ public:
 };
 
 extern player_hud* g_player_hud;
+// GammaVR diagnostic (-vr_dbg_base <from> <to>): one line per frame; flat = called from the flat frame (-vr_dbg_base_flat)
+void vr_dbg_base_log(bool flat, u32 frame);

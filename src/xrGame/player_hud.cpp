@@ -1892,7 +1892,16 @@ bool player_hud::vr_place_at_grip()
 //  cambase = the actor's active camera before effectors (cam_Active()->Position())
 //  t2w     = g_vr_track.track_to_world.c
 //  effs    = active camera effectors: count, then type id, class name, 'H' if a HUD motion camera effector
-static void vr_dbg_base_log()
+// prints "x y z" with the given precision, or "nan nan nan" (portable, MSVC prints NaN as -nan(ind))
+static void vr_dbg_vec(string64& out, const Fvector* v, int prec)
+{
+	if (v)
+		xr_sprintf(out, "%.*f %.*f %.*f", prec, v->x, prec, v->y, prec, v->z);
+	else
+		xr_strcpy(out, "nan nan nan");
+}
+
+void vr_dbg_base_log(bool flat, u32 frame)
 {
 	static int s_from = -1, s_to = -1;
 	static bool s_parsed = false;
@@ -1902,20 +1911,19 @@ static void vr_dbg_base_log()
 		if (LPCSTR p = strstr(Core.Params, "-vr_dbg_base "))
 			if (sscanf(p + 13, "%d %d", &s_from, &s_to) != 2)
 				s_from = s_to = -1;
-		Msg("* [vr3dbg] base diagnostic window %d %d", s_from, s_to);
+		Msg("* [vr3dbg] base diagnostic window %d %d (%s)", s_from, s_to, flat ? "FLAT, VR path off" : "VR path");
 	}
-	if (s_from < 0 || !g_actor || int(g_vr_track.frame) < s_from || int(g_vr_track.frame) > s_to)
+	if (s_from < 0 || !g_actor || int(frame) < s_from || int(frame) > s_to)
 		return;
 	static u32 s_logged = u32(-1);
-	if (s_logged == g_vr_track.frame)
+	if (s_logged == frame)
 		return;
-	s_logged = g_vr_track.frame;
+	s_logged = frame;
 	CCameraManager& CM = g_actor->Cameras();
 	const Fvector cp = CM.Position(), cd = CM.Direction();
 	CCameraBase* cb = g_actor->cam_Active();
 	const Fvector bp = cb ? cb->Position() : Fvector().set(0.f, 0.f, 0.f);
 	const Fvector& ap = g_actor->Position();
-	const Fvector& t = g_vr_track.track_to_world.c;
 	string1024 effs;
 	effs[0] = 0;
 	u32 n = 0;
@@ -1924,28 +1932,64 @@ static void vr_dbg_base_log()
 		if (!e)
 			continue;
 		++n;
-		string128 one;
-		xr_sprintf(one, " %d:%s%s", (int)e->GetType(), typeid(*e).name(), e->IsHudMotionEffector() ? ":H" : "");
+		string256 one;
+		string128 cls;
+		xr_strcpy(cls, typeid(*e).name()); // MSVC: "class CEffectorBobbing": spaces become '_' so each entry is one token
+		for (char* c = cls; *c; ++c)
+			if (*c == ' ')
+				*c = '_';
+		xr_sprintf(one, " %d:%s%s", (int)e->GetType(), cls, e->IsHudMotionEffector() ? ":H" : "");
 		if (xr_strlen(effs) + xr_strlen(one) < sizeof(effs) - 1)
 			xr_strcat(effs, one);
 	}
 	u32 hud_st = u32(-1);
 	LPCSTR motion = "none";
+	int ammo = -1;
 	if (CHudItem* hi = smart_cast<CHudItem*>(g_actor->inventory().ActiveItem()))
 	{
 		hud_st = hi->GetState();
 		if (hi->m_current_motion.size())
 			motion = hi->m_current_motion.c_str();
 	}
-	Msg("* [vr3dbg] frame %u cam %.4f %.4f %.4f dir %.5f %.5f %.5f cambase %.4f %.4f %.4f actor %.4f %.4f %.4f t2w %.4f %.4f %.4f mstate 0x%08x hud_state %u motion %s effs %u%s",
-		g_vr_track.frame, cp.x, cp.y, cp.z, cd.x, cd.y, cd.z, bp.x, bp.y, bp.z, ap.x, ap.y, ap.z, t.x, t.y, t.z,
-		g_actor->MovingState(), hud_st, motion, n, effs);
+	if (CWeapon* w = smart_cast<CWeapon*>(g_actor->inventory().ActiveItem()))
+		ammo = w->GetAmmoElapsed();
+	// VR-only fields (nan in a flat run): tracking origin t2w, the tracking-space point (0,0,2) in the world (p2),
+	// the VR base position and yaw
+	string64 t_txt, p2_txt, base_txt, yaw_txt;
+	if (!flat)
+	{
+		Fvector p2;
+		g_vr_track.track_to_world.transform_tiny(p2, Fvector().set(0.f, 0.f, 2.f));
+		vr_dbg_vec(t_txt, &g_vr_track.track_to_world.c, 4);
+		vr_dbg_vec(p2_txt, &p2, 4);
+	}
+	else
+	{
+		vr_dbg_vec(t_txt, nullptr, 4);
+		vr_dbg_vec(p2_txt, nullptr, 4);
+	}
+	if (!flat && g_vr_base.valid && g_vr_base.yaw_set)
+	{
+		vr_dbg_vec(base_txt, &g_vr_base.pos, 4);
+		xr_sprintf(yaw_txt, "%.4f", g_vr_base.yaw);
+	}
+	else
+	{
+		vr_dbg_vec(base_txt, nullptr, 4);
+		xr_strcpy(yaw_txt, "nan");
+	}
+	// actor aim (first-eye camera direction, before effects): yaw = atan2(x, z), pitch = asin(y), radians
+	const Fvector& ad = g_actor->cam_FirstEye()->vDirection;
+	const float aim_yaw = atan2f(ad.x, ad.z), aim_pitch = asinf(_max(-1.f, _min(1.f, ad.y)));
+	Msg("* [vr3dbg] frame %u cam %.4f %.4f %.4f dir %.5f %.5f %.5f cambase %.4f %.4f %.4f actor %.4f %.4f %.4f t2w %s mstate 0x%08x hud_state %u motion %s effs %u%s p2 %s base %s yaw %s aim %.5f %.5f ammo %d health %.4f",
+		frame, cp.x, cp.y, cp.z, cd.x, cd.y, cd.z, bp.x, bp.y, bp.z, ap.x, ap.y, ap.z, t_txt,
+		g_actor->MovingState(), hud_st, motion, n, effs, p2_txt, base_txt, yaw_txt, aim_yaw, aim_pitch, ammo, g_actor->GetfHealth());
 }
 
 void player_hud::render_hud(IDSGraphManager* DM)
 {
 	if (g_vr_track.active)
-		vr_dbg_base_log(); // GammaVR diagnostic, only with -vr_dbg_base
+		vr_dbg_base_log(false, g_vr_track.frame); // GammaVR diagnostic, only with -vr_dbg_base
 	bool b_r0 = ((m_attached_items[0] && m_attached_items[0]->need_renderable()) || script_anim_part == 0 || script_anim_part == 2);
 	bool b_r1 = ((m_attached_items[1] && m_attached_items[1]->need_renderable()) || script_anim_part == 1 || script_anim_part == 2);
 
