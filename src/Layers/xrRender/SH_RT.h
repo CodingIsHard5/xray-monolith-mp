@@ -17,6 +17,13 @@ public:
 	void reset_begin();
 	void reset_end();
 	IC BOOL valid() { return !!pTexture; }
+#ifdef USE_DX11
+	void vr_swap(CRT& o) // GammaVR: per-eye history, see CTexture::vr_swap_surface
+	{
+		std::swap(pSurface, o.pSurface); std::swap(pRT, o.pRT); std::swap(pZRT, o.pZRT); std::swap(pUAView, o.pUAView);
+		if (pTexture._get() && o.pTexture._get()) pTexture->vr_swap_surface(*o.pTexture._get());
+	}
+#endif
 
 public:
 	ID3DTexture2D* pSurface;

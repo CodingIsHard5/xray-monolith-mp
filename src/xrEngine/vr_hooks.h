@@ -21,3 +21,11 @@ inline bool vr_plain()
 	static const bool v = !!strstr(Core.Params, "-vr_plain");
 	return v;
 }
+
+// "VR preset" (Overseer ruling 2026-11-19): full-screen effects that are a comfort problem in a headset are off
+// (film grain, motion blur, volumetric blur). On with -vr_openxr, or with -vr_preset for the flat benchmark.
+inline bool vr_preset()
+{
+	static const bool v = strstr(Core.Params, "-vr_openxr") || strstr(Core.Params, "-vr_preset");
+	return v;
+}

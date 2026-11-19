@@ -304,6 +304,14 @@ void CEnvironment::SetGameTime(float game_time, float time_factor)
 		return;
 	}
 #endif
+	// GammaVR test switch -vr_freeze_env: the weather clock stays at the value of its first update, so the sun and
+	// sky are the same in every run of a picture comparison across runs (mono-twin check).
+	static const bool vr_freeze_env = !!strstr(Core.Params, "-vr_freeze_env");
+	if (vr_freeze_env)
+	{
+		static float first_time = game_time;
+		game_time = first_time;
+	}
 	if (bWFX)
 		wfx_time -= TimeDiff(fGameTime, game_time);
 	fGameTime = game_time;

@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "../../xrEngine/vr_hooks.h"
+extern ENGINE_API int g_stereo_bench_eye;
 #include "../../xrEngine/igame_persistent.h"
 #include "../../xrEngine/environment.h"
 
@@ -89,11 +90,14 @@ void CRenderTarget::phase_combine()
 	// Save previus and current matrices
 	Fvector2 m_blur_scale;
 	{
-		static Fmatrix m_saved_viewproj;
+		static Fmatrix m_saved_viewproj_eye[2];
+		const int hist_eye = (vr_hist_count && g_stereo_bench_eye == 1) ? 1 : 0; // GammaVR: own history per eye
+		Fmatrix& m_saved_viewproj = m_saved_viewproj_eye[hist_eye];
 
 		if (!Device.m_SecondViewport.IsSVPFrame())
 		{
-			static Fvector3 saved_position;
+			static Fvector3 saved_position_eye[2];
+			Fvector3& saved_position = saved_position_eye[hist_eye];
 			Position_previous.set(saved_position);
 			saved_position.set(Device.vCameraPosition);
 
@@ -525,7 +529,7 @@ void CRenderTarget::phase_combine()
 		phase_ssfx_fog_scattering();
 	}
 
-	if (RImplementation.o.ssfx_motionblur && ps_ssfx_motionblur.y > 0 && !vr_plain())
+	if (RImplementation.o.ssfx_motionblur && ps_ssfx_motionblur.y > 0 && !vr_plain() && !vr_preset())
 	{
 		PIX_EVENT(phase_ssfx_motion_blur);
 		phase_ssfx_motion_blur();

@@ -66,6 +66,16 @@ CTexture::~CTexture()
 	DEV->_DeleteTexture(this);
 }
 
+// GammaVR: per-eye history. Two render-target textures of identical size and format trade their GPU surface and view,
+// so shaders that sample this texture by name read the other eye's copy. No GPU work, no new objects.
+void CTexture::vr_swap_surface(CTexture& o)
+{
+	std::swap(pSurface, o.pSurface);
+	std::swap(m_pSRView, o.m_pSRView);
+	std::swap(desc_cache, o.desc_cache);
+	std::swap(desc, o.desc);
+}
+
 void CTexture::surface_set(ID3DBaseTexture* surf)
 {
 	while (flags.bLoading)

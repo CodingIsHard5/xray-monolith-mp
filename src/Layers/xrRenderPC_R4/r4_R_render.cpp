@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "../../xrEngine/vr_hooks.h"
+extern ENGINE_API int g_stereo_bench_eye;
 #include "../../xrEngine/igame_persistent.h"
 #include "../xrRender/FBasicVisual.h"
 #include "../../xrEngine/customhud.h"
@@ -75,6 +76,7 @@ void CRender::Render()
 	PIX_EVENT_C(CRender_Render, dx10_marker_frame);
 	dx10_annotate_frame();
 
+	if (Target) Target->vr_history_select(g_stereo_bench_eye);
 	rmNormal();
 
 	bool _menu_pp = g_pGamePersistent ? g_pGamePersistent->OnRenderPPUI_query() : false;
@@ -231,7 +233,8 @@ void CRender::Render()
 	{
 		// Save previus and current matrices
 		{
-			static Fmatrix mm_saved_viewproj;
+			static Fmatrix mm_saved_viewproj_eye[2];
+			Fmatrix& mm_saved_viewproj = mm_saved_viewproj_eye[Target->vr_hist_count && g_stereo_bench_eye == 1 ? 1 : 0]; // GammaVR: own history per eye
 
 			if (!Device.m_SecondViewport.IsSVPFrame())
 			{
@@ -344,7 +347,7 @@ void CRender::Render()
 	}
 
 	{
-		if (RImplementation.o.ssfx_volumetric && !vr_plain())
+		if (RImplementation.o.ssfx_volumetric && !vr_plain() && !vr_preset())
 			Target->phase_ssfx_volumetric_blur();
 	}
 

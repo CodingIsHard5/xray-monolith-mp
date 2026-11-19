@@ -64,7 +64,7 @@ BOOL CRenderTarget::u_need_PP()
 {
 	bool _blur = (param_blur > 0.001f);
 	bool _gray = (param_gray > 0.001f);
-	bool _noise = (param_noise > 0.001f) && !vr_plain();
+	bool _noise = (param_noise > 0.001f) && !vr_plain() && !vr_preset();
 	bool _dual = (param_duality_h > 0.001f) || (param_duality_v > 0.001f);
 
 	// bool	_menu_pp= g_pGamePersistent?g_pGamePersistent->OnRenderPPUI_query():false;

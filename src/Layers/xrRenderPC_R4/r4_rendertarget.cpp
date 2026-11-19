@@ -650,6 +650,7 @@ CRenderTarget::CRenderTarget()
 		rt_ssfx_water_waves.create(r2_RT_ssfx_water_waves, 512, 512, D3DFMT_A8R8G8B8); // Water Waves
 
 		rt_ssfx_prevPos.create(r2_RT_ssfx_prevPos, w, h, D3DFMT_A16B16G16R16F, SampleCount);
+		vr_history_create();
 
 		//rt_ssfx_hud.create(r2_RT_ssfx_hud, w, h, D3DFMT_A16B16G16R16F); // Deprecated
 
@@ -1565,4 +1566,44 @@ bool CRenderTarget::use_minmax_sm_this_frame()
 	default:
 		return false;
 	}
+}
+
+// GammaVR per-eye history -------------------------------------------------------------------------------------
+#include "../../xrEngine/vr_hooks.h"
+extern ENGINE_API int g_stereo_bench_eye;
+extern ENGINE_API int ps_r_stereo_bench;
+void CRenderTarget::vr_history_create()
+{
+	vr_hist_count = 0; vr_hist_eye = 0;
+	const bool want = strstr(Core.Params, "-vr_openxr") || strstr(Core.Params, "-vr_preset") || strstr(Core.Params, "-vr_eye_history");
+	if (!want || strstr(Core.Params, "-vr_shared_history")) return;
+	struct item { ref_rt* rt; u32 samples; };
+	const u32 sc = RImplementation.o.dx10_msaa ? RImplementation.o.dx10_msaa_samples : 1;
+	item list[] = {
+		{&rt_ssfx_prev_frame, 1}, {&rt_ssfx_prevPos, sc}, {&rt_ssfx_taa, sc},
+		{&rt_ssfx_ssr, 1}, {&rt_ssfx_water, 1}, {&rt_ssfx_ao, 1}, {&rt_ssfx_il, 1},
+		{&rt_ssfx_sss, 1}, {&rt_ssfx_sss_ext, 1}, {&rt_ssfx_sss_ext2, 1},
+	};
+	u64 bytes = 0;
+	for (const item& it : list)
+	{
+		CRT* live = it.rt->_get();
+		if (!live || !live->valid() || vr_hist_count >= VR_HIST_MAX) continue;
+		string128 name; xr_sprintf(name, "$user$vr_hist_%u", vr_hist_count);
+		rt_vr_hist[vr_hist_count].create(name, live->dwWidth, live->dwHeight, live->fmt, it.samples);
+		const u32 bpp = (live->fmt == D3DFMT_A16B16G16R16F) ? 8 : 4;
+		bytes += u64(live->dwWidth) * live->dwHeight * bpp * it.samples;
+		vr_hist_live[vr_hist_count++] = it.rt;
+	}
+	Msg("* [vr] per-eye history: %u pictures for the second eye, %.1f MB of video memory", vr_hist_count, float(bytes) / (1024.f * 1024.f));
+}
+// Called at the start of every scene render. eye 1 = second eye; anything else (first eye, mono) = the normal set.
+void CRenderTarget::vr_history_select(int eye)
+{
+	const int want = (eye == 1) ? 1 : 0;
+	if (want == vr_hist_eye || !vr_hist_count) return;
+	for (u32 i = 0; i < vr_hist_count; i++)
+		if (vr_hist_live[i]->_get() && rt_vr_hist[i]._get()) vr_hist_live[i]->_get()->vr_swap(*rt_vr_hist[i]._get());
+	vr_hist_eye = want;
+	RCache.Invalidate(); // bound-texture cache holds the old views
 }

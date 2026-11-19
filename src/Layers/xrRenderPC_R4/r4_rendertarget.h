@@ -225,6 +225,15 @@ public:
 	//ref_shader s_ssfx_hud[5]; // SSS23: DEPRECATED
 
 	Fmatrix Matrix_previous, Matrix_current;
+	// GammaVR per-eye history: the second eye's own copies of every picture that is carried from frame to frame.
+	// vr_history_select(eye) trades them with the live ones, so each eye blends with its own past.
+	enum { VR_HIST_MAX = 16 };
+	ref_rt rt_vr_hist[VR_HIST_MAX];
+	ref_rt* vr_hist_live[VR_HIST_MAX];
+	u32 vr_hist_count = 0;
+	int vr_hist_eye = 0;
+	void vr_history_create();
+	void vr_history_select(int eye);
 	//Fmatrix Matrix_HUD_previous, Matrix_HUD_current;
 	Fvector3 Position_previous;
 	//bool RVelocity;

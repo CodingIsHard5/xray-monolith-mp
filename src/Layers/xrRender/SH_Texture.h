@@ -40,6 +40,7 @@ public:
 	//	void								Apply			(u32 dwStage);
 
 	void surface_set(ID3DBaseTexture* surf);
+	void vr_swap_surface(CTexture& o); // GammaVR: exchange surface + view with another texture of the same size and format
 	ID3DBaseTexture* surface_get();
 
 	IC BOOL isUser() { return flags.bUser; }
