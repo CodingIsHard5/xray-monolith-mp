@@ -209,7 +209,16 @@ void IGame_Level::OnRender()
 			// that the head pose of the first VR frame lands on this frame's game camera:
 			// track_to_world = game camera * inverse(head at the first VR frame); head camera = track_to_world * head.
 			Fvector head_pos = pos0, head_right = right0, head_top = top0, head_dir = dir0;
-			if (vr_frame && vr_info.head.valid)
+			if (vr_frame)
+			{
+				static bool s_m3_logged = false;
+				if (!s_m3_logged)
+				{
+					s_m3_logged = true;
+					Msg("* [vr3] milestone 3 paths %s (head pose camera, per-eye HUD view, gun at controller)", vr_m3() ? "ON (-vr_m3)" : "OFF");
+				}
+			}
+			if (vr_frame && vr_m3() && vr_info.head.valid)
 			{
 				static vr_pose s_head0;
 				static bool s_have_head0 = false;
@@ -285,8 +294,11 @@ void IGame_Level::OnRender()
 					Device.mProject._31 = -(V.tan_r + V.tan_l) / w;
 					Device.mProject._32 = -(V.tan_u + V.tan_d) / h;
 					// milestone 3: the HUD (held weapon) is placed in the world, so it gets the eye's field of view too
-					Device.mProjectHud._11 = Device.mProject._11;
-					Device.mProjectHud._22 = Device.mProject._22;
+					if (vr_m3())
+					{
+						Device.mProjectHud._11 = Device.mProject._11;
+						Device.mProjectHud._22 = Device.mProject._22;
+					}
 					Device.mProjectHud._31 = Device.mProject._31;
 					Device.mProjectHud._32 = Device.mProject._32;
 				}
@@ -312,7 +324,7 @@ void IGame_Level::OnRender()
 				{
 					// milestone 3: the HUD pass sets Device.mView from mViewHud (CHudInitializer::SetHudMode), which
 					// otherwise stays the mono camera; the gun must be seen from this eye
-					Device.mViewHud = Device.mView;
+					if (vr_m3()) Device.mViewHud = Device.mView;
 				}
 				Device.mFullTransform.mul(Device.mProject, Device.mView);
 				Device.mFullTransformHud.mul(Device.mProjectHud, Device.mView);

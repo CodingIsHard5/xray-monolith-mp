@@ -135,3 +135,11 @@ inline bool vr_dbg(const char* sw)
 {
 	return !!strstr(Core.Params, sw);
 }
+
+// Milestone 3 paths (head pose drives the camera, per-eye HUD view, gun at the controller) are OFF unless -vr_m3
+// is given, so builds that carry them still render milestone 2 tests exactly as before.
+inline bool vr_m3()
+{
+	static const bool v = !!strstr(Core.Params, "-vr_m3");
+	return v;
+}
