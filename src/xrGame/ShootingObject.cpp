@@ -15,6 +15,7 @@
 #include "level.h"
 #include "level_bullet_manager.h"
 #include "game_cl_single.h"
+#include "weapon.h" // GammaVR milestone 4b: deferred shots check that their weapon still exists
 
 #define HIT_POWER_EPSILON 0.05f
 #define WALLMARK_SIZE 0.04f
@@ -482,6 +483,74 @@ bool CShootingObject::SendHitAllowed(CObject* pUser)
 extern void random_dir(Fvector& tgt_dir, const Fvector& src_dir, float dispersion);
 // GammaVR milestone 4: [vr3fire] log line, defined in player_hud.cpp (no-op off the VR m3 path)
 void vr_log_shot(int shot, const Fvector& pos, const Fvector& dir0, const Fvector& dir, float disp, u32 bullet);
+// GammaVR milestone 4b (Amendment 17), defined in player_hud.cpp (declared there in player_hud.h)
+extern int g_vr_fire_src;
+extern u32 g_vr_fire_placed_frame;
+extern u16 g_vr_fire_defer_weapon;
+extern bool g_vr_fire_frame_set;
+extern u32 g_vr_fire_frame;
+bool vr_fire_cache_of_frame(u16 weapon_id, u32 dev_frame, Fvector& start, Fvector& dir, u32& placed_frame);
+u32 vr_fire_update_frame();
+
+// A bullet of the actor's gun whose creation waits for the gun placement drawn in its own frame. Queued and committed on
+// the main thread only: queued inside CWeaponMagazined::state_Fire (UpdateCL, in FrameMove), committed at the start of
+// the next CLevel::OnFrame (FrameMove), both while no secondary task runs (they start after FrameMove and are waited for
+// at the end of CRenderDevice::on_idle). Not committed from render_hud: the render runs concurrently with the
+// GameThread task (scheduler, seqParallel bullet update, Lua GC) and AddBullet calls Lua (CBulletOnInit).
+namespace
+{
+struct vr_deferred_shot
+{
+	CShootingObject* so;
+	IGame_Level* level;
+	u16 weapon_id, parent_id;
+	u32 dev_frame;    // Device.dwFrame of the update that fired
+	u32 log_frame;    // VR frame that update led to (fallback [vr3fire] frame)
+	u32 placed_frame; // placement frame of the fallback start/dir
+	Fvector pos, dir; // fallback: the previous frame's placement (milestone 4 values)
+	float fire_disp;
+	CCartridge cartridge;
+	bool send_hit;
+	int shot;
+};
+xr_vector<vr_deferred_shot> s_vr_deferred_shots;
+}
+
+void CShootingObject::vr_commit_deferred_shots()
+{
+	if (s_vr_deferred_shots.empty())
+		return;
+	xr_vector<vr_deferred_shot> shots;
+	shots.swap(s_vr_deferred_shots);
+	for (const vr_deferred_shot& S : shots)
+	{
+		if (S.level != g_pGameLevel || !g_pGameLevel)
+			continue;
+		CObject* o = Level().Objects.net_Find(S.weapon_id);
+		CWeapon* w = o ? smart_cast<CWeapon*>(o) : nullptr;
+		if (!w || o->getDestroy() || static_cast<CShootingObject*>(w) != S.so)
+		{
+			Msg("! [vr3] fire: deferred shot %d dropped, weapon %u gone", S.shot, u32(S.weapon_id));
+			continue;
+		}
+		Fvector pos = S.pos, dir = S.dir;
+		u32 placed = S.placed_frame, frame = S.log_frame, cache_frame = 0;
+		if (vr_fire_cache_of_frame(S.weapon_id, S.dev_frame, pos, dir, cache_frame))
+			placed = frame = cache_frame;
+		else
+			Msg("! [vr3] fire: no placement drawn in the shot's frame %u, shot %d uses the placement of frame %u",
+				S.log_frame, S.shot, S.placed_frame);
+		g_vr_fire_src = 1;
+		g_vr_fire_placed_frame = placed;
+		g_vr_fire_frame_set = true;
+		g_vr_fire_frame = frame;
+		S.so->CShootingObject::FireBullet(pos, dir, S.fire_disp, S.cartridge, S.parent_id, S.weapon_id, S.send_hit, S.shot);
+		g_vr_fire_frame_set = false;
+		g_vr_fire_frame = 0;
+		g_vr_fire_src = 0;
+		g_vr_fire_placed_frame = 0;
+	}
+}
 
 void CShootingObject::FireBullet(const Fvector& pos,
                                  const Fvector& shot_dir,
@@ -491,6 +560,28 @@ void CShootingObject::FireBullet(const Fvector& pos,
                                  u16 weapon_id,
                                  bool send_hit, int iShotNum)
 {
+	// GammaVR milestone 4b (Amendment 17): the actor's VR barrel shot is queued here (start/dir resolved and the bullet
+	// created by vr_commit_deferred_shots at the start of the next update, with the placement drawn in this frame)
+	if (g_vr_fire_defer_weapon != u16(-1) && weapon_id == g_vr_fire_defer_weapon && g_actor && parent_id == g_actor->ID())
+	{
+		vr_deferred_shot S;
+		S.so = this;
+		S.level = g_pGameLevel;
+		S.weapon_id = weapon_id;
+		S.parent_id = parent_id;
+		S.dev_frame = Device.dwFrame;
+		S.log_frame = vr_fire_update_frame();
+		S.placed_frame = g_vr_fire_placed_frame;
+		S.pos.set(pos);
+		S.dir.set(shot_dir);
+		S.fire_disp = fire_disp;
+		S.cartridge = cartridge;
+		S.send_hit = send_hit;
+		S.shot = iShotNum;
+		s_vr_deferred_shots.push_back(S);
+		return;
+	}
+
 	Fvector dir;
 	random_dir(dir, shot_dir, fire_disp);
 

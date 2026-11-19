@@ -542,7 +542,9 @@ void vr_dbg_base_log(bool flat, u32 frame);
 // the VR m3 path (vr_m3_vr(): -vr_m3 and -vr_openxr); flat runs never take a branch guarded by vr_fire_new() /
 // vr_recoil_new(). Defined in player_hud.cpp.
 // The held item's muzzle point and barrel direction in the WORLD as placed on the controller (kick included), written by
-// render_hud() in the eye passes of a VR frame, read by the fire path (CWeaponMagazined::state_Fire) of the next update.
+// render_hud() in the eye passes of a VR frame, read by the fire path (CWeaponMagazined::state_Fire) of the next update
+// (-vr_fire_prev, and the fallback) and, milestone 4b, by the deferred shots of the same frame
+// (CShootingObject::vr_commit_deferred_shots at the start of the next CLevel::OnFrame).
 struct vr_fire_cache
 {
 	bool valid;
@@ -570,6 +572,17 @@ bool vr_fire_from_gun(u16 weapon_id, Fvector& start, Fvector& dir, u32& placed_f
 // set by state_Fire around its FireTrace calls (for the [vr3fire] log): 1 = VR barrel path, 0 = old; placed frame or 0
 extern int g_vr_fire_src;
 extern u32 g_vr_fire_placed_frame;
+// milestone 4b (Amendment 17): resolve the actor's shot with the placement drawn in the shot's own frame.
+bool vr_fire_same_frame(); // vr_fire_new() and not -vr_fire_prev
+// fills start/dir/placed_frame from g_vr_fire only if it is weapon 'weapon_id' placed in the render of engine frame
+// 'dev_frame'; false (nothing changed) otherwise
+bool vr_fire_cache_of_frame(u16 weapon_id, u32 dev_frame, Fvector& start, Fvector& dir, u32& placed_frame);
+u32 vr_fire_update_frame(); // the VR frame the current update leads to (last drawn + 1), as [vr3fire] logs it
+// set by state_Fire around FireTrace: the weapon whose bullets CShootingObject::FireBullet queues; u16(-1) = none
+extern u16 g_vr_fire_defer_weapon;
+// set around a deferred shot's FireBullet: [vr3fire] logs g_vr_fire_frame instead of vr_fire_update_frame()
+extern bool g_vr_fire_frame_set;
+extern u32 g_vr_fire_frame;
 // [vr3fire] / [vr3hit] log lines (no-ops off the VR m3 path); also declared locally in ShootingObject.cpp and
 // Level_Bullet_Manager.cpp
 void vr_log_shot(int shot, const Fvector& pos, const Fvector& dir0, const Fvector& dir, float disp, u32 bullet);

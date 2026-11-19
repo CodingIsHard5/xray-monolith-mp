@@ -1785,17 +1785,24 @@ vr_fire_cache g_vr_fire;  // static storage: zero-initialised, valid = false
 vr_kick_state g_vr_kick;  // zero
 int g_vr_fire_src = 0;
 u32 g_vr_fire_placed_frame = 0;
+// milestone 4b (Amendment 17)
+u16 g_vr_fire_defer_weapon = u16(-1);
+bool g_vr_fire_frame_set = false;
+u32 g_vr_fire_frame = 0;
 
-// -vr_fire_old / -vr_recoil_old (controls), parsed once; constructed only on the VR m3 path (see vr_fire_new below), so
+// -vr_fire_old / -vr_fire_prev / -vr_recoil_old (controls), parsed once; constructed only on the VR m3 path (see vr_fire_new below), so
 // the start lines appear only in VR runs
 struct vr_m4_switches
 {
-	bool fire_old, recoil_old;
+	bool fire_old, fire_prev, recoil_old;
 	vr_m4_switches()
 	{
 		fire_old = !!strstr(Core.Params, "-vr_fire_old");
+		fire_prev = !!strstr(Core.Params, "-vr_fire_prev"); // milestone 4b control: milestone 4's previous-frame placement
 		recoil_old = !!strstr(Core.Params, "-vr_recoil_old");
-		Msg(fire_old ? "* [vr3] fire: OLD (flat camera pick)" : "* [vr3] fire: from the gun barrel (VR)");
+		Msg(fire_old ? "* [vr3] fire: OLD (flat camera pick)"
+			: fire_prev ? "* [vr3] fire: from the gun barrel (VR), PREVIOUS frame (control)"
+			: "* [vr3] fire: from the gun barrel (VR), same frame");
 		Msg(recoil_old ? "* [vr3] recoil: OLD (actor aim)" : "* [vr3] recoil: on the gun (VR)");
 	}
 };
@@ -1811,6 +1818,10 @@ bool vr_fire_new()
 bool vr_recoil_new()
 {
 	return vr_m3_vr() && !vr_m4().recoil_old;
+}
+bool vr_fire_same_frame()
+{
+	return vr_fire_new() && !vr_m4().fire_prev;
 }
 
 // called from CActor::update_camera instead of CWeaponShotEffector::ChangeHP: the same increments, kept here
@@ -1849,6 +1860,19 @@ bool vr_fire_from_gun(u16 weapon_id, Fvector& start, Fvector& dir, u32& placed_f
 	placed_frame = 0;
 	const vr_fire_cache& F = g_vr_fire;
 	if (!F.valid || F.item_id != weapon_id || Device.dwFrame - F.dev_frame > 2)
+		return false;
+	start.set(F.muzzle);
+	dir.set(F.dir);
+	placed_frame = F.frame;
+	return true;
+}
+
+// milestone 4b (Amendment 17): the cached placement only if it is of this weapon and was made in the render of engine
+// frame dev_frame (the frame whose update fired the shot). Nothing changed and false otherwise.
+bool vr_fire_cache_of_frame(u16 weapon_id, u32 dev_frame, Fvector& start, Fvector& dir, u32& placed_frame)
+{
+	const vr_fire_cache& F = g_vr_fire;
+	if (!F.valid || F.item_id != weapon_id || F.dev_frame != dev_frame)
 		return false;
 	start.set(F.muzzle);
 	dir.set(F.dir);
@@ -1929,6 +1953,10 @@ static u32 vr_update_frame()
 {
 	return g_vr_track.frame + 1;
 }
+u32 vr_fire_update_frame()
+{
+	return vr_update_frame();
+}
 
 // [vr3fire]: CShootingObject::FireBullet, actor's bullets only, VR m3 path only
 static xr_set<u32> s_vr_fired_bullets;
@@ -1938,7 +1966,7 @@ void vr_log_shot(int shot, const Fvector& pos, const Fvector& dir0, const Fvecto
 		return;
 	s_vr_fired_bullets.insert(bullet);
 	Msg("* [vr3fire] frame %u shot %d start %.5f %.5f %.5f dir0 %.6f %.6f %.6f dir %.6f %.6f %.6f disp %.6f bullet %u src %d placed_frame %u",
-		vr_update_frame(), shot, pos.x, pos.y, pos.z, dir0.x, dir0.y, dir0.z, dir.x, dir.y, dir.z, disp, bullet,
+		g_vr_fire_frame_set ? g_vr_fire_frame : vr_update_frame(), shot, pos.x, pos.y, pos.z, dir0.x, dir0.y, dir0.z, dir.x, dir.y, dir.z, disp, bullet,
 		g_vr_fire_src, g_vr_fire_placed_frame);
 }
 

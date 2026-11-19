@@ -808,10 +808,16 @@ void CWeaponMagazined::state_Fire(float dt)
 			// first base_dispersioned_bullets_count shots that otherwise reuse the first shot's start and direction
 			g_vr_fire_src = vr_src ? 1 : 0;
 			g_vr_fire_placed_frame = vr_placed_frame;
+			// milestone 4b (Amendment 17): on the barrel path (not -vr_fire_prev) the bullets of this FireTrace are
+			// queued by CShootingObject::FireBullet and created at the start of the next update with the placement drawn
+			// in THIS frame (p1, d above = previous placement, used only if this frame draws none). Everything else in
+			// FireTrace (ammo, particles, light, condition) happens now, as before.
+			g_vr_fire_defer_weapon = (vr_src && vr_fire_same_frame()) ? ID() : u16(-1);
 			if (m_iShotNum > m_iBaseDispersionedBulletsCount || vr_src)
 				FireTrace(p1, d);
 			else
 				FireTrace(m_vStartPos, m_vStartDir);
+			g_vr_fire_defer_weapon = u16(-1);
 			g_vr_fire_src = 0;
 			g_vr_fire_placed_frame = 0;
 

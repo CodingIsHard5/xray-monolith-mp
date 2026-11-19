@@ -65,6 +65,9 @@ protected:
 	virtual void FireStart();
 	virtual void FireEnd();
 public:
+	// GammaVR milestone 4b (Amendment 17): creates the actor's bullets queued by FireBullet in the previous update, with
+	// the gun placement drawn in that update's frame. Called once per frame from CLevel::OnFrame (main thread).
+	static void vr_commit_deferred_shots();
 	IC BOOL IsWorking() const { return bWorking; }
 	virtual BOOL ParentMayHaveAimBullet() { return FALSE; }
 	virtual bool SOParentIsActor() { return false; }

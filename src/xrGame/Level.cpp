@@ -1030,6 +1030,9 @@ void CLevel::OnFrame()
 		psDeviceFlags.set(rsDisableObjectsAsCrows, true);
 	else
 		psDeviceFlags.set(rsDisableObjectsAsCrows, false);
+	// GammaVR milestone 4b (Amendment 17): the actor's VR shots of the previous update, with the gun placement drawn in
+	// their frame (no-op unless such shots were queued; main thread, before the objects update)
+	CShootingObject::vr_commit_deferred_shots();
 	// commit events from bullet manager from prev-frame
 	Device.Statistic->TEST0.Begin();
 	BulletManager().CommitEvents();
