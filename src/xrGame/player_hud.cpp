@@ -1416,7 +1416,15 @@ void player_hud::render_hud(IDSGraphManager* DM)
 	{
 		if (vr_nogun())
 			return;
-		vr_place_at_grip();
+		if (!vr_place_at_grip())
+		{
+			static bool s_warned = false;
+			if (!s_warned)
+			{
+				s_warned = true;
+				Msg("! [vr3] frame %u held item NOT placed at the grip (no item in hand 0/1, no grip pose, or bad scale)", g_vr_track.frame);
+			}
+		}
 	}
 
 	DM->add_Dynamic(m_model->dcast_RenderVisual(), &m_transform);

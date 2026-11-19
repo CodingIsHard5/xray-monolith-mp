@@ -25,6 +25,8 @@
 #include "UI3dStatic.h"
 
 #include "GametaskManager.h"
+#include "inventory_item.h"
+#include "../xrEngine/vr_hooks.h"
 
 extern CUIGameCustom* CurrentGameUI()
 {
@@ -211,6 +213,20 @@ bool need_render_hud()
 
 void CHUDManager::Render_Last(IDSGraphManager* DM)
 {
+	// GammaVR milestone 3: every 100th VR frame, say whether a HUD item is held, so "no gun held" never looks like "no data"
+	static u32 s_vr_hud_logged = u32(-1);
+	if (g_vr_track.active && g_vr_track.frame % 100 == 0 && s_vr_hud_logged != g_vr_track.frame)
+	{
+		s_vr_hud_logged = g_vr_track.frame;
+		PIItem it = g_actor ? g_actor->inventory().ActiveItem() : nullptr;
+		Msg("* [vr3] frame %u hud_state ui %d flags %d need_hud %d active_slot %u active_item %s hud_item0 %d hud_item1 %d",
+			g_vr_track.frame, pUIGame ? 1 : 0,
+			psHUD_Flags.is(HUD_WEAPON | HUD_WEAPON_RT | HUD_WEAPON_RT2 | HUD_DRAW_RT2) ? 1 : 0,
+			need_render_hud() ? 1 : 0, g_actor ? (u32)g_actor->inventory().GetActiveSlot() : 0u,
+			it ? it->m_section_id.c_str() : "none",
+			(g_player_hud && g_player_hud->attached_item(0)) ? 1 : 0,
+			(g_player_hud && g_player_hud->attached_item(1)) ? 1 : 0);
+	}
 	if (0 == pUIGame) return;
 	if (g_actor) g_actor->RenderCamAttached(DM);
 	if (!psHUD_Flags.is(HUD_WEAPON | HUD_WEAPON_RT | HUD_WEAPON_RT2 | HUD_DRAW_RT2))return;

@@ -587,6 +587,98 @@ namespace
 		st->Release();
 	}
 
+	// Milestone 3, -vr_dump: the HUD layer mask of this eye. The HUD (held item + arms) is drawn into the G-buffer with
+	// the depth range [0, 0.02] (CRender::rmNear) and the world with [0, 1]; world depth 0.02 is 1.02 x the near plane,
+	// so depth <= 0.02 marks exactly the pixels where the HUD layer is the front surface. Post-processing (bloom, DOF,
+	// TAA, ...) never writes depth, so the mask is the gun's own silhouette. Depth target: HW.pBaseZB, the one
+	// phase_scene_begin() binds for the HUD pass without MSAA (with MSAA it is rt_MSAADepth: not supported here).
+	// It is only cleared in phase_scene_prepare(), i.e. at the start of the next eye, so it is intact in vr_eye_done().
+	void vr_dump_hud_mask(int eye)
+	{
+		static bool s_format_logged = false;
+		if (RImplementation.o.dx10_msaa)
+		{
+			Msg("! [vr3] mask: MSAA is on, the HUD depth is in rt_MSAADepth; no mask written");
+			return;
+		}
+		ID3D11Resource* zr = nullptr;
+		HW.pBaseZB->GetResource(&zr);
+		if (!zr)
+		{
+			Msg("! [vr3] mask: no depth resource");
+			return;
+		}
+		D3D11_TEXTURE2D_DESC d;
+		((ID3D11Texture2D*)zr)->GetDesc(&d);
+		if (!s_format_logged)
+		{
+			s_format_logged = true;
+			Msg("* [vr3] mask: read from the base depth buffer, DXGI format %d, %ux%u, samples %u", (int)d.Format, d.Width, d.Height, d.SampleDesc.Count);
+		}
+		if (d.Format != DXGI_FORMAT_D24_UNORM_S8_UINT && d.Format != DXGI_FORMAT_R24G8_TYPELESS)
+		{
+			Msg("! [vr3] mask: depth format %d is not D24S8; no mask written", (int)d.Format);
+			zr->Release();
+			return;
+		}
+		d.Usage = D3D11_USAGE_STAGING;
+		d.BindFlags = 0;
+		d.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+		d.MiscFlags = 0;
+		ID3D11Texture2D* st = nullptr;
+		if (d.SampleDesc.Count != 1 || FAILED(HW.pDevice->CreateTexture2D(&d, nullptr, &st)) || !st)
+		{
+			Msg("! [vr3] mask: staging depth texture failed");
+			zr->Release();
+			return;
+		}
+		HW.pContext->CopyResource(st, zr);
+		zr->Release();
+		D3D11_MAPPED_SUBRESOURCE m;
+		if (SUCCEEDED(HW.pContext->Map(st, 0, D3D11_MAP_READ, 0, &m)))
+		{
+			const u32 thr = u32(0.02 * 16777215.0) + 1; // D24 depth in the low 24 bits of each texel
+			u32 n = 0, x0 = d.Width, y0 = d.Height, x1 = 0, y1 = 0;
+			string_path name, path;
+			xr_sprintf(name, "vr_eye%d_%u_hudmask.raw", eye, vr.frames_run);
+			FS.update_path(path, "$logs$", name);
+			FILE* f = fopen(path, "wb");
+			if (f)
+				fprintf(f, "GVRIMG1 %u %u %d\n", d.Width, d.Height, (int)DXGI_FORMAT_R8G8B8A8_UNORM); // same reader: 4 bytes/pixel
+			else
+				Msg("! [vr3] mask: cannot open %s", path);
+			xr_vector<u32> row(d.Width);
+			for (u32 y = 0; y < d.Height; ++y)
+			{
+				const u32* src = (const u32*)((const u8*)m.pData + (size_t)y * m.RowPitch);
+				for (u32 x = 0; x < d.Width; ++x)
+				{
+					const bool hud = (src[x] & 0xFFFFFFu) <= thr;
+					row[x] = hud ? 0xFFFFFFFFu : 0xFF000000u;
+					if (hud)
+					{
+						++n;
+						x0 = _min(x0, x);
+						y0 = _min(y0, y);
+						x1 = _max(x1, x);
+						y1 = _max(y1, y);
+					}
+				}
+				if (f)
+					fwrite(row.data(), 4, d.Width, f);
+			}
+			if (f)
+				fclose(f);
+			HW.pContext->Unmap(st, 0);
+			if (n == 0)
+				x0 = y0 = 0;
+			Msg("* [vr3] frame %u eye %d hud_mask pixels %u bbox %u %u %u %u file %s", vr.frames_run, eye, n, x0, y0, x1, y1, name);
+		}
+		else
+			Msg("! [vr3] mask: Map failed");
+		st->Release();
+	}
+
 	// hook: called by the level render loop before the eyes are rendered
 	bool vr_begin_frame(vr_eye_view* out, vr_frame_info* info)
 	{
@@ -672,7 +764,10 @@ namespace
 				HW.pContext->CopyResource(E.tex[idx], bb);
 				bb->Release();
 				if (vr.dump && (vr.frames_run == 200 || vr.frames_run == 300))
+				{
 					vr_dump_image(e, E.tex[idx]);
+					vr_dump_hud_mask(e);
+				}
 			}
 			else
 				ok = false;
