@@ -102,7 +102,14 @@ void CKinematics::CalculateBones(BOOL bForceExact)
 	if (UCalc_Visibox >= psSkeletonUpdate)
 	{
 		// mark
+#ifdef XRCORE_PROFILER_AGG
+		// test-only (det_reseed armed): no random stagger. Bones are calculated lazily by whichever thread
+		// asks first (gameplay or the render-side CalculateBonesThread), so this draw lands on a different
+		// stream from run to run, and the box it schedules feeds the spatial database gameplay reads.
+		UCalc_Visibox = xr_det_split_armed ? 0 : -(::Random.randI(psSkeletonUpdate - 1));
+#else
 		UCalc_Visibox = -(::Random.randI(psSkeletonUpdate - 1));
+#endif
 		UCalc_ThisFrame = true;
 		CalculateBBox();
 #ifdef DEBUG
