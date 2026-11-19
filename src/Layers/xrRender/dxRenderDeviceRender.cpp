@@ -481,6 +481,29 @@ void dxRenderDeviceRender::End()
 	}
 # endif
 
+	// VR spike benchmark rig: presenting to a headless X server copies every frame through system memory
+	// (~10 ms at headset resolution). -perf_nopresent skips Present and instead waits until the GPU has
+	// finished the frame, so frame time = CPU time + the GPU time still outstanding at frame end.
+	static const bool perf_nopresent = !!strstr(Core.Params, "-perf_nopresent");
+	if (perf_nopresent)
+	{
+		PROF_EVENT("bench: wait for GPU (no present)");
+		static ID3D11Query* q = nullptr;
+		if (!q)
+		{
+			D3D11_QUERY_DESC qd = { D3D11_QUERY_EVENT, 0 };
+			HW.pDevice->CreateQuery(&qd, &q);
+		}
+		if (q)
+		{
+			HW.pContext->End(q);
+			HW.pContext->Flush();
+			BOOL done = FALSE;
+			while (HW.pContext->GetData(q, &done, sizeof(done), 0) != S_OK || !done)
+				YieldProcessor();
+		}
+	}
+	else
 	if (!Device.m_SecondViewport.IsSVPFrame() && !Device.m_SecondViewport.isCamReady) {
 		HW.m_pSwapChain->Present(present_interval, present_flags);
 	}
