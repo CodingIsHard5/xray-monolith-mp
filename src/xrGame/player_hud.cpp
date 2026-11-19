@@ -1779,6 +1779,74 @@ void player_hud::vr_log_grip_point()
 	}
 }
 
+// Milestone 3d (Amendment 14), -vr_dbg_grip <from> <to>: one line per VR frame in the window (first eye pass, after the
+// placement): the current frame's grip location (time asked for, raw runtime pose, converted pose), the gun origin,
+// the drawn grip point (-vr_grip_bones) and the drawn barrel line (-vr_barrel_bones) in tracking space. Logging only.
+void player_hud::vr_log_grip_frame()
+{
+	static int s_from = -1, s_to = -1;
+	static bool s_parsed = false;
+	if (!s_parsed)
+	{
+		s_parsed = true;
+		if (LPCSTR p = strstr(Core.Params, "-vr_dbg_grip "))
+			if (sscanf(p + 13, "%d %d", &s_from, &s_to) != 2)
+				s_from = s_to = -1;
+	}
+	if (s_from < 0 || int(g_vr_track.frame) < s_from || int(g_vr_track.frame) > s_to)
+		return;
+	static u32 s_logged = u32(-1);
+	if (s_logged == g_vr_track.frame)
+		return;
+	attachable_hud_item* item = m_attached_items[0] ? m_attached_items[0] : m_attached_items[1];
+	vr_grip_info G;
+	if (!item || !g_vr_get_grip || !g_vr_get_grip(&G))
+		return;
+	s_logged = g_vr_track.frame;
+	Fmatrix world_to_track;
+	world_to_track.invert(g_vr_track.track_to_world);
+	Fvector gt;
+	world_to_track.transform_tiny(gt, item->m_item_transform.c);
+	string64 gp_txt, bar_txt;
+	Fvector hw;
+	if (vr_hand_bone_world(this, hw))
+	{
+		Fvector ht;
+		world_to_track.transform_tiny(ht, hw);
+		xr_sprintf(gp_txt, "%.5f %.5f %.5f", ht.x, ht.y, ht.z);
+	}
+	else
+		xr_strcpy(gp_txt, "nan nan nan");
+	xr_strcpy(bar_txt, "nan nan nan");
+	const vr_3b_switches& S = vr_3b();
+	if (S.barrel && item->m_model)
+	{
+		IKinematics* K = item->m_model;
+		const u16 br = vr_find_bone(K, S.rear), bf = vr_find_bone(K, S.front);
+		if (br != BI_NONE && bf != BI_NONE)
+		{
+			const int idx = m_attached_items[0] ? 0 : 1;
+			const Fmatrix& D = S.vis_rot ? m_vr_draw_xform[idx] : item->m_item_transform;
+			Fvector rw, fw, rt, ft, a;
+			D.transform_tiny(rw, K->LL_GetTransform(br).c);
+			D.transform_tiny(fw, K->LL_GetTransform(bf).c);
+			world_to_track.transform_tiny(rt, rw);
+			world_to_track.transform_tiny(ft, fw);
+			a.sub(ft, rt);
+			if (a.magnitude() > EPS)
+			{
+				a.normalize();
+				xr_sprintf(bar_txt, "%.6f %.6f %.6f", a.x, a.y, a.z);
+			}
+		}
+	}
+	const vr_pose& R = G.runtime;
+	Msg("* [vr3grip] frame %u t_ns %lld hand %c valid %d grip_rt_pos %.5f %.5f %.5f grip_rt_quat %.6f %.6f %.6f %.6f xr_pos %.5f %.5f %.5f xr_quat %.6f %.6f %.6f %.6f gun_track %.5f %.5f %.5f grip_pt %s barrel %s lag %d",
+		g_vr_track.frame, G.t_ns, G.hand, R.valid ? 1 : 0, R.pos.x, R.pos.y, R.pos.z, R.qx, R.qy, R.qz, R.qw,
+		G.xr_pos[0], G.xr_pos[1], G.xr_pos[2], G.xr_quat[0], G.xr_quat[1], G.xr_quat[2], G.xr_quat[3],
+		gt.x, gt.y, gt.z, gp_txt, bar_txt, G.lag);
+}
+
 bool player_hud::vr_place_at_grip()
 {
 	attachable_hud_item* item = m_attached_items[0] ? m_attached_items[0] : m_attached_items[1];
@@ -2017,6 +2085,7 @@ void player_hud::render_hud(IDSGraphManager* DM)
 			vis_rot = vr_update_vis_rot(); // milestone 3b test control: rotates only what is drawn
 			vr_log_gun_bones();
 			vr_log_grip_point(); // milestone 3c
+			vr_log_grip_frame(); // milestone 3d, only with -vr_dbg_grip
 		}
 	}
 

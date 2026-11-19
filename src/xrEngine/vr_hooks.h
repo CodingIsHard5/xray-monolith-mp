@@ -87,6 +87,11 @@ struct vr_grip_info
 	vr_pose runtime;
 	vr_pose gun;
 	char hand;      // 'L' or 'R'
+	// milestone 3d (-vr_dbg_grip): the CURRENT frame's grip location call, for the per-frame grip log
+	long long t_ns;   // XrTime passed to xrLocateSpace for this grip (the frame's predictedDisplayTime)
+	float xr_pos[3];  // raw pose from the runtime: grip space in LOCAL space, OpenXR axes, no conversion
+	float xr_quat[4]; // x, y, z, w
+	int lag;          // -vr_grip_lag: the gun pose is the converted grip pose of this many VR frames ago (0 = current)
 };
 extern ENGINE_API bool (*g_vr_get_grip)(vr_grip_info* out);
 

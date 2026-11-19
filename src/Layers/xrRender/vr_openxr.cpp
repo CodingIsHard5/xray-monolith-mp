@@ -66,6 +66,14 @@ namespace
 		bool gun_on_head = false; // -vr_gun_on_head
 		bool grip_rot = false;    // -vr_grip_rot <yaw> <pitch> (milestone 3b, criterion 7e: engine-injected rotation)
 		float grip_rot_q[4] = { 0.f, 0.f, 0.f, 1.f }; // q_inject x, y, z, w (engine axes)
+		// milestone 3d: raw grip locations of this frame, and a ring of converted grip poses for -vr_grip_lag
+		XrPosef grip_raw[2];
+		XrTime grip_time = 0;
+		int grip_lag = 0;                // -vr_grip_lag <n>, 0..8
+		static const int GRIP_RING = 9;
+		vr_pose grip_ring[GRIP_RING][2]; // converted poses, newest at grip_ring_head
+		int grip_ring_head = -1, grip_ring_count = 0;
+		bool period_logged = false;
 		bool profiles_logged = false;
 
 		PFN_xrGetInstanceProcAddr GetInstanceProcAddr = nullptr;
@@ -460,6 +468,14 @@ namespace
 			}
 			if (!vr.grip_rot)
 				Msg("* [vr3] grip rotation injected: none");
+			// -vr_grip_lag <n>: deliberately broken test mode, the gun uses the grip pose of n VR frames ago
+			if (LPCSTR g = strstr(Core.Params, "-vr_grip_lag "))
+			{
+				int n = 0;
+				if (sscanf(g + 13, "%d", &n) == 1)
+					vr.grip_lag = _max(0, _min(8, n));
+			}
+			Msg("* [vr3] grip lag (deliberately broken test mode): %d frames", vr.grip_lag);
 			vr.ok = vr_init();
 			Msg(vr.ok ? "* [vr] OpenXR bring-up complete" : "! [vr] OpenXR bring-up FAILED; VR path disabled for this run");
 			Msg("* [vr] eye offset scale %.3f, dump %d, mono twin eye %d", vr.eye_scale, vr.dump ? 1 : 0, g_vr_mono_eye);
@@ -513,6 +529,7 @@ namespace
 		if (XR_FAILED(rs))
 			return;
 		const XrSpaceLocationFlags need = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT;
+		vr.grip_time = vr.fs.predictedDisplayTime; // the time passed to xrLocateSpace below (milestone 3d log)
 		for (int h = 0; h < 2; ++h)
 		{
 			XrSpaceLocation loc = { XR_TYPE_SPACE_LOCATION };
@@ -520,8 +537,15 @@ namespace
 			const bool valid = XR_SUCCEEDED(r) && (loc.locationFlags & need) == need;
 			if (XR_SUCCEEDED(r))
 				vr_to_engine(loc.pose, valid, vr.grip[h]);
+			vr.grip_raw[h] = XR_SUCCEEDED(r) ? loc.pose : XrPosef{ { 0.f, 0.f, 0.f, 1.f }, { 0.f, 0.f, 0.f } };
 		}
 		vr.grip_located = true;
+		// milestone 3d: ring of converted poses (one entry per located VR frame) for -vr_grip_lag
+		vr.grip_ring_head = (vr.grip_ring_head + 1) % vr_state::GRIP_RING;
+		vr.grip_ring[vr.grip_ring_head][0] = vr.grip[0];
+		vr.grip_ring[vr.grip_ring_head][1] = vr.grip[1];
+		if (vr.grip_ring_count < vr_state::GRIP_RING)
+			++vr.grip_ring_count;
 
 		if (!vr.profiles_logged)
 		{
@@ -550,6 +574,24 @@ namespace
 			return false;
 		out->hand = vr.gun_hand ? 'R' : 'L';
 		out->runtime = vr.grip[vr.gun_hand];
+		out->t_ns = (long long)vr.grip_time;
+		const XrPosef& raw = vr.grip_raw[vr.gun_hand];
+		out->xr_pos[0] = raw.position.x;
+		out->xr_pos[1] = raw.position.y;
+		out->xr_pos[2] = raw.position.z;
+		out->xr_quat[0] = raw.orientation.x;
+		out->xr_quat[1] = raw.orientation.y;
+		out->xr_quat[2] = raw.orientation.z;
+		out->xr_quat[3] = raw.orientation.w;
+		out->lag = vr.grip_lag;
+		// -vr_grip_lag: the pose the gun is placed with is the one of grip_lag frames ago (the oldest kept if fewer)
+		vr_pose placed = out->runtime;
+		if (vr.grip_lag > 0 && vr.grip_ring_count > 0)
+		{
+			const int back = _min(vr.grip_lag, vr.grip_ring_count - 1);
+			const int idx = (vr.grip_ring_head - back + vr_state::GRIP_RING) % vr_state::GRIP_RING;
+			placed = vr.grip_ring[idx][vr.gun_hand];
+		}
 		if (vr.gun_on_head)
 		{
 			// DELIBERATELY BROKEN test mode: head pose plus a fixed offset (0.2 m right, 0.2 m down, 0.4 m forward)
@@ -561,12 +603,12 @@ namespace
 		}
 		else
 		{
-			out->gun = out->runtime;
+			out->gun = placed;
 			if (vr.grip_rot)
 			{
 				// test switch -vr_grip_rot: orientation = q_inject * q_runtime (Hamilton product), position untouched
 				const float x1 = vr.grip_rot_q[0], y1 = vr.grip_rot_q[1], z1 = vr.grip_rot_q[2], w1 = vr.grip_rot_q[3];
-				const vr_pose& R = out->runtime;
+				const vr_pose& R = placed;
 				out->gun.qx = w1 * R.qx + x1 * R.qw + y1 * R.qz - z1 * R.qy;
 				out->gun.qy = w1 * R.qy - x1 * R.qz + y1 * R.qw + z1 * R.qx;
 				out->gun.qz = w1 * R.qz + x1 * R.qy - y1 * R.qx + z1 * R.qw;
@@ -590,6 +632,11 @@ namespace
 			return false;
 		}
 		vr.frame_begun = true;
+		if (!vr.period_logged)
+		{
+			vr.period_logged = true;
+			Msg("* [vr3] frame period (runtime) %lld ns", (long long)vr.fs.predictedDisplayPeriod);
+		}
 		return true;
 	}
 

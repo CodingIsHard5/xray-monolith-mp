@@ -386,6 +386,7 @@ public:
 	bool vr_update_vis_rot(); // GammaVR milestone 3b: -vr_vis_rot test control (rotates only the drawn item models)
 	void vr_log_gun_bones(); // GammaVR milestone 3b: bone list of the held item and the -vr_barrel_bones visible axis
 	void vr_log_grip_point(); // GammaVR milestone 3c: hands bone list, -vr_grip_bones grip point, barrel bones in model space
+	void vr_log_grip_frame(); // GammaVR milestone 3d: -vr_dbg_grip per-frame grip / gun / barrel line
 	void render_item_ui();
 	bool render_item_ui_query();
 	u32 anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotionDef*& md, float speed, u16 override_part = u16(-1));
