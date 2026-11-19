@@ -522,7 +522,13 @@ bool ParticleRenderStream(FVF::LIT* pv, u32 count, PAPI::Particle * particles, C
 	{
 		PAPI::Particle& m = particles[i];
 		{
-			if (pPE->m_RT_Flags.is(CParticleEffect::flRT_LiveUpdate))
+			// GammaVR: the smoothing step below advances the drawn particle state on every render call. The second eye
+			// of a stereo frame must draw the same state as the first, so it skips the step.
+			extern ENGINE_API int g_stereo_bench_eye;
+			if (g_stereo_bench_eye == 1)
+			{
+			}
+			else if (pPE->m_RT_Flags.is(CParticleEffect::flRT_LiveUpdate))
 			{
 				m.posI.set(m.pos);
 				m.rotI.set(m.rot);
