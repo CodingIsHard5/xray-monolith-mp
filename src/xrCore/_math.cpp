@@ -18,6 +18,57 @@ XRCORE_API Fmatrix Fidentity;
 XRCORE_API Dmatrix Didentity;
 XRCORE_API CRandom Random;
 
+#ifdef XRCORE_PROFILER_AGG
+struct DetDraw
+{
+	u32 frame;
+	u32 thread;
+	void* ret;
+};
+static const long DET_DRAWS_MAX = 400000;
+static DetDraw* g_det_draws = nullptr;
+static volatile long g_det_draw_count = 0;
+static u32 g_det_main_thread = 0;
+XRCORE_API volatile long xr_det_trace_armed = 0;
+
+XRCORE_API void xr_det_trace_draw(void* return_address)
+{
+	const long i = InterlockedIncrement(&g_det_draw_count) - 1;
+	if (i >= DET_DRAWS_MAX)
+		return;
+	g_det_draws[i].frame = Core.dwFrame;
+	g_det_draws[i].thread = GetCurrentThreadId();
+	g_det_draws[i].ret = return_address;
+}
+
+XRCORE_API void xr_det_trace_start()
+{
+	if (!g_det_draws)
+		g_det_draws = (DetDraw*)malloc(sizeof(DetDraw) * DET_DRAWS_MAX);
+	g_det_main_thread = GetCurrentThreadId();
+	g_det_draw_count = 0;
+	xr_det_trace_armed = 1;
+}
+
+XRCORE_API void xr_det_trace_dump(const char* path)
+{
+	xr_det_trace_armed = 0;
+	if (!g_det_draws)
+		return;
+	FILE* f = fopen(path, "wt");
+	if (!f)
+		return;
+	const long total = g_det_draw_count;
+	const long n = total < DET_DRAWS_MAX ? total : DET_DRAWS_MAX;
+	const size_t base = (size_t)GetModuleHandle(NULL);
+	fprintf(f, "#draws %ld recorded %ld\n", total, n);
+	for (long i = 0; i < n; ++i)
+		fprintf(f, "%u %c 0x%llx\n", g_det_draws[i].frame, g_det_draws[i].thread == g_det_main_thread ? 'M' : 'W',
+		        (unsigned long long)((size_t)g_det_draws[i].ret - base + 0x140000000ull));
+	fclose(f);
+}
+#endif
+
 XRCORE_API bool xr_det_mode()
 {
 	static const bool value = Core.Params && strstr(Core.Params, "-det_mode");

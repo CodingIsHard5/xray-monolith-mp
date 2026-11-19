@@ -2,7 +2,7 @@ name: Perf-Build
 run-name: Perf build ${{ github.ref_name }} @ ${{ github.sha }}
 
 # Builds the MT engine (DX11) for performance work on perf/** branches.
-# One run at a time per branch; a newer push cancels the older run.
+# One run at a time in the shared group; a newer push waits for the run in flight (shared with VR-Build).
 on:
   push:
     branches: [ "perf/**" ]
@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: perf-build
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   SOLUTION_FILE_PATH: src/engine-vs2022.sln

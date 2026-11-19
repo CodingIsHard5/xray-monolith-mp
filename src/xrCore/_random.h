@@ -18,6 +18,18 @@ return(dwResult);
 }
 */
 
+#ifdef XRCORE_PROFILER_AGG
+// Harness builds only: record who draws from the global ::Random (frame, thread, return address), so the
+// first draw that differs between two -det_mode runs can be named. See _math.cpp.
+#include <intrin.h>
+class CRandom;
+XRCORE_API extern CRandom Random;
+XRCORE_API extern volatile long xr_det_trace_armed;
+XRCORE_API void xr_det_trace_draw(void* return_address);
+XRCORE_API void xr_det_trace_start();
+XRCORE_API void xr_det_trace_dump(const char* path);
+#endif
+
 class CRandom
 {
 private:
@@ -35,7 +47,14 @@ public:
 	IC s32 seed() const { return holdrand; }
 	IC s32 maxI() { return 32767; }
 
-	ICN s32 randI() { return (((holdrand = holdrand * 214013L + 2531011L) >> 16) & 0x7fff); }
+	ICN s32 randI()
+	{
+#ifdef XRCORE_PROFILER_AGG
+		if (xr_det_trace_armed && this == &Random)
+			xr_det_trace_draw(_ReturnAddress());
+#endif
+		return (((holdrand = holdrand * 214013L + 2531011L) >> 16) & 0x7fff);
+	}
 	IC s32 randI(s32 max)
 	{
         if (max <= 0)

@@ -2088,8 +2088,27 @@ public:
 		srand(1);
 		if (ai().get_alife())
 			const_cast<CALifeSimulator&>(ai().alife()).random().seed(0x12071980u ^ 1);
+#ifdef XRCORE_PROFILER_AGG
+		xr_det_trace_start();
+#endif
 	}
 };
+
+#ifdef XRCORE_PROFILER_AGG
+class CCC_DetTraceDump : public IConsole_Command
+{
+public:
+	CCC_DetTraceDump(LPCSTR N) : IConsole_Command(N) {}
+
+	virtual void Execute(LPCSTR args)
+	{
+		string_path fn, path;
+		xr_sprintf(fn, "det_trace_%s.txt", args);
+		FS.update_path(path, "$logs$", fn);
+		xr_det_trace_dump(path);
+	}
+};
+#endif
 
 class CCC_TimeFactor : public IConsole_Command
 {
@@ -2783,6 +2802,9 @@ void CCC_RegisterCommands()
 	CMD1(CCC_DemoPlay, "demo_play");
 	CMD1(CCC_DetRngState, "det_rng_state");
 	CMD1(CCC_DetReseed, "det_reseed");
+#ifdef XRCORE_PROFILER_AGG
+	CMD1(CCC_DetTraceDump, "det_trace_dump");
+#endif
 	CMD1(CCC_DemoRecord, "demo_record");
 	CMD1(CCC_DemoRecordBlockedInput, "demo_record_blocked_input");
 	CMD1(CCC_DemoRecordStop, "demo_record_stop");
