@@ -721,6 +721,10 @@ void CInput::DeactivateSoft()
 void CInput::OnFrame(void)
 {
 	PROF_EVENT("CInput::OnFrame");
+	// VR spike benchmark rig: a headless, non-foreground window makes DirectInput re-acquire every frame
+	// under wine (~8 ms). -perf_noinput removes that rig artefact from captures.
+	static const bool perf_noinput = !!strstr(Core.Params, "-perf_noinput");
+	if (perf_noinput) return;
 	RDEVICE.Statistic->Input.Begin();
 	dwCurTime = RDEVICE.TimerAsync_MMT();
 	if (pKeyboard) KeyUpdate();
