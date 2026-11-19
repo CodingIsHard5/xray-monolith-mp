@@ -1,0 +1,46 @@
+name: VR-OpenXR-Loader
+run-name: OpenXR loader 1.1.65 @ 24a1f2b9 (${{ github.ref_name }})
+
+# Builds the Khronos OpenXR loader (Apache-2.0) from the exact commit security reviewed
+# (release-1.1.65 = 24a1f2b92d212501a2b1b8d30ffd53abf55fcfa8). Output: openxr_loader.dll + headers.
+# Runs only when this file changes. Shares the perf-build group: one build at a time.
+on:
+  push:
+    branches: [ "vr-**" ]
+    paths: [ ".github/workflows/vr-openxr-loader.yml" ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-build
+  cancel-in-progress: false
+
+jobs:
+  loader:
+    runs-on: windows-latest
+    steps:
+    - name: Checkout OpenXR-SDK at the reviewed commit
+      uses: actions/checkout@v4
+      with:
+        repository: KhronosGroup/OpenXR-SDK
+        ref: 24a1f2b92d212501a2b1b8d30ffd53abf55fcfa8
+        persist-credentials: false
+    - name: Verify commit
+      shell: bash
+      run: test "$(git rev-parse HEAD)" = "24a1f2b92d212501a2b1b8d30ffd53abf55fcfa8"
+    - name: Build loader (x64, Release, DLL)
+      shell: bash
+      run: |
+        cmake -S . -B build -A x64 -DDYNAMIC_LOADER=ON -DBUILD_TESTS=OFF -DBUILD_API_LAYERS=OFF -DBUILD_CONFORMANCE_TESTS=OFF
+        cmake --build build --config Release --target openxr_loader
+        mkdir -p out/bin out/lib
+        find build -name 'openxr_loader.dll' -exec cp {} out/bin/ \;
+        find build -name 'openxr_loader.lib' -exec cp {} out/lib/ \;
+        cp -r include out/include
+        cp LICENSE out/ 2>/dev/null || true
+        sha256sum out/bin/openxr_loader.dll out/lib/openxr_loader.lib
+    - uses: actions/upload-artifact@v4
+      with:
+        name: openxr_loader_1.1.65
+        path: out
