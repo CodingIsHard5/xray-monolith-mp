@@ -18,6 +18,12 @@ XRCORE_API Fmatrix Fidentity;
 XRCORE_API Dmatrix Didentity;
 XRCORE_API CRandom Random;
 
+XRCORE_API bool xr_det_mode()
+{
+	static const bool value = Core.Params && strstr(Core.Params, "-det_mode");
+	return value;
+}
+
 #ifdef _M_AMD64
 u16 getFPUsw() { return 0; }
 
@@ -140,10 +146,7 @@ void initialize()
 #endif //XRCORE_STATIC
 
     // -det_mode: test-only determinism switch for the equivalence harness. Fixed seed instead of the CPU clock.
-    if (Core.Params && strstr(Core.Params, "-det_mode"))
-        ::Random.seed(0x12071980);
-    else
-        ::Random.seed(u32(CPU::GetCLK() % (1i64 << 32i64)));
+    ::Random.seed(xr_det_seed(u32(CPU::GetCLK() % (1i64 << 32i64))));
 }
 };
 #endif

@@ -6,7 +6,7 @@
 CMMSound::CMMSound()
 {
 	// Ncenka - fix for not playing random Main Menu music
-	m_random.seed(u32(CPU::QPC() & 0xffffffff));
+	m_random.seed(xr_det_seed(u32(CPU::QPC() & 0xffffffff), 6));
 }
 
 CMMSound::~CMMSound()

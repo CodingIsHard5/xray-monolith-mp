@@ -214,7 +214,7 @@ void CLevelSoundManager::Load()
 #endif // #ifdef DEBUG
 				CInifile::Sect& S = gameLtx.r_section(music_sect);
 				std::random_device rd;
-				std::mt19937 g(rd());
+				std::mt19937 g(xr_det_seed(rd(), 7));
 
 				// copy data and shuffle
 				CInifile::Items items = S.Data;
@@ -319,7 +319,7 @@ void CLevelSoundManager::Update()
 				// Msg("m_PlayedMusicIndices.size %d", m_PlayedMusicIndices.size());
 				m_PlayedMusicIndices.clear();
 				std::random_device rd;
-				std::mt19937 g(rd());
+				std::mt19937 g(xr_det_seed(rd(), 7));
 				std::shuffle(m_MusicTracks.begin(), m_MusicTracks.end(), g);
 				// Msg("Refreshing tracks");
 				m_NextTrackTime = engine_time + 10000; // next check after 10 sec

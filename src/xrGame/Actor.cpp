@@ -1345,7 +1345,8 @@ void CActor::UpdateCL()
 			if (g_pGameLevel && g_pGameLevel->name() != NULL)
 			{
 				snprintf(discord_gameinfo.level_name, 128, xr_ToUTF8(*CStringTable().translate(g_pGameLevel->name())));
-				srand(time(0));
+				if (!xr_det_mode()) // det_mode: keep the C runtime generator on its default seed
+					srand(time(0));
 				int level_icon_id = rand() % 3 + 1;
 				discord_gameinfo.level_icon_index = level_icon_id;
 				discord_gameinfo.level = g_pGameLevel->name().c_str();

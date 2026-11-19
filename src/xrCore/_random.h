@@ -32,6 +32,7 @@ public:
 	};
 
 	IC void seed(s32 val) { holdrand = val; }
+	IC s32 seed() const { return holdrand; }
 	IC s32 maxI() { return 32767; }
 
 	ICN s32 randI() { return (((holdrand = holdrand * 214013L + 2531011L) >> 16) & 0x7fff); }
@@ -56,5 +57,10 @@ public:
 };
 
 XRCORE_API extern CRandom Random;
+
+// -det_mode (test-only, off by default): every generator that is normally seeded from a clock gets a
+// fixed seed instead, so two runs of the equivalence harness draw the same numbers.
+XRCORE_API bool xr_det_mode();
+IC u32 xr_det_seed(u32 clock_seed, u32 salt = 0) { return xr_det_mode() ? (0x12071980u ^ salt) : clock_seed; }
 
 #endif

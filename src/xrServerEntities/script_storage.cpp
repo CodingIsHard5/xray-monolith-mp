@@ -423,6 +423,19 @@ void CScriptStorage::reinit()
 	luajit::open_lib(lua(), LUA_BITLIBNAME, luaopen_bit);
 	luajit::open_lib(lua(), LUA_FFILIBNAME, luaopen_ffi);
 
+	// -det_mode (test-only): scripts seed math.random from os.time()/os.clock(). Derive both from the
+	// engine's fixed-step clock so two harness runs see the same values.
+	if (xr_det_mode())
+	{
+		static const char det_chunk[] =
+			"local os_time = os.time\n"
+			"local function ms() local f = rawget(_G, 'time_global') return f and f() or 0 end\n"
+			"os.time = function(t) if t ~= nil then return os_time(t) end return 1700000000 + math.floor(ms() / 1000) end\n"
+			"os.clock = function() return ms() / 1000 end\n";
+		if (luaL_dostring(lua(), det_chunk))
+			Msg("! det_mode: failed to install the os.time/os.clock override: %s", lua_tostring(lua(), -1));
+	}
+
 #ifdef DEBUG
     luajit::open_lib(lua(), LUA_DBLIBNAME, luaopen_debug);
 #else //!DEBUG

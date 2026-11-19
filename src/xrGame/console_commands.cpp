@@ -10,6 +10,7 @@
 #include "script_debugger.h"
 #include "ai_debug.h"
 #include "alife_simulator.h"
+#include "random32.h"
 #include "alife_spawn_registry.h"
 #include "game_cl_base.h"
 #include "game_cl_single.h"
@@ -2053,6 +2054,21 @@ public:
 		xr_strcpy(I, "[on,off] or [1,0]");
 	}
 };
+// det_mode proof: current state of the engine's shared generators. Two harness runs that drew the same
+// numbers print the same line at the same checkpoint.
+class CCC_DetRngState : public IConsole_Command
+{
+public:
+	CCC_DetRngState(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+
+	virtual void Execute(LPCSTR args)
+	{
+		Msg("* det_rng_state %s: Random=%d Random32=%u alife=%u crt_next=%d frame=%u time_ms=%u", args ? args : "",
+		    (int)::Random.seed(), ::Random32.seed(), ai().get_alife() ? const_cast<CALifeSimulator&>(ai().alife()).random().seed() : 0u,
+		    rand(), Device.dwFrame, Device.dwTimeGlobal);
+	}
+};
+
 class CCC_TimeFactor : public IConsole_Command
 {
 public:
@@ -2743,6 +2759,7 @@ void CCC_RegisterCommands()
 	// Demo
 	//#ifndef MASTER_GOLD
 	CMD1(CCC_DemoPlay, "demo_play");
+	CMD1(CCC_DetRngState, "det_rng_state");
 	CMD1(CCC_DemoRecord, "demo_record");
 	CMD1(CCC_DemoRecordBlockedInput, "demo_record_blocked_input");
 	CMD1(CCC_DemoRecordStop, "demo_record_stop");

@@ -46,7 +46,7 @@ CALifeSimulatorBase::CALifeSimulatorBase(xrServer* server, LPCSTR section)
 	m_registry_container = 0;
 	m_upgrade_manager = 0;
 
-	random().seed(u32(CPU::QPC() & 0xffffffff));
+	random().seed(xr_det_seed(u32(CPU::QPC() & 0xffffffff), 1));
 	m_can_register_objects = true;
 }
 
