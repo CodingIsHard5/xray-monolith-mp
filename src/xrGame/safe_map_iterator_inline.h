@@ -103,6 +103,11 @@ IC void CSSafeMapIterator::start_timer()
 TEMPLATE_SPEZIALIZATION
 IC bool CSSafeMapIterator::time_over()
 {
+#ifdef XRCORE_PROFILER_AGG
+	// -det_mode (test-only): no wall-clock cut-off of the per-frame A-Life iteration; the object count limit stays.
+	if (xr_det_mode())
+		return false;
+#endif
 	return (use_time_limit && !m_first_update && (m_timer.GetElapsed_sec() >= m_max_process_time));
 }
 

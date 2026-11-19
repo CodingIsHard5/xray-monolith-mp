@@ -336,6 +336,13 @@ void CSheduler::ProcessStep()
 	ItemsBatch.clear();
 	u32 ItemsCount = Items.size();
 	float target = psShedulerTarget;
+#ifdef XRCORE_PROFILER_AGG
+	// -det_mode (test-only): the wall-clock time budget decides how many objects get their update this frame,
+	// so it differs run to run. Without it the batch size is the only per-frame limit.
+	static const bool det_no_budget = xr_det_mode();
+#else
+	static const bool det_no_budget = false;
+#endif
 
     u32 batchSize = g_pGameLevel && g_pGameLevel->schedulerFlush ? 65536 : SchedulerBatchSize;
 
@@ -345,7 +352,7 @@ void CSheduler::ProcessStep()
 		{
 			// Optional: Also stop collecting if we are already out of time
 			// (Prevents grabbing items we won't even touch)
-			if (Device.dwPrecacheFrame == 0 && CPU::QPC() > cycles_limit)
+			if (!det_no_budget && Device.dwPrecacheFrame == 0 && CPU::QPC() > cycles_limit)
 				break;
 
 			// Add item to batch
@@ -376,7 +383,7 @@ void CSheduler::ProcessStep()
 				break;
 
 			// Stop if really underestimated the cost of batch, check every 8th item
-			if ((i % 8) == 0 && Device.dwPrecacheFrame == 0 && CPU::QPC() > cycles_limit)
+			if (!det_no_budget && (i % 8) == 0 && Device.dwPrecacheFrame == 0 && CPU::QPC() > cycles_limit)
 			{
 				psShedulerTarget += (psShedulerReaction * 3);
 				break;
