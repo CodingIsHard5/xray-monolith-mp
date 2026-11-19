@@ -18,6 +18,13 @@ if #times > 0 then total = #times end
 local perturb = string.match(cl, "%-det_perturb%s+(%a+)")
 local perturb_at = (tonumber(string.match(cl, "%-det_perturb_at%s+(%d+)")) or 60) * 1000
 local perturbed = false
+-- dose series (ruling 2026-11-19): -det_perturb skip -det_perturb_n <N> skips the first N offline squad updates after the time;
+-- -det_perturb decision: one extra math.random() immediately before the first target choice (SIMBOARD:get_squad_target)
+-- made for an OFFLINE squad after the time, i.e. a draw inside a squad decision path.
+local perturb_n = tonumber(string.match(cl, "%-det_perturb_n%s+(%d+)")) or 1
+local perturb_done = 0
+local streams_on = string.find(cl, "-det_lua_streams", 1, true) ~= nil
+local stream_sites = {}
 local dosave = string.find(cl, "-det_save", 1, true) ~= nil
 local quit_at = nil
 local start_t, done, upd = nil, 0, 0
@@ -128,6 +135,16 @@ local function on_update()
 			if f then f:write(table.concat(ltrace, "\n"), "\n") f:close() end
 		end
 		dump(done)
+		if streams_on then
+			local f = io.open(getFS():update_path("$logs$", "det_streams_" .. tag .. "_" .. done .. ".txt"), "w")
+			if f then
+				local keys = {}
+				for k in pairs(stream_sites) do keys[#keys + 1] = k end
+				table.sort(keys)
+				for _, k in ipairs(keys) do f:write(k, " ", stream_sites[k], "\n") end
+				f:close()
+			end
+		end
 		-- -det_save: also write a real game save at the checkpoint (into the project's own run dir). The command is
 		-- issued at the same update in every run; quitting waits so the save is on disk first.
 		if dosave then get_console():execute("save det_" .. tag .. "_" .. done) end
@@ -163,18 +180,77 @@ function on_game_start()
 			return realseed(v, ...)
 		end
 	end
+	-- -det_lua_streams (cause 8, Overseer ruling 2026-11-19; test only): scripts share ONE Lua random generator, so draws
+	-- made near the player shift the sequence seen by A-Life and weather. Route math.random by WHICH SCRIPT IS CALLING:
+	--   stream "alife"   : A-Life server-side scripts (squads, smart terrains, sim board, offline combat, server classes, spawners)
+	--   stream "weather" : weather, emissions, psi storms
+	--   everything else  : the stock shared generator, untouched
+	-- Frames of this file and of generic helper files are skipped when looking for the caller. Each routed stream is its
+	-- own Park-Miller generator with a fixed seed. Per call site counts are written to det_streams_<tag>.txt.
+	if streams_on then
+		local group = {}
+		for n in string.gmatch("sim_board sim_squad_scripted sim_squad_bounty sim_squad_warfare zzz_sim_squad_scripted_milpda " ..
+			"simulation_objects smart_terrain smart_terrain_warfare sim_offline_combat squads_filler " ..
+			"se_stalker se_monster se_artefact se_item se_zones se_heli se_car se_level_changer se_smart_cover " ..
+			"smr_pop smr_civil_war smr_loot heli_alife heli_alife_warfare", "%S+") do group[n] = "alife" end
+		for n in string.gmatch("level_weathers surge_manager psi_storm_manager idiots_surge", "%S+") do group[n] = "weather" end
+		local helper = { zz_eperf_dump = true, _g = true, utils_data = true, utils_obj = true, utils_item = true, util = true }
+		local seed = { alife = 20071980, weather = 19860426 }
+		local function draw(g, a, b)
+			local x = (seed[g] * 16807) % 2147483647
+			seed[g] = x
+			local u = (x - 1) / 2147483646
+			if a == nil then return u end
+			if b == nil then return math.floor(u * a) + 1 end
+			return a + math.floor(u * (b - a + 1))
+		end
+		local shared = math.random
+		math.random = function(a, b)
+			local name, line = "?", 0
+			for lv = 2, 9 do
+				local i = debug.getinfo(lv, "Sl")
+				if not i then break end
+				name = string.match(i.short_src, "([^\\/]+)%.%a+$") or i.short_src
+				line = i.currentline
+				if not helper[name] then break end
+			end
+			local g = group[name]
+			local key = (g or "shared") .. " " .. name .. ":" .. line
+			stream_sites[key] = (stream_sites[key] or 0) + 1
+			if g then return draw(g, a, b) end
+			if a == nil then return shared() elseif b == nil then return shared(a) end
+			return shared(a, b)
+		end
+		printf("* det_lua_streams: installed")
+	end
 	if perturb == "skip" and sim_squad_scripted and sim_squad_scripted.sim_squad_scripted then
 		local cls = sim_squad_scripted.sim_squad_scripted
 		local real_update = cls.update
 		cls.update = function(self, ...)
-			if not perturbed and start_t and time_global() - start_t >= perturb_at and not self.online then
+			if perturb_done < perturb_n and start_t and time_global() - start_t >= perturb_at and not self.online then
+				perturb_done = perturb_done + 1
 				perturbed = true
-				printf(string.format("* det_perturb skip: skipped one update of offline squad %s (%s)", tostring(self.id), tostring(self:name())))
+				if perturb_done <= 3 or perturb_done == perturb_n then
+					printf(string.format("* det_perturb skip: skipped update %d of %d, offline squad %s (%s)", perturb_done, perturb_n, tostring(self.id), tostring(self:name())))
+				end
 				return
 			end
 			return real_update(self, ...)
 		end
 		printf("* det_perturb skip: wrapper installed")
+	end
+	if perturb == "decision" and sim_board and sim_board.simulation_board then
+		local cls = sim_board.simulation_board
+		local real_target = cls.get_squad_target
+		cls.get_squad_target = function(self, squad, ...)
+			if not perturbed and start_t and time_global() - start_t >= perturb_at and squad and not squad.online then
+				perturbed = true
+				printf(string.format("* det_perturb decision: one extra math.random (%d) before target choice of offline squad %s (%s)",
+					math.random(1, 1000000000), tostring(squad.id), tostring(squad:name())))
+			end
+			return real_target(self, squad, ...)
+		end
+		printf("* det_perturb decision: wrapper installed")
 	end
 	RegisterScriptCallback("actor_on_update", on_update)
 end
