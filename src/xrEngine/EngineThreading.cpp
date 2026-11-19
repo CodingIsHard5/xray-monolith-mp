@@ -124,6 +124,10 @@ int psLua_ParallelGC_CallAmount = 25;
 void XRay::Engine::GameThread()
 {
 	PROF_THREAD("Secondary Task 2")
+#ifdef XRCORE_PROFILER_AGG
+	// test-only stream split: this task is gameplay (scheduler, seqParallel, seqFrameMT, Lua)
+	struct DetRole { int prev; DetRole() : prev(xr_det_set_role(1)) {} ~DetRole() { xr_det_set_role(prev); } } det_role;
+#endif
 		
 	// we has granted permission to execute
 	if (g_hud)

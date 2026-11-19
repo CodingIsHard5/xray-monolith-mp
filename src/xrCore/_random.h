@@ -28,6 +28,13 @@ XRCORE_API extern volatile long xr_det_trace_armed;
 XRCORE_API void xr_det_trace_draw(void* return_address);
 XRCORE_API void xr_det_trace_start();
 XRCORE_API void xr_det_trace_dump(const char* path);
+// Stream split (test-only, armed by det_reseed): draws on ::Random that are not gameplay (render phase of the
+// main thread, cosmetic worker threads) are served from separate generators, so their run-to-run interleaving
+// cannot shift the gameplay stream. Roles: 0 = worker default (own per-thread stream), 1 = gameplay (::Random
+// itself), 2 = main-thread render phase (one shared render stream).
+XRCORE_API extern volatile long xr_det_split_armed;
+XRCORE_API int xr_det_set_role(int role); // returns the previous role of this thread
+XRCORE_API bool xr_det_alt_draw(s32& result);
 #endif
 
 class CRandom
@@ -50,8 +57,17 @@ public:
 	ICN s32 randI()
 	{
 #ifdef XRCORE_PROFILER_AGG
-		if (xr_det_trace_armed && this == &Random)
-			xr_det_trace_draw(_ReturnAddress());
+		if (this == &Random)
+		{
+			if (xr_det_split_armed)
+			{
+				s32 alt;
+				if (xr_det_alt_draw(alt))
+					return alt;
+			}
+			if (xr_det_trace_armed)
+				xr_det_trace_draw(_ReturnAddress());
+		}
 #endif
 		return (((holdrand = holdrand * 214013L + 2531011L) >> 16) & 0x7fff);
 	}

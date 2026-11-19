@@ -2090,6 +2090,7 @@ public:
 			const_cast<CALifeSimulator&>(ai().alife()).random().seed(0x12071980u ^ 1);
 #ifdef XRCORE_PROFILER_AGG
 		xr_det_trace_start();
+		xr_det_split_armed = 1;
 #endif
 	}
 };

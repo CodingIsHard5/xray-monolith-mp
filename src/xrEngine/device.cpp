@@ -468,7 +468,13 @@ void CRenderDevice::on_idle()
 		Device.seqParallelBeforRender.clear();
 	}
 
+#ifdef XRCORE_PROFILER_AGG
+	xr_det_set_role(1); // gameplay phase of the main thread (see _random.h, test-only stream split)
+#endif
 	FrameMove();
+#ifdef XRCORE_PROFILER_AGG
+	xr_det_set_role(2); // render phase from here to the end of the frame
+#endif
 
     if (g_pGamePersistent != nullptr)
     {

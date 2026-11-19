@@ -31,6 +31,27 @@ static volatile long g_det_draw_count = 0;
 static u32 g_det_main_thread = 0;
 XRCORE_API volatile long xr_det_trace_armed = 0;
 
+XRCORE_API volatile long xr_det_split_armed = 0;
+static thread_local int t_det_role = 0;
+static thread_local s32 t_det_hold = 0x2468ace1;
+static s32 g_det_render_hold = 0x13579bdf;
+
+XRCORE_API int xr_det_set_role(int role)
+{
+	const int prev = t_det_role;
+	t_det_role = role;
+	return prev;
+}
+
+XRCORE_API bool xr_det_alt_draw(s32& result)
+{
+	if (t_det_role == 1)
+		return false;
+	s32& hold = (t_det_role == 2) ? g_det_render_hold : t_det_hold;
+	result = (((hold = hold * 214013L + 2531011L) >> 16) & 0x7fff);
+	return true;
+}
+
 XRCORE_API void xr_det_trace_draw(void* return_address)
 {
 	const long i = InterlockedIncrement(&g_det_draw_count) - 1;
