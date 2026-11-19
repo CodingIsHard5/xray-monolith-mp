@@ -53,9 +53,10 @@ jobs:
         cmake -S engine/vr_tools/xr_probe -B probe_build -A x64 -DCMAKE_POLICY_DEFAULT_CMP0091=NEW "-DOPENXR_INC=$PWD/out/include" "-DOPENXR_LIB=$PWD/out/lib/openxr_loader.lib"
         cmake --build probe_build --config Release
         find probe_build -name 'xr_probe.exe' -exec cp {} out/tools/ \;
+        find probe_build -name 'xr_vrreg.exe' -exec cp {} out/tools/ \;
     - name: Hashes
       shell: bash
-      run: sha256sum out/bin/openxr_loader.dll out/lib/openxr_loader.lib out/tools/xr_probe.exe
+      run: sha256sum out/bin/openxr_loader.dll out/lib/openxr_loader.lib out/tools/xr_probe.exe out/tools/xr_vrreg.exe
     - uses: actions/upload-artifact@v4
       with:
         name: openxr_loader_1.1.65
