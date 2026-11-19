@@ -328,6 +328,71 @@ void mt_FreezeThread(void *ptr) {
 	}
 }
 
+#if XRCORE_PROFILER == PROFILER_AGG
+// Scripted capture for repeatable measurements:
+//   -perf_capture <warmup_frames>,<frames>[,<tag>]  start automatically once a level is loaded and running
+//   -perf_fixed_dt                                  fixed 33 ms simulation step during the capture
+//   -perf_quit                                      quit when the capture has been written
+// A capture can also be started by hand with the console command `prof_capture <frames> [tag]`.
+static void perf_autocapture()
+{
+	static int state = -1; // -1 unparsed, 0 off, 1 warmup, 2 capturing, 3 done
+	static u32 warmup = 0, frames = 0;
+	static string64 tag = "auto";
+	static bool fixed_dt = false, quit = false, saved_const_fps = false;
+
+	if (state == -1)
+	{
+		state = 0;
+		if (LPCSTR p = strstr(Core.Params, "-perf_capture "))
+		{
+			string256 args;
+			if (sscanf(p + xr_strlen("-perf_capture "), "%255s", args) == 1)
+			{
+				string64 t = "";
+				if (sscanf(args, "%u,%u,%63s", &warmup, &frames, t) >= 2 && frames)
+				{
+					if (t[0])
+						xr_strcpy(tag, t);
+					state = 1;
+				}
+			}
+			fixed_dt = !!strstr(Core.Params, "-perf_fixed_dt");
+			quit = !!strstr(Core.Params, "-perf_quit");
+		}
+	}
+
+	switch (state)
+	{
+	case 1:
+		if (!g_pGameLevel || !g_bLoaded || Device.dwPrecacheFrame || Device.Paused())
+			break;
+		if (warmup)
+		{
+			--warmup;
+			break;
+		}
+		if (fixed_dt)
+		{
+			saved_const_fps = !!psDeviceFlags.test(rsConstantFPS);
+			psDeviceFlags.set(rsConstantFPS, TRUE);
+		}
+		xrprof::start(frames, tag);
+		state = 2;
+		break;
+	case 2:
+		if (!xrprof::finished())
+			break;
+		if (fixed_dt)
+			psDeviceFlags.set(rsConstantFPS, saved_const_fps);
+		if (quit)
+			Console->Execute("quit");
+		state = 3;
+		break;
+	}
+}
+#endif
+
 void CRenderDevice::on_idle()
 {
 
@@ -340,6 +405,9 @@ void CRenderDevice::on_idle()
 	}
 
 	PROF_FRAME("Main Thread");
+#if XRCORE_PROFILER == PROFILER_AGG
+	perf_autocapture();
+#endif
 
 #ifdef DEDICATED_SERVER
     u32 FrameStartTime = TimerGlobal.GetElapsed_ms();
