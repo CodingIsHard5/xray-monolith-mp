@@ -50,6 +50,9 @@ namespace xrprof
 		std::atomic<ticks_t> incl[2];
 		std::atomic<ticks_t> self[2];
 		std::atomic<ticks_t> calls[2];
+		// last-frame snapshot of self[] and calls[]; touched only by frame() on the main thread (-perf_slow)
+		ticks_t snap_self[2] = {0, 0};
+		ticks_t snap_calls[2] = {0, 0};
 		Site* next;
 		Site(const char* func_, const char* file_, int line_, const char* name_ = nullptr);
 	};

@@ -9,6 +9,7 @@
 #if XRCORE_PROFILER == PROFILER_AGG
 
 #include <vector>
+#include <utility>
 #include <stdio.h>
 
 namespace xrprof
@@ -22,6 +23,24 @@ namespace xrprof
 	static char g_tag[64] = "";
 	static ticks_t g_tsc_start = 0, g_tsc_last = 0;
 	static LARGE_INTEGER g_qpc_start;
+
+	// -perf_slow <ms>: for every frame longer than <ms>, keep the sites with the largest self time in that
+	// frame (perf_slow_<tag>.csv). Time of a scope is booked when the scope ends, so work that started on a
+	// worker in an earlier frame is charged to the frame it finished in.
+	struct SlowRow
+	{
+		unsigned frame;
+		float frame_ticks;
+		const Site* site;
+		int slot;
+		ticks_t self;
+		ticks_t calls;
+	};
+	static std::vector<SlowRow> g_slow;
+	static float g_slow_ms = 0.f;
+	static double g_ms_per_tick_est = 0.0;
+	static const int SLOW_TOP = 14;
+	static const size_t SLOW_MAX_ROWS = 600 * SLOW_TOP;
 
 	Site::Site(const char* func_, const char* file_, int line_, const char* name_)
 		: name(name_ ? name_ : func_), func(func_), file(file_), line(line_)
@@ -51,7 +70,26 @@ namespace xrprof
 				s->incl[i].store(0, std::memory_order_relaxed);
 				s->self[i].store(0, std::memory_order_relaxed);
 				s->calls[i].store(0, std::memory_order_relaxed);
+				s->snap_self[i] = 0;
+				s->snap_calls[i] = 0;
 			}
+		g_slow.clear();
+		g_slow_ms = 0.f;
+		if (Core.Params)
+			if (LPCSTR p = strstr(Core.Params, "-perf_slow "))
+				sscanf(p + xr_strlen("-perf_slow "), "%f", &g_slow_ms);
+		if (g_slow_ms > 0.f)
+		{
+			g_slow.reserve(SLOW_MAX_ROWS);
+			LARGE_INTEGER q0, q1, qf;
+			QueryPerformanceFrequency(&qf);
+			QueryPerformanceCounter(&q0);
+			const ticks_t t0 = __rdtsc();
+			do
+				QueryPerformanceCounter(&q1);
+			while (q1.QuadPart - q0.QuadPart < qf.QuadPart / 100); // 10 ms calibration, once per capture
+			g_ms_per_tick_est = double(q1.QuadPart - q0.QuadPart) * 1000.0 / double(qf.QuadPart) / double(__rdtsc() - t0);
+		}
 		xr_strcpy(g_tag, tag && *tag ? tag : "capture");
 		g_frame_ms.clear();
 		g_frame_ms.reserve(frames);
@@ -116,6 +154,25 @@ namespace xrprof
 			fclose(f);
 		}
 
+		if (g_slow_ms > 0.f)
+		{
+			xr_sprintf(fn, "perf_slow_%s.csv", g_tag);
+			FS.update_path(path, "$logs$", fn);
+			if (FILE* f = fopen(path, "wt"))
+			{
+				fprintf(f, "#threshold_ms,%.3f\nframe,frame_ms,thread,self_ms,calls,name,file,line\n", g_slow_ms);
+				for (const SlowRow& r : g_slow)
+				{
+					fprintf(f, "%u,%.4f,%s,%.4f,%llu,", r.frame, r.frame_ticks * ms_per_tick, r.slot ? "other" : "main",
+					        double(r.self) * ms_per_tick, r.calls);
+					csv_field(f, r.site->name);
+					fputc(',', f);
+					csv_field(f, r.site->file);
+					fprintf(f, ",%d\n", r.site->line);
+				}
+				fclose(f);
+			}
+		}
 		Msg("* [xrprof] capture '%s' finished: %u frames, %.1f ms total, %.3f ms/frame avg", g_tag,
 		    (unsigned)g_frame_ms.size(), total_ms, g_frame_ms.empty() ? 0.0 : total_ms / double(g_frame_ms.size()));
 		g_finished = true;
@@ -128,6 +185,35 @@ namespace xrprof
 		const ticks_t now = __rdtsc();
 		// stored as raw ticks (float keeps ~7 digits: enough for one frame), scaled in dump()
 		g_frame_ms.push_back(float(now - g_tsc_last));
+		if (g_slow_ms > 0.f)
+		{
+			const bool slow = double(now - g_tsc_last) * g_ms_per_tick_est > g_slow_ms && g_slow.size() + SLOW_TOP <= SLOW_MAX_ROWS;
+			SlowRow top[SLOW_TOP];
+			int n = 0;
+			for (Site* s = g_sites.load(std::memory_order_acquire); s; s = s->next)
+				for (int i = 0; i < 2; ++i)
+				{
+					const ticks_t cur = s->self[i].load(std::memory_order_relaxed), calls = s->calls[i].load(std::memory_order_relaxed);
+					const ticks_t d = cur - s->snap_self[i], dc = calls - s->snap_calls[i];
+					s->snap_self[i] = cur;
+					s->snap_calls[i] = calls;
+					if (!slow || !d)
+						continue;
+					// insertion into a small descending list
+					int k;
+					if (n < SLOW_TOP)
+						k = n++;
+					else if (top[SLOW_TOP - 1].self >= d)
+						continue;
+					else
+						k = SLOW_TOP - 1;
+					top[k] = SlowRow{(unsigned)g_frame_ms.size() - 1, float(now - g_tsc_last), s, i, d, dc};
+					for (; k > 0 && top[k - 1].self < top[k].self; --k)
+						std::swap(top[k - 1], top[k]);
+				}
+			for (int k = 0; k < n; ++k)
+				g_slow.push_back(top[k]);
+		}
 		g_tsc_last = now;
 		if (!--g_frames_left)
 			dump();
