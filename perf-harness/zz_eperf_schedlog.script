@@ -1,0 +1,9 @@
+-- EnginePerf (test overlay only): turns on the stock engine's own scheduler log. Inactive unless started with -eperf_schedlog.
+local active = string.find(command_line and command_line() or "", "-eperf_schedlog", 1, true) ~= nil
+local did = false
+local function on_update()
+	if not did then did = true get_console():execute("scheduler_log 1") end
+end
+function on_game_start()
+	if active then RegisterScriptCallback("actor_on_update", on_update) end
+end

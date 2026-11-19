@@ -1,0 +1,148 @@
+-- EnginePerf equivalence harness: A-Life state dump (test overlay only; lives in the project's run dir).
+-- Inactive unless the engine was started with -det_mode.
+--   -det_tag <name>  -det_interval <engine seconds>  -det_checkpoints <n>
+-- Writes $logs$/alife_dump_<tag>_<k>.txt at each checkpoint, then quits after the last one.
+local cl = command_line and command_line() or ""
+local active = string.find(cl, "-det_mode", 1, true) ~= nil
+local tag = string.match(cl, "%-det_tag%s+(%S+)") or "run"
+local interval = (tonumber(string.match(cl, "%-det_interval%s+(%d+)")) or 60) * 1000
+local total = tonumber(string.match(cl, "%-det_checkpoints%s+(%d+)")) or 3
+local trace = tonumber(string.match(cl, "%-det_trace%s+(%d+)")) or 0 -- log generator states for the first N updates
+-- -det_times a,b,c (engine seconds from the start point) replaces the even interval: checkpoint k at times[k]
+local times = {}
+for v in string.gmatch(string.match(cl, "%-det_times%s+(%S+)") or "", "%d+") do times[#times + 1] = tonumber(v) * 1000 end
+if #times > 0 then total = #times end
+local start_t, done, upd = nil, 0, 0
+
+local function g(f, ...) local ok, v = pcall(f, ...) if ok then return v end return nil end
+local function s(v) if v == nil then return "-" end return tostring(v) end
+
+local function dump(k)
+	local path = getFS():update_path("$logs$", string.format("alife_dump_%s_%d.txt", tag, k))
+	local f = io.open(path, "w")
+	if not f then printf("! eperf dump: cannot open %s", path) return end
+	local sim = alife()
+	f:write(string.format("#checkpoint %d engine_ms %d game %s\n", k, time_global() - start_t, s(g(function() return game.get_game_time():diffSec(level.get_start_time()) end))))
+	local n = 0
+	for id = 0, 65534 do
+		local se = sim:object(id)
+		if se then
+			n = n + 1
+			local p = se.position
+			local line = { id, se:section_name(), se:name(), se.parent_id, se.m_game_vertex_id, se.m_level_vertex_id,
+				string.format("%.2f,%.2f,%.2f", p.x, p.y, p.z), s(se.online) }
+			local alive = g(function() return se:alive() end)
+			if alive ~= nil then
+				line[#line + 1] = "alive=" .. s(alive)
+				line[#line + 1] = "hp=" .. s(g(function() return string.format("%.3f", se:health()) end))
+				line[#line + 1] = "comm=" .. s(g(function() return se:community() end))
+				line[#line + 1] = "rank=" .. s(g(function() return se:rank() end))
+				line[#line + 1] = "money=" .. s(g(function() return se:character_money() end))
+				line[#line + 1] = "squad=" .. s(g(function() return se.group_id end))
+			end
+			if se.current_action ~= nil or se.assigned_target_id ~= nil or se.current_target_id ~= nil then
+				line[#line + 1] = "sq_action=" .. s(g(function() return type(se.current_action) == "table" and se.current_action.name or se.current_action end))
+				line[#line + 1] = "sq_target=" .. s(se.current_target_id) .. "/" .. s(se.assigned_target_id)
+				line[#line + 1] = "sq_smart=" .. s(se.smart_id)
+				line[#line + 1] = "sq_npcs=" .. s(g(function() return se:npc_count() end))
+				line[#line + 1] = "sq_player=" .. s(se.player_id)
+			end
+			if se.npc_info ~= nil then
+				local c = 0 for _ in pairs(se.npc_info) do c = c + 1 end
+				line[#line + 1] = "smart_npcs=" .. c
+				line[#line + 1] = "smart_pop=" .. s(se.population)
+			end
+			f:write(table.concat(line, "\t"), "\n")
+		end
+	end
+	f:write("#objects " .. n .. "\n")
+	-- faction relations
+	local facs = g(function() return game_relations.factions_table end)
+	if facs then
+		for _, a in ipairs(facs) do
+			local row = {}
+			for _, b in ipairs(facs) do row[#row + 1] = s(g(function() return relation_registry.community_relation(a, b) end)) end
+			f:write("#rel\t" .. a .. "\t" .. table.concat(row, ",") .. "\n")
+		end
+	end
+	-- actor
+	local cnt = 0
+	g(function() db.actor:iterate_inventory(function() cnt = cnt + 1 end, db.actor) end)
+	local ap = db.actor:position()
+	f:write(string.format("#actor money=%s items=%d pos=%.2f,%.2f,%.2f hp=%.3f\n", s(g(function() return db.actor:money() end)), cnt, ap.x, ap.y, ap.z, db.actor.health))
+	f:close()
+	printf(string.format("* eperf dump: checkpoint %d written, %d objects", k, n))
+end
+
+local ltrace = {}
+local function on_update()
+	if not start_t then
+		start_t = time_global()
+		printf(string.format("* det_lua_state pre: %d", math.random(1, 1000000000))) -- Lua generator as loading left it
+		get_console():execute("det_rng_state pre")
+		get_console():execute("det_reseed")
+		math.randomseed(12071980)
+		get_console():execute("det_rng_state start")
+		printf(string.format("* det_lua_state start: %d", math.random(1, 1000000000)))
+		if trace > 0 then dump(0) end -- state at the reseed point: tells "started different" from "diverged later"
+	end
+	upd = upd + 1
+	if upd <= trace then -- full-precision positions of a few watched objects (ids from -det_watch a,b,c) and the camera
+		local parts = {}
+		local c = device().cam_pos
+		parts[1] = string.format("cam %.9g %.9g %.9g", c.x, c.y, c.z)
+		local a = db.actor:position()
+		parts[2] = string.format("actor %.9g %.9g %.9g", a.x, a.y, a.z)
+		for id in string.gmatch(string.match(cl, "%-det_watch%s+(%S+)") or "", "%d+") do
+			local o = level.object_by_id(tonumber(id))
+			if o then
+				local q = o:position()
+				parts[#parts + 1] = string.format("%s %.9g %.9g %.9g", id, q.x, q.y, q.z)
+			end
+		end
+		printf("* det_pos u" .. upd .. ": " .. table.concat(parts, " | "))
+	end
+	if upd <= trace then
+		get_console():execute("det_rng_state u" .. upd)
+		printf(string.format("* det_lua_state u%d: %d", upd, math.random(1, 1000000000)))
+	end
+	if done < total and time_global() - start_t >= (times[done + 1] or (done + 1) * interval) then
+		done = done + 1
+		get_console():execute("det_rng_state cp" .. done)
+		printf(string.format("* det_lua_state cp%d: %d", done, math.random(1, 1000000000)))
+		if done == 1 then
+			get_console():execute("det_trace_dump " .. tag)
+			local f = io.open(getFS():update_path("$logs$", "det_trace_" .. tag .. ".lua.txt"), "w")
+			if f then f:write(table.concat(ltrace, "\n"), "\n") f:close() end
+		end
+		dump(done)
+		if done >= total then get_console():execute("quit") end
+	end
+end
+
+function on_game_start()
+	if not active then return end
+	-- Wall-clock-free os.time/os.clock for scripts (loadscreen.script seeds math.random from os.time() on every
+	-- load screen). The engine-side override in script_storage.cpp does not survive to this point, so do it here.
+	local os_time = os.time
+	os.time = function(t) if t ~= nil then return os_time(t) end return 1700000000 + math.floor(time_global() / 1000) end
+	os.clock = function() return time_global() / 1000 end
+	-- Lua draw trace from script start (before the save is loaded): who calls math.random / math.randomseed, in
+	-- order. Misses scripts that cached math.random in a local at load. Entries are "<update> <script:line> [seed]".
+	if trace > 0 and debug and debug.getinfo then
+		local real, realseed = math.random, math.randomseed
+		local function where()
+			local i = debug.getinfo(3, "Sl")
+			return i and (i.short_src .. ":" .. i.currentline) or "?"
+		end
+		math.random = function(...)
+			if #ltrace < 150000 then ltrace[#ltrace + 1] = upd .. " " .. where() end
+			return real(...)
+		end
+		math.randomseed = function(v, ...)
+			if #ltrace < 150000 then ltrace[#ltrace + 1] = upd .. " SEED " .. where() .. " " .. tostring(v) end
+			return realseed(v, ...)
+		end
+	end
+	RegisterScriptCallback("actor_on_update", on_update)
+end
