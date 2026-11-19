@@ -485,6 +485,10 @@ void dxRenderDeviceRender::End()
 	// (~10 ms at headset resolution). -perf_nopresent skips Present and instead waits until the GPU has
 	// finished the frame, so frame time = CPU time + the GPU time still outstanding at frame end.
 #ifdef USE_DX11
+	// GammaVR Phase B: OpenXR frame (only with -vr_openxr; see vr_openxr.cpp)
+	extern void vr_openxr_frame();
+	if (!Device.m_SecondViewport.IsSVPFrame())
+		vr_openxr_frame();
 	static const bool perf_nopresent = !!strstr(Core.Params, "-perf_nopresent");
 	if (perf_nopresent)
 	{
