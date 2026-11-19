@@ -33,11 +33,14 @@ START=$(date +%s); RC=1
 while :; do
   sleep 5
   if "$T/protected-title-check.sh" >/dev/null 2>&1; then echo "ABORT: protected title started"; RC=3; break; fi
-  if [ -s "$RUN/appdata/logs/alife_dump_${TAG}_$N.txt" ] && grep -qa "^#actor" "$RUN/appdata/logs/alife_dump_${TAG}_$N.txt"; then RC=0; sleep 8; break; fi
+  if [ -s "$RUN/appdata/logs/alife_dump_${TAG}_$N.txt" ] && grep -qa "^#actor" "$RUN/appdata/logs/alife_dump_${TAG}_$N.txt"; then RC=0; sleep 8
+    case "${DET_EXTRA:-}" in *-det_save*) for _ in $(seq 1 30); do [ -s "$RUN/appdata/savedgames/det_${TAG}_$N.scop" ] && break; sleep 3; done; sleep 5;; esac
+    break; fi
   if ! pgrep -f "bin\\\\$EXE" >/dev/null 2>&1 && [ $(( $(date +%s) - START )) -gt 30 ]; then echo "engine exited early"; RC=4; break; fi
   [ $(( $(date +%s) - START )) -gt "$LIMIT" ] && { echo "TIMEOUT after ${LIMIT}s"; RC=5; break; }
 done
 cp "$LOG" "$OUT/xray.log" 2>/dev/null; mv "$RUN"/appdata/logs/alife_dump_"$TAG"_*.txt "$OUT/" 2>/dev/null; mv "$RUN"/appdata/logs/det_trace_"$TAG".txt "$RUN"/appdata/logs/det_trace_"$TAG".lua.txt "$RUN"/appdata/logs/det_trace_"$TAG".txt.sched "$OUT/" 2>/dev/null
+mv "$RUN"/appdata/savedgames/det_"$TAG"_* "$OUT/" 2>/dev/null
 ls "$RUN"/appdata/logs/*.mdmp >/dev/null 2>&1 && { echo "CRASH DUMP present"; mv "$RUN"/appdata/logs/*.mdmp "$OUT/"; }
 echo "rc=$RC elapsed=$(( $(date +%s) - START ))s out=$OUT"; grep -a "eperf dump" "$OUT/xray.log" 2>/dev/null | tail -4
 exit $RC
