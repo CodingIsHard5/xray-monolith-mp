@@ -14,6 +14,10 @@
 #include "../xrEngine/CameraBase.h"
 #include "../xrEngine/vr_hooks.h"
 #include "../xrEngine/bone.h"
+#include "Inventory.h"
+#include "../xrEngine/Effector.h"
+#include "../xrEngine/CameraManager.h"
+#include <typeinfo>
 
 extern int g_nearwall;
 
@@ -1881,8 +1885,67 @@ bool player_hud::vr_place_at_grip()
 	return true;
 }
 
+// GammaVR diagnostic (-vr_m3 with -vr_dbg_base <from> <to>): one line per VR frame in [from, to], logged once per frame
+// (first eye pass), to find what moves the game camera that track_to_world is re-derived from every frame
+// (IGame_Level.cpp: track_to_world = game camera * inverse(head start pose)). Logging only.
+//  cam     = final game camera after the camera effectors (CCameraManager::Position/Direction, what Device got = pos0/dir0)
+//  cambase = the actor's active camera before effectors (cam_Active()->Position())
+//  t2w     = g_vr_track.track_to_world.c
+//  effs    = active camera effectors: count, then type id, class name, 'H' if a HUD motion camera effector
+static void vr_dbg_base_log()
+{
+	static int s_from = -1, s_to = -1;
+	static bool s_parsed = false;
+	if (!s_parsed)
+	{
+		s_parsed = true;
+		if (LPCSTR p = strstr(Core.Params, "-vr_dbg_base "))
+			if (sscanf(p + 13, "%d %d", &s_from, &s_to) != 2)
+				s_from = s_to = -1;
+		Msg("* [vr3dbg] base diagnostic window %d %d", s_from, s_to);
+	}
+	if (s_from < 0 || !g_actor || int(g_vr_track.frame) < s_from || int(g_vr_track.frame) > s_to)
+		return;
+	static u32 s_logged = u32(-1);
+	if (s_logged == g_vr_track.frame)
+		return;
+	s_logged = g_vr_track.frame;
+	CCameraManager& CM = g_actor->Cameras();
+	const Fvector cp = CM.Position(), cd = CM.Direction();
+	CCameraBase* cb = g_actor->cam_Active();
+	const Fvector bp = cb ? cb->Position() : Fvector().set(0.f, 0.f, 0.f);
+	const Fvector& ap = g_actor->Position();
+	const Fvector& t = g_vr_track.track_to_world.c;
+	string1024 effs;
+	effs[0] = 0;
+	u32 n = 0;
+	for (CEffectorCam* e : CM.vr_dbg_effectors())
+	{
+		if (!e)
+			continue;
+		++n;
+		string128 one;
+		xr_sprintf(one, " %d:%s%s", (int)e->GetType(), typeid(*e).name(), e->IsHudMotionEffector() ? ":H" : "");
+		if (xr_strlen(effs) + xr_strlen(one) < sizeof(effs) - 1)
+			xr_strcat(effs, one);
+	}
+	u32 hud_st = u32(-1);
+	LPCSTR motion = "none";
+	if (CHudItem* hi = smart_cast<CHudItem*>(g_actor->inventory().ActiveItem()))
+	{
+		hud_st = hi->GetState();
+		if (hi->m_current_motion.size())
+			motion = hi->m_current_motion.c_str();
+	}
+	Msg("* [vr3dbg] frame %u cam %.4f %.4f %.4f dir %.5f %.5f %.5f cambase %.4f %.4f %.4f actor %.4f %.4f %.4f t2w %.4f %.4f %.4f mstate 0x%08x hud_state %u motion %s effs %u%s",
+		g_vr_track.frame, cp.x, cp.y, cp.z, cd.x, cd.y, cd.z, bp.x, bp.y, bp.z, ap.x, ap.y, ap.z, t.x, t.y, t.z,
+		g_actor->MovingState(), hud_st, motion, n, effs);
+}
+
 void player_hud::render_hud(IDSGraphManager* DM)
 {
+	if (g_vr_track.active)
+		vr_dbg_base_log(); // GammaVR diagnostic, only with -vr_dbg_base
 	bool b_r0 = ((m_attached_items[0] && m_attached_items[0]->need_renderable()) || script_anim_part == 0 || script_anim_part == 2);
 	bool b_r1 = ((m_attached_items[1] && m_attached_items[1]->need_renderable()) || script_anim_part == 1 || script_anim_part == 2);
 

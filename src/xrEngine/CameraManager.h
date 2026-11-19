@@ -150,6 +150,8 @@ public:
 
 	void Dump();
 	u32 Count() { return m_EffectorsCam.size() + m_EffectorsCam_added_deffered.size(); }
+	// GammaVR diagnostic (-vr_dbg_base): read-only view of the active camera effectors
+	const EffectorCamVec& vr_dbg_effectors() const { return m_EffectorsCam; }
 	CEffectorCam* AddCamEffector(CEffectorCam* ef);
 	CEffectorCam* GetCamEffector(ECamEffectorType type);
 	void RemoveCamEffector(ECamEffectorType type);
