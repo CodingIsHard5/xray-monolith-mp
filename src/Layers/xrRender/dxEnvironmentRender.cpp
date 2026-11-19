@@ -8,7 +8,8 @@
 
 #include "../../xrEngine/xr_efflensflare.h"
 
-static Fmatrix mSky_prev = Fidentity;
+static Fmatrix mSky_prev_eye[2] = {Fidentity, Fidentity}; // GammaVR: one previous sky matrix per eye
+extern ENGINE_API int g_stereo_bench_eye;
 
 //////////////////////////////////////////////////////////////////////////
 // half box def
@@ -328,6 +329,7 @@ void dxEnvironmentRender::RenderSky(CEnvironment& env, bool OnlyMV)
 
 	if (OnlyMV)
 	{
+		Fmatrix& mSky_prev = mSky_prev_eye[g_stereo_bench_eye == 1 ? 1 : 0];
 		RCache.set_xform_world_prev(mSky_prev);
 		mSky_prev = mSky;
 

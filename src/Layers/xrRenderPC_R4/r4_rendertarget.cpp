@@ -1574,7 +1574,7 @@ extern ENGINE_API int g_stereo_bench_eye;
 extern ENGINE_API int ps_r_stereo_bench;
 void CRenderTarget::vr_history_create()
 {
-	vr_hist_count = 0; vr_hist_eye = 0;
+	vr_hist_count = 0; vr_hist_eye = 0; vr_hist_seeded = false;
 	const bool want = strstr(Core.Params, "-vr_openxr") || strstr(Core.Params, "-vr_preset") || strstr(Core.Params, "-vr_eye_history");
 	if (!want || strstr(Core.Params, "-vr_shared_history")) return;
 	struct item { ref_rt* rt; u32 samples; };
@@ -1602,6 +1602,14 @@ void CRenderTarget::vr_history_select(int eye)
 {
 	const int want = (eye == 1) ? 1 : 0;
 	if (want == vr_hist_eye || !vr_hist_count) return;
+	if (!vr_hist_seeded)
+	{
+		// equal start: the first eye's history was filled during loading, the second eye's set is still empty
+		for (u32 i = 0; i < vr_hist_count; i++)
+			if (vr_hist_live[i]->_get() && rt_vr_hist[i]._get() && vr_hist_live[i]->_get()->pSurface && rt_vr_hist[i]->pSurface)
+				HW.pContext->CopyResource(rt_vr_hist[i]->pSurface, vr_hist_live[i]->_get()->pSurface);
+		vr_hist_seeded = true;
+	}
 	for (u32 i = 0; i < vr_hist_count; i++)
 		if (vr_hist_live[i]->_get() && rt_vr_hist[i]._get()) vr_hist_live[i]->_get()->vr_swap(*rt_vr_hist[i]._get());
 	vr_hist_eye = want;

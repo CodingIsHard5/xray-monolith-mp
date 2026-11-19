@@ -1,4 +1,5 @@
 #include "stdafx.h"
+extern ENGINE_API int g_stereo_bench_eye;
 
 
 IC bool SortLights(light* i, light* j)
@@ -836,7 +837,7 @@ void CRenderTarget::phase_ssfx_sss_ext(light_Package& LP)
 				if (!LightSlot[slot]->flags.bActive || Remove)
 				{
                     // demonized: keep the light pointer for some frames to eliminate flicker, but also check if its actually been disabled
-                    LightSlot[slot]->sss_remove_latency++;
+                    if (g_stereo_bench_eye != 1) LightSlot[slot]->sss_remove_latency++; // GammaVR: once per frame, not once per eye
                     if (!LightSlot[slot]->flags.bActive || LightSlot[slot]->sss_remove_latency > 5)
                     {
                         if (LightSlot[slot]->flags.type == IRender_Light::OMNIPART)

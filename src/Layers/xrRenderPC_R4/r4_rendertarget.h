@@ -232,6 +232,7 @@ public:
 	ref_rt* vr_hist_live[VR_HIST_MAX];
 	u32 vr_hist_count = 0;
 	int vr_hist_eye = 0;
+	bool vr_hist_seeded = false;
 	void vr_history_create();
 	void vr_history_select(int eye);
 	//Fmatrix Matrix_HUD_previous, Matrix_HUD_current;

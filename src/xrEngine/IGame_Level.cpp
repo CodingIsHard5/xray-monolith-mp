@@ -197,6 +197,9 @@ void IGame_Level::OnRender()
 			// The second eye overwrites the first in the back buffer; this measures cost, not picture.
 			const Fvector pos0 = Device.vCameraPosition;
 			const Fmatrix view0 = Device.mView, proj0 = Device.mProject, projHud0 = Device.mProjectHud;
+			const Fmatrix invView0 = Device.mInvView, viewPrev0 = Device.mView_prev, projPrev0 = Device.mProject_prev, fullPrev0 = Device.mFullTransform_prev;
+			static Fmatrix eye_view_saved[2], eye_proj_saved[2]; // each eye's own previous-frame camera (motion vectors)
+			static u32 eye_saved_frame[2] = {0, 0};
 			for (int eye = 0; eye < 2; ++eye)
 			{
 				const int mono_eye = vr_frame ? g_vr_mono_eye : -1;
@@ -228,6 +231,15 @@ void IGame_Level::OnRender()
 					Device.mProjectHud._31 = -side * 0.08f;
 				}
 				Device.mView.build_camera_dir(Device.vCameraPosition, Device.vCameraDirection, Device.vCameraTop);
+				Device.mInvView.invert(Device.mView);
+				{
+					const bool have_prev = eye_saved_frame[eye] && eye_saved_frame[eye] + 1 == Device.dwFrame;
+					Device.mView_prev = have_prev ? eye_view_saved[eye] : Device.mView;
+					Device.mProject_prev = have_prev ? eye_proj_saved[eye] : Device.mProject;
+					Device.mFullTransform_prev.mul(Device.mProject_prev, Device.mView_prev);
+					Device.m_pRender->SetCacheXform_prev(Device.mView_prev, Device.mProject_prev);
+					eye_view_saved[eye] = Device.mView; eye_proj_saved[eye] = Device.mProject; eye_saved_frame[eye] = Device.dwFrame;
+				}
 				Device.mFullTransform.mul(Device.mProject, Device.mView);
 				Device.mFullTransformHud.mul(Device.mProjectHud, Device.mView);
 				Device.mFullTransformCamAttached.mul(Device.mProjectCamAttached, Device.mView);
@@ -258,6 +270,9 @@ void IGame_Level::OnRender()
 			{
 				Device.vCameraPosition = pos0;
 				Device.mView = view0;
+				Device.mInvView = invView0;
+				Device.mView_prev = viewPrev0; Device.mProject_prev = projPrev0; Device.mFullTransform_prev = fullPrev0;
+				Device.m_pRender->SetCacheXform_prev(Device.mView_prev, Device.mProject_prev);
 				Device.mProject = proj0;
 				Device.mProjectHud = projHud0;
 				Device.mFullTransform.mul(Device.mProject, Device.mView);
