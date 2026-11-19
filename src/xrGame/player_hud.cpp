@@ -1408,6 +1408,10 @@ void player_hud::vr_log_gun_pixels()
 		Device.dwWidth, Device.dwHeight);
 }
 
+// GammaVR milestone 3c: grip transform of the held item (see vr_grip_lookup below)
+static bool s_vr_grip_on = false;      // an offset is applied to the held item
+static Fmatrix s_vr_grip_frame = Fidentity; // translate(grip_pos) * Rframe, weapon model space
+
 // GammaVR milestone 3b (Amendment 10 note 3) test switches, parsed once.
 struct vr_3b_switches
 {
@@ -1443,7 +1447,7 @@ static u16 vr_find_bone(IKinematics* K, LPCSTR name)
 }
 
 // -vr_vis_rot <deg>: test control. Only the DRAWN item models are rotated: yaw to the right by <deg> about the grip pose's
-// vertical axis through the item origin (the grip point). After the placement the item's own axes are the grip axes, so
+// vertical axis through the grip point (3c: the grip frame item * s_vr_grip_frame; without an offset the item origin and axes), so
 // this is the item-local rotation about y: draw = m_item_transform * rotateY (rotateY takes (0,0,1) to (sin a, 0, cos a),
 // i.e. to the right for a > 0). The same world rotation is applied to every attached item (scope) so they stay together.
 // m_item_transform itself is not changed, so gun_axis / gun_muzzle / gun_px / mask origin come from the unrotated
@@ -1466,11 +1470,13 @@ bool player_hud::vr_update_vis_rot()
 	attachable_hud_item* item = m_attached_items[0] ? m_attached_items[0] : m_attached_items[1];
 	if (!item)
 		return false;
-	Fmatrix rot, item_inv, W;
+	Fmatrix rot, F, F_inv, W;
 	rot.rotateY(deg2rad(S.vis_rot_deg));
-	item_inv.invert(item->m_item_transform);
-	W.mul_43(item->m_item_transform, rot);
-	W.mulB_43(item_inv); // W = item * rot * inverse(item): world rotation about the grip's y axis through the item origin
+	// pivot frame F = the grip frame in the world: item * grip frame (milestone 3c; identity offset = the item origin/axes)
+	F.mul_43(item->m_item_transform, s_vr_grip_on ? s_vr_grip_frame : Fidentity);
+	F_inv.invert(F);
+	W.mul_43(F, rot);
+	W.mulB_43(F_inv); // W = F * rot * inverse(F): world rotation about the grip's y axis through the grip point
 	for (int i = 0; i < 3; ++i)
 		if (m_attached_items[i])
 			m_vr_draw_xform[i].mul_43(W, m_attached_items[i]->m_item_transform);
@@ -1552,6 +1558,223 @@ void player_hud::vr_log_gun_bones()
 	Msg("* [vr3] frame %u gun_vis_pts track %.4f %.4f %.4f %.4f %.4f %.4f", g_vr_track.frame, rt.x, rt.y, rt.z, ft.x, ft.y, ft.z);
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// GammaVR milestone 3c (Amendment 11): per-weapon grip transform from gamedata/configs/gvr_grips.ltx ($game_config$).
+//   [<section>]  family = ak|ar|pistol|shotgun|bolt (or family_xx)   grip_pos = x, y, z   grip_rot = pitch, yaw, roll
+// grip_pos: metres, in the weapon item's MODEL space (the HUD model drawn with m_item_transform): placed on the controller.
+// grip_rot (degrees) defines the grip frame's orientation in model space, Rframe = Ry(yaw) * Rx(pitch) * Rz(roll), applied
+// to a vector as roll about z first, then pitch UP about x, then yaw RIGHT about y (engine axes x right, y up, z forward):
+// Rframe * (0,0,1) = (sin yaw cos pitch, sin pitch, cos yaw cos pitch). That model-space direction is put on the
+// controller's forward (z) axis. Calibration from a measured barrel direction b (model space, unit): pitch = asin(b.y),
+// yaw = atan2(b.x, b.z), roll = 0. Fmatrix: Ry = rotateY(yaw), Rx = rotateX(-pitch), Rz = rotateZ(roll) (+x toward +y).
+// Item world transform = grip pose * inverse(translate(grip_pos) * Rframe) (with the item's own scale kept).
+// Lookup (or the -vr_grip_as section instead of the held one): the weapon's object section (e.g. wpn_sks) with grip_pos,
+// else the HUD section (e.g. wpn_sks_hud, as gun_bones prints) with grip_pos, else the family_<f> section named by the
+// first of those that has a 'family' line, else none (old behaviour). -vr_grip_off: never any offset.
+struct vr_grip_cfg
+{
+	bool off = false;
+	string128 as;
+	string64 hand_bone;
+	bool has_hand_bone = false;
+	CInifile* ini = nullptr;
+	vr_grip_cfg()
+	{
+		as[0] = hand_bone[0] = 0;
+		off = !!strstr(Core.Params, "-vr_grip_off");
+		if (LPCSTR p = strstr(Core.Params, "-vr_grip_as "))
+			sscanf(p + 12, "%127s", as);
+		if (LPCSTR p = strstr(Core.Params, "-vr_grip_bones "))
+			has_hand_bone = sscanf(p + 15, "%63s", hand_bone) == 1;
+		string_path path;
+		FS.update_path(path, "$game_config$", "gvr_grips.ltx");
+		if (FS.exist(path))
+			ini = xr_new<CInifile>(path, TRUE, TRUE, FALSE);
+		Msg("* [vr3] grip config %s: %s; -vr_grip_off %d, -vr_grip_as %s, -vr_grip_bones %s", path, ini ? "loaded" : "MISSING (no offsets)",
+			off ? 1 : 0, as[0] ? as : "-", has_hand_bone ? hand_bone : "-");
+	}
+};
+static const vr_grip_cfg& vr_grip_config()
+{
+	static const vr_grip_cfg c;
+	return c;
+}
+
+
+// looks the held item up (once per change of section) and sets s_vr_grip_on / s_vr_grip_frame
+static void vr_grip_lookup(attachable_hud_item* item)
+{
+	static shared_str s_hud_sect, s_obj_sect;
+	const shared_str obj_sect = (item->m_parent_hud_item && item->m_parent_hud_item->has_object())
+		? item->m_parent_hud_item->object().cNameSect() : shared_str("none");
+	if (s_hud_sect == item->m_sect_name && s_obj_sect == obj_sect)
+		return;
+	s_hud_sect = item->m_sect_name;
+	s_obj_sect = obj_sect;
+	s_vr_grip_on = false;
+	s_vr_grip_frame.identity();
+	const vr_grip_cfg& C = vr_grip_config();
+	Msg("* [vr3] grip lookup: weapon %s hud %s as %s", obj_sect.c_str(), item->m_sect_name.c_str(), C.as[0] ? C.as : "-");
+	LPCSTR source = nullptr;
+	if (!C.off && C.ini)
+	{
+		LPCSTR cand[2] = { C.as[0] ? C.as : obj_sect.c_str(), C.as[0] ? nullptr : item->m_sect_name.c_str() };
+		LPCSTR fam_from = nullptr;
+		for (int n = 0; n < 2 && !source; ++n)
+		{
+			if (!cand[n] || !C.ini->section_exist(cand[n]))
+				continue;
+			if (C.ini->line_exist(cand[n], "grip_pos"))
+				source = cand[n];
+			else if (!fam_from && C.ini->line_exist(cand[n], "family"))
+				fam_from = cand[n];
+		}
+		static string64 fam_sect;
+		if (!source && fam_from)
+		{
+			LPCSTR f = C.ini->r_string(fam_from, "family");
+			if (strstr(f, "family_") == f)
+				xr_strcpy(fam_sect, f);
+			else
+				xr_sprintf(fam_sect, "family_%s", f);
+			if (C.ini->section_exist(fam_sect) && C.ini->line_exist(fam_sect, "grip_pos"))
+				source = fam_sect;
+		}
+	}
+	if (!source)
+	{
+		Msg("* [vr3] grip offset for %s: none", obj_sect.c_str());
+		return;
+	}
+	const Fvector pos = C.ini->r_fvector3(source, "grip_pos");
+	const Fvector rot = C.ini->line_exist(source, "grip_rot") ? C.ini->r_fvector3(source, "grip_rot") : Fvector().set(0.f, 0.f, 0.f);
+	Fmatrix Ry, Rx, Rz, R;
+	Ry.rotateY(deg2rad(rot.y));
+	Rx.rotateX(-deg2rad(rot.x));
+	Rz.rotateZ(deg2rad(rot.z));
+	R.mul_43(Ry, Rx);
+	R.mulB_43(Rz); // R = Ry * Rx * Rz: roll first, then pitch, then yaw
+	s_vr_grip_frame.set(R);
+	s_vr_grip_frame.c.set(pos);
+	s_vr_grip_on = true;
+	Msg("* [vr3] grip offset for %s: source %s pos %.4f %.4f %.4f rot %.3f %.3f %.3f", obj_sect.c_str(), source,
+		pos.x, pos.y, pos.z, rot.x, rot.y, rot.z);
+	Msg("* [vr3] grip frame (model space, rows i j k = frame x y z axes, Rframe*(0,0,1) = k): i %.5f %.5f %.5f j %.5f %.5f %.5f k %.5f %.5f %.5f",
+		R.i.x, R.i.y, R.i.z, R.j.x, R.j.y, R.j.z, R.k.x, R.k.y, R.k.z);
+}
+
+// Milestone 3c logging: the -vr_grip_bones bone of the first-person HANDS model as drawn, the barrel bones in weapon model
+// space. The arms are drawn as their own models with their own transforms (render_hud: add_Dynamic(m_model, &m_transform),
+// add_Dynamic(m_model_2, &m_transform_2)); the bone's world position = m_transform * m_model bone (LL_GetTransform(b).c)
+// (m_model_2 / m_transform_2 if the bone is only found there... both share the skeleton, so m_model is searched first).
+// The weapon is attached to the arms (calc_transform: m_item_transform = m_transform * anchor bone * item offset), and the
+// grip placement moves arms and weapon by the same rigid C, so the hand stays where it was relative to the weapon.
+// Weapon model space = inverse(m_item_transform) (the unrotated item transform; -vr_vis_rot does not rotate the arms).
+static bool vr_hand_bone_world(player_hud* H, Fvector& w)
+{
+	const vr_grip_cfg& C = vr_grip_config();
+	if (!C.has_hand_bone)
+		return false;
+	IKinematics* K1 = H->m_model->dcast_PKinematics();
+	u16 b = vr_find_bone(K1, C.hand_bone);
+	if (b != BI_NONE)
+	{
+		H->m_transform.transform_tiny(w, K1->LL_GetTransform(b).c);
+		return true;
+	}
+	IKinematics* K2 = H->m_model_2->dcast_PKinematics();
+	b = vr_find_bone(K2, C.hand_bone);
+	if (b != BI_NONE)
+	{
+		H->m_transform_2.transform_tiny(w, K2->LL_GetTransform(b).c);
+		return true;
+	}
+	static bool s_warned = false;
+	if (!s_warned)
+	{
+		s_warned = true;
+		Msg("! [vr3] grip bone not found in the hands models: %s", C.hand_bone);
+	}
+	return false;
+}
+
+void player_hud::vr_log_grip_point()
+{
+	attachable_hud_item* item = m_attached_items[0] ? m_attached_items[0] : m_attached_items[1];
+	if (!item)
+		return;
+	static bool s_hands_listed = false;
+	if (!s_hands_listed)
+	{
+		s_hands_listed = true;
+		IKinematics* K = m_model->dcast_PKinematics();
+		const u16 n = K->LL_BoneCount();
+		Msg("* [vr3] hand_bones count %u", (u32)n);
+		for (u16 i = 0; i < n; ++i)
+		{
+			LPCSTR name = K->LL_BoneName_dbg(i);
+			const u16 par = K->LL_GetData(i).GetParentID();
+			LPCSTR pname = par == BI_NONE ? "none" : K->LL_BoneName_dbg(par);
+			Msg("* [vr3] hand_bone %u name %s parent %s", (u32)i, name ? name : "?", pname ? pname : "?");
+		}
+	}
+	Fmatrix world_to_model, world_to_track;
+	world_to_model.invert(item->m_item_transform);
+	world_to_track.invert(g_vr_track.track_to_world);
+	const vr_grip_cfg& C = vr_grip_config();
+
+	// frames 200/300, once per eye pass: grip point pixel (same matrix as gun_px)
+	if (C.has_hand_bone && (g_vr_track.frame == 200 || g_vr_track.frame == 300))
+	{
+		static u32 s_px_frame[2] = { u32(-1), u32(-1) };
+		const int eye = g_stereo_bench_eye;
+		const int slot = eye == 1 ? 1 : 0;
+		if (s_px_frame[slot] != g_vr_track.frame)
+		{
+			s_px_frame[slot] = g_vr_track.frame;
+			Fvector w;
+			float x, y;
+			if (vr_hand_bone_world(this, w) && vr_hud_pixel(w, x, y))
+				Msg("* [vr3] frame %u eye %d grip_px %.2f %.2f size %u %u", g_vr_track.frame, eye, x, y, Device.dwWidth, Device.dwHeight);
+			else
+				Msg("* [vr3] frame %u eye %d grip_px nan nan size %u %u", g_vr_track.frame, eye, Device.dwWidth, Device.dwHeight);
+		}
+	}
+
+	static u32 s_logged_frame = u32(-1);
+	if (g_vr_track.frame % 100 != 0 || s_logged_frame == g_vr_track.frame)
+		return;
+	s_logged_frame = g_vr_track.frame;
+	if (C.has_hand_bone)
+	{
+		Fvector w, t, m;
+		if (vr_hand_bone_world(this, w))
+		{
+			world_to_track.transform_tiny(t, w);
+			world_to_model.transform_tiny(m, w);
+			Msg("* [vr3] frame %u grip_pt track %.4f %.4f %.4f world %.4f %.4f %.4f model %.4f %.4f %.4f bone %s", g_vr_track.frame,
+				t.x, t.y, t.z, w.x, w.y, w.z, m.x, m.y, m.z, C.hand_bone);
+		}
+		else
+			Msg("* [vr3] frame %u grip_pt track nan nan nan world nan nan nan model nan nan nan bone %s", g_vr_track.frame, C.hand_bone);
+	}
+	const vr_3b_switches& S = vr_3b();
+	if (S.barrel && item->m_model)
+	{
+		IKinematics* K = item->m_model;
+		const u16 br = vr_find_bone(K, S.rear), bf = vr_find_bone(K, S.front);
+		if (br == BI_NONE || bf == BI_NONE)
+			Msg("* [vr3] frame %u barrel_model rear nan nan nan front nan nan nan", g_vr_track.frame);
+		else
+		{
+			// bone positions in model space directly: m_item_transform * bone, mapped back by its inverse = the bone itself
+			const Fvector& r = K->LL_GetTransform(br).c;
+			const Fvector& f = K->LL_GetTransform(bf).c;
+			Msg("* [vr3] frame %u barrel_model rear %.4f %.4f %.4f front %.4f %.4f %.4f", g_vr_track.frame, r.x, r.y, r.z, f.x, f.y, f.z);
+		}
+	}
+}
+
 bool player_hud::vr_place_at_grip()
 {
 	attachable_hud_item* item = m_attached_items[0] ? m_attached_items[0] : m_attached_items[1];
@@ -1568,9 +1791,30 @@ bool player_hud::vr_place_at_grip()
 	const float si = cur.i.magnitude(), sj = cur.j.magnitude(), sk = cur.k.magnitude();
 	if (si < EPS || sj < EPS || sk < EPS)
 		return false;
-	target.i.mul(si);
-	target.j.mul(sj);
-	target.k.mul(sk);
+	// milestone 3c: grip transform. Item = grip pose * inverse(grip frame), i.e. rotation = grip rotation * Rframe^T and
+	// position such that the model point grip_pos lands on the grip position: c = grip.c - (scaled rotation) * grip_pos.
+	vr_grip_lookup(item);
+	if (s_vr_grip_on)
+	{
+		Fmatrix rot_target = target, frame_rot = s_vr_grip_frame, frame_rot_inv, R;
+		rot_target.c.set(0.f, 0.f, 0.f);
+		frame_rot.c.set(0.f, 0.f, 0.f);
+		frame_rot_inv.transpose(frame_rot); // pure rotation: inverse = transpose (4x4 transpose keeps c = 0, w = 1)
+		R.mul_43(rot_target, frame_rot_inv);
+		R.i.mul(si);
+		R.j.mul(sj);
+		R.k.mul(sk);
+		Fvector off;
+		R.transform_dir(off, s_vr_grip_frame.c);
+		R.c.sub(target.c, off);
+		target.set(R);
+	}
+	else
+	{
+		target.i.mul(si);
+		target.j.mul(sj);
+		target.k.mul(sk);
+	}
 
 	Fmatrix cur_inv, C;
 	cur_inv.invert(cur);
@@ -1664,6 +1908,7 @@ void player_hud::render_hud(IDSGraphManager* DM)
 			vr_log_gun_pixels(); // milestone 3b: in every eye pass, with the item's final transform of this frame
 			vis_rot = vr_update_vis_rot(); // milestone 3b test control: rotates only what is drawn
 			vr_log_gun_bones();
+			vr_log_grip_point(); // milestone 3c
 		}
 	}
 
