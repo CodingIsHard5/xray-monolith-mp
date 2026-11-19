@@ -219,6 +219,15 @@ void initialize()
 
     // -det_mode: test-only determinism switch for the equivalence harness. Fixed seed instead of the CPU clock.
     ::Random.seed(xr_det_seed(u32(CPU::GetCLK() % (1i64 << 32i64))));
+#ifdef XRCORE_PROFILER_AGG
+    // Arm the stream split from process start, not only at det_reseed: objects already run scheduler updates
+    // during loading and the precache frames, and cosmetic draws must not shift the gameplay stream there either.
+    if (xr_det_mode())
+    {
+        xr_det_set_role(1); // this is the main thread
+        xr_det_split_armed = 1;
+    }
+#endif
 }
 };
 #endif
