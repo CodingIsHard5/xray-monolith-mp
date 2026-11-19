@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "vr_hooks.h"
 #include "igame_level.h"
 #include "igame_persistent.h"
 
@@ -186,7 +187,10 @@ void IGame_Level::OnRender()
 		extern ENGINE_API int ps_r_stereo_bench;
 		extern ENGINE_API float ps_r_stereo_ipd;
 		extern ENGINE_API int g_stereo_bench_eye;
-		if (ps_r_stereo_bench >= 1 && g_pGameLevel && !Device.m_SecondViewport.IsSVPFrame())
+		// GammaVR Phase B: with -vr_openxr and a running session, the eyes come from the OpenXR runtime
+		vr_eye_view vr_views[2];
+		const bool vr_frame = g_vr_begin_frame && g_pGameLevel && !Device.m_SecondViewport.IsSVPFrame() && g_vr_begin_frame(vr_views);
+		if ((vr_frame || ps_r_stereo_bench >= 1) && g_pGameLevel && !Device.m_SecondViewport.IsSVPFrame())
 		{
 			// VR spike, naive stereo: the full scene pipeline runs once per eye.
 			// Each eye is offset half the IPD along camera right and gets an off-centre projection.
@@ -197,12 +201,30 @@ void IGame_Level::OnRender()
 			{
 				g_stereo_bench_eye = eye;
 				const float side = eye ? 1.f : -1.f;
-				Device.vCameraPosition.mad(pos0, Device.vCameraRight, side * ps_r_stereo_ipd * 0.5f);
-				Device.mView.build_camera_dir(Device.vCameraPosition, Device.vCameraDirection, Device.vCameraTop);
 				Device.mProject = proj0;
-				Device.mProject._31 = -side * 0.08f;
 				Device.mProjectHud = projHud0;
-				Device.mProjectHud._31 = -side * 0.08f;
+				if (vr_frame)
+				{
+					// eye position from the runtime (relative to the head), projection from the runtime's field of view
+					const vr_eye_view& V = vr_views[eye];
+					Device.vCameraPosition.mad(pos0, Device.vCameraRight, V.offset.x);
+					Device.vCameraPosition.mad(Device.vCameraTop, V.offset.y);
+					Device.vCameraPosition.mad(Device.vCameraDirection, V.offset.z);
+					const float w = V.tan_r - V.tan_l, h = V.tan_u - V.tan_d;
+					Device.mProject._11 = 2.f / w;
+					Device.mProject._22 = 2.f / h;
+					Device.mProject._31 = -(V.tan_r + V.tan_l) / w;
+					Device.mProject._32 = -(V.tan_u + V.tan_d) / h;
+					Device.mProjectHud._31 = Device.mProject._31;
+					Device.mProjectHud._32 = Device.mProject._32;
+				}
+				else
+				{
+					Device.vCameraPosition.mad(pos0, Device.vCameraRight, side * ps_r_stereo_ipd * 0.5f);
+					Device.mProject._31 = -side * 0.08f;
+					Device.mProjectHud._31 = -side * 0.08f;
+				}
+				Device.mView.build_camera_dir(Device.vCameraPosition, Device.vCameraDirection, Device.vCameraTop);
 				Device.mFullTransform.mul(Device.mProject, Device.mView);
 				Device.mFullTransformHud.mul(Device.mProjectHud, Device.mView);
 				Device.mFullTransformCamAttached.mul(Device.mProjectCamAttached, Device.mView);
@@ -217,6 +239,8 @@ void IGame_Level::OnRender()
 					PROF_EVENT("stereo eye: Render");
 					Render->Render();
 				}
+				if (vr_frame && g_vr_eye_done)
+					g_vr_eye_done(eye);
 			}
 			g_stereo_bench_eye = -1;
 			// restore the centre camera for everything drawn after the scene (UI, debug)

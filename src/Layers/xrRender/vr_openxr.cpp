@@ -4,7 +4,10 @@
 // Enabled by the command line switch -vr_openxr. Without it nothing here runs and openxr_loader.dll is never loaded.
 // What it does: creates an OpenXR instance, system and D3D11 session, one swapchain per eye, and every engine frame
 // runs xrWaitFrame/xrBeginFrame/xrEndFrame with one projection layer of two views, logging the head pose.
-// The eye images are only cleared to a flat colour here; rendering the game into them is the next step.
+// Milestone 2: the level render loop (IGame_Level::OnRender) asks vr_begin_frame() for the two eye views, renders the
+// scene once per eye and calls vr_eye_done(), which copies the finished back buffer into that eye's swapchain image.
+// -vr_eye_scale <f> scales the eye offset (test control: 0 = both eyes at the head). -vr_dump reads both swapchain
+// images back on stereo frames 200 and 300 and writes them to the logs folder.
 // The loader is bound at run time (LoadLibrary), so the engine build needs only the OpenXR headers.
 #ifdef USE_DX11
 
@@ -12,6 +15,7 @@
 #define XR_USE_GRAPHICS_API_D3D11
 #include "../../3rd party/openxr/include/openxr/openxr.h"
 #include "../../3rd party/openxr/include/openxr/openxr_platform.h"
+#include "../../xrEngine/vr_hooks.h"
 
 namespace
 {
@@ -19,7 +23,7 @@ namespace
 	{
 		XrSwapchain chain = XR_NULL_HANDLE;
 		int32_t w = 0, h = 0;
-		xr_vector<ID3D11RenderTargetView*> rtv;
+		xr_vector<ID3D11Texture2D*> tex;
 	};
 
 	struct vr_state
@@ -38,6 +42,16 @@ namespace
 		u32 frames_ok = 0;       // xrEndFrame calls that returned XR_SUCCESS with the projection layer
 		u32 frames_run = 0;      // consecutive such calls
 		u32 frames_fail = 0;
+		// per-frame state
+		bool frame_begun = false;
+		u32 eyes_done = 0;
+		XrFrameState fs = { XR_TYPE_FRAME_STATE };
+		XrView views[2] = { { XR_TYPE_VIEW }, { XR_TYPE_VIEW } };
+		XrSpaceLocation head_loc = { XR_TYPE_SPACE_LOCATION };
+		XrResult head_r = XR_SUCCESS;
+		float eye_scale = 1.f;
+		bool dump = false;
+		bool views_logged = false;
 
 		PFN_xrGetInstanceProcAddr GetInstanceProcAddr = nullptr;
 		PFN_xrCreateInstance CreateInstance = nullptr;
@@ -184,16 +198,34 @@ namespace
 		uint32_t nf = 0;
 		if (!vr_check(vr.EnumerateSwapchainFormats(vr.session, 64, &nf, formats), "xrEnumerateSwapchainFormats") || !nf)
 			return false;
-		int64_t pick = formats[0];
-		for (uint32_t i = 0; i < nf; ++i)
-			if (formats[i] == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) { pick = formats[i]; break; }
+		// the eye pictures are copied from the engine's back buffer, so the swapchain must be copy-compatible with it
+		const DXGI_FORMAT bb = HW.m_ChainDesc.Format;
+		const DXGI_FORMAT bb_srgb = bb == DXGI_FORMAT_R8G8B8A8_UNORM ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : bb;
+		int64_t pick = 0;
+		for (uint32_t i = 0; i < nf && !pick; ++i)
+			if (formats[i] == bb) pick = formats[i];
+		for (uint32_t i = 0; i < nf && !pick; ++i)
+			if (formats[i] == bb_srgb) pick = formats[i];
+		if (!pick)
+		{
+			Msg("! [vr] the runtime offers no swapchain format compatible with the back buffer (format %d)", (int)bb);
+			return false;
+		}
 		vr.format = (DXGI_FORMAT)pick;
+		Msg("* [vr] runtime recommends %ux%u per eye (max %ux%u); using the back buffer size %ux%u, format %d (back buffer format %d)",
+			vcv[0].recommendedImageRectWidth, vcv[0].recommendedImageRectHeight, vcv[0].maxImageRectWidth, vcv[0].maxImageRectHeight,
+			(u32)HW.m_ChainDesc.Width, (u32)HW.m_ChainDesc.Height, (int)pick, (int)bb);
+		if (HW.m_ChainDesc.Width > vcv[0].maxImageRectWidth || HW.m_ChainDesc.Height > vcv[0].maxImageRectHeight)
+		{
+			Msg("! [vr] back buffer is larger than the runtime's maximum eye image");
+			return false;
+		}
 
 		for (int e = 0; e < 2; ++e)
 		{
 			vr_eye& E = vr.eye[e];
-			E.w = (int32_t)vcv[e].recommendedImageRectWidth;
-			E.h = (int32_t)vcv[e].recommendedImageRectHeight;
+			E.w = (int32_t)HW.m_ChainDesc.Width;
+			E.h = (int32_t)HW.m_ChainDesc.Height;
 			XrSwapchainCreateInfo ci = { XR_TYPE_SWAPCHAIN_CREATE_INFO };
 			ci.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
 			ci.format = pick;
@@ -218,19 +250,7 @@ namespace
 			if (!vr_check(vr.EnumerateSwapchainImages(E.chain, ni, &ni, (XrSwapchainImageBaseHeader*)img.data()), "xrEnumerateSwapchainImages"))
 				return false;
 			for (uint32_t i = 0; i < ni; ++i)
-			{
-				D3D11_RENDER_TARGET_VIEW_DESC rd = {};
-				rd.Format = vr.format;
-				rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-				ID3D11RenderTargetView* v = nullptr;
-				HRESULT hr = HW.pDevice->CreateRenderTargetView(img[i].texture, &rd, &v);
-				if (FAILED(hr))
-				{
-					Msg("! [vr] CreateRenderTargetView on eye %d image %u failed: 0x%08x", e, i, (u32)hr);
-					return false;
-				}
-				E.rtv.push_back(v);
-			}
+				E.tex.push_back(img[i].texture);
 			Msg("* [vr] eye %d swapchain: %dx%d, format %d, %u images", e, E.w, E.h, (int)pick, ni);
 		}
 		return true;
@@ -272,95 +292,230 @@ namespace
 	}
 }
 
-// Called once per engine frame from dxRenderDeviceRender::End(), on the thread that owns the D3D11 context.
-void vr_openxr_frame()
+namespace
 {
-	static const bool enabled = !!strstr(Core.Params, "-vr_openxr");
-	if (!enabled)
-		return;
-	if (!vr.tried)
+	bool vr_ready()
 	{
-		vr.tried = true;
-		vr.ok = vr_init();
-		Msg(vr.ok ? "* [vr] OpenXR bring-up complete" : "! [vr] OpenXR bring-up FAILED; VR path disabled for this run");
-	}
-	if (!vr.ok)
-		return;
-
-	vr_events();
-	if (!vr.running)
-		return;
-
-	XrFrameWaitInfo wi = { XR_TYPE_FRAME_WAIT_INFO };
-	XrFrameState fs = { XR_TYPE_FRAME_STATE };
-	if (XR_FAILED(vr.WaitFrame(vr.session, &wi, &fs)))
-	{
-		vr.frames_fail++; vr.frames_run = 0;
-		return;
-	}
-	XrFrameBeginInfo bi = { XR_TYPE_FRAME_BEGIN_INFO };
-	if (XR_FAILED(vr.BeginFrame(vr.session, &bi)))
-	{
-		vr.frames_fail++; vr.frames_run = 0;
-		return;
+		static const bool enabled = !!strstr(Core.Params, "-vr_openxr");
+		if (!enabled)
+			return false;
+		if (!vr.tried)
+		{
+			vr.tried = true;
+			if (LPCSTR p = strstr(Core.Params, "-vr_eye_scale "))
+				sscanf(p + 14, "%f", &vr.eye_scale);
+			vr.dump = !!strstr(Core.Params, "-vr_dump");
+			vr.ok = vr_init();
+			Msg(vr.ok ? "* [vr] OpenXR bring-up complete" : "! [vr] OpenXR bring-up FAILED; VR path disabled for this run");
+			Msg("* [vr] eye offset scale %.3f, dump %d", vr.eye_scale, vr.dump ? 1 : 0);
+		}
+		return vr.ok;
 	}
 
-	XrView views[2] = { { XR_TYPE_VIEW }, { XR_TYPE_VIEW } };
-	XrViewState vs = { XR_TYPE_VIEW_STATE };
-	XrViewLocateInfo li = { XR_TYPE_VIEW_LOCATE_INFO };
-	li.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-	li.displayTime = fs.predictedDisplayTime;
-	li.space = vr.local;
-	uint32_t nv = 0;
-	XrResult rv = vr.LocateViews(vr.session, &li, &vs, 2, &nv, views);
-	XrSpaceLocation hl = { XR_TYPE_SPACE_LOCATION };
-	XrResult rh = vr.LocateSpace(vr.head, vr.local, fs.predictedDisplayTime, &hl);
-
-	bool layer_ok = fs.shouldRender && XR_SUCCEEDED(rv) && nv == 2;
-	XrCompositionLayerProjectionView pv[2] = { { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW }, { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW } };
-	if (layer_ok)
+	// rotate v by the inverse of unit quaternion q
+	XrVector3f vr_inv_rotate(const XrQuaternionf& q, const XrVector3f& v)
 	{
+		const float x = -q.x, y = -q.y, z = -q.z, w = q.w;
+		const float tx = 2.f * (y * v.z - z * v.y), ty = 2.f * (z * v.x - x * v.z), tz = 2.f * (x * v.y - y * v.x);
+		XrVector3f r;
+		r.x = v.x + w * tx + (y * tz - z * ty);
+		r.y = v.y + w * ty + (z * tx - x * tz);
+		r.z = v.z + w * tz + (x * ty - y * tx);
+		return r;
+	}
+
+	// xrWaitFrame + xrBeginFrame + view and head poses. True if a frame is now open.
+	bool vr_open_frame()
+	{
+		vr.frame_begun = false;
+		vr.eyes_done = 0;
+		XrFrameWaitInfo wi = { XR_TYPE_FRAME_WAIT_INFO };
+		vr.fs = { XR_TYPE_FRAME_STATE };
+		XrFrameBeginInfo bi = { XR_TYPE_FRAME_BEGIN_INFO };
+		if (XR_FAILED(vr.WaitFrame(vr.session, &wi, &vr.fs)) || XR_FAILED(vr.BeginFrame(vr.session, &bi)))
+		{
+			vr.frames_fail++; vr.frames_run = 0;
+			return false;
+		}
+		vr.frame_begun = true;
+		return true;
+	}
+
+	void vr_dump_image(int eye, ID3D11Texture2D* image)
+	{
+		D3D11_TEXTURE2D_DESC d;
+		image->GetDesc(&d);
+		d.Format = vr.format;
+		d.Usage = D3D11_USAGE_STAGING;
+		d.BindFlags = 0;
+		d.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+		d.MiscFlags = 0;
+		ID3D11Texture2D* st = nullptr;
+		if (FAILED(HW.pDevice->CreateTexture2D(&d, nullptr, &st)) || !st)
+		{
+			Msg("! [vr] dump: staging texture failed");
+			return;
+		}
+		HW.pContext->CopyResource(st, image);
+		D3D11_MAPPED_SUBRESOURCE m;
+		if (SUCCEEDED(HW.pContext->Map(st, 0, D3D11_MAP_READ, 0, &m)))
+		{
+			string_path name, path;
+			xr_sprintf(name, "vr_eye%d_%u.raw", eye, vr.frames_run);
+			FS.update_path(path, "$logs$", name);
+			if (FILE* f = fopen(path, "wb"))
+			{
+				fprintf(f, "GVRIMG1 %u %u %d\n", d.Width, d.Height, (int)d.Format);
+				for (u32 y = 0; y < d.Height; ++y)
+					fwrite((const u8*)m.pData + (size_t)y * m.RowPitch, 4, d.Width, f);
+				fclose(f);
+				Msg("* [vr] dump: wrote %s (%ux%u, read back from the swapchain image)", name, d.Width, d.Height);
+			}
+			else
+				Msg("! [vr] dump: cannot open %s", path);
+			HW.pContext->Unmap(st, 0);
+		}
+		else
+			Msg("! [vr] dump: Map failed");
+		st->Release();
+	}
+
+	// hook: called by the level render loop before the eyes are rendered
+	bool vr_begin_frame(vr_eye_view* out)
+	{
+		if (!vr_ready())
+			return false;
+		vr_events();
+		if (!vr.running || !vr_open_frame())
+			return false;
+
+		XrViewState vs = { XR_TYPE_VIEW_STATE };
+		XrViewLocateInfo li = { XR_TYPE_VIEW_LOCATE_INFO };
+		li.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+		li.displayTime = vr.fs.predictedDisplayTime;
+		li.space = vr.local;
+		uint32_t nv = 0;
+		vr.views[0] = { XR_TYPE_VIEW };
+		vr.views[1] = { XR_TYPE_VIEW };
+		XrResult rv = vr.LocateViews(vr.session, &li, &vs, 2, &nv, vr.views);
+		vr.head_loc = { XR_TYPE_SPACE_LOCATION };
+		vr.head_r = vr.LocateSpace(vr.head, vr.local, vr.fs.predictedDisplayTime, &vr.head_loc);
+		const XrSpaceLocationFlags need = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT;
+		if (!vr.fs.shouldRender || XR_FAILED(rv) || nv != 2 || XR_FAILED(vr.head_r) || (vr.head_loc.locationFlags & need) != need)
+			return false; // the open frame is ended without a layer in vr_openxr_frame()
+
 		for (int e = 0; e < 2; ++e)
 		{
-			vr_eye& E = vr.eye[e];
-			uint32_t idx = 0;
-			XrSwapchainImageAcquireInfo ai = { XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
-			XrSwapchainImageWaitInfo swi = { XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
-			swi.timeout = XR_INFINITE_DURATION;
-			XrSwapchainImageReleaseInfo ri = { XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
-			if (XR_FAILED(vr.AcquireSwapchainImage(E.chain, &ai, &idx)) || XR_FAILED(vr.WaitSwapchainImage(E.chain, &swi)))
-			{
-				layer_ok = false;
-				break;
-			}
-			// placeholder eye image: left eye dark red, right eye dark blue
-			const float col[2][4] = { { 0.25f, 0.f, 0.f, 1.f }, { 0.f, 0.f, 0.25f, 1.f } };
-			if (idx < E.rtv.size())
-				HW.pContext->ClearRenderTargetView(E.rtv[idx], col[e]);
-			if (XR_FAILED(vr.ReleaseSwapchainImage(E.chain, &ri)))
-				layer_ok = false;
-			pv[e].pose = views[e].pose;
-			pv[e].fov = views[e].fov;
-			pv[e].subImage.swapchain = E.chain;
-			pv[e].subImage.imageRect.offset.x = 0;
-			pv[e].subImage.imageRect.offset.y = 0;
-			pv[e].subImage.imageRect.extent.width = E.w;
-			pv[e].subImage.imageRect.extent.height = E.h;
-			pv[e].subImage.imageArrayIndex = 0;
+			XrVector3f d;
+			d.x = vr.views[e].pose.position.x - vr.head_loc.pose.position.x;
+			d.y = vr.views[e].pose.position.y - vr.head_loc.pose.position.y;
+			d.z = vr.views[e].pose.position.z - vr.head_loc.pose.position.z;
+			const XrVector3f h = vr_inv_rotate(vr.head_loc.pose.orientation, d);
+			// OpenXR: x right, y up, -z forward. Engine: x right, y up, +z forward.
+			out[e].offset.set(h.x * vr.eye_scale, h.y * vr.eye_scale, -h.z * vr.eye_scale);
+			out[e].tan_l = tanf(vr.views[e].fov.angleLeft);
+			out[e].tan_r = tanf(vr.views[e].fov.angleRight);
+			out[e].tan_u = tanf(vr.views[e].fov.angleUp);
+			out[e].tan_d = tanf(vr.views[e].fov.angleDown);
 		}
+		if (!vr.views_logged)
+		{
+			vr.views_logged = true;
+			for (int e = 0; e < 2; ++e)
+				Msg("* [vr] view %d: offset from head (engine axes, scaled) %.5f %.5f %.5f, fov tan l %.5f r %.5f u %.5f d %.5f, image %dx%d",
+					e, out[e].offset.x, out[e].offset.y, out[e].offset.z, out[e].tan_l, out[e].tan_r, out[e].tan_u, out[e].tan_d, vr.eye[e].w, vr.eye[e].h);
+			const float sx = vr.views[1].pose.position.x - vr.views[0].pose.position.x;
+			const float sy = vr.views[1].pose.position.y - vr.views[0].pose.position.y;
+			const float sz = vr.views[1].pose.position.z - vr.views[0].pose.position.z;
+			Msg("* [vr] eye separation from the runtime %.5f m, rendered separation %.5f m",
+				_sqrt(sx * sx + sy * sy + sz * sz), _abs(out[1].offset.x - out[0].offset.x));
+		}
+		return true;
 	}
 
+	// hook: the scene for one eye is finished in the back buffer; copy it into that eye's swapchain image
+	void vr_eye_done(int e)
+	{
+		if (!vr.frame_begun || e < 0 || e > 1)
+			return;
+		vr_eye& E = vr.eye[e];
+		uint32_t idx = 0;
+		XrSwapchainImageAcquireInfo ai = { XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
+		XrSwapchainImageWaitInfo swi = { XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
+		swi.timeout = XR_INFINITE_DURATION;
+		XrSwapchainImageReleaseInfo ri = { XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
+		if (XR_FAILED(vr.AcquireSwapchainImage(E.chain, &ai, &idx)))
+			return;
+		bool ok = XR_SUCCEEDED(vr.WaitSwapchainImage(E.chain, &swi)) && idx < E.tex.size();
+		if (ok)
+		{
+			ID3D11Resource* bb = nullptr;
+			HW.pBaseRT->GetResource(&bb);
+			if (bb)
+			{
+				HW.pContext->CopyResource(E.tex[idx], bb);
+				bb->Release();
+				if (vr.dump && (vr.frames_run == 200 || vr.frames_run == 300))
+					vr_dump_image(e, E.tex[idx]);
+			}
+			else
+				ok = false;
+		}
+		if (XR_FAILED(vr.ReleaseSwapchainImage(E.chain, &ri)))
+			ok = false;
+		if (ok)
+			vr.eyes_done |= 1u << e;
+	}
+
+	struct vr_hook_registrar
+	{
+		vr_hook_registrar()
+		{
+			g_vr_begin_frame = &vr_begin_frame;
+			g_vr_eye_done = &vr_eye_done;
+		}
+	} s_vr_hook_registrar;
+}
+
+// Called once per engine frame from dxRenderDeviceRender::End(), on the thread that owns the D3D11 context.
+// Ends the OpenXR frame the level render loop opened; if none was opened (menus, loading), submits an empty frame
+// so the session keeps running.
+void vr_openxr_frame()
+{
+	if (!vr_ready())
+		return;
+	if (!vr.frame_begun)
+	{
+		vr_events();
+		if (!vr.running || !vr_open_frame())
+			return;
+	}
+
+	const bool layer_ok = vr.eyes_done == 3;
+	XrCompositionLayerProjectionView pv[2] = { { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW }, { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW } };
+	for (int e = 0; e < 2; ++e)
+	{
+		pv[e].pose = vr.views[e].pose;
+		pv[e].fov = vr.views[e].fov;
+		pv[e].subImage.swapchain = vr.eye[e].chain;
+		pv[e].subImage.imageRect.offset.x = 0;
+		pv[e].subImage.imageRect.offset.y = 0;
+		pv[e].subImage.imageRect.extent.width = vr.eye[e].w;
+		pv[e].subImage.imageRect.extent.height = vr.eye[e].h;
+		pv[e].subImage.imageArrayIndex = 0;
+	}
 	XrCompositionLayerProjection proj = { XR_TYPE_COMPOSITION_LAYER_PROJECTION };
 	proj.space = vr.local;
 	proj.viewCount = 2;
 	proj.views = pv;
 	const XrCompositionLayerBaseHeader* layers[1] = { (const XrCompositionLayerBaseHeader*)&proj };
 	XrFrameEndInfo ei = { XR_TYPE_FRAME_END_INFO };
-	ei.displayTime = fs.predictedDisplayTime;
+	ei.displayTime = vr.fs.predictedDisplayTime;
 	ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
 	ei.layerCount = layer_ok ? 1 : 0;
 	ei.layers = layer_ok ? layers : nullptr;
 	XrResult re = vr.EndFrame(vr.session, &ei);
+	vr.frame_begun = false;
 
 	if (re == XR_SUCCESS && layer_ok)
 	{
@@ -371,9 +526,10 @@ void vr_openxr_frame()
 		vr.frames_fail++; vr.frames_run = 0;
 	}
 
-	// one line per frame: the milestone 1 test reads these
+	// one line per frame: the milestone tests read these
+	const XrSpaceLocation& hl = vr.head_loc;
 	Msg("* [vr] frame ok=%u run=%u fail=%u end=%d layer=%d t=%lld head_r=%d flags=0x%x pos %.5f %.5f %.5f quat %.6f %.6f %.6f %.6f",
-		vr.frames_ok, vr.frames_run, vr.frames_fail, (int)re, layer_ok ? 1 : 0, (long long)fs.predictedDisplayTime, (int)rh,
+		vr.frames_ok, vr.frames_run, vr.frames_fail, (int)re, layer_ok ? 1 : 0, (long long)vr.fs.predictedDisplayTime, (int)vr.head_r,
 		(u32)hl.locationFlags, hl.pose.position.x, hl.pose.position.y, hl.pose.position.z,
 		hl.pose.orientation.x, hl.pose.orientation.y, hl.pose.orientation.z, hl.pose.orientation.w);
 }

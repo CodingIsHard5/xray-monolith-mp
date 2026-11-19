@@ -1114,6 +1114,9 @@ ENGINE_API int ps_r_stereo_bench = 0;
 // eye being rendered inside the stereo loop (0/1), -1 outside it
 ENGINE_API int g_stereo_bench_eye = -1;
 ENGINE_API float ps_r_stereo_ipd = 0.064f;
+#include "vr_hooks.h"
+ENGINE_API bool (*g_vr_begin_frame)(vr_eye_view* views) = nullptr;
+ENGINE_API void (*g_vr_eye_done)(int eye) = nullptr;
 extern u32 g_crosshair_color;
 float g_freelook_z_offset;
 float g_ironsights_factor = 1.25f;
