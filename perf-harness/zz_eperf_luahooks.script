@@ -1,0 +1,83 @@
+-- Test-only: time every script callback handler (EnginePerf, plan stage 0: "what makes up the player's 0.96 ms").
+-- Active ONLY with -perf_luahooks. Totals per (callback name, handler) are written to $logs$/lua_hooks.csv every 600 player
+-- updates (overwritten). Timing wrappers add overhead: use the SHARES, and the frame time of this run is not a baseline.
+local cl = command_line and command_line() or ""
+local on = string.find(cl, "-perf_luahooks", 1, true) ~= nil
+local agg = {}          -- key "name|src" -> { calls, us }
+local binder = { 0, 0 } -- actor binder update: calls, us
+local dispatches = 0    -- actor_on_update dispatches (= player updates)
+
+local function timer()
+	if profile_timer then local t = profile_timer() t:start() return function() t:stop() return t:time() end end
+	local c = os.clock() return function() return (os.clock() - c) * 1e6 end
+end
+local src_cache = {}
+local function src_of(f)
+	local s = src_cache[f]
+	if s then return s end
+	if type(f) == "function" then
+		local inf = debug.getinfo(f, "S")
+		s = (string.match(inf.short_src or "?", "([%w_%-]+)%.script") or tostring(inf.short_src)) .. ":" .. tostring(inf.linedefined)
+	else
+		s = "userdata"
+	end
+	src_cache[f] = s
+	return s
+end
+local function write()
+	local f = io.open(getFS():update_path("$logs$", "lua_hooks.csv"), "w")
+	if not f then return end
+	f:write("#player_updates,", dispatches, "\n#actor_binder_update_calls,", binder[1], ",total_ms,", string.format("%.3f", binder[2] / 1000), "\n")
+	f:write("callback,handler,calls,total_ms\n")
+	for k, r in pairs(agg) do
+		local name, src = string.match(k, "^(.-)|(.*)$")
+		f:write(name, ",", src, ",", r[1], ",", string.format("%.3f", r[2] / 1000), "\n")
+	end
+	f:close()
+end
+
+function on_game_start()
+	if not on then return end
+	local intercepts
+	for i = 1, 20 do
+		local n, v = debug.getupvalue(axr_main.make_callback, i)
+		if not n then break end
+		if n == "intercepts" then intercepts = v end
+	end
+	if not intercepts then printf("* lua_hooks: intercepts not reachable") return end
+	local orig_make = axr_main.make_callback
+	local function by_index(t, a, b) return t[a] < t[b] end
+	axr_main.make_callback = function(name, ...)
+		local tbl = intercepts[name]
+		if not tbl then return orig_make(name, ...) end
+		for f, _ in spairs(tbl, by_index) do
+			local stop = timer()
+			if type(f) == "function" then f(...) elseif f[name] then f[name](f, ...) end
+			local us = stop()
+			local k = name .. "|" .. src_of(f)
+			local r = agg[k]
+			if not r then r = { 0, 0 } agg[k] = r end
+			r[1] = r[1] + 1
+			r[2] = r[2] + us
+		end
+		if name == "actor_on_update" then
+			dispatches = dispatches + 1
+			if dispatches % 600 == 0 then write() end
+		end
+	end
+	local ab = bind_stalker and bind_stalker.actor_binder
+	if ab and ab.update then
+		local real = ab.update
+		ab.update = function(self, ...)
+			local stop = timer()
+			local a = real(self, ...)
+			binder[1] = binder[1] + 1
+			binder[2] = binder[2] + stop()
+			return a
+		end
+		printf("* lua_hooks: actor binder wrapped")
+	else
+		printf("* lua_hooks: actor binder NOT found")
+	end
+	printf("* lua_hooks: installed")
+end

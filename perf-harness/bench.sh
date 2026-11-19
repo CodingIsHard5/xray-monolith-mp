@@ -37,13 +37,22 @@ if ! wmctrl -m >/dev/null 2>&1; then openbox >/dev/null 2>&1 & WM_PID=$!
 LOG="$RUN/appdata/logs/xray_$(whoami).log"
 rm -f "$LOG" "$RUN"/appdata/logs/perf_*_"$TAG".csv
 DESK="eperf$$"
+# BENCH_LOWEND=1: constrained run (ranks causes, gives no verdict): 4 physical cores, 8 GB memory limit without swap,
+# DXVK reports a 2 GB video card. No root needed. CPU speed, GPU speed, disk and native Windows are NOT imitated.
+LOWPFX=""; if [ "${BENCH_LOWEND:-0}" = 1 ]; then
+  LOWPFX="taskset -c ${BENCH_CORES:-0-3} systemd-run --user --scope -q -p MemoryMax=${BENCH_MEM:-8G} -p MemorySwapMax=0"
+  printf 'dxgi.maxDeviceMemory = %s\n' "${BENCH_VRAM_MB:-2048}" > "$OUT/dxvk_lowend.conf"; export DXVK_CONFIG_FILE="$OUT/dxvk_lowend.conf"
+  echo "lowend: cores=${BENCH_CORES:-0-3} mem=${BENCH_MEM:-8G} vram_reported_mb=${BENCH_VRAM_MB:-2048}" >> "$OUT/conditions.txt"
+fi
+PEAK=0
 ( cd "$RUN" && ALSOFT_DRIVERS=null SDL_AUDIODRIVER=dummy WINEDLLOVERRIDES="d3dcompiler_47=n" WINEDEBUG=-all \
-  DXVK_LOG_LEVEL=info DXVK_LOG_PATH="$OUT" nice -n 10 wine explorer "/desktop=$DESK,1280x720" \
+  DXVK_LOG_LEVEL=info DXVK_LOG_PATH="$OUT" $LOWPFX nice -n 10 wine explorer "/desktop=$DESK,1280x720" \
   "Z:${RUN//\//\\}\\bin\\$EXE" -nointro -dbg -start "server($SAVE/single/alife/load)" "client(localhost)" \
   -perf_capture "$WARM,$FRAMES,$TAG" -perf_fixed_dt -perf_quit "$@" > "$OUT/wine_stderr.log" 2>&1 ) &
 START=$(date +%s); RC=1
 while :; do
   sleep 5
+  for EP in $(pgrep -f "bin\\\\$EXE"); do [ -z "${AFF:-}" ] && AFF=$(awk '/Cpus_allowed_list/{print $2}' /proc/$EP/status 2>/dev/null) && [ -n "$AFF" ] && echo "engine pid $EP cpus_allowed=$AFF cgroup=$(tail -1 /proc/$EP/cgroup | cut -c1-120)" >> "$OUT/conditions.txt"; R=$(awk '/VmRSS/{print $2}' /proc/$EP/status 2>/dev/null); [ "${R:-0}" -gt "$PEAK" ] && PEAK=$R; done
   if "$T/protected-title-check.sh" >/dev/null 2>&1; then echo "ABORT: protected title started"; RC=3; break; fi
   if [ -s "$RUN/appdata/logs/perf_sites_$TAG.csv" ] && grep -qa "xrprof\] capture '$TAG' finished" "$LOG" 2>/dev/null; then RC=0; sleep 8; break; fi
   if ! pgrep -f "bin\\\\$EXE" >/dev/null 2>&1 && [ $(( $(date +%s) - START )) -gt 30 ]; then echo "engine exited without a capture"; RC=4; break; fi
@@ -53,6 +62,7 @@ while :; do
     w=$(xdotool search --name "$DESK" 2>/dev/null | head -1); [ -n "$w" ] && xdotool windowactivate --sync "$w" key space 2>/dev/null
   fi
 done
+echo "engine peak resident memory (sampled every 5 s): $((PEAK/1024)) MiB" >> "$OUT/conditions.txt"
 HO="$(others)"; echo "end   $(date '+%F %T') loadavg=$(cut -d' ' -f1-3 /proc/loadavg) heavy_others=[$HO]" >> "$OUT/conditions.txt"
 if [ "$X" != 1 ]; then echo "VERDICT: functional run, timings are not measurements" >> "$OUT/conditions.txt"
 elif [ -n "$HO" ] || grep -q "^start.*heavy_others=\[[^]]" "$OUT/conditions.txt"; then echo "VERDICT: CONFOUNDED (other heavy process present)" >> "$OUT/conditions.txt"
