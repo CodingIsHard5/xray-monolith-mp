@@ -427,6 +427,10 @@ void CSheduler::ProcessStep()
 			u32 dwUpdate = dwMin + iFloor(float(dwMax - dwMin) * scale);
 			clamp(dwUpdate, u32(_max(dwMin, u32(20))), dwMax);
 
+#ifdef XRCORE_PROFILER_AGG
+			if (xr_det_trace_armed)
+				xr_det_sched_trace(T.scheduled_name.c_str(), Elapsed, dwUpdate, scale);
+#endif
 			T.Object->shedule_Update(clampr(Elapsed, u32(1), u32(_max(u32(T.Object->shedule.t_max), u32(1000)))));
 
 			// Fill item structure

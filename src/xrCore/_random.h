@@ -28,6 +28,8 @@ XRCORE_API extern volatile long xr_det_trace_armed;
 XRCORE_API void xr_det_trace_draw(void* return_address);
 XRCORE_API void xr_det_trace_start();
 XRCORE_API void xr_det_trace_dump(const char* path);
+// Scheduler execution trace (test-only): which scheduled object was updated in which frame, with its interval.
+XRCORE_API void xr_det_sched_trace(const char* name, u32 elapsed, u32 next_interval, float scale);
 // Stream split (test-only, armed by det_reseed): draws on ::Random that are not gameplay (render phase of the
 // main thread, cosmetic worker threads) are served from separate generators, so their run-to-run interleaving
 // cannot shift the gameplay stream. Roles: 0 = worker default (own per-thread stream), 1 = gameplay (::Random

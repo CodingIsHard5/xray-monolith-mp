@@ -71,8 +71,51 @@ XRCORE_API void xr_det_trace_start()
 	xr_det_trace_armed = 1;
 }
 
+struct DetSched
+{
+	u32 frame;
+	u32 elapsed;
+	u32 next;
+	float scale;
+	char name[44];
+};
+static const long DET_SCHED_MAX = 300000;
+static DetSched* g_det_sched = nullptr;
+static volatile long g_det_sched_count = 0;
+
+XRCORE_API void xr_det_sched_trace(const char* name, u32 elapsed, u32 next_interval, float scale)
+{
+	if (!xr_det_trace_armed)
+		return;
+	if (!g_det_sched)
+		g_det_sched = (DetSched*)malloc(sizeof(DetSched) * DET_SCHED_MAX);
+	const long i = InterlockedIncrement(&g_det_sched_count) - 1;
+	if (i >= DET_SCHED_MAX || !g_det_sched)
+		return;
+	DetSched& e = g_det_sched[i];
+	e.frame = Core.dwFrame;
+	e.elapsed = elapsed;
+	e.next = next_interval;
+	e.scale = scale;
+	strncpy(e.name, name ? name : "?", sizeof(e.name) - 1);
+	e.name[sizeof(e.name) - 1] = 0;
+}
+
 XRCORE_API void xr_det_trace_dump(const char* path)
 {
+	if (g_det_sched && path)
+	{
+		string_path sp;
+		xr_sprintf(sp, "%s.sched", path);
+		if (FILE* sf = fopen(sp, "wt"))
+		{
+			const long n = g_det_sched_count < DET_SCHED_MAX ? g_det_sched_count : DET_SCHED_MAX;
+			for (long i = 0; i < n; ++i)
+				fprintf(sf, "%u %s %u %u %.6f\n", g_det_sched[i].frame, g_det_sched[i].name, g_det_sched[i].elapsed,
+				        g_det_sched[i].next, g_det_sched[i].scale);
+			fclose(sf);
+		}
+	}
 	xr_det_trace_armed = 0;
 	if (!g_det_draws)
 		return;
