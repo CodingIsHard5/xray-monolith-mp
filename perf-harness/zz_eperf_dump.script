@@ -12,6 +12,12 @@ local trace = tonumber(string.match(cl, "%-det_trace%s+(%d+)")) or 0 -- log gene
 local times = {}
 for v in string.gmatch(string.match(cl, "%-det_times%s+(%S+)") or "", "%d+") do times[#times + 1] = tonumber(v) * 1000 end
 if #times > 0 then total = #times end
+-- -det_perturb skip|draw  [-det_perturb_at <engine seconds>, default 60]: CONTROL runs only (must-fail check).
+--   skip: the first update of an OFFLINE squad after that time is skipped once (whole sim_squad_scripted:update)
+--   draw: one extra math.random() call at that time (shifts the Lua random sequence by one draw)
+local perturb = string.match(cl, "%-det_perturb%s+(%a+)")
+local perturb_at = (tonumber(string.match(cl, "%-det_perturb_at%s+(%d+)")) or 60) * 1000
+local perturbed = false
 local start_t, done, upd = nil, 0, 0
 
 local function g(f, ...) local ok, v = pcall(f, ...) if ok then return v end return nil end
@@ -87,6 +93,10 @@ local function on_update()
 		if trace > 0 then dump(0) end -- state at the reseed point: tells "started different" from "diverged later"
 	end
 	upd = upd + 1
+	if perturb == "draw" and not perturbed and time_global() - start_t >= perturb_at then
+		perturbed = true
+		printf(string.format("* det_perturb draw: one extra math.random at update %d -> %d", upd, math.random(1, 1000000000)))
+	end
 	if upd <= trace then -- full-precision positions of a few watched objects (ids from -det_watch a,b,c) and the camera
 		local parts = {}
 		local c = device().cam_pos
@@ -143,6 +153,19 @@ function on_game_start()
 			if #ltrace < 150000 then ltrace[#ltrace + 1] = upd .. " SEED " .. where() .. " " .. tostring(v) end
 			return realseed(v, ...)
 		end
+	end
+	if perturb == "skip" and sim_squad_scripted and sim_squad_scripted.sim_squad_scripted then
+		local cls = sim_squad_scripted.sim_squad_scripted
+		local real_update = cls.update
+		cls.update = function(self, ...)
+			if not perturbed and start_t and time_global() - start_t >= perturb_at and not self.online then
+				perturbed = true
+				printf(string.format("* det_perturb skip: skipped one update of offline squad %s (%s)", tostring(self.id), tostring(self:name())))
+				return
+			end
+			return real_update(self, ...)
+		end
+		printf("* det_perturb skip: wrapper installed")
 	end
 	RegisterScriptCallback("actor_on_update", on_update)
 end

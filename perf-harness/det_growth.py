@@ -6,7 +6,10 @@ Per object line (tab separated): id section name parent gvid lvid pos online key
   discrete fields         : everything else (section, name, parent, online flag, alive, hp, comm, rank, money, squad, sq_*, smart counts)
   offline object          : online flag is not "true" in BOTH runs
 Header lines (#rel, #actor, #objects ...) other than the #checkpoint line count as discrete.
-Exit 0 only if no discrete difference and no offline difference at any checkpoint."""
+Exit 0 only if no discrete difference and no offline difference at any checkpoint.
+--tier-a (ruling 2026-11-19): exit code follows the TIER (a) verdict instead: every offline object exact, relations and
+actor line exact. Ignored for tier (a): online objects, objects present in one run only that are ONLINE there, and the
+"#objects" count line (it follows the online prop items)."""
 import sys, glob, os, re, math
 def load(d):
     out = {}
@@ -24,7 +27,8 @@ POS = (4, 5, 6)
 def xyz(s):
     try: return [float(v) for v in s.split(',')]
     except Exception: return None
-A, B = load(sys.argv[1]), load(sys.argv[2]); bad = False
+TIER_A = '--tier-a' in sys.argv; args = [a for a in sys.argv[1:] if not a.startswith('--')]
+A, B = load(args[0]), load(args[1]); bad = False; bad_a = False
 for k in sorted(set(A) | set(B)):
     if k not in A or k not in B: print(f"checkpoint {k}: missing in one run"); bad = True; continue
     (ta, ha, oa), (tb, hb, ob) = A[k], B[k]
@@ -55,4 +59,10 @@ for k in sorted(set(A) | set(B)):
     verdict = "EXACT on discrete fields and offline objects" if not (only or hdr_diff or disc_off or pos_off or disc_on) else "DISCRETE/OFFLINE DIFFERENCE"
     print(f"   -> {verdict}")
     bad |= verdict != "EXACT on discrete fields and offline objects"
-sys.exit(1 if bad else 0)
+    isoff = lambda p: not (len(p) > 7 and p[7] == 'true')
+    only_off = [i for i in only if isoff(oa.get(i) or ob.get(i))]
+    hdr_a = [(x, y) for x, y in hdr_diff if not (x.startswith('#objects') or x == 'len')] + ([("len", "len")] if len(ha) != len(hb) else [])
+    fail_a = bool(only_off or hdr_a or disc_off or pos_off)
+    print(f"   -> TIER (a): {'FAIL' if fail_a else 'PASS'} (offline differing {len(disc_off) + len(pos_off)}, offline only-in-one {len(only_off)} {only_off[:6]}, relation/actor lines {len(hdr_a)})")
+    bad_a |= fail_a
+sys.exit(1 if (bad_a if TIER_A else bad) else 0)
