@@ -53,6 +53,19 @@ namespace
 		bool dump = false;
 		bool views_logged = false;
 
+		// milestone 3: controller grip poses (action set with one pose action, subaction paths left/right)
+		bool actions_ok = false;
+		XrActionSet action_set = XR_NULL_HANDLE;
+		XrAction grip_action = XR_NULL_HANDLE;
+		XrPath hand_path[2] = { XR_NULL_PATH, XR_NULL_PATH }; // 0 = left, 1 = right
+		XrSpace grip_space[2] = { XR_NULL_HANDLE, XR_NULL_HANDLE };
+		vr_pose grip[2];          // located this frame, engine axes, LOCAL space
+		vr_pose head_e;           // head pose this frame, engine axes, LOCAL space
+		bool grip_located = false;
+		int gun_hand = 1;         // -vr_gun_hand left|right
+		bool gun_on_head = false; // -vr_gun_on_head
+		bool profiles_logged = false;
+
 		PFN_xrGetInstanceProcAddr GetInstanceProcAddr = nullptr;
 		PFN_xrCreateInstance CreateInstance = nullptr;
 		PFN_xrGetInstanceProperties GetInstanceProperties = nullptr;
@@ -76,6 +89,15 @@ namespace
 		PFN_xrAcquireSwapchainImage AcquireSwapchainImage = nullptr;
 		PFN_xrWaitSwapchainImage WaitSwapchainImage = nullptr;
 		PFN_xrReleaseSwapchainImage ReleaseSwapchainImage = nullptr;
+		PFN_xrStringToPath StringToPath = nullptr;
+		PFN_xrPathToString PathToString = nullptr;
+		PFN_xrCreateActionSet CreateActionSet = nullptr;
+		PFN_xrCreateAction CreateAction = nullptr;
+		PFN_xrSuggestInteractionProfileBindings SuggestInteractionProfileBindings = nullptr;
+		PFN_xrAttachSessionActionSets AttachSessionActionSets = nullptr;
+		PFN_xrCreateActionSpace CreateActionSpace = nullptr;
+		PFN_xrSyncActions SyncActions = nullptr;
+		PFN_xrGetCurrentInteractionProfile GetCurrentInteractionProfile = nullptr;
 	};
 
 	vr_state vr;
@@ -96,6 +118,78 @@ namespace
 		{
 			Msg("! [vr] xrGetInstanceProcAddr(%s) failed: XrResult %d", name, (int)r);
 			return false;
+		}
+		return true;
+	}
+
+	// milestone 3: one action set with a grip pose action for both hands; suggested bindings for the KHR simple
+	// controller and the Microsoft motion controller (the profiles of Monado's simulated "simple" and "wmr" controllers).
+	// Must run after xrCreateSession and before the first xrSyncActions. False = no controller poses (VR still runs).
+	bool vr_init_actions()
+	{
+		if (!vr_check(vr.StringToPath(vr.instance, "/user/hand/left", &vr.hand_path[0]), "xrStringToPath(left)") ||
+			!vr_check(vr.StringToPath(vr.instance, "/user/hand/right", &vr.hand_path[1]), "xrStringToPath(right)"))
+			return false;
+
+		XrActionSetCreateInfo asi = { XR_TYPE_ACTION_SET_CREATE_INFO };
+		xr_strcpy(asi.actionSetName, "gammavr");
+		xr_strcpy(asi.localizedActionSetName, "GammaVR");
+		asi.priority = 0;
+		if (!vr_check(vr.CreateActionSet(vr.instance, &asi, &vr.action_set), "xrCreateActionSet"))
+			return false;
+
+		XrActionCreateInfo aci = { XR_TYPE_ACTION_CREATE_INFO };
+		xr_strcpy(aci.actionName, "grip_pose");
+		xr_strcpy(aci.localizedActionName, "Grip pose");
+		aci.actionType = XR_ACTION_TYPE_POSE_INPUT;
+		aci.countSubactionPaths = 2;
+		aci.subactionPaths = vr.hand_path;
+		if (!vr_check(vr.CreateAction(vr.action_set, &aci, &vr.grip_action), "xrCreateAction(grip_pose)"))
+			return false;
+
+		XrPath grip_path[2] = { XR_NULL_PATH, XR_NULL_PATH };
+		if (!vr_check(vr.StringToPath(vr.instance, "/user/hand/left/input/grip/pose", &grip_path[0]), "xrStringToPath(left grip)") ||
+			!vr_check(vr.StringToPath(vr.instance, "/user/hand/right/input/grip/pose", &grip_path[1]), "xrStringToPath(right grip)"))
+			return false;
+		XrActionSuggestedBinding b[2];
+		for (int h = 0; h < 2; ++h)
+		{
+			b[h].action = vr.grip_action;
+			b[h].binding = grip_path[h];
+		}
+		const char* profiles[] = { "/interaction_profiles/khr/simple_controller", "/interaction_profiles/microsoft/motion_controller" };
+		u32 suggested = 0;
+		for (int p = 0; p < 2; ++p)
+		{
+			XrPath prof = XR_NULL_PATH;
+			if (!vr_check(vr.StringToPath(vr.instance, profiles[p], &prof), "xrStringToPath(profile)"))
+				continue;
+			XrInteractionProfileSuggestedBinding sb = { XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
+			sb.interactionProfile = prof;
+			sb.countSuggestedBindings = 2;
+			sb.suggestedBindings = b;
+			const XrResult r = vr.SuggestInteractionProfileBindings(vr.instance, &sb);
+			Msg("* [vr3] suggested bindings for %s: XrResult %d", profiles[p], (int)r);
+			if (XR_SUCCEEDED(r))
+				suggested++;
+		}
+		if (!suggested)
+			return false;
+
+		XrSessionActionSetsAttachInfo ati = { XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO };
+		ati.countActionSets = 1;
+		ati.actionSets = &vr.action_set;
+		if (!vr_check(vr.AttachSessionActionSets(vr.session, &ati), "xrAttachSessionActionSets"))
+			return false;
+
+		for (int h = 0; h < 2; ++h)
+		{
+			XrActionSpaceCreateInfo sci = { XR_TYPE_ACTION_SPACE_CREATE_INFO };
+			sci.action = vr.grip_action;
+			sci.subactionPath = vr.hand_path[h];
+			sci.poseInActionSpace.orientation.w = 1.f;
+			if (!vr_check(vr.CreateActionSpace(vr.session, &sci, &vr.grip_space[h]), "xrCreateActionSpace(grip)"))
+				return false;
 		}
 		return true;
 	}
@@ -151,6 +245,15 @@ namespace
 		VR_BIND(AcquireSwapchainImage);
 		VR_BIND(WaitSwapchainImage);
 		VR_BIND(ReleaseSwapchainImage);
+		VR_BIND(StringToPath);
+		VR_BIND(PathToString);
+		VR_BIND(CreateActionSet);
+		VR_BIND(CreateAction);
+		VR_BIND(SuggestInteractionProfileBindings);
+		VR_BIND(AttachSessionActionSets);
+		VR_BIND(CreateActionSpace);
+		VR_BIND(SyncActions);
+		VR_BIND(GetCurrentInteractionProfile);
 #undef VR_BIND
 
 		XrInstanceProperties ip = { XR_TYPE_INSTANCE_PROPERTIES };
@@ -187,6 +290,9 @@ namespace
 		rsi.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
 		if (!vr_check(vr.CreateReferenceSpace(vr.session, &rsi, &vr.head), "xrCreateReferenceSpace(VIEW)"))
 			return false;
+
+		vr.actions_ok = vr_init_actions();
+		Msg(vr.actions_ok ? "* [vr3] controller actions ready (grip pose, both hands)" : "! [vr3] controller actions NOT available; the gun keeps its normal HUD place");
 
 		XrViewConfigurationView vcv[2] = { { XR_TYPE_VIEW_CONFIGURATION_VIEW }, { XR_TYPE_VIEW_CONFIGURATION_VIEW } };
 		uint32_t n = 0;
@@ -263,6 +369,12 @@ namespace
 			XrEventDataBuffer ev = { XR_TYPE_EVENT_DATA_BUFFER };
 			if (vr.PollEvent(vr.instance, &ev) != XR_SUCCESS)
 				break;
+			if (ev.type == XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED)
+			{
+				Msg("* [vr3] interaction profile changed (runtime event)");
+				vr.profiles_logged = false; // log the bound profiles again on the next VR frame
+				continue;
+			}
 			if (ev.type != XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED)
 				continue;
 			const XrEventDataSessionStateChanged* sc = (const XrEventDataSessionStateChanged*)&ev;
@@ -311,6 +423,10 @@ namespace
 				if (sscanf(m + 13, "%d", &e) == 1 && (e == 0 || e == 1))
 					g_vr_mono_eye = e;
 			}
+			vr.gun_hand = strstr(Core.Params, "-vr_gun_hand left") ? 0 : 1;
+			vr.gun_on_head = !!strstr(Core.Params, "-vr_gun_on_head");
+			Msg("* [vr3] gun hand %c, nogun %d, gun on head %d (DELIBERATELY BROKEN test mode if 1)",
+				vr.gun_hand ? 'R' : 'L', vr_nogun() ? 1 : 0, vr.gun_on_head ? 1 : 0);
 			vr.ok = vr_init();
 			Msg(vr.ok ? "* [vr] OpenXR bring-up complete" : "! [vr] OpenXR bring-up FAILED; VR path disabled for this run");
 			Msg("* [vr] eye offset scale %.3f, dump %d, mono twin eye %d", vr.eye_scale, vr.dump ? 1 : 0, g_vr_mono_eye);
@@ -328,6 +444,91 @@ namespace
 		r.y = v.y + w * ty + (z * tx - x * tz);
 		r.z = v.z + w * tz + (x * ty - y * tx);
 		return r;
+	}
+
+	// OpenXR pose (x right, y up, -z forward, right-handed) -> engine axes (x right, y up, +z forward).
+	// Mirroring z: position (x, y, -z); a rotation R becomes S R S with S = diag(1, 1, -1), i.e. the quaternion
+	// (x, y, z, w) becomes (-x, -y, z, w).
+	void vr_to_engine(const XrPosef& p, bool valid, vr_pose& out)
+	{
+		out.pos.set(p.position.x, p.position.y, -p.position.z);
+		out.qx = -p.orientation.x;
+		out.qy = -p.orientation.y;
+		out.qz = p.orientation.z;
+		out.qw = p.orientation.w;
+		out.valid = valid;
+	}
+
+	// milestone 3: xrSyncActions and the grip pose of both hands at the frame's predicted display time
+	void vr_locate_grips()
+	{
+		vr.grip_located = false;
+		for (int h = 0; h < 2; ++h)
+		{
+			vr.grip[h].pos.set(0.f, 0.f, 0.f);
+			vr.grip[h].qx = vr.grip[h].qy = vr.grip[h].qz = 0.f;
+			vr.grip[h].qw = 1.f;
+			vr.grip[h].valid = false;
+		}
+		if (!vr.actions_ok)
+			return;
+		XrActiveActionSet active = { vr.action_set, XR_NULL_PATH };
+		XrActionsSyncInfo si = { XR_TYPE_ACTIONS_SYNC_INFO };
+		si.countActiveActionSets = 1;
+		si.activeActionSets = &active;
+		const XrResult rs = vr.SyncActions(vr.session, &si); // XR_SESSION_NOT_FOCUSED is a success code: poses may be invalid
+		if (XR_FAILED(rs))
+			return;
+		const XrSpaceLocationFlags need = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT;
+		for (int h = 0; h < 2; ++h)
+		{
+			XrSpaceLocation loc = { XR_TYPE_SPACE_LOCATION };
+			const XrResult r = vr.LocateSpace(vr.grip_space[h], vr.local, vr.fs.predictedDisplayTime, &loc);
+			const bool valid = XR_SUCCEEDED(r) && (loc.locationFlags & need) == need;
+			if (XR_SUCCEEDED(r))
+				vr_to_engine(loc.pose, valid, vr.grip[h]);
+		}
+		vr.grip_located = true;
+
+		if (!vr.profiles_logged)
+		{
+			vr.profiles_logged = true;
+			for (int h = 0; h < 2; ++h)
+			{
+				XrInteractionProfileState ps = { XR_TYPE_INTERACTION_PROFILE_STATE };
+				char name[XR_MAX_PATH_LENGTH];
+				xr_strcpy(name, "none");
+				const XrResult r = vr.GetCurrentInteractionProfile(vr.session, vr.hand_path[h], &ps);
+				if (XR_SUCCEEDED(r) && ps.interactionProfile != XR_NULL_PATH)
+				{
+					uint32_t n = 0;
+					if (XR_FAILED(vr.PathToString(vr.instance, ps.interactionProfile, XR_MAX_PATH_LENGTH, &n, name)))
+						xr_strcpy(name, "?");
+				}
+				Msg("* [vr3] interaction profile hand %c: %s (XrResult %d, sync %d)", h ? 'R' : 'L', name, (int)r, (int)rs);
+			}
+		}
+	}
+
+	// hook: grip pose of the chosen hand, and the pose the gun uses
+	bool vr_get_grip(vr_grip_info* out)
+	{
+		if (!vr.ok || !vr.grip_located || !out)
+			return false;
+		out->hand = vr.gun_hand ? 'R' : 'L';
+		out->runtime = vr.grip[vr.gun_hand];
+		if (vr.gun_on_head)
+		{
+			// DELIBERATELY BROKEN test mode: head pose plus a fixed offset (0.2 m right, 0.2 m down, 0.4 m forward)
+			Fvector off, o;
+			off.set(0.2f, -0.2f, 0.4f);
+			vr_quat_rotate(vr.head_e.qx, vr.head_e.qy, vr.head_e.qz, vr.head_e.qw, off, o);
+			out->gun = vr.head_e;
+			out->gun.pos.add(vr.head_e.pos, o);
+		}
+		else
+			out->gun = out->runtime;
+		return true;
 	}
 
 	// xrWaitFrame + xrBeginFrame + view and head poses. True if a frame is now open.
@@ -387,7 +588,7 @@ namespace
 	}
 
 	// hook: called by the level render loop before the eyes are rendered
-	bool vr_begin_frame(vr_eye_view* out)
+	bool vr_begin_frame(vr_eye_view* out, vr_frame_info* info)
 	{
 		if (!vr_ready())
 			return false;
@@ -409,6 +610,15 @@ namespace
 		const XrSpaceLocationFlags need = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT;
 		if (!vr.fs.shouldRender || XR_FAILED(rv) || nv != 2 || XR_FAILED(vr.head_r) || (vr.head_loc.locationFlags & need) != need)
 			return false; // the open frame is ended without a layer in vr_openxr_frame()
+
+		// milestone 3: head pose and controller grip poses, engine axes, tracking (LOCAL) space
+		vr_to_engine(vr.head_loc.pose, true, vr.head_e);
+		vr_locate_grips();
+		if (info)
+		{
+			info->head = vr.head_e;
+			info->frame = vr.frames_run;
+		}
 
 		for (int e = 0; e < 2; ++e)
 		{
@@ -479,6 +689,7 @@ namespace
 		{
 			g_vr_begin_frame = &vr_begin_frame;
 			g_vr_eye_done = &vr_eye_done;
+			g_vr_get_grip = &vr_get_grip;
 		}
 	} s_vr_hook_registrar;
 }

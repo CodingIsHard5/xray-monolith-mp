@@ -12,6 +12,7 @@
 #include "weapon.h"
 #include "script_attachment_manager.h"
 #include "../xrEngine/CameraBase.h"
+#include "../xrEngine/vr_hooks.h"
 
 extern int g_nearwall;
 
@@ -1330,12 +1331,93 @@ void player_hud::finalize_hands_ik()
 	solve_hand_ik(1);
 }
 
+// GammaVR milestone 3 (Amendment 9, 3b). Called from render_hud() inside the eye loop of a VR frame, i.e. after the
+// OpenXR frame has located the grip pose for this frame's predicted display time and after update() has placed the HUD
+// rig the normal way. Moves the whole rig (both arm models, the attached items, the script item) by one rigid transform
+// C so that the held item's model origin lands on the grip pose mapped to the world through the same tracking-to-world
+// mapping as the camera (g_vr_track.track_to_world). C maps the item's current transform onto the target, so a second
+// call in the same frame (second eye) gives C = identity. The arms stay attached to the item as they are.
+bool player_hud::vr_place_at_grip()
+{
+	attachable_hud_item* item = m_attached_items[0] ? m_attached_items[0] : m_attached_items[1];
+	vr_grip_info G;
+	if (!item || !g_vr_get_grip || !g_vr_get_grip(&G) || !G.gun.valid)
+		return false;
+
+	Fmatrix gun_track, target;
+	vr_pose_matrix(G.gun, gun_track);
+	target.mul_43(g_vr_track.track_to_world, gun_track); // grip pose first, then tracking space -> world
+
+	// keep the item's own scale (if its transform has one): only position and orientation are replaced
+	const Fmatrix& cur = item->m_item_transform;
+	const float si = cur.i.magnitude(), sj = cur.j.magnitude(), sk = cur.k.magnitude();
+	if (si < EPS || sj < EPS || sk < EPS)
+		return false;
+	target.i.mul(si);
+	target.j.mul(sj);
+	target.k.mul(sk);
+
+	Fmatrix cur_inv, C;
+	cur_inv.invert(cur);
+	C.mul_43(target, cur_inv); // C * cur = target
+
+	m_transform.mulA_43(C);
+	m_transform_2.mulA_43(C);
+	for (int i = 0; i < 3; ++i)
+		if (m_attached_items[i])
+			m_attached_items[i]->m_item_transform.mulA_43(C);
+	if (script_anim_item_model)
+		m_item_pos.mulA_43(C);
+
+	// attachments follow the moved transforms (same as the end of OnFrame())
+	if (m_attached_items[0])
+		m_attached_items[0]->update_attachments_xform();
+	if (m_attached_items[1])
+		m_attached_items[1]->update_attachments_xform();
+	if (g_actor && m_model && m_model_2)
+	{
+		xr_map<shared_str, script_attachment*>& actor_hud_attachments = *g_actor->GetAttachments();
+		for (auto& pair : actor_hud_attachments)
+		{
+			script_attachment* att = pair.second;
+			if (att->GetType() == eSA_HUD)
+			{
+				bool m2 = att->GetParentBone() < 21;
+				att->UpdateXFORM(m2 ? m_model_2->dcast_PKinematics() : m_model->dcast_PKinematics(), m2 ? &m_transform_2 : &m_transform);
+			}
+		}
+	}
+
+	// log once per logged frame: the gun origin in the world, and mapped back into the tracking space
+	static u32 s_logged_frame = u32(-1);
+	if (g_vr_track.frame % 100 == 0 && s_logged_frame != g_vr_track.frame)
+	{
+		s_logged_frame = g_vr_track.frame;
+		const Fvector& w = item->m_item_transform.c;
+		Fmatrix world_to_track;
+		world_to_track.invert(g_vr_track.track_to_world);
+		Fvector t;
+		world_to_track.transform_tiny(t, w);
+		Msg("* [vr3] frame %u gun_world pos %.4f %.4f %.4f", g_vr_track.frame, w.x, w.y, w.z);
+		Msg("* [vr3] frame %u gun_track pos %.4f %.4f %.4f", g_vr_track.frame, t.x, t.y, t.z);
+	}
+	return true;
+}
+
 void player_hud::render_hud(IDSGraphManager* DM)
 {
 	bool b_r0 = ((m_attached_items[0] && m_attached_items[0]->need_renderable()) || script_anim_part == 0 || script_anim_part == 2);
 	bool b_r1 = ((m_attached_items[1] && m_attached_items[1]->need_renderable()) || script_anim_part == 1 || script_anim_part == 2);
 
 	if (!b_r0 && !b_r1) return;
+
+	// GammaVR milestone 3: in the eyes of a VR frame the held item is drawn at the controller grip pose
+	if (g_vr_track.active)
+	{
+		if (vr_nogun())
+			return;
+		vr_place_at_grip();
+	}
 
 	DM->add_Dynamic(m_model->dcast_RenderVisual(), &m_transform);
 	DM->add_Dynamic(m_model_2->dcast_RenderVisual(), &m_transform_2);

@@ -1115,7 +1115,9 @@ ENGINE_API int ps_r_stereo_bench = 0;
 ENGINE_API int g_stereo_bench_eye = -1;
 ENGINE_API float ps_r_stereo_ipd = 0.064f;
 #include "vr_hooks.h"
-ENGINE_API bool (*g_vr_begin_frame)(vr_eye_view* views) = nullptr;
+ENGINE_API bool (*g_vr_begin_frame)(vr_eye_view* views, vr_frame_info* info) = nullptr;
+ENGINE_API bool (*g_vr_get_grip)(vr_grip_info* out) = nullptr;
+ENGINE_API vr_track_state g_vr_track; // zero-initialised: inactive
 ENGINE_API void (*g_vr_eye_done)(int eye) = nullptr;
 ENGINE_API int g_vr_mono_eye = -1;
 extern u32 g_crosshair_color;

@@ -189,17 +189,76 @@ void IGame_Level::OnRender()
 		extern ENGINE_API int g_stereo_bench_eye;
 		// GammaVR Phase B: with -vr_openxr and a running session, the eyes come from the OpenXR runtime
 		vr_eye_view vr_views[2];
-		const bool vr_frame = g_vr_begin_frame && g_pGameLevel && !Device.m_SecondViewport.IsSVPFrame() && g_vr_begin_frame(vr_views);
+		vr_frame_info vr_info;
+		vr_info.head.valid = false;
+		vr_info.frame = 0;
+		const bool vr_frame = g_vr_begin_frame && g_pGameLevel && !Device.m_SecondViewport.IsSVPFrame() && g_vr_begin_frame(vr_views, &vr_info);
 		if ((vr_frame || ps_r_stereo_bench >= 1) && g_pGameLevel && !Device.m_SecondViewport.IsSVPFrame())
 		{
 			// VR spike, naive stereo: the full scene pipeline runs once per eye.
 			// Each eye is offset half the IPD along camera right and gets an off-centre projection.
 			// The second eye overwrites the first in the back buffer; this measures cost, not picture.
 			const Fvector pos0 = Device.vCameraPosition;
+			const Fvector right0 = Device.vCameraRight, top0 = Device.vCameraTop, dir0 = Device.vCameraDirection;
 			const Fmatrix view0 = Device.mView, proj0 = Device.mProject, projHud0 = Device.mProjectHud;
 			const Fmatrix invView0 = Device.mInvView, viewPrev0 = Device.mView_prev, projPrev0 = Device.mProject_prev, fullPrev0 = Device.mFullTransform_prev;
 			static Fmatrix eye_view_saved[2], eye_proj_saved[2]; // each eye's own previous-frame camera (motion vectors)
 			static u32 eye_saved_frame[2] = {0, 0};
+			const Fmatrix viewHud0 = Device.mViewHud;
+			// GammaVR milestone 3 (3a): the head pose drives the camera. The tracking space is mapped to the world so
+			// that the head pose of the first VR frame lands on this frame's game camera:
+			// track_to_world = game camera * inverse(head at the first VR frame); head camera = track_to_world * head.
+			Fvector head_pos = pos0, head_right = right0, head_top = top0, head_dir = dir0;
+			if (vr_frame && vr_info.head.valid)
+			{
+				static vr_pose s_head0;
+				static bool s_have_head0 = false;
+				if (!s_have_head0)
+				{
+					s_head0 = vr_info.head;
+					s_have_head0 = true;
+					Msg("* [vr3] head start pose (tracking space, engine axes) pos %.3f %.3f %.3f quat %.4f %.4f %.4f %.4f",
+						s_head0.pos.x, s_head0.pos.y, s_head0.pos.z, s_head0.qx, s_head0.qy, s_head0.qz, s_head0.qw);
+				}
+				Fmatrix game_cam, head0, head0_inv, head_now, head_world;
+				game_cam.set(right0, top0, dir0, pos0);
+				vr_pose_matrix(s_head0, head0);
+				head0_inv.invert(head0);
+				g_vr_track.track_to_world.mul_43(game_cam, head0_inv); // head0_inv first, then the game camera
+				vr_pose_matrix(vr_info.head, head_now);
+				head_world.mul_43(g_vr_track.track_to_world, head_now);
+				head_right = head_world.i;
+				head_top = head_world.j;
+				head_dir = head_world.k;
+				head_pos = head_world.c;
+				g_vr_track.frame = vr_info.frame;
+				g_vr_track.active = true;
+
+				if (vr_info.frame % 100 == 0)
+				{
+					const vr_pose& H = vr_info.head;
+					Msg("* [vr3] frame %u head_rt pos %.4f %.4f %.4f quat %.5f %.5f %.5f %.5f",
+						vr_info.frame, H.pos.x, H.pos.y, H.pos.z, H.qx, H.qy, H.qz, H.qw);
+					// camera relative to the game camera, measured from the vectors actually given to the renderer
+					Fvector d, ri, rj, rk, rp;
+					d.sub(head_pos, pos0);
+					rp.set(d.dotproduct(right0), d.dotproduct(top0), d.dotproduct(dir0));
+					ri.set(head_right.dotproduct(right0), head_right.dotproduct(top0), head_right.dotproduct(dir0));
+					rj.set(head_top.dotproduct(right0), head_top.dotproduct(top0), head_top.dotproduct(dir0));
+					rk.set(head_dir.dotproduct(right0), head_dir.dotproduct(top0), head_dir.dotproduct(dir0));
+					float qx, qy, qz, qw;
+					vr_matrix_quat(ri, rj, rk, qx, qy, qz, qw);
+					Msg("* [vr3] frame %u cam_rel pos %.4f %.4f %.4f quat %.5f %.5f %.5f %.5f",
+						vr_info.frame, rp.x, rp.y, rp.z, qx, qy, qz, qw);
+					vr_grip_info G;
+					if (g_vr_get_grip && g_vr_get_grip(&G))
+						Msg("* [vr3] frame %u grip_rt hand %c valid %d pos %.4f %.4f %.4f quat %.5f %.5f %.5f %.5f",
+							vr_info.frame, G.hand, G.runtime.valid ? 1 : 0, G.runtime.pos.x, G.runtime.pos.y, G.runtime.pos.z,
+							G.runtime.qx, G.runtime.qy, G.runtime.qz, G.runtime.qw);
+					else
+						Msg("* [vr3] frame %u grip_rt hand ? valid 0 pos 0 0 0 quat 0 0 0 1", vr_info.frame);
+				}
+			}
 			for (int eye = 0; eye < 2; ++eye)
 			{
 				const int mono_eye = vr_frame ? g_vr_mono_eye : -1;
@@ -211,9 +270,13 @@ void IGame_Level::OnRender()
 				Device.mProjectHud = projHud0;
 				if (vr_frame)
 				{
+					// camera = head pose in the world (milestone 3; equals the game camera if the runtime gave no head pose)
+					Device.vCameraRight = head_right;
+					Device.vCameraTop = head_top;
+					Device.vCameraDirection = head_dir;
 					// eye position from the runtime (relative to the head), projection from the runtime's field of view
 					const vr_eye_view& V = vr_views[eye];
-					Device.vCameraPosition.mad(pos0, Device.vCameraRight, V.offset.x);
+					Device.vCameraPosition.mad(head_pos, Device.vCameraRight, V.offset.x);
 					Device.vCameraPosition.mad(Device.vCameraTop, V.offset.y);
 					Device.vCameraPosition.mad(Device.vCameraDirection, V.offset.z);
 					const float w = V.tan_r - V.tan_l, h = V.tan_u - V.tan_d;
@@ -221,6 +284,9 @@ void IGame_Level::OnRender()
 					Device.mProject._22 = 2.f / h;
 					Device.mProject._31 = -(V.tan_r + V.tan_l) / w;
 					Device.mProject._32 = -(V.tan_u + V.tan_d) / h;
+					// milestone 3: the HUD (held weapon) is placed in the world, so it gets the eye's field of view too
+					Device.mProjectHud._11 = Device.mProject._11;
+					Device.mProjectHud._22 = Device.mProject._22;
 					Device.mProjectHud._31 = Device.mProject._31;
 					Device.mProjectHud._32 = Device.mProject._32;
 				}
@@ -239,6 +305,12 @@ void IGame_Level::OnRender()
 					Device.mFullTransform_prev.mul(Device.mProject_prev, Device.mView_prev);
 					Device.m_pRender->SetCacheXform_prev(Device.mView_prev, Device.mProject_prev);
 					eye_view_saved[eye] = Device.mView; eye_proj_saved[eye] = Device.mProject; eye_saved_frame[eye] = Device.dwFrame;
+				}
+				if (vr_frame)
+				{
+					// milestone 3: the HUD pass sets Device.mView from mViewHud (CHudInitializer::SetHudMode), which
+					// otherwise stays the mono camera; the gun must be seen from this eye
+					Device.mViewHud = Device.mView;
 				}
 				Device.mFullTransform.mul(Device.mProject, Device.mView);
 				Device.mFullTransformHud.mul(Device.mProjectHud, Device.mView);
@@ -266,9 +338,15 @@ void IGame_Level::OnRender()
 				}
 			}
 			g_stereo_bench_eye = -1;
+			g_vr_track.active = false;
 			// restore the centre camera for everything drawn after the scene (UI, debug)
 			{
 				Device.vCameraPosition = pos0;
+				Device.vCameraRight = right0;
+				Device.vCameraTop = top0;
+				Device.vCameraDirection = dir0;
+				Device.mInvView = invView0;
+				Device.mViewHud = viewHud0;
 				Device.mView = view0;
 				Device.mInvView = invView0;
 				Device.mView_prev = viewPrev0; Device.mProject_prev = projPrev0; Device.mFullTransform_prev = fullPrev0;
