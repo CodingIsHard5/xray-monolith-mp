@@ -1117,6 +1117,7 @@ ENGINE_API float ps_r_stereo_ipd = 0.064f;
 #include "vr_hooks.h"
 ENGINE_API bool (*g_vr_begin_frame)(vr_eye_view* views) = nullptr;
 ENGINE_API void (*g_vr_eye_done)(int eye) = nullptr;
+ENGINE_API int g_vr_mono_eye = -1;
 extern u32 g_crosshair_color;
 float g_freelook_z_offset;
 float g_ironsights_factor = 1.25f;

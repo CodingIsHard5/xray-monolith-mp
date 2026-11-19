@@ -13,12 +13,17 @@
 
 float psOSSR = .001f;
 
+// GammaVR: the occlusion raster belongs to one camera. In a stereo frame each eye pass (and the pre-pass with the
+// centre camera) builds its own, instead of all passes of a frame sharing the first one.
+extern ENGINE_API int g_stereo_bench_eye;
+static inline u32 hom_pass_mark() { return Device.dwFrame | (u32(g_stereo_bench_eye + 1) << 30); }
+
 void __stdcall CHOM::MT_RENDER()
 {
 	PROF_EVENT("Render HOM");
 
 	xrCriticalSectionGuard guard(m_mt_render_guard);
-	const u32 current_frame = Device.dwFrame;
+	const u32 current_frame = hom_pass_mark();
 
 	bool b_main_menu_is_active = (g_pGamePersistent->m_pMainMenu && g_pGamePersistent->m_pMainMenu->IsActive());
 	if (b_main_menu_is_active)
@@ -284,7 +289,7 @@ void CHOM::Render(CFrustum& base)
 	Raster.clear();
 	Render_DB(base);
 	Raster.propagade();
-	MT_frame_rendered.store(Device.dwFrame, std::memory_order_release);
+	MT_frame_rendered.store(hom_pass_mark(), std::memory_order_release);
 	Device.Statistic->RenderCALC_HOM.End();
 }
 

@@ -10,3 +10,6 @@ struct vr_eye_view
 extern ENGINE_API bool (*g_vr_begin_frame)(vr_eye_view* views);
 // Called after the scene has been rendered for one eye: copies the finished picture into that eye's swapchain image.
 extern ENGINE_API void (*g_vr_eye_done)(int eye);
+// Test switch -vr_mono_eye <0|1>: render ONE ordinary mono pass per frame from that eye's camera and give that
+// picture to both eye images ("mono twin" check). -1 = off.
+extern ENGINE_API int g_vr_mono_eye;

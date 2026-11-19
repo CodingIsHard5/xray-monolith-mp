@@ -305,9 +305,15 @@ namespace
 			if (LPCSTR p = strstr(Core.Params, "-vr_eye_scale "))
 				sscanf(p + 14, "%f", &vr.eye_scale);
 			vr.dump = !!strstr(Core.Params, "-vr_dump");
+			if (LPCSTR m = strstr(Core.Params, "-vr_mono_eye "))
+			{
+				int e = -1;
+				if (sscanf(m + 13, "%d", &e) == 1 && (e == 0 || e == 1))
+					g_vr_mono_eye = e;
+			}
 			vr.ok = vr_init();
 			Msg(vr.ok ? "* [vr] OpenXR bring-up complete" : "! [vr] OpenXR bring-up FAILED; VR path disabled for this run");
-			Msg("* [vr] eye offset scale %.3f, dump %d", vr.eye_scale, vr.dump ? 1 : 0);
+			Msg("* [vr] eye offset scale %.3f, dump %d, mono twin eye %d", vr.eye_scale, vr.dump ? 1 : 0, g_vr_mono_eye);
 		}
 		return vr.ok;
 	}

@@ -199,7 +199,10 @@ void IGame_Level::OnRender()
 			const Fmatrix view0 = Device.mView, proj0 = Device.mProject, projHud0 = Device.mProjectHud;
 			for (int eye = 0; eye < 2; ++eye)
 			{
-				g_stereo_bench_eye = eye;
+				const int mono_eye = vr_frame ? g_vr_mono_eye : -1;
+				if (mono_eye >= 0 && eye != mono_eye)
+					continue;
+				g_stereo_bench_eye = mono_eye >= 0 ? -1 : eye; // a mono twin is an ordinary single pass
 				const float side = eye ? 1.f : -1.f;
 				Device.mProject = proj0;
 				Device.mProjectHud = projHud0;
@@ -240,7 +243,15 @@ void IGame_Level::OnRender()
 					Render->Render();
 				}
 				if (vr_frame && g_vr_eye_done)
-					g_vr_eye_done(eye);
+				{
+					if (mono_eye >= 0)
+					{
+						g_vr_eye_done(0);
+						g_vr_eye_done(1);
+					}
+					else
+						g_vr_eye_done(eye);
+				}
 			}
 			g_stereo_bench_eye = -1;
 			// restore the centre camera for everything drawn after the scene (UI, debug)

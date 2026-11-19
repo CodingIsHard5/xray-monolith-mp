@@ -24,7 +24,10 @@ void light::vis_prepare()
         vis.pending = false;
         return;
     }
-    if (!flags.bOccq || flags.bHudMode)
+    // GammaVR: the occlusion query result belongs to the camera of the pass that issued it and is reused for many
+    // frames; a light hidden for one eye can be visible for the other. While rendering stereo, lights are not culled this way.
+    extern ENGINE_API int g_stereo_bench_eye;
+    if (!flags.bOccq || flags.bHudMode || g_stereo_bench_eye >= 0)
     {
         vis.visible = true;
         vis.pending = false;

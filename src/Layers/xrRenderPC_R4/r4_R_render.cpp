@@ -325,6 +325,14 @@ void CRender::Render()
 	{
 		PIX_EVENT_C(DEFER_LIGHT_NO_OCCQ, dx10_marker_lights);
 		Target->phase_accumulator();
+		{
+			// GammaVR: dynamic light count per render pass, every 100th frame (series S13 pre-registration needs it)
+			extern ENGINE_API int g_stereo_bench_eye;
+			if (Device.dwFrame % 100 == 0)
+				Msg("* [lights] frame %u eye %d: normal point %u spot %u shadowed %u, pending point %u spot %u shadowed %u",
+					Device.dwFrame, g_stereo_bench_eye, (u32)LP_normal.v_point.size(), (u32)LP_normal.v_spot.size(), (u32)LP_normal.v_shadowed.size(),
+					(u32)LP_pending.v_point.size(), (u32)LP_pending.v_spot.size(), (u32)LP_pending.v_shadowed.size());
+		}
 		render_lights(LP_normal);
 	}
 

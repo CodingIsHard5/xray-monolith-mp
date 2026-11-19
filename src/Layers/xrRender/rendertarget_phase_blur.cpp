@@ -248,7 +248,17 @@ void CRenderTarget::phase_ssfx_ssr()
 	RCache.set_Element(s_ssfx_ssr->E[0]);
 	RCache.set_c("m_current", Matrix_current);
 	RCache.set_c("m_previous", Matrix_previous);
-	RCache.set_c("cam_pos", ::Random.randF(-1.0, 1.0), ::Random.randF(-1.0, 1.0), 0.0f, 0.0f);
+	{
+		// GammaVR: the second eye of a stereo frame uses the first eye's jitter (different noise per eye is a visible defect in a headset)
+		extern ENGINE_API int g_stereo_bench_eye;
+		static float ssr_jitter[2] = { 0.f, 0.f };
+		if (g_stereo_bench_eye != 1)
+		{
+			ssr_jitter[0] = ::Random.randF(-1.0, 1.0);
+			ssr_jitter[1] = ::Random.randF(-1.0, 1.0);
+		}
+		RCache.set_c("cam_pos", ssr_jitter[0], ssr_jitter[1], 0.0f, 0.0f);
+	}
 
 	RCache.set_c("ssr_setup", ps_ssfx_ssr);
 	RCache.set_Geometry(g_combine);

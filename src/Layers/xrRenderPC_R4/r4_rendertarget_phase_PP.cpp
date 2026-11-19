@@ -10,7 +10,10 @@ void CRenderTarget::u_calc_tc_noise(Fvector2& p0, Fvector2& p1)
 	VERIFY2(tw && th, "Noise scale can't be zero in any way");
 
 	// calculate shift from FPSes
-	im_noise_time -= Device.fTimeDelta;
+	// GammaVR: advance the noise once per frame; the second eye of a stereo frame reuses the first eye's shift
+	extern ENGINE_API int g_stereo_bench_eye;
+	if (g_stereo_bench_eye != 1)
+		im_noise_time -= Device.fTimeDelta;
 	if (im_noise_time < 0)
 	{
 		im_noise_shift_w = ::Random.randI(tw ? tw : 1);
