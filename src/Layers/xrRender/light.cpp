@@ -391,10 +391,13 @@ Fvector light::spatial_sector_point()
 //////////////////////////////////////////////////////////////////////////
 #if (RENDER==R_R2) || (RENDER==R_R3) || (RENDER==R_R4)
 // Xforms
+extern ENGINE_API int g_stereo_bench_eye;
 void light::xform_calc()
 {
-	if (Device.dwFrame == m_parent_u_frame) return;
-	m_parent_u_frame = Device.dwFrame;
+	// GammaVR: once per render pass (see CLight_DB::add_light)
+	const u32 pass_mark = Device.dwFrame | (g_stereo_bench_eye == 1 ? 0x80000000u : 0u);
+	if (pass_mark == m_parent_u_frame) return;
+	m_parent_u_frame = pass_mark;
 
 	// build final rotation / translation
 	Fvector L_dir, L_up, L_right;

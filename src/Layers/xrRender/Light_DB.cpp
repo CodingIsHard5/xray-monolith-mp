@@ -191,10 +191,14 @@ void CLight_DB::add_light(light* L)
 #endif
 
 #if (RENDER==R_R2) || (RENDER==R_R3) || (RENDER==R_R4)
+extern ENGINE_API int g_stereo_bench_eye;
 void CLight_DB::add_light(light* L)
 {
-	if (Device.dwFrame == L->frame_render) return;
-	L->frame_render = Device.dwFrame;
+	// GammaVR: a light is added once per render pass, not once per frame; the second eye is its own pass.
+	// (With the plain per-frame guard the second eye of a stereo frame got no dynamic lights at all.)
+	const u32 pass_mark = Device.dwFrame | (g_stereo_bench_eye == 1 ? 0x80000000u : 0u);
+	if (pass_mark == L->frame_render) return;
+	L->frame_render = pass_mark;
 	if (RImplementation.o.noshadows) L->flags.bShadow = FALSE;
 	if (L->flags.bStatic && !ps_r2_ls_flags.test(R2FLAG_R1LIGHTS)) return;
 	if(Device.vCameraPosition.distance_to_sqr(L->SpatialComponent->spatial.sphere.P)>_sqr(g_pGamePersistent->Environment().CurrentEnv->fog_distance)) return;
