@@ -530,8 +530,13 @@ void __stdcall CDetailManager::MT_CALC()
 	const u32 current_frame = RDEVICE.dwFrame;
     const u32 frame_calc = m_frame_calc;
 	const u32 frame_rendered = m_frame_rendered.load(std::memory_order_acquire);
+	// GammaVR: the visible list is emptied after a scene pass, so the second eye of a stereo frame needs its own
+	// calculation (without this the second eye had no grass or ground details).
+	extern ENGINE_API int g_stereo_bench_eye;
+	const bool second_eye = g_stereo_bench_eye == 1;
+	const u32 calc_mark = current_frame | (g_stereo_bench_eye == 1 ? 0x80000000u : 0u);
 
-	if (frame_calc != current_frame && (frame_rendered + 1) == current_frame)
+	if (frame_calc != calc_mark && ((frame_rendered + 1) == current_frame || second_eye))
 	{
 		Fvector EYE = RDEVICE.vCameraPosition_saved;
 
@@ -543,7 +548,7 @@ void __stdcall CDetailManager::MT_CALC()
 		RDEVICE.Statistic->RenderDUMP_DT_Cache.End();
 
 		UpdateVisibleM();
-		m_frame_calc = current_frame;
+		m_frame_calc = calc_mark;
 	}
 }
 

@@ -3,7 +3,10 @@
 void CRenderTarget::phase_accumulator()
 {
 	// Targets
-	if (dwAccumulatorClearMark == Device.dwFrame)
+	// GammaVR: the accumulator is cleared once per render pass, not once per frame (second eye of a stereo frame)
+	extern ENGINE_API int g_stereo_bench_eye;
+	const u32 pass_mark = Device.dwFrame | (g_stereo_bench_eye == 1 ? 0x80000000u : 0u);
+	if (dwAccumulatorClearMark == pass_mark)
 	{
 		// normal operation - setup
 		if (!RImplementation.o.dx10_msaa)
@@ -20,7 +23,7 @@ void CRenderTarget::phase_accumulator()
 	else
 	{
 		// initial setup
-		dwAccumulatorClearMark = Device.dwFrame;
+		dwAccumulatorClearMark = pass_mark;
 
 		// clear
 		if (!RImplementation.o.dx10_msaa)
