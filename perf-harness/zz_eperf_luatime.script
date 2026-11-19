@@ -1,0 +1,67 @@
+-- Test-only Lua timing for the Cordon hitch (EnginePerf). Active ONLY with -perf_luatime on the command line.
+-- Logs "* lua_slow <what> <ms> <object>" for watched script functions and callback handlers taking >= 1 ms.
+-- Not for equivalence runs: it replaces function objects (timing wrappers), which is fine for a timing capture only.
+local cl = command_line and command_line() or ""
+local on = string.find(cl, "-perf_luatime", 1, true) ~= nil
+local MIN_US = 1000
+local watch_cb = { smart_terrain_on_update = true, squad_on_update = true, squad_on_first_update = true,
+	server_entity_on_update = true, se_stalker_on_update = true, se_monster_on_update = true }
+
+local function now_timer()
+	if profile_timer then local t = profile_timer() t:start() return function() t:stop() return t:time() end end
+	local c = os.clock() return function() return (os.clock() - c) * 1e6 end
+end
+local function oname(o)
+	local ok, n = pcall(function() return o:name() end)
+	return ok and n or "?"
+end
+local function wrap(class, cname, method)
+	local orig = class and class[method]
+	if not orig then printf("* lua_time: no %s.%s", cname, method) return end
+	class[method] = function(self, ...)
+		local stop = now_timer()
+		local a, b, c = orig(self, ...)
+		local us = stop()
+		if us >= MIN_US then printf("* lua_slow %s:%s %.2f ms %s", cname, method, us / 1000, oname(self)) end
+		return a, b, c
+	end
+end
+
+function on_game_start()
+	if not on then return end
+	local st = smart_terrain and smart_terrain.se_smart_terrain
+	for _, m in ipairs({ "update", "show", "try_respawn", "update_jobs", "check_smart_faction" }) do wrap(st, "smart", m) end
+	local sq = sim_squad_scripted and sim_squad_scripted.sim_squad_scripted
+	for _, m in ipairs({ "update", "generic_update", "specific_update", "check_online_status", "refresh", "get_next_action",
+		"update_current_action", "assign_squad_member_to_smart", "check_invulnerability", "show" }) do wrap(sq, "squad", m) end
+	if sim_board and sim_board.simulation_board then wrap(sim_board.simulation_board, "board", "get_squad_target") end
+	-- per-handler timing of the watched callbacks: same order as stock (spairs by registration index)
+	local intercepts
+	for i = 1, 20 do
+		local n, v = debug.getupvalue(axr_main.make_callback, i)
+		if not n then break end
+		if n == "intercepts" then intercepts = v end
+	end
+	if not intercepts then printf("* lua_time: intercepts not reachable") return end
+	local orig_make = axr_main.make_callback
+	local function by_index(t, a, b) return t[a] < t[b] end
+	axr_main.make_callback = function(name, ...)
+		local tbl = watch_cb[name] and intercepts[name]
+		if not tbl then return orig_make(name, ...) end
+		for f, _ in spairs(tbl, by_index) do
+			local stop = now_timer()
+			local src = "userdata"
+			if type(f) == "function" then
+				f(...)
+				local inf = debug.getinfo(f, "S")
+				src = string.match(inf.short_src or "?", "([%w_]+)%.script") or inf.short_src
+				src = src .. ":" .. tostring(inf.linedefined)
+			elseif f[name] then
+				f[name](f, ...)
+			end
+			local us = stop()
+			if us >= MIN_US then printf("* lua_slow cb:%s %.2f ms %s %s", name, us / 1000, src, oname((...))) end
+		end
+	end
+	printf("* lua_time: installed")
+end
