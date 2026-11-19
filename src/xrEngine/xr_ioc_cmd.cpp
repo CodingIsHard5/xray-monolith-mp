@@ -80,6 +80,26 @@ public:
 	}
 };
 
+#if XRCORE_PROFILER == PROFILER_AGG
+class CCC_ProfCapture : public IConsole_Command
+{
+public:
+	CCC_ProfCapture(LPCSTR N) : IConsole_Command(N) {}
+
+	virtual void Execute(LPCSTR args)
+	{
+		u32 frames = 0;
+		string64 tag = "";
+		if (sscanf(args, "%u %63s", &frames, tag) < 1 || !frames)
+		{
+			Msg("usage: prof_capture <frames> [tag]");
+			return;
+		}
+		xrprof::start(frames, tag);
+	}
+};
+#endif
+
 //-----------------------------------------------------------------------
 #ifdef DEBUG_MEMORY_MANAGER
 class CCC_MemStat : public IConsole_Command
@@ -1056,6 +1076,9 @@ void CCC_Register()
 	// General
 	CMD1(CCC_Help, "help");
 	CMD1(CCC_Quit, "quit");
+#if XRCORE_PROFILER == PROFILER_AGG
+	CMD1(CCC_ProfCapture, "prof_capture");
+#endif
 	CMD1(CCC_Start, "start");
 	CMD1(CCC_Disconnect, "disconnect");
 	CMD1(CCC_SaveCFG, "cfg_save");

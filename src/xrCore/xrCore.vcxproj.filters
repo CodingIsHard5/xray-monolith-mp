@@ -87,6 +87,9 @@
     <ClCompile Include="FTimer.cpp">
       <Filter>Kernel</Filter>
     </ClCompile>
+    <ClCompile Include="profiler_agg.cpp">
+      <Filter>Kernel</Filter>
+    </ClCompile>
     <ClCompile Include="stdafx.cpp">
       <Filter>Kernel</Filter>
     </ClCompile>
