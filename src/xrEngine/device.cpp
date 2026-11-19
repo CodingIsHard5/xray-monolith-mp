@@ -405,6 +405,12 @@ void CRenderDevice::on_idle()
 	}
 
 	PROF_FRAME("Main Thread");
+
+	// -det_mode: test-only determinism switch for the equivalence harness. Every frame advances the
+	// simulation by the same fixed step, so two runs see the same sequence of frames whatever the machine load.
+	static const bool det_mode = Core.Params && strstr(Core.Params, "-det_mode");
+	if (det_mode)
+		psDeviceFlags.set(rsConstantFPS, TRUE);
 #if XRCORE_PROFILER == PROFILER_AGG
 	perf_autocapture();
 #endif

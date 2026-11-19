@@ -139,7 +139,11 @@ void initialize()
 
 #endif //XRCORE_STATIC
 
-    ::Random.seed(u32(CPU::GetCLK() % (1i64 << 32i64)));
+    // -det_mode: test-only determinism switch for the equivalence harness. Fixed seed instead of the CPU clock.
+    if (Core.Params && strstr(Core.Params, "-det_mode"))
+        ::Random.seed(0x12071980);
+    else
+        ::Random.seed(u32(CPU::GetCLK() % (1i64 << 32i64)));
 }
 };
 #endif
