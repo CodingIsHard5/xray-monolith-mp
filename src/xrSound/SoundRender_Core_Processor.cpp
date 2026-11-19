@@ -39,6 +39,12 @@ void CSoundRender_Core::update(const Fvector& P, const Fvector& D, const Fvector
 
 	bLocked = TRUE;
 	float new_tm = Timer.GetElapsed_sec();
+#ifdef XRCORE_PROFILER_AGG
+	// -det_mode (test-only): the sound clock advances by the fixed game step, not by wall time, because
+	// gameplay reads sound state (AI hearing events are pulsed off this clock, emitters stop on it).
+	if (xr_det_mode())
+		new_tm = fTimer_Value + 0.033f;
+#endif
 	fTimer_Delta = new_tm - fTimer_Value;
 	//.	float dt					= float(Timer_Delta)/1000.f;
 	float dt_sec = fTimer_Delta;

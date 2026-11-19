@@ -338,8 +338,15 @@ public:
 	// Mode control
 	void DumpFlags();
 	IC CTimer_paused* GetTimerGlobal() { return &TimerGlobal; }
+#ifdef XRCORE_PROFILER_AGG
+	// -det_mode (test-only): the "real time" readers used by gameplay (server id recycling, script
+	// time_global_async, a few timers) follow the fixed-step game clock instead of the wall clock.
+	u32 TimerAsync() { return xr_det_mode() ? dwTimeGlobal : TimerGlobal.GetElapsed_ms(); }
+	u32 TimerAsync_MMT() { return xr_det_mode() ? dwTimeGlobal : TimerMM.GetElapsed_ms() + Timer_MM_Delta; }
+#else
 	u32 TimerAsync() { return TimerGlobal.GetElapsed_ms(); }
 	u32 TimerAsync_MMT() { return TimerMM.GetElapsed_ms() + Timer_MM_Delta; }
+#endif
 
 	// Creation & Destroying
 	void ConnectToRender();
