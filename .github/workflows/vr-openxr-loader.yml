@@ -32,8 +32,14 @@ jobs:
     - name: Build loader (x64, Release, DLL)
       shell: bash
       run: |
-        cmake -S . -B build -A x64 -DDYNAMIC_LOADER=ON -DBUILD_TESTS=OFF -DBUILD_API_LAYERS=OFF -DBUILD_CONFORMANCE_TESTS=OFF
+        cmake -S . -B build -A x64 -DDYNAMIC_LOADER=ON -DBUILD_TESTS=ON -DBUILD_API_LAYERS=OFF -DBUILD_CONFORMANCE_TESTS=OFF
         cmake --build build --config Release --target openxr_loader
+        # test tools from the same reviewed source, for the wineopenxr bridge check (hello_xr, runtime list)
+        cmake --build build --config Release --target hello_xr runtime_list
+        mkdir -p out/tools
+        find build -name 'hello_xr.exe' -exec cp {} out/tools/ \;
+        find build -name 'openxr_runtime_list*.exe' -exec cp {} out/tools/ \;
+        sha256sum out/tools/*
         mkdir -p out/bin out/lib
         find build -name 'openxr_loader.dll' -exec cp {} out/bin/ \;
         find build -name 'openxr_loader.lib' -exec cp {} out/lib/ \;
