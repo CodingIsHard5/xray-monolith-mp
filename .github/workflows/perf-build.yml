@@ -1,0 +1,68 @@
+name: Perf-Build
+run-name: Perf build ${{ github.ref_name }} @ ${{ github.sha }}
+
+# Builds the MT engine (DX11) for performance work on perf/** branches.
+# One run at a time per branch; a newer push cancels the older run.
+on:
+  push:
+    branches: [ "perf/**" ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-build
+  cancel-in-progress: true
+
+env:
+  SOLUTION_FILE_PATH: src/engine-vs2022.sln
+
+jobs:
+  build:
+    name: DX11-MT-profiled
+    runs-on: windows-latest
+
+    steps:
+    - name: Configure Pagefile
+      uses: al-cheb/configure-pagefile-action@v1.3
+      with:
+        minimum-size: 8GB
+        maximum-size: 8GB
+        disk-root: "C:"
+
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        persist-credentials: false
+
+    - name: setup-msbuild
+      uses: microsoft/setup-msbuild@v1.3.1
+      with:
+        msbuild-architecture: "x64"
+
+    # XRCORE_PROFILER_AGG selects the CSV profiler backend (src/xrCore/profiler.h).
+    # It costs one predictable branch per PROF_EVENT while no capture is running.
+    - name: Build DX11 with the CSV profiler backend
+      env:
+        CL: /DXRCORE_PROFILER_AGG
+      run: msbuild /m /p:Configuration=DX11 /flp:"logfile=perf_build.log;verbosity=normal" ${{ env.SOLUTION_FILE_PATH }}
+
+    - name: Upload build log
+      if: always()
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: perf_build_log
+        path: perf_build.log
+        if-no-files-found: "warn"
+        retention-days: 7
+
+    - name: Upload binaries
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: perf_DX11_bin
+        path: |
+          ./_build/_game/bin_dbg/*.exe
+          ./_build/_game/bin_dbg/*.pdb
+        if-no-files-found: "error"
+        retention-days: 7
