@@ -18,7 +18,9 @@ if "$T/protected-title-check.sh" >/dev/null 2>&1; then echo "REFUSED: protected 
 X="${BENCH_EXCLUSIVE:-0}"; KIND="functional"; [ "$X" = 1 ] && KIND="EXCLUSIVE timing"
 if ! "$T/quiet-required.sh" claim $W $((LIMIT/60+5)) "headless Xvfb GAMMA engine benchmark $TAG ($KIND)" >"$OUT/claim.txt" 2>&1; then
   echo "REFUSED: no quiet slot ($(tail -1 "$OUT/claim.txt"))"; exit 3; fi
-others() { ps -eo pcpu,pid,comm --sort=-pcpu | awk 'NR>1 && $1>=100 && $3!~/PerfDX11|wineserver|Xvfb|[Aa]nomaly|Stock/ {print $1"%:"$3}' | head -5 | tr '\n' ' '; }
+# Own engine shows up as comm "X-RAY Primary t": excluded by its command line (this project's run dir), not by name,
+# so another worker's X-Ray engine still counts as a heavy other.
+others() { ps -eo pcpu,pid,comm,args --sort=-pcpu | awk -v own="$RUN" 'NR>1 && $1>=100 && index(tolower($0), tolower(own))==0 && $3!~/wineserver|Xvfb/ {print $1"%:"$3}' | head -5 | tr '\n' ' '; }
 echo "start $(date '+%F %T') kind=$KIND loadavg=$(cut -d' ' -f1-3 /proc/loadavg) heavy_others=[$(others)]" > "$OUT/conditions.txt"
 export WINEPREFIX="$RUN/prefix" DISPLAY="$DISP"
 XVFB_PID=""; WM_PID=""

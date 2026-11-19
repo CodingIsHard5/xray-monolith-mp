@@ -44,9 +44,23 @@ private:
 
 		IC void operator()(_iterator& i, u64 cycle_count) const
 		{
+#ifdef XRCORE_PROFILER_AGG
+			// measurement only: name every offline object whose update() takes 1 ms or more (hitch hunt, Cordon)
+			CTimer perf_one;
+			perf_one.Start();
+#endif
 			START_PROFILE("ALife/scheduled/update")
 				(*i).second->update();
 			STOP_PROFILE
+#ifdef XRCORE_PROFILER_AGG
+			const float perf_ms = perf_one.GetElapsed_sec() * 1000.f;
+			if (perf_ms >= 1.f)
+			{
+				const CSE_Abstract* perf_b = (*i).second->base();
+				Msg("* alife_slow frame %u id %u %s [%s] %.2f ms", Device.dwFrame, u32((*i).first),
+				    perf_b ? perf_b->name_replace() : "?", perf_b ? perf_b->s_name.c_str() : "?", perf_ms);
+			}
+#endif
 		}
 	};
 
