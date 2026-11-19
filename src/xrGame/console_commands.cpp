@@ -2111,6 +2111,41 @@ public:
 };
 #endif
 
+#ifdef XRCORE_PROFILER_AGG
+#include "alife_schedule_registry.h"
+#include "alife_object_registry.h"
+// det_mode only: exact A-Life counters (registrations, scheduled update() calls per object id)
+class CCC_DetAlifeCounts : public IConsole_Command
+{
+public:
+	CCC_DetAlifeCounts(LPCSTR N) : IConsole_Command(N) {}
+
+	virtual void Execute(LPCSTR args)
+	{
+		string_path fn, path;
+		xr_sprintf(fn, "det_alife_counts_%s.txt", args);
+		FS.update_path(path, "$logs$", fn);
+		FILE* f = fopen(path, "wt");
+		if (!f)
+		{
+			Msg("! det_alife_counts: cannot write %s", path);
+			return;
+		}
+		fprintf(f, "registered %u\nunregistered %u\n", u32(g_det_alife_registered), u32(g_det_alife_unregistered));
+		const CALifeSimulator* sim = ai().get_alife();
+		for (u32 id = 0; id < 65536; ++id)
+		{
+			if (!g_det_alife_upd[id])
+				continue;
+			const CSE_ALifeDynamicObject* o = sim ? sim->objects().object(ALife::_OBJECT_ID(id), true) : 0;
+			fprintf(f, "upd %u %u %s %s\n", id, g_det_alife_upd[id], o ? o->name_replace() : "?",
+			        o ? (o->m_bOnline ? "1" : "0") : "-");
+		}
+		fclose(f);
+	}
+};
+#endif
+
 class CCC_TimeFactor : public IConsole_Command
 {
 public:
@@ -2805,6 +2840,7 @@ void CCC_RegisterCommands()
 	CMD1(CCC_DetReseed, "det_reseed");
 #ifdef XRCORE_PROFILER_AGG
 	CMD1(CCC_DetTraceDump, "det_trace_dump");
+	CMD1(CCC_DetAlifeCounts, "det_alife_counts");
 #endif
 	CMD1(CCC_DemoRecord, "demo_record");
 	CMD1(CCC_DemoRecordBlockedInput, "demo_record_blocked_input");

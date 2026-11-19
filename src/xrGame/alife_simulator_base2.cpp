@@ -20,8 +20,18 @@
 
 using namespace ALife;
 
+#ifdef XRCORE_PROFILER_AGG
+u32 g_det_alife_upd[65536] = {};
+volatile long g_det_alife_registered = 0;
+volatile long g_det_alife_unregistered = 0;
+#endif
+
 void CALifeSimulatorBase::register_object(CSE_ALifeDynamicObject* object, bool add_object)
 {
+#ifdef XRCORE_PROFILER_AGG
+	if (xr_det_mode())
+		InterlockedIncrement(&g_det_alife_registered);
+#endif
 	object->on_before_register();
 
 	if (add_object)
@@ -57,6 +67,10 @@ void CALifeSimulatorBase::register_object(CSE_ALifeDynamicObject* object, bool a
 
 void CALifeSimulatorBase::unregister_object(CSE_ALifeDynamicObject* object, bool alife_query)
 {
+#ifdef XRCORE_PROFILER_AGG
+	if (xr_det_mode())
+		InterlockedIncrement(&g_det_alife_unregistered);
+#endif
 	object->on_unregister();
 
 	CSE_ALifeInventoryItem* item = smart_cast<CSE_ALifeInventoryItem*>(object);

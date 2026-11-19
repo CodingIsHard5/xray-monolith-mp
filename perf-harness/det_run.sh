@@ -40,7 +40,7 @@ while :; do
   [ $(( $(date +%s) - START )) -gt "$LIMIT" ] && { echo "TIMEOUT after ${LIMIT}s"; RC=5; break; }
 done
 cp "$LOG" "$OUT/xray.log" 2>/dev/null; mv "$RUN"/appdata/logs/alife_dump_"$TAG"_*.txt "$OUT/" 2>/dev/null; mv "$RUN"/appdata/logs/det_trace_"$TAG".txt "$RUN"/appdata/logs/det_trace_"$TAG".lua.txt "$RUN"/appdata/logs/det_trace_"$TAG".txt.sched "$OUT/" 2>/dev/null
-mv "$RUN"/appdata/savedgames/det_"$TAG"_* "$OUT/" 2>/dev/null; mv "$RUN"/appdata/logs/det_streams_"$TAG"_*.txt "$OUT/" 2>/dev/null
+mv "$RUN"/appdata/savedgames/det_"$TAG"_* "$OUT/" 2>/dev/null; mv "$RUN"/appdata/logs/det_streams_"$TAG"_*.txt "$OUT/" 2>/dev/null; mv "$RUN"/appdata/logs/det_counters_"$TAG"_*.txt "$RUN"/appdata/logs/det_alife_counts_"$TAG"_*.txt "$OUT/" 2>/dev/null
 ls "$RUN"/appdata/logs/*.mdmp >/dev/null 2>&1 && { echo "CRASH DUMP present"; mv "$RUN"/appdata/logs/*.mdmp "$OUT/"; }
 echo "rc=$RC elapsed=$(( $(date +%s) - START ))s out=$OUT"; grep -a "eperf dump" "$OUT/xray.log" 2>/dev/null | tail -4
 exit $RC

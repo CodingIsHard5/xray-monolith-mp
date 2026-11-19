@@ -13,6 +13,13 @@
 #include "ai_debug.h"
 #include "profiler.h"
 
+#ifdef XRCORE_PROFILER_AGG
+// -det_mode (test-only) exact A-Life counters, defined in alife_simulator_base2.cpp, written by det_alife_counts
+extern u32 g_det_alife_upd[65536];
+extern volatile long g_det_alife_registered;
+extern volatile long g_det_alife_unregistered;
+#endif
+
 class CALifeScheduleRegistry : public CSafeMapIterator<
 		ALife::_OBJECT_ID, CSE_ALifeSchedulable, std::less<ALife::_OBJECT_ID>, false>
 {
@@ -48,6 +55,8 @@ private:
 			// measurement only: name every offline object whose update() takes 1 ms or more (hitch hunt, Cordon)
 			CTimer perf_one;
 			perf_one.Start();
+			if (xr_det_mode())
+				++g_det_alife_upd[(*i).first];
 #endif
 			START_PROFILE("ALife/scheduled/update")
 				(*i).second->update();
