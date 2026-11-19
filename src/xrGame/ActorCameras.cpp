@@ -741,6 +741,19 @@ void CActor::update_camera(CCameraShotEffector* effector)
 	CCameraBase* pACam = cam_Active();
 	if (!pACam) return;
 
+	// GammaVR milestone 4 (Amendment 16): in VR the recoil does not turn the actor's aim. The increments ChangeHP would
+	// apply to the camera pitch/yaw go to the VR kick (the gun turns about the grip, player_hud.cpp) instead. The
+	// effector itself still runs (its Update in the camera effector loop) and is removed when inactive, as before.
+	if (vr_recoil_new() && Level().CurrentControlEntity() == this)
+	{
+		Fvector d;
+		effector->GetLastDelta(d); // d.x = -m_delta_vert, d.y = -m_delta_horz: exactly what ChangeHP adds to pitch, yaw
+		vr_kick_add(d.x, d.y);
+		if (!effector->IsActive())
+			Cameras().RemoveCamEffector(eCEShot);
+		return;
+	}
+
 	if (pACam->bClampPitch)
 	{
 		while (pACam->pitch < pACam->lim_pitch[0])

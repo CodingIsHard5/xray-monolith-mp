@@ -765,6 +765,13 @@ void CWeaponMagazined::state_Fire(float dt)
 		CEntity* E = smart_cast<CEntity*>(H_Parent());
 		E->g_fireParams(this, p1, d);
 
+		// GammaVR milestone 4 (Amendment 16): in VR the shot leaves the muzzle of the gun as placed on the controller (last
+		// drawn placement, recoil kick included) along its barrel line, instead of the flat camera pick. -vr_fire_old: old.
+		bool vr_src = false;
+		u32 vr_placed_frame = 0;
+		if (vr_fire_new() && ParentIsActor() && Level().CurrentControlEntity() == H_Parent())
+			vr_src = vr_fire_from_gun(ID(), p1, d, vr_placed_frame);
+
 		if (!E->g_stateFire())
 			StopShooting();
 
@@ -797,10 +804,16 @@ void CWeaponMagazined::state_Fire(float dt)
 			CheckForMisfire();
 			OnShot();
 
-			if (m_iShotNum > m_iBaseDispersionedBulletsCount)
+			// GammaVR milestone 4: on the VR barrel path every shot uses the current barrel values (p1, d), also the
+			// first base_dispersioned_bullets_count shots that otherwise reuse the first shot's start and direction
+			g_vr_fire_src = vr_src ? 1 : 0;
+			g_vr_fire_placed_frame = vr_placed_frame;
+			if (m_iShotNum > m_iBaseDispersionedBulletsCount || vr_src)
 				FireTrace(p1, d);
 			else
 				FireTrace(m_vStartPos, m_vStartDir);
+			g_vr_fire_src = 0;
+			g_vr_fire_placed_frame = 0;
 
 			if (bMisfire)
 			{

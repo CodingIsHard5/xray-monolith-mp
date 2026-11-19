@@ -1779,6 +1779,181 @@ void player_hud::vr_log_grip_point()
 	}
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// GammaVR milestone 4 (Amendment 16): firing along the barrel, recoil on the gun. VR m3 path only (see player_hud.h).
+vr_fire_cache g_vr_fire;  // static storage: zero-initialised, valid = false
+vr_kick_state g_vr_kick;  // zero
+int g_vr_fire_src = 0;
+u32 g_vr_fire_placed_frame = 0;
+
+// -vr_fire_old / -vr_recoil_old (controls), parsed once; constructed only on the VR m3 path (see vr_fire_new below), so
+// the start lines appear only in VR runs
+struct vr_m4_switches
+{
+	bool fire_old, recoil_old;
+	vr_m4_switches()
+	{
+		fire_old = !!strstr(Core.Params, "-vr_fire_old");
+		recoil_old = !!strstr(Core.Params, "-vr_recoil_old");
+		Msg(fire_old ? "* [vr3] fire: OLD (flat camera pick)" : "* [vr3] fire: from the gun barrel (VR)");
+		Msg(recoil_old ? "* [vr3] recoil: OLD (actor aim)" : "* [vr3] recoil: on the gun (VR)");
+	}
+};
+static const vr_m4_switches& vr_m4()
+{
+	static const vr_m4_switches s;
+	return s;
+}
+bool vr_fire_new()
+{
+	return vr_m3_vr() && !vr_m4().fire_old;
+}
+bool vr_recoil_new()
+{
+	return vr_m3_vr() && !vr_m4().recoil_old;
+}
+
+// called from CActor::update_camera instead of CWeaponShotEffector::ChangeHP: the same increments, kept here
+void vr_kick_add(float d_pitch, float d_yaw)
+{
+	g_vr_kick.pitch += d_pitch;
+	g_vr_kick.yaw += d_yaw;
+}
+
+// called once per actor camera update (CActor::on_weapon_shot_update). follow_effector = the shot effector exists, is
+// active and returns by itself (cam_return): the part of the kick it owns (own_pitch/own_yaw = what it has handed to
+// ChangeHP since its last Reset) follows its own relaxing deltas through vr_kick_add; only the rest (left over from an
+// earlier effector / weapon) decays. Otherwise (no effector, effector inactive, or a weapon without cam_return) the whole
+// kick decays exponentially with a time constant of 0.15 s of game time (Device.fTimeDelta, the same delta the effector
+// relaxes with), so it always dies away.
+void vr_kick_decay(bool follow_effector, float own_pitch, float own_yaw)
+{
+	if (!follow_effector)
+		own_pitch = own_yaw = 0.f;
+	const float dt = Device.fTimeDelta;
+	if (!(dt > 0.f))
+		return;
+	const float k = expf(-dt / 0.15f);
+	g_vr_kick.pitch = own_pitch + (g_vr_kick.pitch - own_pitch) * k;
+	g_vr_kick.yaw = own_yaw + (g_vr_kick.yaw - own_yaw) * k;
+	if (_abs(g_vr_kick.pitch) < 1e-7f)
+		g_vr_kick.pitch = 0.f;
+	if (_abs(g_vr_kick.yaw) < 1e-7f)
+		g_vr_kick.yaw = 0.f;
+}
+
+// the cached placement, if it is of this weapon and from the last two engine frames (the fire path runs in the game
+// update, before this frame's eyes are drawn, so normally it is the placement of the previous frame)
+bool vr_fire_from_gun(u16 weapon_id, Fvector& start, Fvector& dir, u32& placed_frame)
+{
+	placed_frame = 0;
+	const vr_fire_cache& F = g_vr_fire;
+	if (!F.valid || F.item_id != weapon_id || Device.dwFrame - F.dev_frame > 2)
+		return false;
+	start.set(F.muzzle);
+	dir.set(F.dir);
+	placed_frame = F.frame;
+	return true;
+}
+
+// The held item's world muzzle point and barrel direction as drawn. With -vr_barrel_bones and both bones found: exactly
+// the computation of gun_vis_axis / the [vr3grip] 'barrel' field (world point = D * LL_GetTransform(bone).c, D = the
+// draw transform), muzzle = front bone, direction = rear -> front. Otherwise vr_gun_fire_world (fire point and fire axis
+// from m_item_transform, the same as the gun_axis / gun_muzzle lines). False when neither is available.
+static bool vr_gun_barrel_world(attachable_hud_item* item, const Fmatrix& D, Fvector& muzzle, Fvector& dir, bool& from_bones)
+{
+	from_bones = false;
+	const vr_3b_switches& S = vr_3b();
+	if (S.barrel && item->m_model)
+	{
+		IKinematics* K = item->m_model;
+		const u16 br = vr_find_bone(K, S.rear), bf = vr_find_bone(K, S.front);
+		if (br != BI_NONE && bf != BI_NONE)
+		{
+			Fvector rw, fw, a;
+			D.transform_tiny(rw, K->LL_GetTransform(br).c);
+			D.transform_tiny(fw, K->LL_GetTransform(bf).c);
+			a.sub(fw, rw);
+			if (a.magnitude() > EPS)
+			{
+				a.normalize();
+				dir.set(a);
+				muzzle.set(fw);
+				from_bones = true;
+				return true;
+			}
+		}
+	}
+	// fallback: fire point and fire axis (vr_gun_fire_world), but through the draw transform D (differs from
+	// m_item_transform only under the -vr_vis_rot test control; identical otherwise)
+	const hud_item_measures& M = item->m_measures;
+	if (!M.m_prop_flags.test(hud_item_measures::e_fire_point) || M.m_fire_bone == BI_NONE || !item->m_model)
+		return false;
+	Fvector local;
+	item->m_model->LL_GetTransform(M.m_fire_bone).transform_tiny(local, M.m_fire_point_offset);
+	D.transform_tiny(muzzle, local);
+	D.transform_dir(dir, M.m_fire_direction);
+	if (dir.magnitude() < EPS)
+		return false;
+	dir.normalize();
+	return true;
+}
+
+// render_hud, every eye pass of a VR frame after the placement (and after the -vr_vis_rot draw transforms): g_vr_fire
+void player_hud::vr_cache_fire()
+{
+	const int idx = m_attached_items[0] ? 0 : 1;
+	attachable_hud_item* item = m_attached_items[idx];
+	g_vr_fire.valid = false;
+	if (!item)
+		return;
+	const Fmatrix& D = vr_3b().vis_rot ? m_vr_draw_xform[idx] : item->m_item_transform;
+	Fvector muzzle, dir;
+	bool from_bones = false;
+	if (!vr_gun_barrel_world(item, D, muzzle, dir, from_bones))
+		return;
+	g_vr_fire.muzzle.set(muzzle);
+	g_vr_fire.dir.set(dir);
+	g_vr_fire.from_bones = from_bones;
+	g_vr_fire.frame = g_vr_track.frame;
+	g_vr_fire.dev_frame = Device.dwFrame;
+	g_vr_fire.item_id = (item->m_parent_hud_item && item->m_parent_hud_item->has_object())
+		? item->m_parent_hud_item->object().ID() : u16(-1);
+	g_vr_fire.valid = true;
+}
+
+// The frame number used by [vr3fire] / [vr3hit]: the VR frame the current game update leads to (the eyes of that frame
+// are drawn after this update): last drawn VR frame + 1. The runtime counter restarts at 0 after a failed frame; then
+// this number is one too high for the first frame after the failure.
+static u32 vr_update_frame()
+{
+	return g_vr_track.frame + 1;
+}
+
+// [vr3fire]: CShootingObject::FireBullet, actor's bullets only, VR m3 path only
+static xr_set<u32> s_vr_fired_bullets;
+void vr_log_shot(int shot, const Fvector& pos, const Fvector& dir0, const Fvector& dir, float disp, u32 bullet)
+{
+	if (!vr_m3_vr())
+		return;
+	s_vr_fired_bullets.insert(bullet);
+	Msg("* [vr3fire] frame %u shot %d start %.5f %.5f %.5f dir0 %.6f %.6f %.6f dir %.6f %.6f %.6f disp %.6f bullet %u src %d placed_frame %u",
+		vr_update_frame(), shot, pos.x, pos.y, pos.z, dir0.x, dir0.y, dir0.z, dir.x, dir.y, dir.z, disp, bullet,
+		g_vr_fire_src, g_vr_fire_placed_frame);
+}
+
+// [vr3hit]: CBulletManager::CommitEvents EVENT_HIT, once per bullet logged by [vr3fire]
+void vr_log_hit(u32 bullet, const Fvector& pos)
+{
+	if (!vr_m3_vr())
+		return;
+	xr_set<u32>::iterator it = s_vr_fired_bullets.find(bullet);
+	if (it == s_vr_fired_bullets.end())
+		return;
+	s_vr_fired_bullets.erase(it);
+	Msg("* [vr3hit] frame %u bullet %u pos %.5f %.5f %.5f", vr_update_frame(), bullet, pos.x, pos.y, pos.z);
+}
+
 // Milestone 3d (Amendment 14), -vr_dbg_grip <from> <to>: one line per VR frame in the window (first eye pass, after the
 // placement): the current frame's grip location (time asked for, raw runtime pose, converted pose), the gun origin,
 // the drawn grip point (-vr_grip_bones) and the drawn barrel line (-vr_barrel_bones) in tracking space. Logging only.
@@ -1840,11 +2015,41 @@ void player_hud::vr_log_grip_frame()
 			}
 		}
 	}
+	// milestone 4 fields (appended): kick (camera convention, radians), actor camera yaw/pitch (radians, the values
+	// ChangeHP modifies), world muzzle and barrel direction as placed this frame (= g_vr_fire, what the next shot uses),
+	// controller aim axis in the world (forward axis of the pose the gun is placed on, no grip offset, no kick)
+	string64 aim_txt, mz_txt, bw_txt, ca_txt;
+	CCameraBase* ac = g_actor ? g_actor->cam_Active() : nullptr;
+	if (ac)
+		xr_sprintf(aim_txt, "%.6f %.6f", ac->yaw, ac->pitch);
+	else
+		xr_strcpy(aim_txt, "nan nan");
+	if (g_vr_fire.valid && g_vr_fire.frame == g_vr_track.frame)
+	{
+		xr_sprintf(mz_txt, "%.5f %.5f %.5f", g_vr_fire.muzzle.x, g_vr_fire.muzzle.y, g_vr_fire.muzzle.z);
+		xr_sprintf(bw_txt, "%.6f %.6f %.6f", g_vr_fire.dir.x, g_vr_fire.dir.y, g_vr_fire.dir.z);
+	}
+	else
+	{
+		xr_strcpy(mz_txt, "nan nan nan");
+		xr_strcpy(bw_txt, "nan nan nan");
+	}
+	if (G.gun.valid)
+	{
+		Fmatrix gm;
+		vr_pose_matrix(G.gun, gm);
+		Fvector ca;
+		g_vr_track.track_to_world.transform_dir(ca, gm.k);
+		ca.normalize_safe();
+		xr_sprintf(ca_txt, "%.6f %.6f %.6f", ca.x, ca.y, ca.z);
+	}
+	else
+		xr_strcpy(ca_txt, "nan nan nan");
 	const vr_pose& R = G.runtime;
-	Msg("* [vr3grip] frame %u t_ns %lld hand %c valid %d grip_rt_pos %.5f %.5f %.5f grip_rt_quat %.6f %.6f %.6f %.6f xr_pos %.5f %.5f %.5f xr_quat %.6f %.6f %.6f %.6f gun_track %.5f %.5f %.5f grip_pt %s barrel %s lag %d",
+	Msg("* [vr3grip] frame %u t_ns %lld hand %c valid %d grip_rt_pos %.5f %.5f %.5f grip_rt_quat %.6f %.6f %.6f %.6f xr_pos %.5f %.5f %.5f xr_quat %.6f %.6f %.6f %.6f gun_track %.5f %.5f %.5f grip_pt %s barrel %s lag %d kick %.6f %.6f aim %s muzzle %s bworld %s ctrl_aim %s",
 		g_vr_track.frame, G.t_ns, G.hand, R.valid ? 1 : 0, R.pos.x, R.pos.y, R.pos.z, R.qx, R.qy, R.qz, R.qw,
 		G.xr_pos[0], G.xr_pos[1], G.xr_pos[2], G.xr_quat[0], G.xr_quat[1], G.xr_quat[2], G.xr_quat[3],
-		gt.x, gt.y, gt.z, gp_txt, bar_txt, G.lag);
+		gt.x, gt.y, gt.z, gp_txt, bar_txt, G.lag, g_vr_kick.pitch, g_vr_kick.yaw, aim_txt, mz_txt, bw_txt, ca_txt);
 }
 
 bool player_hud::vr_place_at_grip()
@@ -1857,6 +2062,7 @@ bool player_hud::vr_place_at_grip()
 	Fmatrix gun_track, target;
 	vr_pose_matrix(G.gun, gun_track);
 	target.mul_43(g_vr_track.track_to_world, gun_track); // grip pose first, then tracking space -> world
+	const Fmatrix grip_world = target; // milestone 4: the controller grip pose in the world (rigid), pivot of the kick
 
 	// keep the item's own scale (if its transform has one): only position and orientation are replaced
 	const Fmatrix& cur = item->m_item_transform;
@@ -1886,6 +2092,24 @@ bool player_hud::vr_place_at_grip()
 		target.i.mul(si);
 		target.j.mul(sj);
 		target.k.mul(sk);
+	}
+
+	// milestone 4 (Amendment 16): the recoil kick turns the gun about the grip point, which stays on the controller
+	// position. In the grip pose's own axes (x right, y up, z forward): pitch up about x first, then yaw right about y
+	// (same matrix conventions as the grip frame above: rotateX(-up) pitches up, rotateY(right) yaws right). The kick is
+	// kept in camera convention (pitch > 0 = down, yaw > 0 = right), so up = -kick.pitch, right = kick.yaw.
+	// World: K = G * L * inverse(G), G = grip pose in the world; item = K * item. G.c is a fixed point of K. Skipped when
+	// the kick is exactly zero (always, with -vr_recoil_old), so the placement is then bit-identical to before.
+	if (g_vr_kick.pitch != 0.f || g_vr_kick.yaw != 0.f)
+	{
+		Fmatrix Ry, Rx, L, G_inv, K;
+		Ry.rotateY(g_vr_kick.yaw);
+		Rx.rotateX(g_vr_kick.pitch); // = rotateX(-up)
+		L.mul_43(Ry, Rx);            // pitch first, then yaw
+		G_inv.invert(grip_world);
+		K.mul_43(grip_world, L);
+		K.mulB_43(G_inv);
+		target.mulA_43(K);
 	}
 
 	Fmatrix cur_inv, C;
@@ -2072,6 +2296,7 @@ void player_hud::render_hud(IDSGraphManager* DM)
 			return;
 		if (!vr_place_at_grip())
 		{
+			g_vr_fire.valid = false; // milestone 4: no placement this frame, the fire path falls back to the old pick
 			static bool s_warned = false;
 			if (!s_warned)
 			{
@@ -2083,6 +2308,7 @@ void player_hud::render_hud(IDSGraphManager* DM)
 		{
 			vr_log_gun_pixels(); // milestone 3b: in every eye pass, with the item's final transform of this frame
 			vis_rot = vr_update_vis_rot(); // milestone 3b test control: rotates only what is drawn
+			vr_cache_fire(); // milestone 4: muzzle and barrel line as drawn, for the next shot and the [vr3grip] log
 			vr_log_gun_bones();
 			vr_log_grip_point(); // milestone 3c
 			vr_log_grip_frame(); // milestone 3d, only with -vr_dbg_grip

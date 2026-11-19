@@ -387,6 +387,7 @@ public:
 	void vr_log_gun_bones(); // GammaVR milestone 3b: bone list of the held item and the -vr_barrel_bones visible axis
 	void vr_log_grip_point(); // GammaVR milestone 3c: hands bone list, -vr_grip_bones grip point, barrel bones in model space
 	void vr_log_grip_frame(); // GammaVR milestone 3d: -vr_dbg_grip per-frame grip / gun / barrel line
+	void vr_cache_fire(); // GammaVR milestone 4: world muzzle and barrel line of the held item as drawn -> g_vr_fire
 	void render_item_ui();
 	bool render_item_ui_query();
 	u32 anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotionDef*& md, float speed, u16 override_part = u16(-1));
@@ -536,3 +537,40 @@ public:
 extern player_hud* g_player_hud;
 // GammaVR diagnostic (-vr_dbg_base <from> <to>): one line per frame; flat = called from the flat frame (-vr_dbg_base_flat)
 void vr_dbg_base_log(bool flat, u32 frame);
+
+// GammaVR milestone 4 (Amendment 16): firing along the barrel and recoil on the gun. Everything below is used only on
+// the VR m3 path (vr_m3_vr(): -vr_m3 and -vr_openxr); flat runs never take a branch guarded by vr_fire_new() /
+// vr_recoil_new(). Defined in player_hud.cpp.
+// The held item's muzzle point and barrel direction in the WORLD as placed on the controller (kick included), written by
+// render_hud() in the eye passes of a VR frame, read by the fire path (CWeaponMagazined::state_Fire) of the next update.
+struct vr_fire_cache
+{
+	bool valid;
+	bool from_bones; // true: muzzle = front -vr_barrel_bones bone, dir = rear->front; false: fire point, fire axis
+	u32 frame;       // g_vr_track.frame (VR frame) of the placement
+	u32 dev_frame;   // Device.dwFrame of the placement
+	u16 item_id;     // object id of the placed held item (the weapon)
+	Fvector muzzle;  // world
+	Fvector dir;     // world, unit
+};
+extern vr_fire_cache g_vr_fire;
+// VR recoil kick: the camera pitch/yaw increments that CWeaponShotEffector::ChangeHP would have applied to the actor's
+// camera (camera convention: pitch > 0 = down, yaw > 0 = right), radians. Applied to the gun about the grip point.
+struct vr_kick_state
+{
+	float pitch, yaw;
+};
+extern vr_kick_state g_vr_kick;
+bool vr_fire_new();   // VR m3 path and not -vr_fire_old
+bool vr_recoil_new(); // VR m3 path and not -vr_recoil_old
+void vr_kick_add(float d_pitch, float d_yaw);
+void vr_kick_decay(bool follow_effector, float own_pitch, float own_yaw);
+// fills start/dir from g_vr_fire for weapon 'weapon_id'; false (nothing changed) when no fresh placement of that weapon
+bool vr_fire_from_gun(u16 weapon_id, Fvector& start, Fvector& dir, u32& placed_frame);
+// set by state_Fire around its FireTrace calls (for the [vr3fire] log): 1 = VR barrel path, 0 = old; placed frame or 0
+extern int g_vr_fire_src;
+extern u32 g_vr_fire_placed_frame;
+// [vr3fire] / [vr3hit] log lines (no-ops off the VR m3 path); also declared locally in ShootingObject.cpp and
+// Level_Bullet_Manager.cpp
+void vr_log_shot(int shot, const Fvector& pos, const Fvector& dir0, const Fvector& dir, float disp, u32 bullet);
+void vr_log_hit(u32 bullet, const Fvector& pos);

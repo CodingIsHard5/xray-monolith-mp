@@ -528,7 +528,8 @@ void CActor::g_cl_Orientate(u32 mstate_rl, float dt)
 	CWeaponMagazined* pWM = smart_cast<CWeaponMagazined*>(inventory().GetActiveSlot() != NO_ACTIVE_SLOT
 		                                                      ? inventory().ItemFromSlot(inventory().GetActiveSlot())
 		                                                      : NULL);
-	if (pWM && pWM->GetCurrentFireMode() == 1 && eacFirstEye != cam_active)
+	// GammaVR milestone 4: in VR the recoil never turns the body (the kick is on the gun)
+	if (pWM && pWM->GetCurrentFireMode() == 1 && eacFirstEye != cam_active && !(vr_recoil_new() && Level().CurrentControlEntity() == this))
 	{
 		Fvector dangle = weapon_recoil_last_delta();
 		r_torso.yaw = unaffected_r_torso.yaw + dangle.y;
@@ -582,7 +583,8 @@ void CActor::g_sv_Orientate(u32 /**mstate_rl/**/, float /**dt/**/)
 	CWeaponMagazined* pWM = smart_cast<CWeaponMagazined*>(inventory().GetActiveSlot() != NO_ACTIVE_SLOT
 		                                                      ? inventory().ItemFromSlot(inventory().GetActiveSlot())
 		                                                      : NULL);
-	if (pWM && pWM->GetCurrentFireMode() == 1/* && eacFirstEye != cam_active*/)
+	// GammaVR milestone 4: in VR the recoil never turns the body (the kick is on the gun)
+	if (pWM && pWM->GetCurrentFireMode() == 1/* && eacFirstEye != cam_active*/ && !(vr_recoil_new() && Level().CurrentControlEntity() == this))
 	{
 		Fvector dangle = weapon_recoil_last_delta();
 		r_torso.yaw += dangle.y;

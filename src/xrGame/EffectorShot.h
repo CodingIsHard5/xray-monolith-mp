@@ -49,6 +49,9 @@ public:
 	void Reset();
 
 	IC bool IsActive() { return m_actived; }
+	IC bool ReturnMode() const { return m_cam_recoil.ReturnMode; } // GammaVR milestone 4: weapon's cam_return
+	// GammaVR milestone 4: camera pitch/yaw this effector has handed to ChangeHP since its last Reset (after Update)
+	IC void GetAppliedAngle(float& pitch, float& yaw) const { pitch = -m_prev_angle_vert; yaw = -m_prev_angle_horz; }
 	//		void	SetActive			(bool Active)		{			m_actived = Active;		}
 	IC void StopShoting() { m_shot_end = true; }
 

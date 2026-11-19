@@ -294,9 +294,20 @@ void CActor::on_weapon_shot_start(CWeapon* weapon)
 void CActor::on_weapon_shot_update()
 {
 	CCameraShotEffector* effector = smart_cast<CCameraShotEffector*>(Cameras().GetCamEffector(eCEShot));
+	// GammaVR milestone 4: read before update_camera, which may remove (delete) the effector
+	const bool vr_follow = effector && effector->IsActive() && effector->ReturnMode();
 	if (effector)
 	{
 		update_camera(effector);
+	}
+	// GammaVR milestone 4: the VR kick always dies away (the part the returning effector owns follows it, the rest decays).
+	// vr_follow implies the effector was active, so update_camera did not remove it.
+	if (vr_recoil_new() && Level().CurrentControlEntity() == this)
+	{
+		float own_pitch = 0.f, own_yaw = 0.f;
+		if (vr_follow)
+			effector->GetAppliedAngle(own_pitch, own_yaw);
+		vr_kick_decay(vr_follow, own_pitch, own_yaw);
 	}
 }
 

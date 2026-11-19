@@ -480,6 +480,8 @@ bool CShootingObject::SendHitAllowed(CObject* pUser)
 };
 
 extern void random_dir(Fvector& tgt_dir, const Fvector& src_dir, float dispersion);
+// GammaVR milestone 4: [vr3fire] log line, defined in player_hud.cpp (no-op off the VR m3 path)
+void vr_log_shot(int shot, const Fvector& pos, const Fvector& dir0, const Fvector& dir, float disp, u32 bullet);
 
 void CShootingObject::FireBullet(const Fvector& pos,
                                  const Fvector& shot_dir,
@@ -545,7 +547,7 @@ void CShootingObject::FireBullet(const Fvector& pos,
 		l_fHitPower = fvHitPower[egdMaster];
 	}
 
-	Level().BulletManager().AddBullet(pos,
+	const u32 bullet_id = Level().BulletManager().AddBullet(pos,
 	                                  dir,
 	                                  m_fStartBulletSpeed * cur_silencer_koef.bullet_speed,
 	                                  l_fHitPower * cur_silencer_koef.hit_power,
@@ -559,6 +561,11 @@ void CShootingObject::FireBullet(const Fvector& pos,
 	                                  send_hit,
 	                                  aim_bullet,
 	                                  iShotNum);
+
+	// GammaVR milestone 4 (Amendment 16): one [vr3fire] line per bullet of the actor's weapon (VR m3 path only).
+	// shot = iShotNum as passed here (CWeapon::FireTrace passes iAmmoElapsed, the rounds in the magazine before this shot)
+	if (g_actor && parent_id == g_actor->ID())
+		vr_log_shot(iShotNum, pos, shot_dir, dir, fire_disp, bullet_id);
 }
 
 void CShootingObject::FireStart()

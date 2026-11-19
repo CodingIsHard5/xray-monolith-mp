@@ -241,7 +241,8 @@ public:
 
 	void Load();
 	void Clear();
-	void AddBullet(const Fvector& position, const Fvector& direction, float starting_speed,
+	// returns the new bullet's bulletId (GammaVR milestone 4 logging; callers may ignore it)
+	u32 AddBullet(const Fvector& position, const Fvector& direction, float starting_speed,
 	               float power, /*float power_critical,*/ float impulse,
 	               u16 sender_id, u16 sendersweapon_id,
 	               ALife::EHitType e_hit_type, float maximum_distance,

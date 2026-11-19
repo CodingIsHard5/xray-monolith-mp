@@ -25,6 +25,9 @@
 #define HIT_POWER_EPSILON 0.05f
 #define WALLMARK_SIZE 0.04f
 
+// GammaVR milestone 4: [vr3hit] log line, defined in player_hud.cpp (no-op off the VR m3 path)
+void vr_log_hit(u32 bullet, const Fvector& pos);
+
 float CBulletManager::m_fMinBulletSpeed = 2.f;
 float const CBulletManager::parent_ignore_distance = 3.f;
 
@@ -252,7 +255,7 @@ void CBulletManager::Clear()
 	m_Events.clear();
 }
 
-void CBulletManager::AddBullet(const Fvector& position,
+u32 CBulletManager::AddBullet(const Fvector& position,
                                const Fvector& direction,
                                float starting_speed,
                                float power,
@@ -277,6 +280,7 @@ void CBulletManager::AddBullet(const Fvector& position,
 	            e_hit_type, maximum_distance, cartridge, air_resistance_factor, SendHit, iShotNum);
 	//	bullet.frame_num			= Device.dwFrame;
 	bullet.flags.aim_bullet = AimBullet;
+	const u32 new_bullet_id = bullet.bulletId; // GammaVR milestone 4: returned (read before the script callback below)
 
 	// demonized - bullet on init callback
 	::luabind::functor<void> funct;
@@ -308,6 +312,7 @@ void CBulletManager::AddBullet(const Fvector& position,
 		if (tmp_cl_game->get_reward_generator())
 			tmp_cl_game->get_reward_generator()->OnBullet_Fire(sender_id, sendersweapon_id, position, direction);
 	}
+	return new_bullet_id;
 }
 
 void CBulletManager::UpdateWorkload()
@@ -1251,6 +1256,8 @@ void CBulletManager::CommitEvents() // @ the start of frame
 		{
 		case EVENT_HIT:
 			{
+				vr_log_hit(bullet->bulletId, end_point); // GammaVR milestone 4: [vr3hit], first hit of a logged actor bullet
+
 				// demonized: bullet on impact callback
 				{
 					xrCriticalSectionGuard guard(&m_Lock);
