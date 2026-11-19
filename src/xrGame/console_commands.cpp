@@ -2069,6 +2069,28 @@ public:
 	}
 };
 
+// det_mode only: put every shared generator into a known state. The harness calls this on the first
+// simulated frame, because the number of draws made while loading depends on how long loading took.
+class CCC_DetReseed : public IConsole_Command
+{
+public:
+	CCC_DetReseed(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+
+	virtual void Execute(LPCSTR args)
+	{
+		if (!xr_det_mode())
+		{
+			Msg("! det_reseed is only available with -det_mode");
+			return;
+		}
+		::Random.seed(0x12071980);
+		::Random32.seed(0);
+		srand(1);
+		if (ai().get_alife())
+			const_cast<CALifeSimulator&>(ai().alife()).random().seed(0x12071980u ^ 1);
+	}
+};
+
 class CCC_TimeFactor : public IConsole_Command
 {
 public:
@@ -2760,6 +2782,7 @@ void CCC_RegisterCommands()
 	//#ifndef MASTER_GOLD
 	CMD1(CCC_DemoPlay, "demo_play");
 	CMD1(CCC_DetRngState, "det_rng_state");
+	CMD1(CCC_DetReseed, "det_reseed");
 	CMD1(CCC_DemoRecord, "demo_record");
 	CMD1(CCC_DemoRecordBlockedInput, "demo_record_blocked_input");
 	CMD1(CCC_DemoRecordStop, "demo_record_stop");
