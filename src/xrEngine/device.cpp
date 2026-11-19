@@ -377,6 +377,10 @@ static void perf_autocapture()
 			saved_const_fps = !!psDeviceFlags.test(rsConstantFPS);
 			psDeviceFlags.set(rsConstantFPS, TRUE);
 		}
+		{
+			extern ENGINE_API int ps_r_stereo_bench;
+			Msg("* [vrbench] capture conditions: backbuffer %ux%u, r_stereo_bench %d", Device.dwWidth, Device.dwHeight, ps_r_stereo_bench);
+		}
 		xrprof::start(frames, tag);
 		state = 2;
 		break;
