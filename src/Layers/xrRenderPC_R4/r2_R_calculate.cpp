@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "../../xrCore/profiler.h"
 #include "../../xrEngine/customhud.h"
 
 float g_fSCREEN;
@@ -13,6 +14,7 @@ extern float r_ssaGLOD_start, r_ssaGLOD_end;
 
 void CRender::Calculate()
 {
+	PROF_EVENT("R4 Calculate");
 	// Transfer to global space to avoid deep pointer access
 	IRender_Target* T = getTarget();
 	float fov_factor = _sqr(90.f / Device.fFOV);

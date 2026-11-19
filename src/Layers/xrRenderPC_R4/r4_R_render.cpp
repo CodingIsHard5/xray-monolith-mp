@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "../../xrCore/profiler.h"
 #include "../../xrEngine/igame_persistent.h"
 #include "../xrRender/FBasicVisual.h"
 #include "../../xrEngine/customhud.h"
@@ -22,6 +23,7 @@ IC bool pred_sp_sort(ISpatial* _1, ISpatial* _2)
 
 void CRender::render_main(Fmatrix& m_ViewProjection, bool _fportals)
 {
+	PROF_EVENT("R4 render_main (cull)");
 	PIX_EVENT(render_main);
 	//	Msg						("---begin");
 	marker ++;
@@ -229,6 +231,7 @@ extern u32 g_r;
 
 void CRender::Render()
 {
+	PROF_EVENT("R4 Render");
 	PIX_EVENT(CRender_Render);
 
 	VERIFY(0 == mapDistort.size() + mapHUDDistort.size());

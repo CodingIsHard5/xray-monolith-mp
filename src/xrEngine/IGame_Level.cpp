@@ -14,6 +14,7 @@
 #include "shader_bus.h"
 
 #include "../xrCore/profiler.h"
+#include <d3dx9.h>
 
 //#include "securom_api.h"
 
@@ -170,8 +171,51 @@ void IGame_Level::OnRender()
 	// Level render, only when no client output required
 	if (!g_dedicated_server)
 	{
-		Render->Calculate();
-		Render->Render();
+		extern ENGINE_API int ps_r_stereo_bench;
+		extern ENGINE_API float ps_r_stereo_ipd;
+		if (ps_r_stereo_bench == 1 && g_pGameLevel && !Device.m_SecondViewport.IsSVPFrame())
+		{
+			// VR spike, naive stereo: the full scene pipeline runs once per eye.
+			// Each eye is offset half the IPD along camera right and gets an off-centre projection.
+			// The second eye overwrites the first in the back buffer; this measures cost, not picture.
+			const Fvector pos0 = Device.vCameraPosition;
+			const Fmatrix view0 = Device.mView, proj0 = Device.mProject, projHud0 = Device.mProjectHud;
+			for (int eye = 0; eye < 2; ++eye)
+			{
+				PROF_EVENT("stereo eye");
+				const float side = eye ? 1.f : -1.f;
+				Device.vCameraPosition.mad(pos0, Device.vCameraRight, side * ps_r_stereo_ipd * 0.5f);
+				Device.mView.build_camera_dir(Device.vCameraPosition, Device.vCameraDirection, Device.vCameraTop);
+				Device.mProject = proj0;
+				Device.mProject._31 = -side * 0.08f;
+				Device.mProjectHud = projHud0;
+				Device.mProjectHud._31 = -side * 0.08f;
+				Device.mFullTransform.mul(Device.mProject, Device.mView);
+				Device.mFullTransformHud.mul(Device.mProjectHud, Device.mView);
+				Device.mFullTransformCamAttached.mul(Device.mProjectCamAttached, Device.mView);
+				Device.mFullTransform3DIcons.mul(Device.mProject3DIcons, Device.mView);
+				D3DXMatrixInverse((D3DXMATRIX*)&Device.mInvFullTransform, 0, (D3DXMATRIX*)&Device.mFullTransform);
+				Device.m_pRender->SetCacheXform(Device.mView, Device.mProject);
+				Render->Calculate();
+				Render->Render();
+			}
+			// restore the centre camera for everything drawn after the scene (UI, debug)
+			Device.vCameraPosition = pos0;
+			Device.mView = view0;
+			Device.mProject = proj0;
+			Device.mProjectHud = projHud0;
+			Device.mFullTransform.mul(Device.mProject, Device.mView);
+			Device.mFullTransformHud.mul(Device.mProjectHud, Device.mView);
+			Device.mFullTransformCamAttached.mul(Device.mProjectCamAttached, Device.mView);
+			Device.mFullTransform3DIcons.mul(Device.mProject3DIcons, Device.mView);
+			D3DXMatrixInverse((D3DXMATRIX*)&Device.mInvFullTransform, 0, (D3DXMATRIX*)&Device.mFullTransform);
+			Device.m_pRender->SetCacheXform(Device.mView, Device.mProject);
+		}
+		else
+		{
+			Render->Calculate();
+			Render->Render();
+		}
 	}
 	else
 	{

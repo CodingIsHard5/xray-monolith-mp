@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "../../xrCore/profiler.h"
 #include "../../xrEngine/igame_persistent.h"
 #include "../../xrEngine/irenderable.h"
 #include "../xrRender/FBasicVisual.h"
@@ -1112,6 +1113,7 @@ void CRender::init_cacades()
 
 void CRender::render_sun_cascades()
 {
+	PROF_EVENT("R4 sun cascades");
 	bool b_need_to_render_sunshafts = RImplementation.Target->need_to_render_sunshafts();
 	bool last_cascade_chain_mode = m_sun_cascades.back().reset_chain;
 	if (b_need_to_render_sunshafts)
