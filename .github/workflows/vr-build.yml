@@ -7,7 +7,7 @@ run-name: VR build ${{ github.ref_name }} @ ${{ github.sha }}
 on:
   push:
     branches: [ "vr-**" ]
-    paths-ignore: [ ".github/workflows/vr-openxr-loader.yml" ]
+    paths-ignore: [ ".github/workflows/vr-openxr-loader.yml", "vr_tools/**" ]
 
 permissions:
   contents: read

@@ -7,7 +7,7 @@ run-name: OpenXR loader 1.1.65 @ 24a1f2b9 (${{ github.ref_name }})
 on:
   push:
     branches: [ "vr-**" ]
-    paths: [ ".github/workflows/vr-openxr-loader.yml" ]
+    paths: [ ".github/workflows/vr-openxr-loader.yml", "vr_tools/**" ]
 
 permissions:
   contents: read
@@ -26,26 +26,36 @@ jobs:
         repository: KhronosGroup/OpenXR-SDK
         ref: 24a1f2b92d212501a2b1b8d30ffd53abf55fcfa8
         persist-credentials: false
-    - name: Verify commit
+        path: sdk
+    - name: Checkout this repo (probe source only)
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        path: engine
+        sparse-checkout: vr_tools
+    - name: Verify SDK commit
       shell: bash
-      run: test "$(git rev-parse HEAD)" = "24a1f2b92d212501a2b1b8d30ffd53abf55fcfa8"
+      run: test "$(git -C sdk rev-parse HEAD)" = "24a1f2b92d212501a2b1b8d30ffd53abf55fcfa8"
     - name: Build loader (x64, Release, DLL)
       shell: bash
       run: |
-        cmake -S . -B build -A x64 -DDYNAMIC_LOADER=ON -DBUILD_TESTS=ON -DBUILD_API_LAYERS=OFF -DBUILD_CONFORMANCE_TESTS=OFF
+        cd sdk
+        cmake -S . -B build -A x64 -DDYNAMIC_LOADER=ON -DBUILD_TESTS=OFF -DBUILD_API_LAYERS=OFF -DBUILD_CONFORMANCE_TESTS=OFF
         cmake --build build --config Release --target openxr_loader
-        # test tools from the same reviewed source, for the wineopenxr bridge check (hello_xr, runtime list)
-        cmake --build build --config Release --target hello_xr runtime_list
-        mkdir -p out/tools
-        find build -name 'hello_xr.exe' -exec cp {} out/tools/ \;
-        find build -name 'openxr_runtime_list*.exe' -exec cp {} out/tools/ \;
-        sha256sum out/tools/*
-        mkdir -p out/bin out/lib
-        find build -name 'openxr_loader.dll' -exec cp {} out/bin/ \;
-        find build -name 'openxr_loader.lib' -exec cp {} out/lib/ \;
-        cp -r include out/include
-        cp LICENSE out/ 2>/dev/null || true
-        sha256sum out/bin/openxr_loader.dll out/lib/openxr_loader.lib
+        mkdir -p ../out/bin ../out/lib ../out/tools
+        find build -name 'openxr_loader.dll' -exec cp {} ../out/bin/ \;
+        find build -name 'openxr_loader.lib' -exec cp {} ../out/lib/ \;
+        cp -r include ../out/include
+        cp LICENSE ../out/ 2>/dev/null || true
+    - name: Build xr_probe (our own test program; reviewed headers + loader)
+      shell: bash
+      run: |
+        cmake -S engine/vr_tools/xr_probe -B probe_build -A x64 -DCMAKE_POLICY_DEFAULT_CMP0091=NEW "-DOPENXR_INC=$PWD/out/include" "-DOPENXR_LIB=$PWD/out/lib/openxr_loader.lib"
+        cmake --build probe_build --config Release
+        find probe_build -name 'xr_probe.exe' -exec cp {} out/tools/ \;
+    - name: Hashes
+      shell: bash
+      run: sha256sum out/bin/openxr_loader.dll out/lib/openxr_loader.lib out/tools/xr_probe.exe
     - uses: actions/upload-artifact@v4
       with:
         name: openxr_loader_1.1.65

@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+project(xr_probe C)
+add_executable(xr_probe xr_probe.c)
+target_include_directories(xr_probe PRIVATE ${OPENXR_INC})
+target_link_libraries(xr_probe PRIVATE ${OPENXR_LIB})
+set_property(TARGET xr_probe PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
