@@ -35,3 +35,13 @@ What it cannot give: a capacity number (8 players, one spot, no player scripts a
 must stay on the server in a thin-player design.
 Stop rules as before; one retry at most. Queued behind the other workers through the claim queue (want EXCLUSIVE); no
 retry loop racing for the slot.
+
+## Amendment 2026-11-20 15:48, before the boot
+A desk read found that the server runs an ungated test schedule (mp_spike_anchor.script) from the first join: it shrinks
+the A-Life online radius and moves anchors at fixed game times, changing main-thread cost by up to 80 ms per second inside
+single windows. So window means are not properties of a player count. This boot keeps the schedule (same gamedata as the
+full arm) so that the registered comparison, corrected-inert against the full arm window by window, stays like for like.
+Added check: the schedule's log lines (village_set, base_added, village_cleared, village_readded) must fall within 5 s of
+series A's on the server clock; otherwise the comparison is reported as misaligned and not scored. The sentence "cost of a
+live scriptless player on the main thread" is read ONLY as the difference to the full arm; no absolute per-player figure,
+and the z2 "reference" row in the predictions is withdrawn (that boot's game clock was halted).
