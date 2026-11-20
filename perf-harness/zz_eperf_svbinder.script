@@ -66,5 +66,20 @@ function on_game_start()
 			return real_cte(ev_id, act_id, timer, f, ...)
 		end
 	end
+	-- A-Life online radius trace (control: must stay at its stock value). Runs from a level-wide call, so it also
+	-- logs with no player joined. One line every 5 s of engine time, and at once on any change.
+	local last_r, last_t = nil, -100000
+	local function radius_watch()
+		local sim = alife()
+		if sim and sim.switch_distance then
+			local r, t = sim:switch_distance(), time_global()
+			if r ~= last_r or t - last_t >= 5000 then
+				printf("* sv_binder: RADIUS %s t=%s%s", tostring(r), t, (last_r ~= nil and r ~= last_r) and " CHANGED" or "")
+				last_r, last_t = r, t
+			end
+		end
+		return false
+	end
+	if AddUniqueCall then AddUniqueCall(radius_watch) else printf("* sv_binder: AddUniqueCall missing, RADIUS not traced") end
 	printf("* sv_binder: installed, inert=%s inert2=%s", tostring(inert), tostring(inert2))
 end

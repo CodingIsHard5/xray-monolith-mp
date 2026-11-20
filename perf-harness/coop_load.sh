@@ -22,7 +22,9 @@ setup)
   # server gamedata: links to every top-level entry of gamma_flat, scripts as a folder of links plus the test overlay
   mkdir -p "$S/gamedata_sv/scripts"
   for e in "$GD"/*; do b=$(basename "$e"); [ "$b" = scripts ] || ln -sfn "$e" "$S/gamedata_sv/$b"; done
-  for e in "$GD"/scripts/*; do ln -sfn "$e" "$S/gamedata_sv/scripts/$(basename "$e")"; done
+  # the co-op worker's ungated test instruments (mp_spike*.script) are left OUT of the scratch server's scripts: they
+  # change the A-Life online radius and anchors on a schedule (Overseer ruling 2026-11-20). gamma_flat is not touched.
+  for e in "$GD"/scripts/*; do case "$(basename "$e")" in mp_spike*.script) continue;; esac; ln -sfn "$e" "$S/gamedata_sv/scripts/$(basename "$e")"; done
   cp "$P/harness/zz_eperf_svbinder.script" "$S/gamedata_sv/scripts/"
   mkroot "$S/sv" "$S/gamedata_sv"
   cp -n "$SRC/run/appdata/savedgames/n1-autosave."* "$S/sv/appdata/savedgames/"; cp -n "$SRC/run/appdata/user.ltx" "$S/sv/appdata/"
