@@ -148,3 +148,11 @@ run. Ruling: I2 runs ALONE when the Overseer gives me the box. Its pairing with 
 3. Same windows, same trace gate, same controls (R, A, B, identity) as amendments 3-5.
 4. The gap between FC2's end (16:41:36) and I2's start is reported.
 Rule unchanged: D(w) = I2(w) - FC2(w) for windows 3-6, thresholds as amendment 3. No capacity number.
+
+## Note (2026-11-20 16:44) - how I2 is started (Overseer order)
+
+I2 is armed behind `tools/queue_i2.sh` (copy here), T0 = 2026-11-20 16:44:00. It reads the claim audit log only and
+opens after votv (claim text containing "bh") and gammavr (claim text containing "7c") have each been granted and
+released after T0. Then: fingerprint compared with FC2's (differs -> no boot), the unchanged driver joins the queue and
+claims, 6 h give-up with withdrawal from the queue. Proven on live state at arming: "waiting: votv bh: not yet granted;
+gammavr 7c: not yet granted". Measurement, rule and controls are untouched by this.
