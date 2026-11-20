@@ -659,7 +659,10 @@ void CActor::cam_Update(float dt, float fFOV)
 				else if (s_vr_fall > 0)
 					--s_vr_fall;
 				if (s_vr_fall > 0 && s_vr_box_age > 8 && o.y < s_vr_feet)
+				{
 					s_vr_feet = o.y;
+					++g_vr_base.fall_count;
+				}
 				clamp(s_vr_feet, o.y - 0.15f, o.y + 0.15f);
 			}
 			s_vr_prev = o;

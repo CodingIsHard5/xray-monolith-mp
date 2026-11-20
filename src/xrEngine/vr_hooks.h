@@ -224,6 +224,8 @@ struct vr_base_state
 	// about the head's current position, not about the base point. Persistent; added to 'pos' ONLY where track_to_world
 	// is built (IGame_Level.cpp); never moves the actor or its collision body. Written by xrGame (vr_input_update).
 	Fvector pivot_off;
+	// milestone 7c attempt 3 (Amendment 27): how many frames so far the fall rule moved the VR feet height (logging)
+	u32 fall_count;
 };
 extern ENGINE_API vr_base_state g_vr_base;
 // -vr_dbg_base_flat: the -vr_dbg_base line is logged from the flat frame (flat run S3); logging only

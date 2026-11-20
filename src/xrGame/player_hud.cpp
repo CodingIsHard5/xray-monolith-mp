@@ -2623,11 +2623,11 @@ static void vr_loco_update(const vr_input_info& I, CActor* A, bool allowed, bool
 		const bool inv_ok = A && A->m_inventory;
 		PIItem act_item = inv_ok ? A->inventory().ActiveItem() : nullptr;
 		LPCSTR act_sect = (act_item && act_item->m_section_id.size()) ? act_item->m_section_id.c_str() : "none";
-		Msg("* [vr3act] frame %u head_dy %.5f stand_h %.3f ratio %.4f want %d box %d crouch_wish %d crouch_state %d accel_state %d view_h %.5f next_btn %d switch %d slot %u section %s crouch_btn %d btn_flag %d",
+		Msg("* [vr3act] frame %u head_dy %.5f stand_h %.3f ratio %.4f want %d box %d crouch_wish %d crouch_state %d accel_state %d view_h %.5f next_btn %d switch %d slot %u section %s crouch_btn %d btn_flag %d fall %u",
 			I.frame, C.calibrated ? C.dy : 0.f, C.calibrated ? C.H : 0.f, C.calibrated ? C.r : 1.f, C.want,
 			mc ? int(mc->BoxID()) : -1, (C.wf & mcCrouch) ? 1 : 0, (real & mcCrouch) ? 1 : 0, (real & mcAccel) ? 1 : 0,
 			hw.y - ap.y, (I.next_active[I.gun ? 1 : 0] && I.next[I.gun ? 1 : 0]) ? 1 : 0, sw,
-			inv_ok ? u32(A->inventory().GetActiveSlot()) : 0u, act_sect, C.btn_raw ? 1 : 0, C.btn ? 1 : 0);
+			inv_ok ? u32(A->inventory().GetActiveSlot()) : 0u, act_sect, C.btn_raw ? 1 : 0, C.btn ? 1 : 0, g_vr_base.fall_count);
 	}
 }
 

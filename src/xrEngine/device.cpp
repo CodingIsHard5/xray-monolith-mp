@@ -204,6 +204,9 @@ static HMONITOR g_StartupMonitor = NULL;
 
 #include "MonitorList.h"
 
+// GammaVR: the fixed simulation step of -perf_fixed_dt, in ms (default 33; -perf_fixed_ms <ms>)
+static float g_perf_fixed_ms = 33.f;
+
 static void InitMonitor()
 {
 	if (g_StartupMonitor)
@@ -358,6 +361,12 @@ static void perf_autocapture()
 				}
 			}
 			fixed_dt = !!strstr(Core.Params, "-perf_fixed_dt");
+			if (LPCSTR q = strstr(Core.Params, "-perf_fixed_ms "))
+			{
+				float ms = 33.f;
+				if (sscanf(q + xr_strlen("-perf_fixed_ms "), "%f", &ms) == 1 && ms >= 2.f && ms <= 100.f)
+					g_perf_fixed_ms = ms;
+			}
 			quit = !!strstr(Core.Params, "-perf_quit");
 		}
 	}
@@ -380,6 +389,8 @@ static void perf_autocapture()
 		{
 			extern ENGINE_API int ps_r_stereo_bench;
 			Msg("* [vrbench] capture conditions: backbuffer %ux%u, r_stereo_bench %d", Device.dwWidth, Device.dwHeight, ps_r_stereo_bench);
+			if (fixed_dt)
+				Msg("* [vrbench] fixed step %.3f ms", g_perf_fixed_ms);
 		}
 		xrprof::start(frames, tag);
 		state = 2;
@@ -752,10 +763,25 @@ void CRenderDevice::FrameMove()
 		//dwTimeDelta = 20;
 		//dwTimeGlobal += 20;
 		// 33ms = 30fps
-		fTimeDelta = 0.033f;
-		fTimeGlobal += 0.033f;
-		dwTimeDelta = 33;
-		dwTimeGlobal += 33;
+		if (g_perf_fixed_ms == 33.f)
+		{
+			fTimeDelta = 0.033f;
+			fTimeGlobal += 0.033f;
+			dwTimeDelta = 33;
+			dwTimeGlobal += 33;
+		}
+		else
+		{
+			// GammaVR (Amendment 27): -perf_fixed_ms <ms> = another fixed step (headset frame times); the millisecond
+			// clock advances by the whole milliseconds the running sum has passed
+			static double s_ms_sum = 0.0;
+			const u32 before = u32(s_ms_sum);
+			s_ms_sum += g_perf_fixed_ms;
+			fTimeDelta = g_perf_fixed_ms * 0.001f;
+			fTimeGlobal += fTimeDelta;
+			dwTimeDelta = u32(s_ms_sum) - before;
+			dwTimeGlobal += dwTimeDelta;
+		}
 	}
 	else
 	{
