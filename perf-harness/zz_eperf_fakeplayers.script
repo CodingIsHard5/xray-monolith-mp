@@ -1,0 +1,82 @@
+-- Test-only fake-player load generator, script part (EnginePerf, plan stage 0). Active ONLY with -fp_n <N>.
+-- A fake player here = (a) one extra full run of the player's script update per frame (bind_stalker.actor_binder.update,
+-- which fires every actor_on_update handler), and (b) a copy of the player's carried items as real world objects, parented
+-- to a container near the player. Modes (-fp_mode): full (a+b, default), script (a), items (b), empty (control: N calls of
+-- an empty function, no items). NOT imitated: networking/replication, the engine's own per-actor update, physics, a second
+-- position in the world. Totals go to $logs$/fake_players.csv every 300 player updates.
+local cl = command_line and command_line() or ""
+local N = tonumber(string.match(cl, "%-fp_n%s+(%d+)") or "") or nil
+local mode = string.match(cl, "%-fp_mode%s+(%a+)") or "full"
+local do_script = (mode == "full" or mode == "script")
+local do_items = (mode == "full" or mode == "items")
+local upd, extra_us, extra_calls = 0, 0, 0
+local boxes, loadout, want_items, made_items, stage = {}, {}, 0, 0, 0
+local BOX = "inv_backpack"
+
+local function timer()
+	if profile_timer then local t = profile_timer() t:start() return function() t:stop() return t:time() end end
+	local c = os.clock() return function() return (os.clock() - c) * 1e6 end
+end
+local function write()
+	local f = io.open(getFS():update_path("$logs$", "fake_players.csv"), "w")
+	if not f then return end
+	local online = 0
+	for _, id in ipairs(boxes) do if level.object_by_id(id) then online = online + 1 end end
+	f:write("n,mode,player_updates,extra_calls,extra_total_ms,loadout_items,items_wanted,items_made,boxes,boxes_online,actor_alive\n")
+	f:write(string.format("%d,%s,%d,%d,%.3f,%d,%d,%d,%d,%d,%s\n", N, mode, upd, extra_calls, extra_us / 1000, #loadout,
+		want_items, made_items, #boxes, online, tostring(db.actor and db.actor:alive())))
+	f:close()
+end
+local function nop(self, delta) end
+
+local function items_step()
+	local a = db.actor
+	if stage == 0 then
+		a:iterate_inventory(function(owner, it) loadout[#loadout + 1] = it:section() end, a)
+		want_items = #loadout * N
+		if not system_ini():section_exist(BOX) then printf("* fake_players: section %s missing, items part OFF", BOX) stage = 9 return end
+		local p = a:position()
+		for i = 1, N do
+			local se = alife():create(BOX, vector():set(p.x + 2 + (i % 10) * 0.5, p.y + 0.5, p.z + 2 + math.floor(i / 10) * 0.5),
+				a:level_vertex_id(), a:game_vertex_id())
+			if se then boxes[#boxes + 1] = se.id end
+		end
+		printf("* fake_players: %s containers created, loadout %s items", #boxes, #loadout)
+		stage = 1
+	elseif stage == 1 and upd >= 30 then
+		-- two containers per update keeps single frames short; all done well inside the warmup
+		local done = 0
+		while done < 2 and #boxes > 0 and made_items < #boxes * #loadout do
+			local bi = math.floor(made_items / #loadout) + 1
+			local id = boxes[bi]
+			local p = db.actor:position()
+			for _, sec in ipairs(loadout) do
+				if alife():create(sec, p, db.actor:level_vertex_id(), db.actor:game_vertex_id(), id) then made_items = made_items + 1 else want_items = want_items - 1 end
+			end
+			done = done + 1
+		end
+		if made_items >= want_items then stage = 2 printf("* fake_players: %s items made in %s containers", made_items, #boxes) end
+	end
+end
+
+function on_game_start()
+	if not N then return end
+	local ab = bind_stalker and bind_stalker.actor_binder
+	if not (ab and ab.update) then printf("* fake_players: actor binder NOT found") return end
+	local real = ab.update
+	ab.update = function(self, delta)
+		local r = real(self, delta)
+		upd = upd + 1
+		if do_items and N > 0 and stage < 2 then items_step() end
+		if N > 0 and (do_script or mode == "empty") and upd > 60 then
+			local f = do_script and real or nop
+			local stop = timer()
+			for i = 1, N do f(self, delta) end
+			extra_us = extra_us + stop()
+			extra_calls = extra_calls + N
+		end
+		if upd % 300 == 0 then write() end
+		return r
+	end
+	printf("* fake_players: installed, n=%s mode=%s", N, mode)
+end
