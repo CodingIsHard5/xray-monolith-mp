@@ -2188,6 +2188,13 @@ static bool vr_turn_smooth()
 	static const bool v = !!strstr(Core.Params, "-vr_turn_smooth");
 	return v;
 }
+// Caden 2026-11-19: stick turning is OFF by default (turn with your own head and body). Opt-in: -vr_turn_snap or
+// -vr_turn_smooth. With it off the right stick does nothing.
+static bool vr_turn_on()
+{
+	static const bool v = vr_turn_smooth() || !!strstr(Core.Params, "-vr_turn_snap");
+	return v;
+}
 
 // flat (horizontal) unit WORLD forward of a tracking-space pose: the pose's forward axis (engine +z = OpenXR -Z, the same
 // axis as ctrl_aim of the gun hand), mapped with the track_to_world of the frame the pose belongs to, then turned by the
@@ -2225,7 +2232,10 @@ static void vr_loco_update(const vr_input_info& I, CActor* A, bool allowed, bool
 			if (sscanf(p + 13, "%d %d", &s_from, &s_to) != 2)
 				s_from = s_to = -1;
 		Msg("* [vr3] walk: %s, left stick, dead zone 0.10", vr_walk_head() ? "head-relative" : "controller-relative");
-		Msg("* [vr3] turn: %s, right stick", vr_turn_smooth() ? "smooth 120 deg/s" : "snap 45 deg, repeat 0.50 s");
+		if (vr_turn_on())
+			Msg("* [vr3] turn: %s, right stick", vr_turn_smooth() ? "smooth 120 deg/s" : "snap 45 deg, repeat 0.50 s");
+		else
+			Msg("* [vr3] turn: off (head and body only), right stick unused");
 	}
 	static bool s_armed = true;
 	static float s_timer = 0.f;
@@ -2241,7 +2251,7 @@ static void vr_loco_update(const vr_input_info& I, CActor* A, bool allowed, bool
 	const bool base_ok = vr_m3_vr() && g_vr_base.yaw_set && g_vr_track.base_used;
 	const bool ok = allowed && base_ok && cam;
 	// turning also needs a free camera (no vehicle / weapon holder, no yaw clamp as on a ladder): else no turn at all
-	const bool turn_ok = ok && !A->Holder() && !cam->bClampYaw;
+	const bool turn_ok = vr_turn_on() && ok && !A->Holder() && !cam->bClampYaw;
 
 	// ---- turning (right stick x, either gun hand)
 	float turn = 0.f;
@@ -2358,7 +2368,7 @@ static void vr_loco_update(const vr_input_info& I, CActor* A, bool allowed, bool
 			I.frame, I.stick[0][0], I.stick[0][1], I.stick[1][0], I.stick[1][1], I.stick_active[0] ? 1 : 0, I.stick_active[1] ? 1 : 0,
 			lfwd.x, lfwd.y, lfwd.z, lvalid ? 1 : 0, hfwd.x, hfwd.y, hfwd.z, hw.x, hw.y, hw.z, ap.x, ap.y, ap.z,
 			W.x, W.y, W.z, k, g_vr_base.yaw, cam ? cam->yaw : 0.f, snap, rad2deg(turn),
-			vr_walk_head() ? "head" : "ctl", vr_turn_smooth() ? "smooth" : "snap");
+			vr_walk_head() ? "head" : "ctl", !vr_turn_on() ? "off" : vr_turn_smooth() ? "smooth" : "snap");
 	}
 }
 
