@@ -584,6 +584,7 @@ namespace
 		out->xr_quat[2] = raw.orientation.z;
 		out->xr_quat[3] = raw.orientation.w;
 		out->lag = vr.grip_lag;
+		out->off = vr.grip[1 - vr.gun_hand]; // milestone 5: off hand, current frame
 		// -vr_grip_lag: the pose the gun is placed with is the one of grip_lag frames ago (the oldest kept if fewer)
 		vr_pose placed = out->runtime;
 		if (vr.grip_lag > 0 && vr.grip_ring_count > 0)

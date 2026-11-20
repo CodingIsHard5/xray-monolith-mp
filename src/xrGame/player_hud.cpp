@@ -1415,6 +1415,11 @@ void player_hud::vr_log_gun_pixels()
 // GammaVR milestone 3c: grip transform of the held item (see vr_grip_lookup below)
 static bool s_vr_grip_on = false;      // an offset is applied to the held item
 static Fmatrix s_vr_grip_frame = Fidentity; // translate(grip_pos) * Rframe, weapon model space
+// GammaVR milestone 5 (Amendment 18): support point of the held item (metres along the barrel from the grip point), and
+// the two-hand grab state (see vr_place_at_grip)
+static bool s_vr_support_on = false;
+static float s_vr_support_dist = 0.f;
+static bool s_vr_2h_grabbed = false;
 
 // GammaVR milestone 3b (Amendment 10 note 3) test switches, parsed once.
 struct vr_3b_switches
@@ -1619,6 +1624,47 @@ static void vr_grip_lookup(attachable_hud_item* item)
 	s_vr_grip_frame.identity();
 	const vr_grip_cfg& C = vr_grip_config();
 	Msg("* [vr3] grip lookup: weapon %s hud %s as %s", obj_sect.c_str(), item->m_sect_name.c_str(), C.as[0] ? C.as : "-");
+	// milestone 5 (Amendment 18): optional support_dist, resolved like grip_pos (the weapon / -vr_grip_as section, then the
+	// HUD section, then the family_<f> section named by the first of those with a 'family' line). Not affected by
+	// -vr_grip_off (which only concerns the grip offset). A new item always starts one-handed.
+	s_vr_support_on = false;
+	s_vr_support_dist = 0.f;
+	s_vr_2h_grabbed = false;
+	if (C.ini)
+	{
+		LPCSTR cand[2] = { C.as[0] ? C.as : obj_sect.c_str(), C.as[0] ? nullptr : item->m_sect_name.c_str() };
+		LPCSTR sup_src = nullptr;
+		LPCSTR fam_from = nullptr;
+		for (int n = 0; n < 2 && !sup_src; ++n)
+		{
+			if (!cand[n] || !C.ini->section_exist(cand[n]))
+				continue;
+			if (C.ini->line_exist(cand[n], "support_dist"))
+				sup_src = cand[n];
+			else if (!fam_from && C.ini->line_exist(cand[n], "family"))
+				fam_from = cand[n];
+		}
+		string64 sup_fam;
+		if (!sup_src && fam_from)
+		{
+			LPCSTR f = C.ini->r_string(fam_from, "family");
+			if (strstr(f, "family_") == f)
+				xr_strcpy(sup_fam, f);
+			else
+				xr_sprintf(sup_fam, "family_%s", f);
+			if (C.ini->section_exist(sup_fam) && C.ini->line_exist(sup_fam, "support_dist"))
+				sup_src = sup_fam;
+		}
+		if (sup_src)
+		{
+			s_vr_support_dist = C.ini->r_float(sup_src, "support_dist");
+			s_vr_support_on = true;
+		}
+	}
+	if (s_vr_support_on)
+		Msg("* [vr3] support point for %s: %.3f m", obj_sect.c_str(), s_vr_support_dist);
+	else
+		Msg("* [vr3] support point for %s: none", obj_sect.c_str());
 	LPCSTR source = nullptr;
 	if (!C.off && C.ini)
 	{
@@ -1982,6 +2028,123 @@ void vr_log_hit(u32 bullet, const Fvector& pos)
 	Msg("* [vr3hit] frame %u bullet %u pos %.5f %.5f %.5f", vr_update_frame(), bullet, pos.x, pos.y, pos.z);
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// GammaVR milestone 5 (Amendment 18): two-handed grip. VR m3 path only (vr_place_at_grip). Switches parsed once, at the
+// first VR placement (so the start line appears only in VR runs):
+//   -vr_2h_off                  feature disabled (control): never grabbed
+//   -vr_2h_force                the off hand's grip input is held on every frame
+//   -vr_2h_force <from> <to>    held only in VR frames from..to (g_vr_track.frame, as in [vr3grip]), inclusive
+struct vr_2h_switches
+{
+	bool off = false;
+	bool force = false;
+	bool window = false;
+	int from = -1, to = -1;
+	vr_2h_switches()
+	{
+		off = !!strstr(Core.Params, "-vr_2h_off");
+		if (LPCSTR p = strstr(Core.Params, "-vr_2h_force"))
+		{
+			force = true;
+			int a = -1, b = -1;
+			if (sscanf(p + 12, " %d %d", &a, &b) == 2)
+			{
+				window = true;
+				from = a;
+				to = b;
+			}
+		}
+		if (off)
+			Msg("* [vr3] two-hand: OFF");
+		else if (force && window)
+			Msg("* [vr3] two-hand: on (force %d-%d)", from, to);
+		else if (force)
+			Msg("* [vr3] two-hand: on (force always)");
+		else
+			Msg("* [vr3] two-hand: on (no input source)");
+	}
+};
+static const vr_2h_switches& vr_2h()
+{
+	static const vr_2h_switches s;
+	return s;
+}
+
+// TODO(GammaVR, "controller input mapping" milestone): the off hand's real grip button goes here. No controller button
+// input exists in the engine yet, so for now the input is held only when forced by -vr_2h_force (test switch).
+static bool vr_2h_input_held()
+{
+	const vr_2h_switches& S = vr_2h();
+	if (S.off)
+		return false;
+	if (S.force)
+		return !S.window || (int(g_vr_track.frame) >= S.from && int(g_vr_track.frame) <= S.to);
+	return false;
+}
+
+// out = v made perpendicular to the unit vector axis (Gram-Schmidt), unit; false when v is (nearly) parallel to axis
+// (perpendicular part below 0.02 of |v|, i.e. within about 1.1 degrees)
+static bool vr_perp_unit(const Fvector& v, const Fvector& axis, Fvector& out)
+{
+	out.mad(v, axis, -v.dotproduct(axis));
+	const float m = out.magnitude();
+	const float vm = v.magnitude();
+	if (!(vm > EPS) || m < 0.02f * vm)
+		return false;
+	out.div(m);
+	return true;
+}
+
+// The held item's barrel direction in its MODEL space (unit): the same choice as vr_gun_barrel_world (the -vr_barrel_bones
+// bone line rear -> front, else the fire axis m_fire_direction), else the grip frame's forward axis (model z axis without
+// a grip offset). A direction only: world direction = draw transform's transform_dir of it (normalized).
+static void vr_gun_barrel_model(attachable_hud_item* item, Fvector& b)
+{
+	const vr_3b_switches& S = vr_3b();
+	if (S.barrel && item->m_model)
+	{
+		IKinematics* K = item->m_model;
+		const u16 br = vr_find_bone(K, S.rear), bf = vr_find_bone(K, S.front);
+		if (br != BI_NONE && bf != BI_NONE)
+		{
+			b.sub(K->LL_GetTransform(bf).c, K->LL_GetTransform(br).c);
+			if (b.magnitude() > EPS)
+			{
+				b.normalize();
+				return;
+			}
+		}
+	}
+	const hud_item_measures& M = item->m_measures;
+	if (M.m_prop_flags.test(hud_item_measures::e_fire_point) && M.m_fire_bone != BI_NONE && item->m_model
+		&& M.m_fire_direction.magnitude() > EPS)
+	{
+		b.set(M.m_fire_direction);
+		b.normalize();
+		return;
+	}
+	if (s_vr_grip_on)
+		b.set(s_vr_grip_frame.k);
+	else
+		b.set(0.f, 0.f, 1.f);
+	b.normalize_safe();
+}
+
+// values of the last placement, for the [vr3grip] line (world space; see vr_place_at_grip)
+struct vr_2h_log_state
+{
+	bool set;
+	u32 frame;
+	bool grabbed;     // drawn two-handed this frame
+	bool off_valid;
+	Fvector off_pos;  // off-hand controller position
+	Fvector main_pos; // main controller position (the grip point)
+	Fvector gup;      // drawn grip frame's up (y) axis, AFTER the kick
+	Fvector cup;      // main controller's up axis
+	Fvector bnk;      // drawn barrel direction WITHOUT the kick
+};
+static vr_2h_log_state s_vr_2h_log; // static storage: zero-initialised, set = false
+
 // Milestone 3d (Amendment 14), -vr_dbg_grip <from> <to>: one line per VR frame in the window (first eye pass, after the
 // placement): the current frame's grip location (time asked for, raw runtime pose, converted pose), the gun origin,
 // the drawn grip point (-vr_grip_bones) and the drawn barrel line (-vr_barrel_bones) in tracking space. Logging only.
@@ -2073,11 +2236,29 @@ void player_hud::vr_log_grip_frame()
 	}
 	else
 		xr_strcpy(ca_txt, "nan nan nan");
+	// milestone 5 fields (appended): 2h = drawn two-handed this frame; off_pos / main_pos = off-hand and main controller
+	// positions (world); gup = drawn grip frame's up axis after the kick (world); cup = main controller's up axis (world);
+	// bnk = drawn barrel direction without the kick (world). nan when this frame was not placed.
+	string512 h2_txt;
+	const vr_2h_log_state& L2 = s_vr_2h_log;
+	if (L2.set && L2.frame == g_vr_track.frame)
+	{
+		string64 off_txt;
+		if (L2.off_valid)
+			xr_sprintf(off_txt, "%.5f %.5f %.5f", L2.off_pos.x, L2.off_pos.y, L2.off_pos.z);
+		else
+			xr_strcpy(off_txt, "nan nan nan");
+		xr_sprintf(h2_txt, "2h %d off_valid %d off_pos %s main_pos %.5f %.5f %.5f gup %.6f %.6f %.6f cup %.6f %.6f %.6f bnk %.6f %.6f %.6f",
+			L2.grabbed ? 1 : 0, L2.off_valid ? 1 : 0, off_txt, L2.main_pos.x, L2.main_pos.y, L2.main_pos.z,
+			L2.gup.x, L2.gup.y, L2.gup.z, L2.cup.x, L2.cup.y, L2.cup.z, L2.bnk.x, L2.bnk.y, L2.bnk.z);
+	}
+	else
+		xr_strcpy(h2_txt, "2h 0 off_valid 0 off_pos nan nan nan main_pos nan nan nan gup nan nan nan cup nan nan nan bnk nan nan nan");
 	const vr_pose& R = G.runtime;
-	Msg("* [vr3grip] frame %u t_ns %lld hand %c valid %d grip_rt_pos %.5f %.5f %.5f grip_rt_quat %.6f %.6f %.6f %.6f xr_pos %.5f %.5f %.5f xr_quat %.6f %.6f %.6f %.6f gun_track %.5f %.5f %.5f grip_pt %s barrel %s lag %d kick %.6f %.6f aim %s muzzle %s bworld %s ctrl_aim %s",
+	Msg("* [vr3grip] frame %u t_ns %lld hand %c valid %d grip_rt_pos %.5f %.5f %.5f grip_rt_quat %.6f %.6f %.6f %.6f xr_pos %.5f %.5f %.5f xr_quat %.6f %.6f %.6f %.6f gun_track %.5f %.5f %.5f grip_pt %s barrel %s lag %d kick %.6f %.6f aim %s muzzle %s bworld %s ctrl_aim %s %s",
 		g_vr_track.frame, G.t_ns, G.hand, R.valid ? 1 : 0, R.pos.x, R.pos.y, R.pos.z, R.qx, R.qy, R.qz, R.qw,
 		G.xr_pos[0], G.xr_pos[1], G.xr_pos[2], G.xr_quat[0], G.xr_quat[1], G.xr_quat[2], G.xr_quat[3],
-		gt.x, gt.y, gt.z, gp_txt, bar_txt, G.lag, g_vr_kick.pitch, g_vr_kick.yaw, aim_txt, mz_txt, bw_txt, ca_txt);
+		gt.x, gt.y, gt.z, gp_txt, bar_txt, G.lag, g_vr_kick.pitch, g_vr_kick.yaw, aim_txt, mz_txt, bw_txt, ca_txt, h2_txt);
 }
 
 bool player_hud::vr_place_at_grip()
@@ -2122,6 +2303,99 @@ bool player_hud::vr_place_at_grip()
 		target.k.mul(sk);
 	}
 
+	// milestone 5 (Amendment 18): two-handed grip. 'target' is now the ONE-handed pose (no kick). Grip point p = grip_world.c
+	// (the main controller position, world). One-handed barrel b1 = target * barrel (model, vr_gun_barrel_model); support
+	// point = p + support_dist * b1. Grab state, once per VR frame: input held (vr_2h_input_held, never with -vr_2h_off or
+	// without a support point) and off-hand pose valid; begins when the off-hand controller is within 0.15 m of the
+	// support point, then stays while the input is held (no distance break). While grabbed: rotation Q about p taking the
+	// barrel b1 to d = unit(off - p) and the gun's up u1 (grip frame y made perpendicular to b1) to u2 = the main
+	// controller's up made perpendicular to d (degenerate: previous frame's up). No blend (snap). The kick follows as before.
+	vr_2h(); // parse the switches and print the two-hand start line at the first VR placement
+	Fvector v2_frame_j, v2_b_model;
+	if (s_vr_grip_on)
+		v2_frame_j.set(s_vr_grip_frame.j);
+	else
+		v2_frame_j.set(0.f, 1.f, 0.f);
+	vr_gun_barrel_model(item, v2_b_model);
+	const Fvector v2_p = grip_world.c;
+	Fvector v2_cup, v2_off;
+	g_vr_track.track_to_world.transform_dir(v2_cup, gun_track.j);
+	v2_cup.normalize_safe();
+	const bool v2_off_valid = G.off.valid;
+	if (v2_off_valid)
+		g_vr_track.track_to_world.transform_tiny(v2_off, G.off.pos);
+	else
+		v2_off.set(0.f, 0.f, 0.f);
+	bool v2_grabbed = false;
+	{
+		static Fvector s_prev_up;
+		static bool s_prev_up_set = false;
+		static u32 s_state_frame = u32(-1);
+		Fvector b1, gy1, u1;
+		target.transform_dir(b1, v2_b_model);
+		b1.normalize_safe();
+		target.transform_dir(gy1, v2_frame_j);
+		gy1.normalize_safe();
+		if (s_state_frame != g_vr_track.frame)
+		{
+			s_state_frame = g_vr_track.frame;
+			if (!s_vr_support_on || !v2_off_valid || !vr_2h_input_held())
+				s_vr_2h_grabbed = false;
+			else if (!s_vr_2h_grabbed)
+			{
+				Fvector sp;
+				sp.mad(v2_p, b1, s_vr_support_dist);
+				s_vr_2h_grabbed = sp.distance_to(v2_off) <= 0.15f;
+			}
+		}
+		Fvector ax_x, ax_z;
+		ax_x.set(1.f, 0.f, 0.f);
+		ax_z.set(0.f, 0.f, 1.f);
+		if (!vr_perp_unit(gy1, b1, u1) && !vr_perp_unit(v2_cup, b1, u1) && !vr_perp_unit(ax_x, b1, u1))
+			vr_perp_unit(ax_z, b1, u1);
+		Fvector d;
+		d.set(0.f, 0.f, 1.f);
+		v2_grabbed = s_vr_2h_grabbed;
+		if (v2_grabbed)
+		{
+			d.sub(v2_off, v2_p);
+			if (d.magnitude() < 1e-4f)
+				v2_grabbed = false; // off hand on the grip point: no direction, drawn one-handed this frame
+			else
+				d.normalize();
+		}
+		if (v2_grabbed)
+		{
+			Fvector u2;
+			if (!vr_perp_unit(v2_cup, d, u2) && !(s_prev_up_set && vr_perp_unit(s_prev_up, d, u2))
+				&& !vr_perp_unit(u1, d, u2) && !vr_perp_unit(ax_x, d, u2))
+				vr_perp_unit(ax_z, d, u2);
+			Fvector r1, r2;
+			r1.crossproduct(u1, b1);
+			r2.crossproduct(u2, d);
+			// Q v = r2 (r1.v) + u2 (u1.v) + d (b1.v): the rotation taking (r1, u1, b1) to (r2, u2, d)
+			Fvector* rows[3] = { &target.i, &target.j, &target.k };
+			Fvector rel;
+			rel.sub(target.c, v2_p);
+			for (int n = 0; n < 4; ++n)
+			{
+				Fvector& v = n < 3 ? *rows[n] : rel;
+				const float a = r1.dotproduct(v), b = u1.dotproduct(v), c = b1.dotproduct(v);
+				Fvector q;
+				q.set(r2.x * a + u2.x * b + d.x * c, r2.y * a + u2.y * b + d.y * c, r2.z * a + u2.z * b + d.z * c);
+				v.set(q);
+			}
+			target.c.add(v2_p, rel);
+			s_prev_up.set(u2);
+		}
+		else
+			s_prev_up.set(u1);
+		s_prev_up_set = true;
+	}
+	Fvector v2_bnk; // drawn barrel direction, world, before the kick
+	target.transform_dir(v2_bnk, v2_b_model);
+	v2_bnk.normalize_safe();
+
 	// milestone 4 (Amendment 16): the recoil kick turns the gun about the grip point, which stays on the controller
 	// position. In the grip pose's own axes (x right, y up, z forward): pitch up about x first, then yaw right about y
 	// (same matrix conventions as the grip frame above: rotateX(-up) pitches up, rotateY(right) yaws right). The kick is
@@ -2139,6 +2413,18 @@ bool player_hud::vr_place_at_grip()
 		K.mulB_43(G_inv);
 		target.mulA_43(K);
 	}
+
+	// milestone 5: values for the [vr3grip] line (world space)
+	s_vr_2h_log.set = true;
+	s_vr_2h_log.frame = g_vr_track.frame;
+	s_vr_2h_log.grabbed = v2_grabbed;
+	s_vr_2h_log.off_valid = v2_off_valid;
+	s_vr_2h_log.off_pos.set(v2_off);
+	s_vr_2h_log.main_pos.set(v2_p);
+	target.transform_dir(s_vr_2h_log.gup, v2_frame_j); // after the kick
+	s_vr_2h_log.gup.normalize_safe();
+	s_vr_2h_log.cup.set(v2_cup);
+	s_vr_2h_log.bnk.set(v2_bnk);
 
 	Fmatrix cur_inv, C;
 	cur_inv.invert(cur);

@@ -92,6 +92,9 @@ struct vr_grip_info
 	float xr_pos[3];  // raw pose from the runtime: grip space in LOCAL space, OpenXR axes, no conversion
 	float xr_quat[4]; // x, y, z, w
 	int lag;          // -vr_grip_lag: the gun pose is the converted grip pose of this many VR frames ago (0 = current)
+	// milestone 5 (Amendment 18): the OTHER hand's (off hand's) grip pose of the current frame, tracking space, engine axes
+	// (as located, no lag, no -vr_grip_rot injection, no -vr_gun_on_head); off.valid = false when not located
+	vr_pose off;
 };
 extern ENGINE_API bool (*g_vr_get_grip)(vr_grip_info* out);
 
