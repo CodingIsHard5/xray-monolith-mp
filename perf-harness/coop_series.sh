@@ -20,8 +20,9 @@ SV=$($L svpid); echo "server pid=$SV rss=$(awk '/VmRSS/{print $2}' /proc/$SV/sta
 proof() { # which process and thread the sampler reads (Overseer condition after the smoke)
   echo "--- sampler proof $1 $(date '+%T'): pid=$SV tid=$SV (main thread = thread whose id equals the process id)"
   echo "tid comm: $(cat /proc/$SV/task/$SV/comm)   process exe args: $(tr '\0' ' ' < /proc/$SV/cmdline | cut -c1-160)"
-  echo "parent chain:"; q=$SV; for k in 1 2 3 4 5 6 7; do [ "$q" -gt 1 ] 2>/dev/null || break; echo "   $q $(cat /proc/$q/comm 2>/dev/null) | $(tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null | cut -c1-110)"; q=$(awk '{print $4}' /proc/$q/stat 2>/dev/null); done
-  echo "threads by processor time (tid comm cputime):"; ps -L -p $SV -o tid=,comm=,time= --sort=-time | head -6 | sed 's/^/   /'
+  echo "identity: command line above (scratch path + port), launcher-recorded pid $SV, resident $(awk '/VmRSS/{print $2}' /proc/$SV/status) kB"
+  echo "parent chain (informational; ends at systemd because of systemd-run):"; q=$SV; for k in 1 2 3 4 5 6 7; do [ "$q" -gt 1 ] 2>/dev/null || break; echo "   $q $(cat /proc/$q/comm 2>/dev/null) | $(tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null | cut -c1-110)"; q=$(awk '{print $4}' /proc/$q/stat 2>/dev/null); done
+  echo "threads by processor time, from /proc (tid comm ticks):"; for t in /proc/$SV/task/*; do echo "$(awk '{print $(NF-38)+$(NF-37)}' $t/stat 2>/dev/null) ${t##*/} $(cat $t/comm 2>/dev/null)"; done | sort -rn | head -6 | awk '{print "   "$2" "$3" "$4" "$1}'
   echo "thread count: $(ls /proc/$SV/task | wc -l)   launcher shell pid $$"
 }
 CL=()
@@ -35,6 +36,7 @@ window() { # label
   echo "window $1 done $(date '+%T') load $(cut -d' ' -f1-3 /proc/loadavg)"
 }
 join() { # n
+  if [ "${COOP_NOCLIENTS:-0}" = 1 ]; then sleep 16; echo "no-client boot: slept 16 s in place of join $1"; return; fi
   $L client "$1"
   for i in $(seq 1 120); do sleep 2; [ "$(grep -ac 'co-op actor spawned' "$LOG")" -ge "$1" ] && break; done
   [ "$(grep -ac 'co-op actor spawned' "$LOG")" -ge "$1" ] || { echo "FAIL: client $1 never joined in 240 s"; exit 1; }
@@ -48,7 +50,7 @@ python3 - "$O/samples.csv" <<'PY' || { echo "CHECK at N=4 FAILED: stopping befor
 import csv,sys,statistics as st
 v=[r for r in csv.reader(open(sys.argv[1])) if r[0]=='n4' and len(r)>=8]
 idle=st.mean(float(r[7]) for r in v); rss=max(float(r[5]) for r in v)
-cl=[st.mean(float(r[6].split(';')[i]) for r in v) for i in range(4)]
+cl=[st.mean(float(r[6].split(';')[i]) for r in v) for i in range(4)] if v[0][6] else [0]
 print('CHECK N=4: cores 0-1 idle %.0f%% (need >70), server rss %.0f MiB (need <6144), clients ms/s %s (need <500)'%(idle,rss,[round(x) for x in cl]))
 sys.exit(0 if idle>70 and rss<6144 and max(cl)<500 else 1)
 PY
