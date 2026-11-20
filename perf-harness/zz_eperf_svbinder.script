@@ -57,7 +57,7 @@ function on_game_start()
 	end
 	if CreateTimeEvent then
 		local real_cte = CreateTimeEvent
-		CreateTimeEvent = function(ev_id, act_id, timer, f, ...)
+		_G.CreateTimeEvent = function(ev_id, act_id, timer, f, ...) -- on _G: a bare assignment only lands in this script's own namespace
 			if act_id == "obj_per_upd" and type(f) == "function" then
 				local stock = f
 				printf("* sv_binder: RATE reset queued t=%s", time_global())

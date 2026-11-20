@@ -94,3 +94,27 @@ second, for windows 3-6 (1, 2, 4, 8 players). Known boot-to-boot spread with ide
 Reported without a rule: both arms in 20 s blocks (steps over 30 flagged "world not steady"); the network thread by name
 in both arms (predicted 8, 8, 10, 11, 14, 20 +/- 2); amendment 2's absolute band (105-165) as information only.
 No capacity number is derived from any of this.
+
+## Amendment 4 (2026-11-20 16:21) - first FC boot void (my trace bug); one retry of the pair
+
+What happened. FC ran 16:02:43-16:20:20 clean (rc 0). I2 did not start: on FC's release the box was reserved for the
+next worker in the queue (rc 3). No retry loop; I queued again.
+
+FC of 16:02 is VOID by the rule as written: control A cannot be shown. The log has 9 "RATE reinit" lines and ZERO
+"RATE reset queued / reset ran" lines. Cause is in my trace, found by reading it: the wrapper was assigned as a bare
+`CreateTimeEvent = ...`, which on this engine lands in my script's own namespace, so stock bind_stalker never called it.
+Whether the stock reset to 20 ran in that boot is therefore UNKNOWN. Control R was met (208 radius lines, all 450, no
+CHANGED, no MP_ANCHOR; the one "trader-switch" line is the engine's own 405/495 m line, not the 180 m test line).
+I have already seen FC's numbers (main thread 98, 97, 139, 179, 187, 246 ms/s; network 6.4, 6.6, 9.1, 11.2, 14.9, 23.9).
+They are information only and are not scored; the rule below is unchanged by having seen them.
+
+Changes, committed before the next boot:
+1. Trace fix only: the wrapper is assigned to `_G.CreateTimeEvent`. Nothing else in the overlay changes.
+2. FC's "exactly 1 update call per joined actor" is read from the log (one "first update of actor id N" line and one
+   "binder RETIRED" line per actor), because the timer file is not written when the stock update raises.
+3. One retry of the pair (standing stop rule: at most one retry): FC2 = `tools/coop_series.sh fc2`, then
+   I2 = `tools/coop_series.sh i2 -fp_inert2`. I2 is queued the moment FC2 releases; the gap between the boots is
+   whatever the queue gives and is reported. No third attempt without a new ruling.
+4. Pre-stated: if the fixed trace shows that the reset is never queued or never runs (rate left at 65,534), control A
+   is FAILED as written, the boot is void, the pair is not scored, and that is reported as a finding about this server.
+Rule, windows, other controls: exactly as amendment 3.
