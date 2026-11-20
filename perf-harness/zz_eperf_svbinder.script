@@ -1,0 +1,42 @@
+-- Test-only (EnginePerf): time every player's script update on the co-op SERVER, per actor. Active ONLY with -fp_svtime.
+-- With -fp_inert the update of every actor except the host's (id 0) is replaced by an empty function (control 2).
+-- Totals per actor id go to $logs$/sv_binder.csv (overwritten about once a second of calls).
+local cl = command_line and command_line() or ""
+local on = string.find(cl, "-fp_svtime", 1, true) ~= nil
+local inert = string.find(cl, "-fp_inert", 1, true) ~= nil
+local per = {}   -- id -> { calls, us, first_tg, last_tg }
+local total = 0
+local function timer()
+	if profile_timer then local t = profile_timer() t:start() return function() t:stop() return t:time() end end
+	local c = os.clock() return function() return (os.clock() - c) * 1e6 end
+end
+local function write()
+	local f = io.open(getFS():update_path("$logs$", "sv_binder.csv"), "w")
+	if not f then return end
+	f:write("actor_id,calls,total_ms,first_time_ms,last_time_ms,inert\n")
+	for id, r in pairs(per) do
+		f:write(string.format("%d,%d,%.3f,%d,%d,%s\n", id, r[1], r[2] / 1000, r[3], r[4], tostring(inert and id ~= 0)))
+	end
+	f:close()
+end
+function on_game_start()
+	if not on then return end
+	local ab = bind_stalker and bind_stalker.actor_binder
+	if not (ab and ab.update) then printf("* sv_binder: actor binder NOT found") return end
+	local real = ab.update
+	ab.update = function(self, delta)
+		local id = self.object and self.object:id() or -1
+		local r = per[id]
+		if not r then r = { 0, 0, time_global(), 0 } per[id] = r printf("* sv_binder: first update of actor id %s", id) end
+		local stop = timer()
+		local a
+		if inert and id ~= 0 then a = nil else a = real(self, delta) end
+		r[2] = r[2] + stop()
+		r[1] = r[1] + 1
+		r[4] = time_global()
+		total = total + 1
+		if total % 100 == 0 then write() end
+		return a
+	end
+	printf("* sv_binder: installed, inert=%s", tostring(inert))
+end
