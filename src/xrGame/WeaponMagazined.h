@@ -74,8 +74,6 @@ protected:
 	void __stdcall UpdateSoundsPositions();
 
 	bool TryReload();
-	// GammaVR milestone 8a (Amendment 31): fill the magazine from the inventory with no animation (manual reload)
-	void VrFillMagazine() { ReloadMagazine(); }
 
 private:
 	LPCSTR empty_click_layer;
@@ -94,6 +92,8 @@ protected:
 	virtual void state_Fire(float dt);
 public:
 	CWeaponMagazined(ESoundTypes eSoundType = SOUND_TYPE_WEAPON_SUBMACHINEGUN);
+	// GammaVR milestone 8a (Amendment 31): fill the magazine from the inventory with no animation (manual reload)
+	void VrFillMagazine() { ReloadMagazine(); }
 	virtual ~CWeaponMagazined();
 
 	virtual void Load(LPCSTR section);
