@@ -1,6 +1,7 @@
 #include "pch_script.h"
 #include "../xrEngine/xr_ioconsole.h"
 #include "../xrEngine/xr_ioc_cmd.h"
+#include "../xrEngine/vr_hooks.h" // GammaVR milestone 7b: vr_m3_vr (vr_stand_calibrate)
 #include "../xrEngine/customhud.h"
 #include "../xrEngine/fdemorecord.h"
 #include "../xrEngine/fdemoplay.h"
@@ -1391,6 +1392,21 @@ public:
 	}
 };
 
+// GammaVR milestone 7b (Amendment 23): stand straight, then "vr_stand_calibrate": the physical-crouch standing calibration is
+// taken again at the next VR read (registered only with -vr_m3 -vr_openxr)
+void vr_stand_calibrate_request(); // player_hud.cpp
+
+class CCC_VrStandCalibrate : public IConsole_Command
+{
+public:
+	CCC_VrStandCalibrate(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
+
+	virtual void Execute(LPCSTR)
+	{
+		vr_stand_calibrate_request();
+	}
+};
+
 class CCC_ClearLog : public IConsole_Command
 {
 public:
@@ -2705,6 +2721,8 @@ void CCC_RegisterCommands()
 
 	CMD1(CCC_FlushLog, "flush"); // flush log
 	CMD1(CCC_ClearLog, "clear_log");
+	if (vr_m3_vr())
+		CMD1(CCC_VrStandCalibrate, "vr_stand_calibrate"); // GammaVR milestone 7b
 
 #ifndef MASTER_GOLD
 	CMD1(CCC_ALifeTimeFactor, "al_time_factor");		// set time factor

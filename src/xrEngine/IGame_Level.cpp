@@ -226,6 +226,8 @@ void IGame_Level::OnRender()
 				{
 					s_head0 = vr_info.head;
 					s_have_head0 = true;
+					g_vr_track.head0_y = s_head0.pos.y; // milestone 7b: for the standing calibration offset (xrGame)
+					g_vr_track.head0_set = true;
 					Msg("* [vr3] head start pose (tracking space, engine axes) pos %.5f %.5f %.5f quat %.6f %.6f %.6f %.6f",
 						s_head0.pos.x, s_head0.pos.y, s_head0.pos.z, s_head0.qx, s_head0.qy, s_head0.qz, s_head0.qw);
 				}

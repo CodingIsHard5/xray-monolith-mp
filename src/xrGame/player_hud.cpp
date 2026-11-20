@@ -20,6 +20,8 @@
 #include "../xrEngine/xr_ioconsole.h"
 #include "UIGameCustom.h"
 #include "xr_level_controller.h"
+#include "CharacterPhysicsSupport.h" // GammaVR milestone 7b: body box index ([vr3act])
+#include "PHMovementControl.h"
 #include <typeinfo>
 
 extern int g_nearwall;
@@ -2196,6 +2198,242 @@ static bool vr_turn_on()
 	return v;
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// GammaVR milestone 7b (Amendment 23): physical crouch. Standing calibration (first VR read with a head pose for a new actor,
+// and on the console command vr_stand_calibrate): y_calib = head tracking-space y, H = standing eye height (-vr_stand_height,
+// else the head's height above the runtime's floor, else 1.66; clamped to 1.0..2.2). Ratio r = (H + y - y_calib) / H; body
+// state with hysteresis: 0 stand -> 1 crouch below 0.90, 1 -> 0 above 0.93, 1 -> 2 low crouch below 0.49, 2 -> 1 above 0.52.
+// Applied by CActor::g_cl_CheckControls through the wish bits (vr_crouch_bits). Same threading as s_vr_walk above.
+static bool vr_crouch_off()
+{
+	static const bool v = !!strstr(Core.Params, "-vr_crouch_off");
+	return v;
+}
+// physical crouch is on for this run; also tells ActorCameras.cpp to hang the VR base on the STANDING camera height
+bool vr_crouch_physical()
+{
+	return vr_m3_vr() && !vr_crouch_off();
+}
+// -vr_stand_height <metres>: false = not given
+static bool vr_stand_height_setting(float& h)
+{
+	static float s_h = 0.f;
+	static int s_have = -1;
+	if (s_have < 0)
+	{
+		s_have = 0;
+		if (LPCSTR p = strstr(Core.Params, "-vr_stand_height "))
+			if (sscanf(p + sizeof("-vr_stand_height ") - 1, "%f", &s_h) == 1)
+				s_have = 1;
+	}
+	h = s_h;
+	return s_have == 1;
+}
+
+struct vr_crouch_state
+{
+	const CActor* actor;  // the actor the calibration belongs to
+	bool calibrated;
+	bool calib_request;   // console command vr_stand_calibrate: calibrate at the next VR read
+	float y_calib;        // head tracking-space y at calibration
+	float H;              // standing eye height, metres
+	float dy, r;          // head offset since calibration and ratio of the last read
+	int want;             // hysteresis state: 0 stand, 1 crouch, 2 low crouch (0 with -vr_crouch_off)
+	u32 dev_frame;        // Device.dwFrame of the update that set 'want'
+	int applied;          // last state handed to g_cl_CheckControls: 0/1/2 as 'want', 3 = button crouch (see vr_crouch_bits)
+	u32 wf;               // wish bits g_cl_CheckControls used last (log only)
+	float off;            // calibration offset: y_calib - start head y (g_vr_track.head0_y); set only at calibration
+	bool btn;             // crouch button toggle flag (opt-in action crouch_toggle)
+	bool btn_prev[2];     // raw button state of the last read, per hand (rising edge)
+	bool btn_raw;         // raw button state of the last read, either hand (log)
+};
+static vr_crouch_state s_vr_crouch; // static storage: zero-initialised, not calibrated
+
+// console command vr_stand_calibrate (console_commands.cpp)
+void vr_stand_calibrate_request()
+{
+	s_vr_crouch.calib_request = true;
+	Msg("* [vr3] stand calibration requested (at the next VR read)");
+}
+
+static int vr_crouch_step(int s, float r)
+{
+	for (int i = 0; i < 3; ++i) // a jump of r may cross more than one threshold in one read
+	{
+		int n = s;
+		if (s == 0 && r < 0.90f)
+			n = 1;
+		else if (s == 1 && r > 0.93f)
+			n = 0;
+		else if (s == 1 && r < 0.49f)
+			n = 2;
+		else if (s == 2 && r > 0.52f)
+			n = 1;
+		if (n == s)
+			break;
+		s = n;
+	}
+	return s;
+}
+
+// once per game update from vr_loco_update
+static void vr_crouch_update(const vr_input_info& I, CActor* A, bool allowed, bool new_read)
+{
+	if (!vr_m3_vr())
+		return;
+	vr_crouch_state& C = s_vr_crouch;
+	C.dev_frame = Device.dwFrame;
+	if (A != C.actor)
+	{
+		C.actor = A; // new / replaced actor (level loaded): calibrate again
+		C.calibrated = false;
+		C.want = 0;
+		C.applied = 0;
+		C.dy = 0.f;
+		C.btn = false;
+	}
+	if (!A || !A->g_Alive())
+		C.btn = false; // dead: the button crouch is dropped
+	if (!new_read)
+		return;
+	// crouch button (opt-in action, no default binding): a rising edge on either hand toggles the flag
+	bool btn_edge = false;
+	C.btn_raw = false;
+	for (int h = 0; h < 2; ++h)
+	{
+		const bool b = I.crouch_btn_active[h] && I.crouch_btn[h];
+		if (b && !C.btn_prev[h])
+			btn_edge = true;
+		C.btn_prev[h] = b;
+		C.btn_raw = C.btn_raw || b;
+	}
+	if (btn_edge && allowed && A && !A->Holder())
+		C.btn = !C.btn;
+	if (!A || !I.head.valid)
+		return;
+	if (!C.calibrated || C.calib_request)
+	{
+		C.calib_request = false;
+		C.calibrated = true;
+		C.y_calib = I.head.pos.y;
+		LPCSTR src = "default";
+		float h = 1.66f;
+		if (vr_stand_height_setting(h))
+			src = "setting";
+		else if (I.floor_valid)
+		{
+			h = I.floor_head_y;
+			src = "floor";
+		}
+		else
+			h = 1.66f;
+		clamp(h, 1.f, 2.2f);
+		C.H = h;
+		// the view path maps the START head pose (first VR frame) onto the VR base, so the base is lowered by the head's
+		// height at calibration above that start pose: at the calibrated pose the eyes are at the standing eye height
+		C.off = g_vr_track.head0_set ? C.y_calib - g_vr_track.head0_y : 0.f;
+		Msg("* [vr3] stand height %.3f m (source %s)", C.H, src);
+	}
+	C.dy = I.head.pos.y - C.y_calib;
+	C.r = (C.H + C.dy) / C.H;
+	C.want = vr_crouch_physical() ? vr_crouch_step(C.want, C.r) : 0;
+}
+
+// for CActor::g_cl_CheckControls (Actor_Movement.cpp): false = leave the crouch bits alone (flat run, other actor, the VR
+// path did not run this update, or nothing VR-requested to undo). Else the bits to set / clear in the wish bits, by state:
+// 0 = mcCrouch off (and mcAccel off when leaving a low crouch), 1 = mcCrouch on, mcAccel off (accelerated crouch = box 1),
+// 2 = mcCrouch and mcAccel on (not accelerated crouch = low crouch, box 2), 3 = button crouch: mcCrouch on (the game's
+// own crouch). Physical crouch (calibrated): the physical state, or 3 when it is 0 and the button flag is on. Without
+// physical crouch (-vr_crouch_off or not calibrated yet): 3 while the button flag is on, one 0 when it goes off.
+bool vr_crouch_bits(const CActor* A, u32& set, u32& clear)
+{
+	set = clear = 0;
+	const vr_crouch_state& C = s_vr_crouch;
+	if (!vr_m3_vr() || !A || A != C.actor)
+		return false;
+	if (C.dev_frame != Device.dwFrame && C.dev_frame + 1 != Device.dwFrame)
+		return false; // stale
+	int st;
+	if (vr_crouch_physical() && C.calibrated)
+		st = (C.want == 0 && C.btn) ? 3 : C.want;
+	else
+		st = C.btn ? 3 : (C.applied == 3 ? 0 : -1);
+	if (st < 0)
+		return false;
+	if (st == 0)
+		clear = mcCrouch | (C.applied == 2 ? mcAccel : 0);
+	else if (st == 1)
+	{
+		set = mcCrouch;
+		clear = mcAccel;
+	}
+	else if (st == 2)
+		set = mcCrouch | mcAccel;
+	else
+	{
+		set = mcCrouch;
+		clear = C.applied == 2 ? mcAccel : 0;
+	}
+	s_vr_crouch.applied = st;
+	return true;
+}
+// for ActorCameras.cpp (VR base, -vr_m3 -vr_openxr only): the base height above the feet. -vr_crouch_off: the game's eased
+// camera height, as before. Physical crouch: the STANDING camera height (the head's own tracked height lowers the view
+// 1:1; the game's crouch does not lower it again), or the game's eased height while the button crouch is on and the head
+// is standing; both minus the calibration offset.
+float vr_base_height(const CActor* A, float current_h, float standing_h)
+{
+	if (!vr_crouch_physical())
+		return current_h;
+	const vr_crouch_state& C = s_vr_crouch;
+	const bool mine = A && A == C.actor && C.calibrated;
+	const float h = (mine && C.btn && C.want == 0) ? current_h : standing_h;
+	return h - (mine ? C.off : 0.f);
+}
+// for CActor::g_cl_CheckControls: the wish bits it used (log only)
+void vr_crouch_note(u32 wf)
+{
+	if (vr_m3_vr())
+		s_vr_crouch.wf = wf;
+}
+
+// milestone 7b: next firearm on the gun hand's upper face button. One switch per press (rising edge of a NEW read): as a
+// player pressing the slot key (CActor::OnNextWeaponSlot does the same: kWPN_1 + slot - KNIFE_SLOT), cycling slots 2 and 3,
+// wrapping, skipping an empty one, never the active one. Returns 1 when a key press was sent.
+static int vr_switch_update(const vr_input_info& I, CActor* A, bool allowed, bool new_read)
+{
+	static bool s_prev = false;
+	if (!new_read)
+		return 0;
+	const int gun = I.gun ? 1 : 0;
+	const bool now = I.next_active[gun] && I.next[gun];
+	const bool edge = now && !s_prev;
+	s_prev = now; // a press seen while input is not allowed is consumed, not kept for later
+	if (!edge || !allowed || !vr_m3_vr() || !A || A->Holder() || !A->m_inventory)
+		return 0;
+	CInventory& inv = A->inventory();
+	const u16 cur = inv.GetActiveSlot();
+	u16 to = NO_ACTIVE_SLOT;
+	if (cur == INV_SLOT_2)
+	{
+		if (inv.ItemFromSlot(INV_SLOT_3))
+			to = INV_SLOT_3;
+	}
+	else if (cur == INV_SLOT_3)
+	{
+		if (inv.ItemFromSlot(INV_SLOT_2))
+			to = INV_SLOT_2;
+	}
+	else if (inv.ItemFromSlot(INV_SLOT_2))
+		to = INV_SLOT_2;
+	else if (inv.ItemFromSlot(INV_SLOT_3))
+		to = INV_SLOT_3;
+	if (to == NO_ACTIVE_SLOT)
+		return 0;
+	A->IR_OnKeyboardPress(kWPN_1 + int(to) - int(KNIFE_SLOT));
+	return 1;
+}
+
 // flat (horizontal) unit WORLD forward of a tracking-space pose: the pose's forward axis (engine +z = OpenXR -Z, the same
 // axis as ctrl_aim of the gun hand), mapped with the track_to_world of the frame the pose belongs to, then turned by the
 // VR yaw added since that frame was built (yaw_since). False when the pose is invalid or (nearly) vertical (horizontal
@@ -2236,6 +2474,9 @@ static void vr_loco_update(const vr_input_info& I, CActor* A, bool allowed, bool
 			Msg("* [vr3] turn: %s, right stick", vr_turn_smooth() ? "smooth 120 deg/s" : "snap 45 deg, repeat 0.50 s");
 		else
 			Msg("* [vr3] turn: off (head and body only), right stick unused");
+		Msg(vr_crouch_physical() ? "* [vr3] crouch: physical (crouch below 0.90, stand above 0.93, low below 0.49, back above 0.52)"
+			: "* [vr3] crouch: physical crouch off");
+		Msg("* [vr3] next firearm: gun-hand upper face button (slots 2, 3)");
 	}
 	static bool s_armed = true;
 	static float s_timer = 0.f;
@@ -2359,6 +2600,10 @@ static void vr_loco_update(const vr_input_info& I, CActor* A, bool allowed, bool
 		}
 	}
 
+	// ---- milestone 7b (Amendment 23): physical crouch (calibration, ratio, hysteresis) and the weapon switch
+	vr_crouch_update(I, A, allowed, new_read);
+	const int sw = vr_switch_update(I, A, allowed, new_read);
+
 	// ---- log: one line per VR frame read (and an extra one for an update that turned on an already logged read)
 	if (s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to && (new_read || turn != 0.f))
 	{
@@ -2369,6 +2614,20 @@ static void vr_loco_update(const vr_input_info& I, CActor* A, bool allowed, bool
 			lfwd.x, lfwd.y, lfwd.z, lvalid ? 1 : 0, hfwd.x, hfwd.y, hfwd.z, hw.x, hw.y, hw.z, ap.x, ap.y, ap.z,
 			W.x, W.y, W.z, k, g_vr_base.yaw, cam ? cam->yaw : 0.f, snap, rad2deg(turn),
 			vr_walk_head() ? "head" : "ctl", !vr_turn_on() ? "off" : vr_turn_smooth() ? "smooth" : "snap");
+		// milestone 7b: view_h = the view (head) height above the feet of this frame's render (head_world and the actor
+		// position its VR base came from); box = the movement control's active body box; crouch_wish = mcCrouch in the wish
+		// bits the actor's last update used
+		const vr_crouch_state& C = s_vr_crouch;
+		CPHMovementControl* mc = (A && A->character_physics_support()) ? A->character_physics_support()->movement() : nullptr;
+		const u32 real = A ? A->MovingState() : 0;
+		const bool inv_ok = A && A->m_inventory;
+		PIItem act_item = inv_ok ? A->inventory().ActiveItem() : nullptr;
+		LPCSTR act_sect = (act_item && act_item->m_section_id.size()) ? act_item->m_section_id.c_str() : "none";
+		Msg("* [vr3act] frame %u head_dy %.5f stand_h %.3f ratio %.4f want %d box %d crouch_wish %d crouch_state %d accel_state %d view_h %.5f next_btn %d switch %d slot %u section %s crouch_btn %d btn_flag %d",
+			I.frame, C.calibrated ? C.dy : 0.f, C.calibrated ? C.H : 0.f, C.calibrated ? C.r : 1.f, C.want,
+			mc ? int(mc->BoxID()) : -1, (C.wf & mcCrouch) ? 1 : 0, (real & mcCrouch) ? 1 : 0, (real & mcAccel) ? 1 : 0,
+			hw.y - ap.y, (I.next_active[I.gun ? 1 : 0] && I.next[I.gun ? 1 : 0]) ? 1 : 0, sw,
+			inv_ok ? u32(A->inventory().GetActiveSlot()) : 0u, act_sect, C.btn_raw ? 1 : 0, C.btn ? 1 : 0);
 	}
 }
 

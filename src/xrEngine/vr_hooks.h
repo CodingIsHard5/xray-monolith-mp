@@ -120,6 +120,17 @@ struct vr_input_info
 	// -vr_gun_on_head; .valid = false when not located) and the head pose
 	vr_pose grip[2];         // 0 = left, 1 = right
 	vr_pose head;
+	// milestone 7b (Amendment 23): boolean action "next_weapon" (xrGetActionStateBoolean, same read); inactive = false
+	bool next[2];            // [hand] current state
+	bool next_active[2];     // XrActionStateBoolean::isActive
+	// boolean action "crouch_toggle" (opt-in, NO default binding; test binding with -vr_dbg_crouch_bind); unbound /
+	// inactive = false
+	bool crouch_btn[2];
+	bool crouch_btn_active[2];
+	// the head's height above the runtime's floor (VIEW located in a STAGE space, same time as 'head'); floor_valid = false
+	// when the runtime offers no STAGE space or the location is not valid
+	float floor_head_y;
+	bool floor_valid;
 };
 extern ENGINE_API bool (*g_vr_get_input)(vr_input_info* out);
 
@@ -140,6 +151,10 @@ struct vr_track_state
 	Fvector pivot;
 	Fvector head_world;
 	Fvector actor_pos;
+	// milestone 7b (Amendment 23): tracking-space y of the start head pose (the head pose track_to_world maps onto the VR
+	// base); head0_set = false until the first VR frame of the m3 path
+	bool head0_set;
+	float head0_y;
 };
 extern ENGINE_API vr_track_state g_vr_track;
 

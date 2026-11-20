@@ -477,6 +477,8 @@ float offsetZ = 0;
 float viewportNearOffset = 0;
 float firstPersonDeathHeadScale = 3.f;
 
+float vr_base_height(const CActor* A, float current_h, float standing_h); // GammaVR milestone 7b, player_hud.cpp
+
 void CActor::cam_Update(float dt, float fFOV)
 {
 	if (m_holder) return;
@@ -610,7 +612,13 @@ void CActor::cam_Update(float dt, float fFOV)
 	if (vr_m3_vr() && Level().CurrentControlEntity() == this)
 	{
 		const Fvector& o = XFORM().c;
-		g_vr_base.pos.set(o.x, o.y + CurrentHeight + current_ik_cam_shift + (fPrevCamPos - flCurrentPlayerY), o.z);
+		// milestone 7b (Amendment 23): with physical crouch the height comes from vr_base_height (player_hud.cpp): the
+		// STANDING camera height (box 0, computed as CameraHeight() does for the active box) minus the calibration offset;
+		// with -vr_crouch_off it returns CurrentHeight unchanged
+		Fvector box0;
+		character_physics_support()->movement()->Boxes()[0].getsize(box0);
+		const float vr_h = vr_base_height(this, CurrentHeight, m_fCamHeightFactor * (box0.y - cammera_into_collision_shift));
+		g_vr_base.pos.set(o.x, o.y + vr_h + current_ik_cam_shift + (fPrevCamPos - flCurrentPlayerY), o.z);
 		g_vr_base.actor_pos.set(o); // milestone 7: logged with the frame this base is used in
 		const Fvector& d = cameras[eacFirstEye]->vDirection;
 		g_vr_base.aim_heading = atan2f(d.x, d.z);

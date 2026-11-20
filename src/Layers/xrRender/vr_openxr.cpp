@@ -90,6 +90,16 @@ namespace
 		bool in_stick_active[2] = { false, false };
 		vr_pose in_grip[2];
 		vr_pose in_head;
+		// milestone 7b (Amendment 23): "next_weapon" (boolean, both hands) and the head's height above the STAGE floor
+		XrAction next_action = XR_NULL_HANDLE;
+		bool in_next[2] = { false, false };
+		bool in_next_active[2] = { false, false };
+		XrAction crouch_action = XR_NULL_HANDLE;    // "crouch_toggle" (boolean, both hands), no default binding
+		bool in_crouch[2] = { false, false };
+		bool in_crouch_active[2] = { false, false };
+		XrSpace stage = XR_NULL_HANDLE;          // STAGE space, used only to measure the head's height above the floor
+		float in_floor_y = 0.f;
+		bool in_floor_valid = false;
 		bool profile_seen[2] = { false, false }; // current interaction profile of the hand logged at least once
 		XrPath profile_cur[2] = { XR_NULL_PATH, XR_NULL_PATH };
 
@@ -127,6 +137,8 @@ namespace
 		PFN_xrGetCurrentInteractionProfile GetCurrentInteractionProfile = nullptr;
 		PFN_xrGetActionStateFloat GetActionStateFloat = nullptr;
 		PFN_xrGetActionStateVector2f GetActionStateVector2f = nullptr;
+		PFN_xrGetActionStateBoolean GetActionStateBoolean = nullptr;     // milestone 7b, optional (null = no next_weapon)
+		PFN_xrEnumerateReferenceSpaces EnumerateReferenceSpaces = nullptr; // milestone 7b, optional (null = no STAGE)
 	};
 
 	vr_state vr;
@@ -203,6 +215,31 @@ namespace
 		tci.subactionPaths = vr.hand_path;
 		if (!vr_check(vr.CreateAction(vr.action_set, &tci, &vr.stick_action), "xrCreateAction(stick)"))
 			vr.stick_action = XR_NULL_HANDLE;
+		// milestone 7b (Amendment 23): "next_weapon" (boolean) for both hands; a failure (or no xrGetActionStateBoolean)
+		// leaves it null (no weapon switch input, everything else unchanged)
+		if (vr.GetActionStateBoolean)
+		{
+			XrActionCreateInfo nci = { XR_TYPE_ACTION_CREATE_INFO };
+			xr_strcpy(nci.actionName, "next_weapon");
+			xr_strcpy(nci.localizedActionName, "Next firearm");
+			nci.actionType = XR_ACTION_TYPE_BOOLEAN_INPUT;
+			nci.countSubactionPaths = 2;
+			nci.subactionPaths = vr.hand_path;
+			if (!vr_check(vr.CreateAction(vr.action_set, &nci, &vr.next_action), "xrCreateAction(next_weapon)"))
+				vr.next_action = XR_NULL_HANDLE;
+			// "crouch_toggle" (boolean), opt-in: NO suggested binding in any profile (an unbound action only reads as
+			// inactive); test switch -vr_dbg_crouch_bind adds left menu click on the WMR profile (below)
+			XrActionCreateInfo cci = { XR_TYPE_ACTION_CREATE_INFO };
+			xr_strcpy(cci.actionName, "crouch_toggle");
+			xr_strcpy(cci.localizedActionName, "Crouch toggle");
+			cci.actionType = XR_ACTION_TYPE_BOOLEAN_INPUT;
+			cci.countSubactionPaths = 2;
+			cci.subactionPaths = vr.hand_path;
+			if (!vr_check(vr.CreateAction(vr.action_set, &cci, &vr.crouch_action), "xrCreateAction(crouch_toggle)"))
+				vr.crouch_action = XR_NULL_HANDLE;
+		}
+		const bool crouch_test_bind = !!strstr(Core.Params, "-vr_dbg_crouch_bind");
+		Msg(crouch_test_bind ? "* [vr3] crouch button: test binding left menu" : "* [vr3] crouch button: unbound (opt-in)");
 
 		// One xrSuggestInteractionProfileBindings call per profile: the grip pose (same path as before) plus fire/grab.
 		// A refused suggestion is logged and skipped. ext: 0 = core profile, 1 = needs XR_META_touch_controller_plus,
@@ -214,14 +251,17 @@ namespace
 			const char* grab; // null = no grab binding
 			const char* stick; // null = no thumbstick binding (milestone 7)
 			int ext;
+			const char* next[2]; // milestone 7b: next_weapon per hand (0 = left, 1 = right), null = no binding
 		};
+		// milestone 7b: next_weapon = the upper face button (Touch / Touch Plus: Y left, B right; Index: B; WMR: menu). The
+		// Frame controller gets none: its button paths are not confirmed (an unknown path would refuse the whole profile).
 		static const vr_profile_def profiles[] = {
-			{ "/interaction_profiles/khr/simple_controller", "/input/select/click", nullptr, nullptr, 0 },
-			{ "/interaction_profiles/microsoft/motion_controller", "/input/trigger/value", "/input/squeeze/click", "/input/thumbstick", 0 },
-			{ "/interaction_profiles/oculus/touch_controller", "/input/trigger/value", "/input/squeeze/value", "/input/thumbstick", 0 },
-			{ "/interaction_profiles/valve/index_controller", "/input/trigger/value", "/input/squeeze/value", "/input/thumbstick", 0 },
-			{ "/interaction_profiles/meta/touch_controller_plus", "/input/trigger/value", "/input/squeeze/value", "/input/thumbstick", 1 },
-			{ "/interaction_profiles/valve/frame_controller_valve", "/input/trigger/value", "/input/squeeze/value", "/input/thumbstick", 2 },
+			{ "/interaction_profiles/khr/simple_controller", "/input/select/click", nullptr, nullptr, 0, { nullptr, nullptr } },
+			{ "/interaction_profiles/microsoft/motion_controller", "/input/trigger/value", "/input/squeeze/click", "/input/thumbstick", 0, { "/input/menu/click", "/input/menu/click" } },
+			{ "/interaction_profiles/oculus/touch_controller", "/input/trigger/value", "/input/squeeze/value", "/input/thumbstick", 0, { "/input/y/click", "/input/b/click" } },
+			{ "/interaction_profiles/valve/index_controller", "/input/trigger/value", "/input/squeeze/value", "/input/thumbstick", 0, { "/input/b/click", "/input/b/click" } },
+			{ "/interaction_profiles/meta/touch_controller_plus", "/input/trigger/value", "/input/squeeze/value", "/input/thumbstick", 1, { "/input/y/click", "/input/b/click" } },
+			{ "/interaction_profiles/valve/frame_controller_valve", "/input/trigger/value", "/input/squeeze/value", "/input/thumbstick", 2, { nullptr, nullptr } },
 		};
 		const char* side[2] = { "/user/hand/left", "/user/hand/right" };
 		u32 suggested = 0;
@@ -235,14 +275,17 @@ namespace
 			XrPath prof = XR_NULL_PATH;
 			if (!vr_check(vr.StringToPath(vr.instance, P.path, &prof), "xrStringToPath(profile)"))
 				continue;
-			XrActionSuggestedBinding b[8]; // 2 hands x (grip pose, fire, grab, stick)
+			XrActionSuggestedBinding b[12]; // 2 hands x (grip pose, fire, grab, stick, next_weapon, crouch_toggle)
 			u32 nb = 0;
 			bool path_ok = true;
 			for (int h = 0; h < 2 && path_ok; ++h)
 			{
-				const char* what[4] = { "/input/grip/pose", P.fire, P.grab, P.stick };
-				const XrAction act[4] = { vr.grip_action, vr.fire_action, vr.grab_action, vr.stick_action };
-				for (int k = 0; k < 4; ++k)
+				// crouch_toggle: only the test binding (-vr_dbg_crouch_bind: WMR left menu click), never by default
+				const char* crouch = (crouch_test_bind && h == 0 &&
+					!xr_strcmp(P.path, "/interaction_profiles/microsoft/motion_controller")) ? "/input/menu/click" : nullptr;
+				const char* what[6] = { "/input/grip/pose", P.fire, P.grab, P.stick, P.next[h], crouch };
+				const XrAction act[6] = { vr.grip_action, vr.fire_action, vr.grab_action, vr.stick_action, vr.next_action, vr.crouch_action };
+				for (int k = 0; k < 6; ++k)
 				{
 					if (!what[k] || act[k] == XR_NULL_HANDLE)
 						continue;
@@ -394,6 +437,11 @@ namespace
 		VR_BIND(GetActionStateFloat);
 		VR_BIND(GetActionStateVector2f);
 #undef VR_BIND
+		// milestone 7b: optional (a failure only loses the weapon switch input / the floor measurement)
+		if (!vr_bind("xrGetActionStateBoolean", vr.GetActionStateBoolean))
+			vr.GetActionStateBoolean = nullptr;
+		if (!vr_bind("xrEnumerateReferenceSpaces", vr.EnumerateReferenceSpaces))
+			vr.EnumerateReferenceSpaces = nullptr;
 
 		XrInstanceProperties ip = { XR_TYPE_INSTANCE_PROPERTIES };
 		if (XR_SUCCEEDED(vr.GetInstanceProperties(vr.instance, &ip)))
@@ -429,6 +477,27 @@ namespace
 		rsi.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
 		if (!vr_check(vr.CreateReferenceSpace(vr.session, &rsi, &vr.head), "xrCreateReferenceSpace(VIEW)"))
 			return false;
+		// milestone 7b (Amendment 23): a STAGE (floor-level) space, ONLY to measure the head's height above the floor for the
+		// standing calibration; LOCAL stays the tracking space. Created only when the runtime lists STAGE.
+		{
+			bool has_stage = false;
+			uint32_t ns = 0;
+			if (vr.EnumerateReferenceSpaces && XR_SUCCEEDED(vr.EnumerateReferenceSpaces(vr.session, 0, &ns, nullptr)) && ns)
+			{
+				xr_vector<XrReferenceSpaceType> st(ns);
+				if (XR_SUCCEEDED(vr.EnumerateReferenceSpaces(vr.session, ns, &ns, st.data())))
+					for (uint32_t i = 0; i < ns && i < st.size(); ++i)
+						if (st[i] == XR_REFERENCE_SPACE_TYPE_STAGE)
+							has_stage = true;
+			}
+			if (has_stage)
+			{
+				rsi.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
+				if (!vr_check(vr.CreateReferenceSpace(vr.session, &rsi, &vr.stage), "xrCreateReferenceSpace(STAGE)"))
+					vr.stage = XR_NULL_HANDLE;
+			}
+			Msg("* [vr3] floor-level space (STAGE): %s", !has_stage ? "not offered" : vr.stage != XR_NULL_HANDLE ? "created (floor height only)" : "creation failed");
+		}
 
 		vr.actions_ok = vr_init_actions();
 		Msg(vr.actions_ok ? "* [vr3] controller actions ready (grip pose, both hands)" : "! [vr3] controller actions NOT available; the gun keeps its normal HUD place");
@@ -699,6 +768,30 @@ namespace
 				vr.in_stick_active[h] = true;
 			}
 		}
+		// milestone 7b (Amendment 23): next_weapon of this VR frame; inactive / failed / no action = false, inactive
+		// and crouch_toggle (unbound unless -vr_dbg_crouch_bind: then inactive = not pressed)
+		for (int h = 0; h < 2; ++h)
+		{
+			const XrAction bact[2] = { vr.next_action, vr.crouch_action };
+			bool* bval[2] = { &vr.in_next[h], &vr.in_crouch[h] };
+			bool* bon[2] = { &vr.in_next_active[h], &vr.in_crouch_active[h] };
+			for (int k = 0; k < 2; ++k)
+			{
+				*bval[k] = false;
+				*bon[k] = false;
+				if (bact[k] == XR_NULL_HANDLE || !vr.GetActionStateBoolean)
+					continue;
+				XrActionStateGetInfo gi = { XR_TYPE_ACTION_STATE_GET_INFO };
+				gi.action = bact[k];
+				gi.subactionPath = vr.hand_path[h];
+				XrActionStateBoolean st = { XR_TYPE_ACTION_STATE_BOOLEAN };
+				if (XR_SUCCEEDED(vr.GetActionStateBoolean(vr.session, &gi, &st)) && st.isActive)
+				{
+					*bval[k] = st.currentState == XR_TRUE;
+					*bon[k] = true;
+				}
+			}
+		}
 		vr.input_frame = vr.frames_run;
 		vr.input_seq++;
 		vr.input_read = true;
@@ -738,6 +831,20 @@ namespace
 		vr.in_grip[0] = vr.grip[0];
 		vr.in_grip[1] = vr.grip[1];
 		vr.in_head = vr.head_e;
+		// milestone 7b: the head's height above the floor (VIEW in STAGE), same time as the head pose; y is the same axis in
+		// OpenXR and engine axes
+		vr.in_floor_valid = false;
+		vr.in_floor_y = 0.f;
+		if (vr.stage != XR_NULL_HANDLE)
+		{
+			XrSpaceLocation fl = { XR_TYPE_SPACE_LOCATION };
+			if (XR_SUCCEEDED(vr.LocateSpace(vr.head, vr.stage, vr.fs.predictedDisplayTime, &fl)) &&
+				(fl.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT))
+			{
+				vr.in_floor_y = fl.pose.position.y;
+				vr.in_floor_valid = true;
+			}
+		}
 		// milestone 3d: ring of converted poses (one entry per located VR frame) for -vr_grip_lag
 		vr.grip_ring_head = (vr.grip_ring_head + 1) % vr_state::GRIP_RING;
 		vr.grip_ring[vr.grip_ring_head][0] = vr.grip[0];
@@ -836,8 +943,14 @@ namespace
 			out->stick[h][1] = vr.in_stick[h][1];
 			out->stick_active[h] = vr.in_stick_active[h];
 			out->grip[h] = vr.in_grip[h];
+			out->next[h] = vr.in_next[h];
+			out->next_active[h] = vr.in_next_active[h];
+			out->crouch_btn[h] = vr.in_crouch[h];
+			out->crouch_btn_active[h] = vr.in_crouch_active[h];
 		}
 		out->head = vr.in_head;
+		out->floor_head_y = vr.in_floor_y;
+		out->floor_valid = vr.in_floor_valid;
 		return true;
 	}
 

@@ -163,6 +163,8 @@ void CActor::g_cl_ValidateMState(float dt, u32 mstate_wf)
 };
 
 bool vr_walk_get(Fvector& dir, float& k); // GammaVR milestone 7, player_hud.cpp (always false in flat runs)
+bool vr_crouch_bits(const CActor* A, u32& set, u32& clear); // GammaVR milestone 7b, player_hud.cpp (false in flat runs)
+void vr_crouch_note(u32 wf); // GammaVR milestone 7b, player_hud.cpp (log only; nothing in flat runs)
 
 void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Jump, float dt)
 {
@@ -182,6 +184,18 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
 		mstate_wf |= mcFwd;
 		mstate_wf &= ~(mcBack | mcLStrafe | mcRStrafe);
 	}
+	// GammaVR milestone 7b (Amendment 23): physical crouch. The head's ratio decides the wished stance: crouch = mcCrouch
+	// (mcAccel off: an accelerated crouch, box 1), low crouch = mcCrouch | mcAccel (not accelerated, box 2), stand = mcCrouch
+	// off. Set on this call's copy AND on mstate_wishful (g_cl_ValidateMState reads that after this call and stands the body
+	// up when mcCrouch is off), re-applied every update (shedule_Update clears mcCrouch / mcAccel without the toggle
+	// settings). The game's own rules pick and fit the box (it stays crouched under a ceiling).
+	u32 vr_set = 0, vr_clear = 0;
+	if (vr_crouch_bits(this, vr_set, vr_clear))
+	{
+		mstate_wishful = (mstate_wishful & ~vr_clear) | vr_set;
+		mstate_wf = (mstate_wf & ~vr_clear) | vr_set;
+	}
+	vr_crouch_note(mstate_wf);
 
 	if (!(mstate_real & mcFall) && (character_physics_support()->movement()->Environment() == CPHMovementControl::
 		peInAir))
