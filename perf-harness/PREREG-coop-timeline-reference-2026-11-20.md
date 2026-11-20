@@ -21,3 +21,12 @@ if it stays near 7 here, that rise belongs to the players), server memory, frame
 Identity of the sampled process (as ruled): command line with the scratch path and port 5461, the pid recorded by the
 launcher, resident size; thread = the one whose id equals the pid; thread time <= process time in every sample.
 One retry at most on a crash; then report.
+
+## Amendment 2026-11-20 11:29, written while boot z is still running and before any of its numbers were read
+Boot z started 11:22:05. Another worker (gammavr) ran a headless trace from about 11:22 to 11:24 inside my EXCLUSIVE claim
+(its gate failed open; reported by the Overseer). Window 1 of boot z (about 11:22:51-11:24:51) overlaps it and is DISTURBED:
+it is not used and not averaged in. Because every window is tied to the time since boot, it can only be re-measured by a
+new boot. So: boot z2 = the same no-client boot again, run after z ends. The decision rule above is scored on z2 alone
+(Z0 from z2's windows 1 and 2, the dip from z2's window 4, R8 from z2's window 6). Boot z's windows 2-6 are reported next
+to z2 as a replicate (how much the timeline itself differs between two boots); they do not enter the rule.
+If z2 is also disturbed by anything, it is reported as disturbed and not scored.
