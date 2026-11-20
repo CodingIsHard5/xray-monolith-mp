@@ -17,7 +17,15 @@ SV=""; LOG=""
 for i in $(seq 1 90); do sleep 2; LOG=$(ls $S/sv/appdata/logs/xray_*.log 2>/dev/null | head -1); [ -n "$LOG" ] && grep -aq "sv_binder: first update of actor id" "$LOG" && break; done
 SV=$($L svpid); echo "server pid=$SV rss=$(awk '/VmRSS/{print $2}' /proc/$SV/status) kB ready after $((i*2))s"
 [ -n "$SV" ] && grep -aq "sv_binder: first update" "$LOG" || { echo "FAIL: server not ready"; tail -5 $S/sv/appdata/logs/stderr.log; exit 1; }
+proof() { # which process and thread the sampler reads (Overseer condition after the smoke)
+  echo "--- sampler proof $1 $(date '+%T'): pid=$SV tid=$SV (main thread = thread whose id equals the process id)"
+  echo "tid comm: $(cat /proc/$SV/task/$SV/comm)   process exe args: $(tr '\0' ' ' < /proc/$SV/cmdline | cut -c1-160)"
+  echo "parent chain:"; q=$SV; for k in 1 2 3 4 5 6 7; do [ "$q" -gt 1 ] 2>/dev/null || break; echo "   $q $(cat /proc/$q/comm 2>/dev/null) | $(tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null | cut -c1-110)"; q=$(awk '{print $4}' /proc/$q/stat 2>/dev/null); done
+  echo "threads by processor time (tid comm cputime):"; ps -L -p $SV -o tid=,comm=,time= --sort=-time | head -6 | sed 's/^/   /'
+  echo "thread count: $(ls /proc/$SV/task | wc -l)   launcher shell pid $$"
+}
 CL=()
+proof start | tee "$O/sampler_proof.txt"
 window() { # label
   sleep 30; cp $S/sv/appdata/logs/sv_binder.csv "$O/sv_binder_$1_start.csv" 2>/dev/null
   python3 tools/coop_sample.py "$WIN" "$O/samples.csv" "$1" "$SV" "${CL[@]}"
@@ -45,5 +53,6 @@ print('CHECK N=4: cores 0-1 idle %.0f%% (need >70), server rss %.0f MiB (need <6
 sys.exit(0 if idle>70 and rss<6144 and max(cl)<500 else 1)
 PY
 join 5; join 6; join 7; join 8; window n8
+proof end | tee -a "$O/sampler_proof.txt"
 cp "$LOG" "$O/server.log"; echo "RETIRED lines: $(grep -ac 'binder RETIRED' "$LOG")  lua errors: $(grep -ac 'LUA error' "$LOG")"
 echo "end $(date '+%F %T') load $(cut -d' ' -f1-3 /proc/loadavg)" | tee -a "$O/conditions.txt"
