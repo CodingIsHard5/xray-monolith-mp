@@ -74,6 +74,8 @@ protected:
 	void __stdcall UpdateSoundsPositions();
 
 	bool TryReload();
+	// GammaVR milestone 8a (Amendment 31): fill the magazine from the inventory with no animation (manual reload)
+	void VrFillMagazine() { ReloadMagazine(); }
 
 private:
 	LPCSTR empty_click_layer;

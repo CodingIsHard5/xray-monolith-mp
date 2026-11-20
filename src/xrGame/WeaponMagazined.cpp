@@ -297,8 +297,19 @@ void CWeaponMagazined::Reload()
 	TryReload();
 }
 
+extern bool vr_reload_block(CWeaponMagazined* W); // GammaVR milestone 8a (player_hud.cpp)
+
 bool CWeaponMagazined::TryReload()
 {
+	// GammaVR milestone 8a (Amendment 31): in VR the player's held gun is reloaded by hand (magazine out, magazine in);
+	// the animated reload is not started. Not for a jammed gun, shotguns, launchers, NPCs or with -vr_reload_auto.
+	if (vr_reload_block(this))
+	{
+		// the same ending as "no ammo to reload with" below: back to idle, so the gun fires again once a magazine is in
+		if (GetState() != eIdle)
+			SwitchState(eIdle);
+		return false;
+	}
 	if (m_pInventory)
 	{
 		if (IsGameTypeSingle() && ParentIsActor())

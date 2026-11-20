@@ -22,6 +22,12 @@
 #include "xr_level_controller.h"
 #include "CharacterPhysicsSupport.h" // GammaVR milestone 7b: body box index ([vr3act])
 #include "PHMovementControl.h"
+#include "WeaponMagazined.h" // GammaVR milestone 8a: manual reload
+#include "WeaponMagazinedWGrenade.h"
+#include "WeaponShotgun.h"
+#include "WeaponPistol.h"
+#include "WeaponRPG7.h"
+#include "WeaponRG6.h"
 #include <typeinfo>
 
 extern int g_nearwall;
@@ -1426,6 +1432,162 @@ static bool s_vr_support_on = false;
 static float s_vr_support_dist = 0.f;
 static bool s_vr_2h_grabbed = false;
 
+// ---------------------------------------------------------------------------------------------------------------------
+// GammaVR milestone 8a (Amendment 31): manual reload, logic only. The off hand's grip press takes a fresh magazine from
+// the pouch zone on the body, or takes the magazine out of the gun at the magazine point; a hand holding a magazine that
+// comes to the magazine point of a gun without one puts it in. Rounds move with CWeaponMagazined::UnloadMagazine /
+// ReloadMagazine, no animation. The places are measured in the HUD placement (render path, vr_place_at_grip, once per VR
+// frame) and the decisions are taken in the next game update (vr_input_update); both run on the main thread.
+struct vr_reload_state
+{
+	bool parsed, off;        // -vr_reload_auto: everything here off (the game's own reload)
+	bool active;             // the held gun is reloaded by hand (set by the game update)
+	bool mag_in;             // the held gun has its magazine in (set by the game update)
+	bool gun_right;          // gun hand (set by the game update)
+	float fwd, down;         // magazine point = grip point + barrel * fwd - gun up * down (set by the game update)
+	bool cfg_set;            // mag_fwd / mag_down found in the VR grip config for the held item
+	float cfg_fwd, cfg_down;
+	bool geo;                // the distances below are valid (off hand located)
+	u32 geo_frame;           // VR frame they were measured in
+	float d_mag, d_sup, d_pouch;
+	Fvector mag_track, pouch_track, sup_track;
+	bool hand_mag;           // the off hand holds a magazine
+	bool hand_far;           // ... and has been more than 14 cm from the magazine point since it took it
+	bool prev_grab;
+	bool blocked_evt;        // the game's reload was refused since the last log line
+	xr_vector<u16> out;      // ids of the guns whose magazine is out
+};
+static vr_reload_state s_vr_rl = {};
+
+static bool vr_reload_manual(CWeaponMagazined* W)
+{
+	vr_reload_state& S = s_vr_rl;
+	if (!S.parsed)
+	{
+		S.parsed = true;
+		S.off = !!strstr(Core.Params, "-vr_reload_auto");
+		Msg("* [vr3rl] manual reload %s", S.off ? "OFF (-vr_reload_auto): the game's own reload" : "on");
+	}
+	if (S.off || !W || !g_vr_track.head0_set)
+		return false;
+	if (smart_cast<CWeaponShotgun*>(W) || smart_cast<CWeaponRPG7*>(W) || smart_cast<CWeaponRG6*>(W))
+		return false;
+	if (CWeaponMagazinedWGrenade* g = smart_cast<CWeaponMagazinedWGrenade*>(W))
+		if (g->GetGrenadeLauncherMode())
+			return false;
+	return true;
+}
+
+// called by CWeaponMagazined::TryReload: true = do not start the game's reload
+bool vr_reload_block(CWeaponMagazined* W)
+{
+	CActor* A = g_actor;
+	if (!A || !W || W->H_Parent() != A)
+		return false;
+	if (smart_cast<CWeaponMagazined*>(A->inventory().ActiveItem()) != W)
+		return false;
+	if (!vr_reload_manual(W) || W->IsMisfire())
+		return false;
+	s_vr_rl.blocked_evt = true;
+	return true;
+}
+
+// once per new controller read, in the game update
+static void vr_reload_update(const vr_input_info& I, CActor* A, bool allowed, bool grab, bool log)
+{
+	vr_reload_state& S = s_vr_rl;
+	S.gun_right = I.gun != 0;
+	CWeaponMagazined* W = (A && allowed) ? smart_cast<CWeaponMagazined*>(A->inventory().ActiveItem()) : nullptr;
+	S.active = W && vr_reload_manual(W);
+	const bool press = grab && !S.prev_grab, release = !grab && S.prev_grab;
+	S.prev_grab = grab;
+	LPCSTR ev = "none";
+	if (S.blocked_evt)
+	{
+		ev = "reload_blocked";
+		S.blocked_evt = false;
+	}
+	if (!S.active)
+	{
+		S.hand_mag = false;
+		S.mag_in = true;
+		if (log)
+			Msg("* [vr3rl] frame %u inactive event %s ammo %d state %u", I.frame, ev, W ? W->GetAmmoElapsed() : -1, W ? W->GetState() : 0u);
+		return;
+	}
+	if (S.cfg_set)
+	{
+		S.fwd = S.cfg_fwd;
+		S.down = S.cfg_down;
+	}
+	else if (smart_cast<CWeaponPistol*>(W))
+	{
+		S.fwd = 0.f;
+		S.down = 0.07f;
+	}
+	else
+	{
+		S.fwd = 0.10f;
+		S.down = 0.06f;
+	}
+	const u16 id = W->ID();
+	xr_vector<u16>::iterator it = std::find(S.out.begin(), S.out.end(), id);
+	bool out = it != S.out.end();
+	if (out && W->GetAmmoElapsed() > 0) // rounds got in some other way: the magazine is in again
+	{
+		S.out.erase(it);
+		out = false;
+	}
+	const bool geo = S.geo && S.geo_frame + 2 >= I.frame;
+	const bool ready = !W->IsPending();
+	if (geo)
+	{
+		if (S.hand_mag && S.d_mag > 0.14f)
+			S.hand_far = true;
+		if (press)
+		{
+			if (S.d_pouch <= 0.15f)
+			{
+				S.hand_mag = true;
+				S.hand_far = S.d_mag > 0.14f;
+				ev = "pouch";
+			}
+			else if (!out && !S.hand_mag && ready && S.d_mag <= 0.10f && S.d_mag < S.d_sup)
+			{
+				W->UnloadMagazine(true);
+				S.out.push_back(id);
+				out = true;
+				S.hand_mag = true;
+				S.hand_far = false;
+				ev = "out";
+			}
+		}
+		else if (grab && S.hand_mag && S.hand_far && out && ready && S.d_mag <= 0.10f)
+		{
+			W->VrFillMagazine();
+			it = std::find(S.out.begin(), S.out.end(), id);
+			if (it != S.out.end())
+				S.out.erase(it);
+			out = false;
+			S.hand_mag = false;
+			ev = "in";
+		}
+	}
+	if (release && S.hand_mag)
+	{
+		S.hand_mag = false;
+		ev = "put_away";
+	}
+	S.mag_in = !out;
+	if (log)
+	{
+		const int ammo = W->GetAmmoElapsed();
+		Msg("* [vr3rl] frame %u mag %s hand_mag %d ammo %d inv %d state %u event %s geo %d d_mag %.4f d_pouch %.4f d_sup %.4f mag_track %.4f %.4f %.4f pouch_track %.4f %.4f %.4f sup_track %.4f %.4f %.4f",
+			I.frame, out ? "out" : "in", S.hand_mag ? 1 : 0, ammo, W->GetSuitableAmmoTotal() - ammo, W->GetState(), ev, geo ? 1 : 0,
+			S.d_mag, S.d_pouch, S.d_sup, S.mag_track.x, S.mag_track.y, S.mag_track.z, S.pouch_track.x, S.pouch_track.y, S.pouch_track.z, S.sup_track.x, S.sup_track.y, S.sup_track.z);
+	}
+}
+
 // GammaVR milestone 3b (Amendment 10 note 3) test switches, parsed once.
 struct vr_3b_switches
 {
@@ -1665,6 +1827,15 @@ static void vr_grip_lookup(attachable_hud_item* item)
 			s_vr_support_dist = C.ini->r_float(sup_src, "support_dist");
 			s_vr_support_on = true;
 		}
+		// milestone 8a: magazine point of this item, if the config gives one (both keys, in the item's own section)
+		s_vr_rl.cfg_set = false;
+		for (int n = 0; n < 2 && !s_vr_rl.cfg_set; ++n)
+			if (cand[n] && C.ini->section_exist(cand[n]) && C.ini->line_exist(cand[n], "mag_fwd") && C.ini->line_exist(cand[n], "mag_down"))
+			{
+				s_vr_rl.cfg_fwd = C.ini->r_float(cand[n], "mag_fwd");
+				s_vr_rl.cfg_down = C.ini->r_float(cand[n], "mag_down");
+				s_vr_rl.cfg_set = true;
+			}
 	}
 	if (s_vr_support_on)
 		Msg("* [vr3] support point for %s: %.3f m", obj_sect.c_str(), s_vr_support_dist);
@@ -2675,6 +2846,8 @@ void vr_input_update()
 				Msg("* [vr3in] frame %u hand %c %s %s value %.3f", I.frame, h ? 'R' : 'L', "grab", s_grab[h] ? "press" : "release", gv);
 		}
 		s_vr_grab_held = s_grab[off];
+		// milestone 8a (Amendment 31): manual reload
+		vr_reload_update(I, g_actor, vr_fire_allowed(g_actor), s_vr_grab_held, s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to);
 		if (s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to)
 			Msg("* [vr3inp] frame %u L trigger %.3f grab %.3f active %d %d R trigger %.3f grab %.3f active %d %d gun_hand %c fire_pressed %d grab_held %d",
 				I.frame, I.trigger[0], I.grab[0], I.trigger_active[0] ? 1 : 0, I.grab_active[0] ? 1 : 0,
@@ -2970,9 +3143,44 @@ bool player_hud::vr_place_at_grip()
 		if (s_state_frame != g_vr_track.frame)
 		{
 			s_state_frame = g_vr_track.frame;
+			// milestone 8a (Amendment 31): where the off hand is against the magazine point, the support point and the
+			// pouch zone (0.60 m below the head, 0.20 m to the off-hand side, 0.05 m forward, turned with the head's yaw)
+			bool rl_claims = false;
+			{
+				vr_reload_state& RS = s_vr_rl;
+				Fvector ru, mp, sp2, hf, hr, pc;
+				if (!vr_perp_unit(gy1, b1, ru) && !vr_perp_unit(v2_cup, b1, ru))
+					ru.set(0.f, 1.f, 0.f);
+				mp.mad(v2_p, b1, RS.fwd);
+				mp.mad(ru, -RS.down);
+				sp2.mad(v2_p, b1, s_vr_support_dist);
+				hf.set(Device.vCameraDirection.x, 0.f, Device.vCameraDirection.z);
+				if (hf.magnitude() < 0.01f)
+					hf.set(0.f, 0.f, 1.f);
+				hf.normalize();
+				hr.set(hf.z, 0.f, -hf.x);
+				pc.set(g_vr_track.head_world);
+				pc.y -= 0.60f;
+				pc.mad(hr, RS.gun_right ? -0.20f : 0.20f);
+				pc.mad(hf, 0.05f);
+				RS.geo = v2_off_valid;
+				RS.geo_frame = g_vr_track.frame;
+				RS.d_mag = v2_off.distance_to(mp);
+				RS.d_sup = s_vr_support_on ? v2_off.distance_to(sp2) : 1000.f;
+				RS.d_pouch = v2_off.distance_to(pc);
+				Fmatrix inv;
+				inv.invert(g_vr_track.track_to_world);
+				inv.transform_tiny(RS.mag_track, mp);
+				inv.transform_tiny(RS.pouch_track, pc);
+				inv.transform_tiny(RS.sup_track, sp2);
+				// a hand holding a magazine, or placed where a grip press belongs to the reload, does not start a two-handed grab
+				rl_claims = RS.active && (RS.hand_mag || (RS.geo && (RS.d_pouch <= 0.15f || (RS.mag_in && RS.d_mag <= 0.10f && RS.d_mag < RS.d_sup))));
+				if (RS.active && RS.hand_mag)
+					s_vr_2h_grabbed = false;
+			}
 			if (!s_vr_support_on || !v2_off_valid || !vr_2h_input_held())
 				s_vr_2h_grabbed = false;
-			else if (!s_vr_2h_grabbed)
+			else if (!s_vr_2h_grabbed && !rl_claims)
 			{
 				Fvector sp;
 				sp.mad(v2_p, b1, s_vr_support_dist);
