@@ -12,6 +12,7 @@ mkroot() { # dir, gamedata target
   cp "$SRC/run/fsgame.ltx" "$1/fsgame.ltx"
   ln -sfn "$S/bin" "$1/bin"; ln -sfn "$DB" "$1/db"; ln -sfn "$2" "$1/gamedata"
 }
+big() { for p in "$@"; do echo "$(awk '/VmRSS/{print $2}' /proc/$p/status 2>/dev/null || echo 0) $p"; done | sort -rn | head -1 | cut -d' ' -f2; }
 case "${1:-}" in
 setup)
   mkdir -p "$S/bin"
@@ -41,8 +42,9 @@ client)
     -coop_noimgui -coop_test_input -xrnet_udp -mp_port $PORT -mp_noauth -start "client(localhost/name=ep$n)" \
     > "$S/c$n/appdata/logs/stderr.log" 2>&1 &
   ;;
-svpid) pgrep -f '[O]urDedicatedDX8.exe.*-mp_host.*'"$PORT" | head -1 ;;
-clpid) pgrep -f '[O]urDedicatedDX8.exe.*name=ep'"$2"'\b' | head -1 ;;
+# several processes carry the command line (launcher stubs); the engine is the one with the most resident memory
+svpid) big $(pgrep -f '[O]urDedicatedDX8.exe.*-mp_host.*'"$PORT") ;;
+clpid) big $(pgrep -f '[O]urDedicatedDX8.exe.*name=ep'"$2"'\b') ;;
 stop) wineserver -k >/dev/null 2>&1; sleep 2; pgrep -f "[O]urDedicatedDX8.exe.*$PORT" >/dev/null && echo "STILL ALIVE" || echo stopped ;;
 *) echo "usage: setup|server|client n|svpid|clpid n|stop"; exit 2 ;;
 esac

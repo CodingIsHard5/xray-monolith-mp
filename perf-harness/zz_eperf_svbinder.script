@@ -35,7 +35,7 @@ function on_game_start()
 		r[1] = r[1] + 1
 		r[4] = time_global()
 		total = total + 1
-		if total % 100 == 0 then write() end
+		if total % 100 == 0 or r[1] == 1 then write() end
 		return a
 	end
 	printf("* sv_binder: installed, inert=%s", tostring(inert))
