@@ -3,7 +3,8 @@
 -- Totals per actor id go to $logs$/sv_binder.csv (overwritten about once a second of calls).
 local cl = command_line and command_line() or ""
 local on = string.find(cl, "-fp_svtime", 1, true) ~= nil
-local inert = string.find(cl, "-fp_inert", 1, true) ~= nil
+local inert2 = string.find(cl, "-fp_inert2", 1, true) ~= nil  -- corrected inert: stock first update (errors caught), then empty
+local inert = (not inert2) and string.find(cl, "-fp_inert", 1, true) ~= nil
 local per = {}   -- id -> { calls, us, first_tg, last_tg }
 local total = 0
 local function timer()
@@ -15,7 +16,7 @@ local function write()
 	if not f then return end
 	f:write("actor_id,calls,total_ms,first_time_ms,last_time_ms,inert\n")
 	for id, r in pairs(per) do
-		f:write(string.format("%d,%d,%.3f,%d,%d,%s\n", id, r[1], r[2] / 1000, r[3], r[4], tostring(inert and id ~= 0)))
+		f:write(string.format("%d,%d,%.3f,%d,%d,%s\n", id, r[1], r[2] / 1000, r[3], r[4], tostring((inert or inert2) and id ~= 0)))
 	end
 	f:close()
 end
@@ -30,7 +31,13 @@ function on_game_start()
 		if not r then r = { 0, 0, time_global(), 0 } per[id] = r printf("* sv_binder: first update of actor id %s", id) end
 		local stop = timer()
 		local a
-		if inert and id ~= 0 then a = nil else a = real(self, delta) end
+		if inert and id ~= 0 then a = nil
+		elseif inert2 and id ~= 0 then
+			if r[1] == 0 then
+				local ok, err = pcall(real, self, delta)
+				printf("* sv_binder: actor id %s stock first update ran, ok=%s %s", id, tostring(ok), ok and "" or tostring(err))
+			end
+		else a = real(self, delta) end
 		r[2] = r[2] + stop()
 		r[1] = r[1] + 1
 		r[4] = time_global()
@@ -38,5 +45,26 @@ function on_game_start()
 		if total % 100 == 0 or r[1] == 1 then write() end
 		return a
 	end
-	printf("* sv_binder: installed, inert=%s", tostring(inert))
+	-- A-Life rate trace: stock writes 65,534 in actor_binder:reinit and resets to 20 from a timed event queued by the first
+	-- update. The value cannot be read back from script on this build, so both writers are logged with the game clock.
+	if ab.reinit then
+		local real_reinit = ab.reinit
+		ab.reinit = function(self, ...)
+			local a = real_reinit(self, ...)
+			printf("* sv_binder: RATE reinit (stock sets 65534) actor id %s t=%s", self.object and self.object:id() or -1, time_global())
+			return a
+		end
+	end
+	if CreateTimeEvent then
+		local real_cte = CreateTimeEvent
+		CreateTimeEvent = function(ev_id, act_id, timer, f, ...)
+			if act_id == "obj_per_upd" and type(f) == "function" then
+				local stock = f
+				printf("* sv_binder: RATE reset queued t=%s", time_global())
+				f = function(...) local r = stock(...) printf("* sv_binder: RATE reset ran (stock sets 20) t=%s", time_global()) return r end
+			end
+			return real_cte(ev_id, act_id, timer, f, ...)
+		end
+	end
+	printf("* sv_binder: installed, inert=%s inert2=%s", tostring(inert), tostring(inert2))
 end

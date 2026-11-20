@@ -10,6 +10,7 @@ pgrep -x sober >/dev/null && { echo "REFUSED: sober"; exit 3; }
 "$T/quiet-required.sh" want engineperf EXCLUSIVE >"$O/claim.txt" 2>&1
 "$T/quiet-required.sh" claim engineperf 45 "EXCLUSIVE: co-op server + up to 8 headless clients, series $TAG (scratch copy, port 5461)" >>"$O/claim.txt" 2>&1 || { echo "REFUSED claim: $(tail -1 "$O/claim.txt")"; exit 3; }
 trap '$L stop; "$T/quiet-required.sh" release engineperf >/dev/null 2>&1' EXIT
+cp harness/zz_eperf_svbinder.script $S/gamedata_sv/scripts/
 rm -f $S/sv/appdata/logs/*.log $S/sv/appdata/logs/sv_binder.csv $S/c*/appdata/logs/*.log
 echo "start $(date '+%F %T') load $(cut -d' ' -f1-3 /proc/loadavg) tag=$TAG flags=$*" | tee "$O/conditions.txt"
 $L server "$@"

@@ -32,7 +32,14 @@ def desk():
     return r
 new = not os.path.exists(out)
 o = open(out, 'a')
-if new: o.write('label,t,sv_main_ms,sv_all_ms,sv_other_max_ms,sv_rss_mib,clients_ms,desk_idle_pct\n')
+if new: o.write('label,t,sv_main_ms,sv_all_ms,sv_other_max_ms,sv_rss_mib,clients_ms,desk_idle_pct,sv_net_ms\n')
+def net_tid():
+    try:
+        for t in os.listdir(f'/proc/{sv}/task'):
+            if open(f'/proc/{sv}/task/{t}/comm').read().strip() == 'xrnet-enet-sv': return int(t)
+    except Exception: pass
+    return None
+NT = net_tid()
 pt = threads(sv); pc = [tcpu(c) for c in cl]; pd = desk(); t0 = time.time()
 for i in range(secs):
     time.sleep(max(0, t0 + i + 1 - time.time()))
@@ -42,5 +49,6 @@ for i in range(secs):
     oth = max([nt[t] - pt.get(t, 0) for t in nt if t != sv] or [0])
     idle = sum(a[0] - b[0] for a, b in zip(nd, pd)); tot = sum(a[1] - b[1] for a, b in zip(nd, pd))
     cs = ';'.join('%.0f' % ((a or 0) - (b or 0)) for a, b in zip(nc, pc))
-    o.write('%s,%d,%.0f,%.0f,%.0f,%.0f,%s,%.0f\n' % (label, i, main, allc, oth, rss(sv), cs, 100.0 * idle / max(1, tot)))
+    net = (nt.get(NT, 0) - pt.get(NT, 0)) if NT else -1
+    o.write('%s,%d,%.0f,%.0f,%.0f,%.0f,%s,%.0f,%.0f\n' % (label, i, main, allc, oth, rss(sv), cs, 100.0 * idle / max(1, tot), net))
     o.flush(); pt, pc, pd = nt, nc, nd
