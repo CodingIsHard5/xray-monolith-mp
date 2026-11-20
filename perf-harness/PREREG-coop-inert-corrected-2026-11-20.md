@@ -126,3 +126,25 @@ every boot: within 60 s of the host's first update the server log must show "RAT
 "RATE reset queued", then "RATE reset ran (stock sets 20)". If not, the driver stops the server, releases the box and
 exits 4; I report at once, I2 is not started, and (Overseer) that does not count as the retry being used.
 The gate adds up to 60 s before window 1 in both arms alike. Nothing else changes; rule and controls as amendment 3/4.
+
+## Amendment 6 (2026-11-20 16:42) - I2 runs alone, later; conditions for its pairing with FC2 (Overseer ruling)
+
+FC2 (16:24:02-16:41:36) passed the trace gate and all its controls. I2 was refused the box on FC2's release and has not
+run. Ruling: I2 runs ALONE when the Overseer gives me the box. Its pairing with FC2 is valid only if all of these hold:
+1. Same scratch tree and binaries. Fingerprint by `tools/coop_hash.sh` (binaries; the 1,012 server scripts by name and
+   content; gamedata names; overlay script; driver + launcher + sampler). FC2's fingerprint was taken after the boot, at
+   2026-11-20 16:42; nothing in those paths has a modification time after FC2's start except the overlay copy the driver itself
+   re-copies (content identical to the source, compared). Values:
+     bin        e7b26092a4d3b8b4  files=9
+     scripts    89452b0a6da13019  entries=1012
+     gamedata   0401a8a83edc109b  (names to depth 2)
+     overlay    41462a8c9314f287
+     tools      5d86ea12a35e45dc
+   The fingerprint is taken again immediately before I2 and must be byte-identical, or I2 does not start.
+2. Load: the median of the 1-minute load average over the boot's seven logged points (start + end of each of the six
+   windows; the only load points FC2 recorded) must be within +/- 1.5 of FC2's. FC2's seven points:
+   2.23, 0.52, 0.26, 0.36, 0.49, 1.03, 1.15 -> median 0.52. So I2's median must be 2.02 or lower.
+   If this fails, I2 is VOID for the pairing; I ask the Overseer; no automatic re-run.
+3. Same windows, same trace gate, same controls (R, A, B, identity) as amendments 3-5.
+4. The gap between FC2's end (16:41:36) and I2's start is reported.
+Rule unchanged: D(w) = I2(w) - FC2(w) for windows 3-6, thresholds as amendment 3. No capacity number.
