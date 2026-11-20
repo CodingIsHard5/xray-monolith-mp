@@ -248,7 +248,9 @@ void IGame_Level::OnRender()
 						Msg("* [vr3] VR base yaw latched at frame %u: %.5f rad (actor aim heading)", vr_info.frame, g_vr_base.yaw);
 					}
 					game_cam.rotateY(g_vr_base.yaw); // k = (sin yaw, 0, cos yaw): yaw only, no pitch, no roll
-					game_cam.c.set(g_vr_base.pos);
+					// milestone 7 (Amendment 20): + the pivot offset accumulated by VR turns (zero until the first turn), so
+					// that a turn keeps the head's world position; the actor itself is not moved
+					game_cam.c.add(g_vr_base.pos, g_vr_base.pivot_off);
 				}
 				else
 				{
@@ -275,6 +277,12 @@ void IGame_Level::OnRender()
 				head_pos = head_world.c;
 				g_vr_track.frame = vr_info.frame;
 				g_vr_track.active = true;
+				// milestone 7: what this frame's mapping was built from, for the next game update (turning, walking, log)
+				g_vr_track.base_used = use_base;
+				g_vr_track.base_yaw = use_base ? g_vr_base.yaw : 0.f;
+				g_vr_track.track_to_world.transform_tiny(g_vr_track.pivot, s_head0.pos); // = game_cam.c
+				g_vr_track.head_world = head_world.c;
+				g_vr_track.actor_pos = use_base ? g_vr_base.actor_pos : pos0;
 
 				if (vr_info.frame % 100 == 0)
 				{

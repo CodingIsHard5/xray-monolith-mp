@@ -162,11 +162,26 @@ void CActor::g_cl_ValidateMState(float dt, u32 mstate_wf)
 	};
 };
 
+bool vr_walk_get(Fvector& dir, float& k); // GammaVR milestone 7, player_hud.cpp (always false in flat runs)
+
 void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Jump, float dt)
 {
 	float cam_eff_factor = 0.0f;
 	mstate_old = mstate_real;
 	vControlAccel.set(0, 0, 0);
+
+	// GammaVR milestone 7 (Amendment 20): VR stick walking. For all of the game's own rules (CanMove, weight / stamina,
+	// run / crouch / sprint factors, state flags, step sounds and animations) it is a held FORWARD key: mcFwd on, the other
+	// direction bits off, so the speed factor is the plain forward one in every direction (no back / strafe factor). Only
+	// this call's copy of the wish bits is changed (nothing to clear later). The direction is applied at the end.
+	Fvector vr_walk_dir;
+	float vr_walk_k = 0.f;
+	const bool vr_walk = vr_walk_get(vr_walk_dir, vr_walk_k);
+	if (vr_walk)
+	{
+		mstate_wf |= mcFwd;
+		mstate_wf &= ~(mcBack | mcLStrafe | mcRStrafe);
+	}
 
 	if (!(mstate_real & mcFall) && (character_physics_support()->movement()->Environment() == CPHMovementControl::
 		peInAir))
@@ -363,6 +378,15 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
 				}
 			}
 		}
+	}
+	// GammaVR milestone 7: VR walking replaces the body-yaw rotation: the stick's world direction times its strength times
+	// the size of the acceleration the game built (zero when the game's rules stopped the move)
+	if (vr_walk)
+	{
+		const float a = vControlAccel.magnitude();
+		vControlAccel.set(vr_walk_dir);
+		vControlAccel.mul(vr_walk_k * a);
+		return;
 	}
 	//transform local dir to world dir
 	Fmatrix mOrient;

@@ -611,6 +611,7 @@ void CActor::cam_Update(float dt, float fFOV)
 	{
 		const Fvector& o = XFORM().c;
 		g_vr_base.pos.set(o.x, o.y + CurrentHeight + current_ik_cam_shift + (fPrevCamPos - flCurrentPlayerY), o.z);
+		g_vr_base.actor_pos.set(o); // milestone 7: logged with the frame this base is used in
 		const Fvector& d = cameras[eacFirstEye]->vDirection;
 		g_vr_base.aim_heading = atan2f(d.x, d.z);
 		g_vr_base.aim_pitch = asinf(_max(-1.f, _min(1.f, d.y)));

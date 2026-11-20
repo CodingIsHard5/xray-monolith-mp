@@ -84,6 +84,12 @@ namespace
 		u32 input_frame = 0, input_seq = 0;
 		float in_trigger[2] = { 0.f, 0.f }, in_grab[2] = { 0.f, 0.f };
 		bool in_trigger_active[2] = { false, false }, in_grab_active[2] = { false, false };
+		// milestone 7 (Amendment 20): thumbstick (vector2f, both hands) and the poses of the same read
+		XrAction stick_action = XR_NULL_HANDLE;
+		float in_stick[2][2] = { { 0.f, 0.f }, { 0.f, 0.f } };
+		bool in_stick_active[2] = { false, false };
+		vr_pose in_grip[2];
+		vr_pose in_head;
 		bool profile_seen[2] = { false, false }; // current interaction profile of the hand logged at least once
 		XrPath profile_cur[2] = { XR_NULL_PATH, XR_NULL_PATH };
 
@@ -120,6 +126,7 @@ namespace
 		PFN_xrSyncActions SyncActions = nullptr;
 		PFN_xrGetCurrentInteractionProfile GetCurrentInteractionProfile = nullptr;
 		PFN_xrGetActionStateFloat GetActionStateFloat = nullptr;
+		PFN_xrGetActionStateVector2f GetActionStateVector2f = nullptr;
 	};
 
 	vr_state vr;
@@ -187,6 +194,15 @@ namespace
 		gci.subactionPaths = vr.hand_path;
 		if (!vr_check(vr.CreateAction(vr.action_set, &gci, &vr.grab_action), "xrCreateAction(grab)"))
 			vr.grab_action = XR_NULL_HANDLE;
+		// milestone 7 (Amendment 20): thumbstick "stick" (vector2f) for both hands; a failure leaves it null (no stick input)
+		XrActionCreateInfo tci = { XR_TYPE_ACTION_CREATE_INFO };
+		xr_strcpy(tci.actionName, "stick");
+		xr_strcpy(tci.localizedActionName, "Stick");
+		tci.actionType = XR_ACTION_TYPE_VECTOR2F_INPUT;
+		tci.countSubactionPaths = 2;
+		tci.subactionPaths = vr.hand_path;
+		if (!vr_check(vr.CreateAction(vr.action_set, &tci, &vr.stick_action), "xrCreateAction(stick)"))
+			vr.stick_action = XR_NULL_HANDLE;
 
 		// One xrSuggestInteractionProfileBindings call per profile: the grip pose (same path as before) plus fire/grab.
 		// A refused suggestion is logged and skipped. ext: 0 = core profile, 1 = needs XR_META_touch_controller_plus,
@@ -196,15 +212,16 @@ namespace
 			const char* path;
 			const char* fire; // input path below /user/hand/<side>, null = no fire binding
 			const char* grab; // null = no grab binding
+			const char* stick; // null = no thumbstick binding (milestone 7)
 			int ext;
 		};
 		static const vr_profile_def profiles[] = {
-			{ "/interaction_profiles/khr/simple_controller", "/input/select/click", nullptr, 0 },
-			{ "/interaction_profiles/microsoft/motion_controller", "/input/trigger/value", "/input/squeeze/click", 0 },
-			{ "/interaction_profiles/oculus/touch_controller", "/input/trigger/value", "/input/squeeze/value", 0 },
-			{ "/interaction_profiles/valve/index_controller", "/input/trigger/value", "/input/squeeze/value", 0 },
-			{ "/interaction_profiles/meta/touch_controller_plus", "/input/trigger/value", "/input/squeeze/value", 1 },
-			{ "/interaction_profiles/valve/frame_controller_valve", "/input/trigger/value", "/input/squeeze/value", 2 },
+			{ "/interaction_profiles/khr/simple_controller", "/input/select/click", nullptr, nullptr, 0 },
+			{ "/interaction_profiles/microsoft/motion_controller", "/input/trigger/value", "/input/squeeze/click", "/input/thumbstick", 0 },
+			{ "/interaction_profiles/oculus/touch_controller", "/input/trigger/value", "/input/squeeze/value", "/input/thumbstick", 0 },
+			{ "/interaction_profiles/valve/index_controller", "/input/trigger/value", "/input/squeeze/value", "/input/thumbstick", 0 },
+			{ "/interaction_profiles/meta/touch_controller_plus", "/input/trigger/value", "/input/squeeze/value", "/input/thumbstick", 1 },
+			{ "/interaction_profiles/valve/frame_controller_valve", "/input/trigger/value", "/input/squeeze/value", "/input/thumbstick", 2 },
 		};
 		const char* side[2] = { "/user/hand/left", "/user/hand/right" };
 		u32 suggested = 0;
@@ -218,14 +235,14 @@ namespace
 			XrPath prof = XR_NULL_PATH;
 			if (!vr_check(vr.StringToPath(vr.instance, P.path, &prof), "xrStringToPath(profile)"))
 				continue;
-			XrActionSuggestedBinding b[6];
+			XrActionSuggestedBinding b[8]; // 2 hands x (grip pose, fire, grab, stick)
 			u32 nb = 0;
 			bool path_ok = true;
 			for (int h = 0; h < 2 && path_ok; ++h)
 			{
-				const char* what[3] = { "/input/grip/pose", P.fire, P.grab };
-				const XrAction act[3] = { vr.grip_action, vr.fire_action, vr.grab_action };
-				for (int k = 0; k < 3; ++k)
+				const char* what[4] = { "/input/grip/pose", P.fire, P.grab, P.stick };
+				const XrAction act[4] = { vr.grip_action, vr.fire_action, vr.grab_action, vr.stick_action };
+				for (int k = 0; k < 4; ++k)
 				{
 					if (!what[k] || act[k] == XR_NULL_HANDLE)
 						continue;
@@ -375,6 +392,7 @@ namespace
 		VR_BIND(SyncActions);
 		VR_BIND(GetCurrentInteractionProfile);
 		VR_BIND(GetActionStateFloat);
+		VR_BIND(GetActionStateVector2f);
 #undef VR_BIND
 
 		XrInstanceProperties ip = { XR_TYPE_INSTANCE_PROPERTIES };
@@ -663,6 +681,24 @@ namespace
 				}
 			}
 		}
+		// milestone 7 (Amendment 20): thumbsticks of this VR frame; inactive / failed / no action = 0 0, inactive
+		for (int h = 0; h < 2; ++h)
+		{
+			vr.in_stick[h][0] = vr.in_stick[h][1] = 0.f;
+			vr.in_stick_active[h] = false;
+			if (vr.stick_action == XR_NULL_HANDLE)
+				continue;
+			XrActionStateGetInfo gi = { XR_TYPE_ACTION_STATE_GET_INFO };
+			gi.action = vr.stick_action;
+			gi.subactionPath = vr.hand_path[h];
+			XrActionStateVector2f st = { XR_TYPE_ACTION_STATE_VECTOR2F };
+			if (XR_SUCCEEDED(vr.GetActionStateVector2f(vr.session, &gi, &st)) && st.isActive)
+			{
+				vr.in_stick[h][0] = st.currentState.x;
+				vr.in_stick[h][1] = st.currentState.y;
+				vr.in_stick_active[h] = true;
+			}
+		}
 		vr.input_frame = vr.frames_run;
 		vr.input_seq++;
 		vr.input_read = true;
@@ -698,6 +734,10 @@ namespace
 			vr.grip_raw[h] = XR_SUCCEEDED(r) ? loc.pose : XrPosef{ { 0.f, 0.f, 0.f, 1.f }, { 0.f, 0.f, 0.f } };
 		}
 		vr.grip_located = true;
+		// milestone 7: the poses that belong to this read (vr_input_info::grip / head)
+		vr.in_grip[0] = vr.grip[0];
+		vr.in_grip[1] = vr.grip[1];
+		vr.in_head = vr.head_e;
 		// milestone 3d: ring of converted poses (one entry per located VR frame) for -vr_grip_lag
 		vr.grip_ring_head = (vr.grip_ring_head + 1) % vr_state::GRIP_RING;
 		vr.grip_ring[vr.grip_ring_head][0] = vr.grip[0];
@@ -792,7 +832,12 @@ namespace
 			out->grab[h] = vr.in_grab[h];
 			out->trigger_active[h] = vr.in_trigger_active[h];
 			out->grab_active[h] = vr.in_grab_active[h];
+			out->stick[h][0] = vr.in_stick[h][0];
+			out->stick[h][1] = vr.in_stick[h][1];
+			out->stick_active[h] = vr.in_stick_active[h];
+			out->grip[h] = vr.in_grip[h];
 		}
+		out->head = vr.in_head;
 		return true;
 	}
 

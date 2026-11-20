@@ -2135,6 +2135,233 @@ static bool vr_fire_allowed(CActor* A)
 	return true;
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// GammaVR milestone 7 (Amendment 20): stick walking and turning. Only with -vr_m3 -vr_openxr (vr_m3_vr) and a frame whose
+// tracking mapping hung on the VR base (g_vr_track.base_used); everything below is a no-op otherwise.
+// Angles: "heading" convention throughout (engine axes x right, y up, z forward; heading = atan2(x, z); a POSITIVE angle
+// turns to the RIGHT, clockwise seen from above). g_vr_base.yaw is such a heading (game_cam.rotateY(yaw)); the actor's
+// camera yaw (CCameraBase::yaw, kRIGHT adds to it, movement is rotated by rotateY(-r_model_yaw) = rotateY(cam yaw)) too.
+
+// v rotated about the world up axis by heading angle a (same as Fmatrix().rotateY(a).transform_dir(v))
+static void vr_rot_y(Fvector& v, float a)
+{
+	const float c = _cos(a), s = _sin(a);
+	const float x = v.x * c + v.z * s, z = -v.x * s + v.z * c;
+	v.x = x;
+	v.z = z;
+}
+
+// Walk request handed to CActor::g_cl_CheckControls. Written by vr_input_update (CLevel::OnFrame: FrameMove, main thread);
+// read by the actor's shedule_Update, which with mt_Scheduler (default) runs in the GameThread task the device starts
+// AFTER FrameMove of the same device frame and waits for before the next FrameMove (with mt_Scheduler 0: in
+// CGamePersistent::OnFrame, same seqFrame pass on the main thread, order against CLevel::OnFrame not fixed, hence the
+// one-frame tolerance below). Never written and read at the same time.
+struct vr_walk_state
+{
+	bool on;
+	u32 dev_frame;  // Device.dwFrame of the update that computed it
+	Fvector dir;    // W: unit, horizontal, world
+	float k;        // strength 0..1
+};
+static vr_walk_state s_vr_walk; // static storage: zero-initialised, off
+
+// for CActor::g_cl_CheckControls (Actor_Movement.cpp): true = VR stick walking this update (dir = unit world direction,
+// k = strength in (0, 1]). Always false in flat runs.
+bool vr_walk_get(Fvector& dir, float& k)
+{
+	if (!vr_m3_vr() || !s_vr_walk.on)
+		return false;
+	if (s_vr_walk.dev_frame != Device.dwFrame && s_vr_walk.dev_frame + 1 != Device.dwFrame)
+		return false; // stale: the VR path did not run this update
+	dir.set(s_vr_walk.dir);
+	k = s_vr_walk.k;
+	return true;
+}
+
+static bool vr_walk_head()
+{
+	static const bool v = !!strstr(Core.Params, "-vr_walk_head");
+	return v;
+}
+static bool vr_turn_smooth()
+{
+	static const bool v = !!strstr(Core.Params, "-vr_turn_smooth");
+	return v;
+}
+
+// flat (horizontal) unit WORLD forward of a tracking-space pose: the pose's forward axis (engine +z = OpenXR -Z, the same
+// axis as ctrl_aim of the gun hand), mapped with the track_to_world of the frame the pose belongs to, then turned by the
+// VR yaw added since that frame was built (yaw_since). False when the pose is invalid or (nearly) vertical (horizontal
+// part below 0.1).
+static bool vr_flat_fwd(const vr_pose& p, float yaw_since, Fvector& out)
+{
+	out.set(0.f, 0.f, 0.f);
+	if (!p.valid)
+		return false;
+	Fmatrix m;
+	vr_pose_matrix(p, m);
+	Fvector w;
+	g_vr_track.track_to_world.transform_dir(w, m.k);
+	vr_rot_y(w, yaw_since);
+	w.y = 0.f;
+	const float l = w.magnitude();
+	if (l < 0.1f)
+		return false;
+	out.set(w.x / l, 0.f, w.z / l);
+	return true;
+}
+
+// Once per game update, after the button mapping. I = the last controller read (VR frame I.frame, read in the previous
+// render); new_read = I is a read not seen by an earlier update; allowed = the same checks a key press passes
+// (vr_fire_allowed: live current actor, not paused, no menu / console / script input lock).
+static void vr_loco_update(const vr_input_info& I, CActor* A, bool allowed, bool new_read)
+{
+	static bool s_started = false;
+	static int s_from = -1, s_to = -1;
+	if (!s_started)
+	{
+		s_started = true;
+		if (LPCSTR p = strstr(Core.Params, "-vr_dbg_base "))
+			if (sscanf(p + 13, "%d %d", &s_from, &s_to) != 2)
+				s_from = s_to = -1;
+		Msg("* [vr3] walk: %s, left stick, dead zone 0.10", vr_walk_head() ? "head-relative" : "controller-relative");
+		Msg("* [vr3] turn: %s, right stick", vr_turn_smooth() ? "smooth 120 deg/s" : "snap 45 deg, repeat 0.50 s");
+	}
+	static bool s_armed = true;
+	static float s_timer = 0.f;
+
+	s_vr_walk.on = false;
+	s_vr_walk.dev_frame = Device.dwFrame;
+
+	const float lx = I.stick_active[0] ? I.stick[0][0] : 0.f, ly = I.stick_active[0] ? I.stick[0][1] : 0.f;
+	const float rx = I.stick_active[1] ? I.stick[1][0] : 0.f;
+	const float dt = float(Device.dwTimeDelta) / 1000.f; // the actor update's step (its DT is in ms of the same clock)
+
+	CCameraBase* cam = A ? A->cam_Active() : nullptr;
+	const bool base_ok = vr_m3_vr() && g_vr_base.yaw_set && g_vr_track.base_used;
+	const bool ok = allowed && base_ok && cam;
+	// turning also needs a free camera (no vehicle / weapon holder, no yaw clamp as on a ladder): else no turn at all
+	const bool turn_ok = ok && !A->Holder() && !cam->bClampYaw;
+
+	// ---- turning (right stick x, either gun hand)
+	float turn = 0.f;
+	int snap = 0;
+	const float ax = _abs(rx);
+	if (!turn_ok)
+	{
+		s_armed = true;
+		s_timer = 0.f;
+	}
+	else if (vr_turn_smooth())
+	{
+		if (ax > 0.1f)
+			turn = deg2rad(120.f) * (rx > 0.f ? 1.f : -1.f) * ((_min(ax, 1.f) - 0.1f) / 0.9f) * dt;
+	}
+	else
+	{
+		if (ax < 0.5f)
+		{
+			s_armed = true;
+			s_timer = 0.f;
+		}
+		else if (s_armed)
+		{
+			if (ax >= 0.75f)
+			{
+				snap = rx > 0.f ? 1 : -1;
+				s_armed = false;
+				s_timer = 0.f;
+			}
+		}
+		else
+		{
+			s_timer += dt;
+			if (s_timer >= 0.5f)
+			{
+				snap = rx > 0.f ? 1 : -1;
+				s_timer = 0.f;
+			}
+		}
+		if (snap)
+			turn = float(snap) * PI_DIV_4;
+	}
+	if (turn != 0.f)
+	{
+		// keep the head where it is: the view pivots about the start-head point (pivot = VR base pos + pivot offset);
+		// d = head - pivot as the next render would show it before this turn (the last rendered frame's d, turned by any
+		// VR yaw added since that frame was built), horizontal part; offset += d - Rot(turn) d
+		Fvector d;
+		d.sub(g_vr_track.head_world, g_vr_track.pivot);
+		d.y = 0.f;
+		vr_rot_y(d, g_vr_base.yaw - g_vr_track.base_yaw);
+		Fvector rd = d;
+		vr_rot_y(rd, turn);
+		g_vr_base.pivot_off.x += d.x - rd.x;
+		g_vr_base.pivot_off.z += d.z - rd.z;
+		vr_base_set_yaw(g_vr_base.yaw + turn);
+		// body / aim: the active camera's yaw; CActor::g_cl_Orientate copies it into r_torso.yaw (= -cam yaw) on the
+		// actor's next update, and r_model_yaw follows r_torso (at once while moving, else by its turn lerp)
+		cam->yaw += turn;
+	}
+
+	// ---- walking (left stick, either gun hand)
+	const float yaw_since = base_ok ? g_vr_base.yaw - g_vr_track.base_yaw : 0.f; // includes this update's turn
+	Fvector lfwd, hfwd, W;
+	const bool lvalid = base_ok && vr_flat_fwd(I.grip[0], yaw_since, lfwd);
+	const bool hvalid = base_ok && vr_flat_fwd(I.head, yaw_since, hfwd);
+	if (!lvalid)
+		lfwd.set(0.f, 0.f, 0.f);
+	if (!hvalid)
+		hfwd.set(0.f, 0.f, 0.f);
+	W.set(0.f, 0.f, 0.f);
+	float k = 0.f;
+	const float m = _sqrt(lx * lx + ly * ly);
+	if (ok && m > 0.1f)
+	{
+		Fvector F;
+		bool fok = false;
+		if (!vr_walk_head() && lvalid)
+		{
+			F.set(lfwd);
+			fok = true;
+		}
+		else if (hvalid)
+		{
+			F.set(hfwd);
+			fok = true;
+		}
+		if (fok)
+		{
+			Fvector R = F;
+			vr_rot_y(R, PI_DIV_2); // 90 degrees clockwise seen from above
+			W.set(F.x * ly + R.x * lx, 0.f, F.z * ly + R.z * lx);
+			const float wl = W.magnitude();
+			if (wl > EPS)
+			{
+				W.div(wl);
+				k = _min(1.f, (m - 0.1f) / 0.9f);
+				s_vr_walk.on = true;
+				s_vr_walk.dir.set(W);
+				s_vr_walk.k = k;
+			}
+			else
+				W.set(0.f, 0.f, 0.f);
+		}
+	}
+
+	// ---- log: one line per VR frame read (and an extra one for an update that turned on an already logged read)
+	if (s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to && (new_read || turn != 0.f))
+	{
+		const Fvector& hw = g_vr_track.head_world;
+		const Fvector& ap = g_vr_track.actor_pos;
+		Msg("* [vr3loc] frame %u stickL %.3f %.3f stickR %.3f %.3f active %d %d lfwd %.5f %.5f %.5f lvalid %d hfwd %.5f %.5f %.5f head_w %.5f %.5f %.5f actor %.5f %.5f %.5f walk_dir %.5f %.5f %.5f walk_k %.4f vr_yaw %.6f body_yaw %.6f snap %d turn_deg %.4f mode %s/%s",
+			I.frame, I.stick[0][0], I.stick[0][1], I.stick[1][0], I.stick[1][1], I.stick_active[0] ? 1 : 0, I.stick_active[1] ? 1 : 0,
+			lfwd.x, lfwd.y, lfwd.z, lvalid ? 1 : 0, hfwd.x, hfwd.y, hfwd.z, hw.x, hw.y, hw.z, ap.x, ap.y, ap.z,
+			W.x, W.y, W.z, k, g_vr_base.yaw, cam ? cam->yaw : 0.f, snap, rad2deg(turn),
+			vr_walk_head() ? "head" : "ctl", vr_turn_smooth() ? "smooth" : "snap");
+	}
+}
+
 void vr_input_update()
 {
 	static bool s_trig[2] = { false, false }, s_grab[2] = { false, false };
@@ -2154,10 +2381,14 @@ void vr_input_update()
 
 	vr_input_info I;
 	if (!g_vr_get_input || !g_vr_get_input(&I))
+	{
+		s_vr_walk.on = false; // milestone 7: no input, no VR walking
 		return;
+	}
 	const int gun = I.gun ? 1 : 0, off = 1 - gun;
 	bool fire_press_edge = false;
-	if (!s_seen || I.seq != s_seq)
+	const bool new_read = !s_seen || I.seq != s_seq;
+	if (new_read)
 	{
 		s_seen = true;
 		s_seq = I.seq;
@@ -2209,6 +2440,8 @@ void vr_input_update()
 		else if (!allowed)
 			Msg("* [vr3key] frame %u kWPN_FIRE press blocked (no live current actor, paused, menu, console or input disabled)", I.frame);
 	}
+	// milestone 7 (Amendment 20): stick walking and turning
+	vr_loco_update(I, A, allowed, new_read);
 }
 
 // out = v made perpendicular to the unit vector axis (Gram-Schmidt), unit; false when v is (nearly) parallel to axis

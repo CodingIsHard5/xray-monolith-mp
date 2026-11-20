@@ -111,6 +111,15 @@ struct vr_input_info
 	float grab[2];           // grab action value, 0..1 (a click binding gives 0 or 1)
 	bool trigger_active[2];  // XrActionStateFloat::isActive
 	bool grab_active[2];
+	// milestone 7 (Amendment 20): thumbstick action "stick" (xrGetActionStateVector2f, same read), x right / y up, -1..1;
+	// an inactive action reads as 0 0, inactive
+	float stick[2][2];       // [hand][0 = x, 1 = y]
+	bool stick_active[2];    // XrActionStateVector2f::isActive
+	// the poses of the SAME VR frame as the values above (located right after the read, at the frame's predicted display
+	// time, tracking space, engine axes): both controllers' grip poses as located (no lag, no -vr_grip_rot injection, no
+	// -vr_gun_on_head; .valid = false when not located) and the head pose
+	vr_pose grip[2];         // 0 = left, 1 = right
+	vr_pose head;
 };
 extern ENGINE_API bool (*g_vr_get_input)(vr_input_info* out);
 
@@ -122,6 +131,15 @@ struct vr_track_state
 	bool active;
 	u32 frame;               // vr_frame_info::frame of this frame
 	Fmatrix track_to_world;
+	// milestone 7 (Amendment 20), kept after the frame (read by the next game update): whether this frame's mapping hung on
+	// the VR base (base_used; false = camera after effects / -vr_base_old), the VR yaw it was built with (base_yaw, valid
+	// only with base_used), the world point the start head pose was mapped to (pivot = VR base pos + pivot offset), the
+	// head's world position (head_world) and the actor position the VR base was taken from (actor_pos)
+	bool base_used;
+	float base_yaw;
+	Fvector pivot;
+	Fvector head_world;
+	Fvector actor_pos;
 };
 extern ENGINE_API vr_track_state g_vr_track;
 
@@ -185,6 +203,12 @@ struct vr_base_state
 	bool yaw_set;
 	float yaw;
 	Fvector cam_point; // diagnostic: the flat first-eye camera point BEFORE the wall push-out (collide_camera), lean included
+	// milestone 7 (Amendment 20): the actor position (XFORM().c) 'pos' was derived from, same update
+	Fvector actor_pos;
+	// milestone 7: horizontal world offset of the play-space pivot, accumulated by VR turns so that a turn rotates the view
+	// about the head's current position, not about the base point. Persistent; added to 'pos' ONLY where track_to_world
+	// is built (IGame_Level.cpp); never moves the actor or its collision body. Written by xrGame (vr_input_update).
+	Fvector pivot_off;
 };
 extern ENGINE_API vr_base_state g_vr_base;
 // -vr_dbg_base_flat: the -vr_dbg_base line is logged from the flat frame (flat run S3); logging only
