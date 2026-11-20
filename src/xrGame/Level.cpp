@@ -1011,6 +1011,8 @@ void CLevel::SkipMusicTrack()
 
 BOOL mt_ph_commander = FALSE;
 BOOL mt_TaskManager = FALSE;
+void vr_input_update(); // GammaVR milestone 6, player_hud.cpp
+
 void CLevel::OnFrame()
 {
 	PROF_EVENT("CLevel::OnFrame()");
@@ -1033,6 +1035,9 @@ void CLevel::OnFrame()
 	// GammaVR milestone 4b (Amendment 17): the actor's VR shots of the previous update, with the gun placement drawn in
 	// their frame (no-op unless such shots were queued; main thread, before the objects update)
 	CShootingObject::vr_commit_deferred_shots();
+	// GammaVR milestone 6 (Amendment 19): controller buttons read in the previous render -> kWPN_FIRE on the actor and the
+	// two-handed grab input (no-op without -vr_openxr; main thread, before the objects update)
+	vr_input_update();
 	// commit events from bullet manager from prev-frame
 	Device.Statistic->TEST0.Begin();
 	BulletManager().CommitEvents();

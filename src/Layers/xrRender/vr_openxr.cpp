@@ -75,6 +75,17 @@ namespace
 		int grip_ring_head = -1, grip_ring_count = 0;
 		bool period_logged = false;
 		bool profiles_logged = false;
+		// milestone 6 (Amendment 19): button actions, read once per VR frame after xrSyncActions
+		XrAction fire_action = XR_NULL_HANDLE;   // float, both hands
+		XrAction grab_action = XR_NULL_HANDLE;   // float, both hands
+		bool ext_touch_plus = false;             // XR_META_touch_controller_plus offered and enabled
+		bool ext_frame = false;                  // XR_VALVE_frame_controller_interaction offered and enabled
+		bool input_read = false;                 // at least one read so far
+		u32 input_frame = 0, input_seq = 0;
+		float in_trigger[2] = { 0.f, 0.f }, in_grab[2] = { 0.f, 0.f };
+		bool in_trigger_active[2] = { false, false }, in_grab_active[2] = { false, false };
+		bool profile_seen[2] = { false, false }; // current interaction profile of the hand logged at least once
+		XrPath profile_cur[2] = { XR_NULL_PATH, XR_NULL_PATH };
 
 		PFN_xrGetInstanceProcAddr GetInstanceProcAddr = nullptr;
 		PFN_xrCreateInstance CreateInstance = nullptr;
@@ -108,6 +119,7 @@ namespace
 		PFN_xrCreateActionSpace CreateActionSpace = nullptr;
 		PFN_xrSyncActions SyncActions = nullptr;
 		PFN_xrGetCurrentInteractionProfile GetCurrentInteractionProfile = nullptr;
+		PFN_xrGetActionStateFloat GetActionStateFloat = nullptr;
 	};
 
 	vr_state vr;
@@ -157,31 +169,93 @@ namespace
 		if (!vr_check(vr.CreateAction(vr.action_set, &aci, &vr.grip_action), "xrCreateAction(grip_pose)"))
 			return false;
 
-		XrPath grip_path[2] = { XR_NULL_PATH, XR_NULL_PATH };
-		if (!vr_check(vr.StringToPath(vr.instance, "/user/hand/left/input/grip/pose", &grip_path[0]), "xrStringToPath(left grip)") ||
-			!vr_check(vr.StringToPath(vr.instance, "/user/hand/right/input/grip/pose", &grip_path[1]), "xrStringToPath(right grip)"))
-			return false;
-		XrActionSuggestedBinding b[2];
-		for (int h = 0; h < 2; ++h)
+		// milestone 6 (Amendment 19): button actions "fire" and "grab" (float) for both hands. A failure here leaves the
+		// action null (no button input, the grip pose still works).
+		XrActionCreateInfo fci = { XR_TYPE_ACTION_CREATE_INFO };
+		xr_strcpy(fci.actionName, "fire");
+		xr_strcpy(fci.localizedActionName, "Fire");
+		fci.actionType = XR_ACTION_TYPE_FLOAT_INPUT;
+		fci.countSubactionPaths = 2;
+		fci.subactionPaths = vr.hand_path;
+		if (!vr_check(vr.CreateAction(vr.action_set, &fci, &vr.fire_action), "xrCreateAction(fire)"))
+			vr.fire_action = XR_NULL_HANDLE;
+		XrActionCreateInfo gci = { XR_TYPE_ACTION_CREATE_INFO };
+		xr_strcpy(gci.actionName, "grab");
+		xr_strcpy(gci.localizedActionName, "Grab");
+		gci.actionType = XR_ACTION_TYPE_FLOAT_INPUT;
+		gci.countSubactionPaths = 2;
+		gci.subactionPaths = vr.hand_path;
+		if (!vr_check(vr.CreateAction(vr.action_set, &gci, &vr.grab_action), "xrCreateAction(grab)"))
+			vr.grab_action = XR_NULL_HANDLE;
+
+		// One xrSuggestInteractionProfileBindings call per profile: the grip pose (same path as before) plus fire/grab.
+		// A refused suggestion is logged and skipped. ext: 0 = core profile, 1 = needs XR_META_touch_controller_plus,
+		// 2 = needs XR_VALVE_frame_controller_interaction (suggested only when that extension was enabled).
+		struct vr_profile_def
 		{
-			b[h].action = vr.grip_action;
-			b[h].binding = grip_path[h];
-		}
-		const char* profiles[] = { "/interaction_profiles/khr/simple_controller", "/interaction_profiles/microsoft/motion_controller" };
+			const char* path;
+			const char* fire; // input path below /user/hand/<side>, null = no fire binding
+			const char* grab; // null = no grab binding
+			int ext;
+		};
+		static const vr_profile_def profiles[] = {
+			{ "/interaction_profiles/khr/simple_controller", "/input/select/click", nullptr, 0 },
+			{ "/interaction_profiles/microsoft/motion_controller", "/input/trigger/value", "/input/squeeze/click", 0 },
+			{ "/interaction_profiles/oculus/touch_controller", "/input/trigger/value", "/input/squeeze/value", 0 },
+			{ "/interaction_profiles/valve/index_controller", "/input/trigger/value", "/input/squeeze/value", 0 },
+			{ "/interaction_profiles/meta/touch_controller_plus", "/input/trigger/value", "/input/squeeze/value", 1 },
+			{ "/interaction_profiles/valve/frame_controller_valve", "/input/trigger/value", "/input/squeeze/value", 2 },
+		};
+		const char* side[2] = { "/user/hand/left", "/user/hand/right" };
 		u32 suggested = 0;
-		for (int p = 0; p < 2; ++p)
+		for (const vr_profile_def& P : profiles)
 		{
+			if ((P.ext == 1 && !vr.ext_touch_plus) || (P.ext == 2 && !vr.ext_frame))
+			{
+				Msg("* [vr3] bindings %s: skipped (extension not offered)", P.path);
+				continue;
+			}
 			XrPath prof = XR_NULL_PATH;
-			if (!vr_check(vr.StringToPath(vr.instance, profiles[p], &prof), "xrStringToPath(profile)"))
+			if (!vr_check(vr.StringToPath(vr.instance, P.path, &prof), "xrStringToPath(profile)"))
+				continue;
+			XrActionSuggestedBinding b[6];
+			u32 nb = 0;
+			bool path_ok = true;
+			for (int h = 0; h < 2 && path_ok; ++h)
+			{
+				const char* what[3] = { "/input/grip/pose", P.fire, P.grab };
+				const XrAction act[3] = { vr.grip_action, vr.fire_action, vr.grab_action };
+				for (int k = 0; k < 3; ++k)
+				{
+					if (!what[k] || act[k] == XR_NULL_HANDLE)
+						continue;
+					string256 full;
+					xr_sprintf(full, "%s%s", side[h], what[k]);
+					XrPath bp = XR_NULL_PATH;
+					if (!vr_check(vr.StringToPath(vr.instance, full, &bp), "xrStringToPath(binding)"))
+					{
+						path_ok = false;
+						break;
+					}
+					b[nb].action = act[k];
+					b[nb].binding = bp;
+					++nb;
+				}
+			}
+			if (!path_ok)
 				continue;
 			XrInteractionProfileSuggestedBinding sb = { XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
 			sb.interactionProfile = prof;
-			sb.countSuggestedBindings = 2;
+			sb.countSuggestedBindings = nb;
 			sb.suggestedBindings = b;
 			const XrResult r = vr.SuggestInteractionProfileBindings(vr.instance, &sb);
-			Msg("* [vr3] suggested bindings for %s: XrResult %d", profiles[p], (int)r);
 			if (XR_SUCCEEDED(r))
+			{
+				Msg("* [vr3] bindings %s: accepted", P.path);
 				suggested++;
+			}
+			else
+				Msg("* [vr3] bindings %s: refused (%d)", P.path, (int)r);
 		}
 		if (!suggested)
 			return false;
@@ -220,14 +294,50 @@ namespace
 			return false;
 		}
 
-		const char* exts[] = { XR_KHR_D3D11_ENABLE_EXTENSION_NAME };
+		// milestone 6: the controller-profile extensions are enabled only when the runtime offers them
+		static const char* EXT_TOUCH_PLUS = "XR_META_touch_controller_plus";
+		static const char* EXT_FRAME = "XR_VALVE_frame_controller_interaction";
+		PFN_xrEnumerateInstanceExtensionProperties EnumExt = nullptr;
+		if (XR_FAILED(vr.GetInstanceProcAddr(XR_NULL_HANDLE, "xrEnumerateInstanceExtensionProperties", (PFN_xrVoidFunction*)&EnumExt)) || !EnumExt)
+			EnumExt = (PFN_xrEnumerateInstanceExtensionProperties)GetProcAddress(loader, "xrEnumerateInstanceExtensionProperties");
+		if (EnumExt)
+		{
+			uint32_t ne = 0;
+			if (XR_SUCCEEDED(EnumExt(nullptr, 0, &ne, nullptr)) && ne)
+			{
+				xr_vector<XrExtensionProperties> ep(ne);
+				for (uint32_t i = 0; i < ne; ++i)
+				{
+					ep[i].type = XR_TYPE_EXTENSION_PROPERTIES;
+					ep[i].next = nullptr;
+				}
+				if (XR_SUCCEEDED(EnumExt(nullptr, ne, &ne, ep.data())))
+					for (uint32_t i = 0; i < ne && i < ep.size(); ++i)
+					{
+						if (!xr_strcmp(ep[i].extensionName, EXT_TOUCH_PLUS))
+							vr.ext_touch_plus = true;
+						else if (!xr_strcmp(ep[i].extensionName, EXT_FRAME))
+							vr.ext_frame = true;
+					}
+			}
+		}
+		else
+			Msg("! [vr3] xrEnumerateInstanceExtensionProperties not found; optional controller extensions not enabled");
+		Msg("* [vr3] extensions offered: %s %d, %s %d", EXT_TOUCH_PLUS, vr.ext_touch_plus ? 1 : 0, EXT_FRAME, vr.ext_frame ? 1 : 0);
+
+		const char* exts[3] = { XR_KHR_D3D11_ENABLE_EXTENSION_NAME, nullptr, nullptr };
+		uint32_t n_exts = 1;
+		if (vr.ext_touch_plus)
+			exts[n_exts++] = EXT_TOUCH_PLUS;
+		if (vr.ext_frame)
+			exts[n_exts++] = EXT_FRAME;
 		XrInstanceCreateInfo ici = { XR_TYPE_INSTANCE_CREATE_INFO };
 		xr_strcpy(ici.applicationInfo.applicationName, "GammaVR");
 		xr_strcpy(ici.applicationInfo.engineName, "X-Ray Monolith");
 		ici.applicationInfo.applicationVersion = 1;
 		ici.applicationInfo.engineVersion = 1;
 		ici.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0);
-		ici.enabledExtensionCount = 1;
+		ici.enabledExtensionCount = n_exts;
 		ici.enabledExtensionNames = exts;
 		if (!vr_check(vr.CreateInstance(&ici, &vr.instance), "xrCreateInstance"))
 			return false;
@@ -264,6 +374,7 @@ namespace
 		VR_BIND(CreateActionSpace);
 		VR_BIND(SyncActions);
 		VR_BIND(GetCurrentInteractionProfile);
+		VR_BIND(GetActionStateFloat);
 #undef VR_BIND
 
 		XrInstanceProperties ip = { XR_TYPE_INSTANCE_PROPERTIES };
@@ -528,6 +639,53 @@ namespace
 		const XrResult rs = vr.SyncActions(vr.session, &si); // XR_SESSION_NOT_FOCUSED is a success code: poses may be invalid
 		if (XR_FAILED(rs))
 			return;
+		// milestone 6 (Amendment 19): button values of this VR frame (vr.frames_run = the number this frame's eyes get as
+		// vr_frame_info::frame). An inactive action or a failed call reads as value 0, inactive.
+		for (int h = 0; h < 2; ++h)
+		{
+			const XrAction act[2] = { vr.fire_action, vr.grab_action };
+			float* val[2] = { &vr.in_trigger[h], &vr.in_grab[h] };
+			bool* on[2] = { &vr.in_trigger_active[h], &vr.in_grab_active[h] };
+			for (int k = 0; k < 2; ++k)
+			{
+				*val[k] = 0.f;
+				*on[k] = false;
+				if (act[k] == XR_NULL_HANDLE)
+					continue;
+				XrActionStateGetInfo gi = { XR_TYPE_ACTION_STATE_GET_INFO };
+				gi.action = act[k];
+				gi.subactionPath = vr.hand_path[h];
+				XrActionStateFloat st = { XR_TYPE_ACTION_STATE_FLOAT };
+				if (XR_SUCCEEDED(vr.GetActionStateFloat(vr.session, &gi, &st)) && st.isActive)
+				{
+					*val[k] = st.currentState;
+					*on[k] = true;
+				}
+			}
+		}
+		vr.input_frame = vr.frames_run;
+		vr.input_seq++;
+		vr.input_read = true;
+		// current interaction profile of each hand: one line whenever it becomes known or changes
+		for (int h = 0; h < 2; ++h)
+		{
+			XrInteractionProfileState ps = { XR_TYPE_INTERACTION_PROFILE_STATE };
+			if (XR_FAILED(vr.GetCurrentInteractionProfile(vr.session, vr.hand_path[h], &ps)))
+				continue;
+			if (vr.profile_seen[h] && ps.interactionProfile == vr.profile_cur[h])
+				continue;
+			vr.profile_seen[h] = true;
+			vr.profile_cur[h] = ps.interactionProfile;
+			char name[XR_MAX_PATH_LENGTH];
+			xr_strcpy(name, "none");
+			if (ps.interactionProfile != XR_NULL_PATH)
+			{
+				uint32_t n = 0;
+				if (XR_FAILED(vr.PathToString(vr.instance, ps.interactionProfile, XR_MAX_PATH_LENGTH, &n, name)))
+					xr_strcpy(name, "?");
+			}
+			Msg("* [vr3] interaction profile %c: %s", h ? 'R' : 'L', name);
+		}
 		const XrSpaceLocationFlags need = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT;
 		vr.grip_time = vr.fs.predictedDisplayTime; // the time passed to xrLocateSpace below (milestone 3d log)
 		for (int h = 0; h < 2; ++h)
@@ -615,6 +773,25 @@ namespace
 				out->gun.qz = w1 * R.qz + x1 * R.qy - y1 * R.qx + z1 * R.qw;
 				out->gun.qw = w1 * R.qw - x1 * R.qx - y1 * R.qy - z1 * R.qz;
 			}
+		}
+		return true;
+	}
+
+	// hook (milestone 6): button values of the last read (see vr_input_info). Written in vr_locate_grips (render path,
+	// main thread), read by xrGame in CLevel::OnFrame (FrameMove, main thread): never at the same time.
+	bool vr_get_input(vr_input_info* out)
+	{
+		if (!vr.ok || !vr.input_read || !out)
+			return false;
+		out->frame = vr.input_frame;
+		out->seq = vr.input_seq;
+		out->gun = vr.gun_hand;
+		for (int h = 0; h < 2; ++h)
+		{
+			out->trigger[h] = vr.in_trigger[h];
+			out->grab[h] = vr.in_grab[h];
+			out->trigger_active[h] = vr.in_trigger_active[h];
+			out->grab_active[h] = vr.in_grab_active[h];
 		}
 		return true;
 	}
@@ -878,6 +1055,7 @@ namespace
 			g_vr_begin_frame = &vr_begin_frame;
 			g_vr_eye_done = &vr_eye_done;
 			g_vr_get_grip = &vr_get_grip;
+			g_vr_get_input = &vr_get_input;
 		}
 	} s_vr_hook_registrar;
 }

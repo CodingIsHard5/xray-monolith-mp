@@ -98,6 +98,22 @@ struct vr_grip_info
 };
 extern ENGINE_API bool (*g_vr_get_grip)(vr_grip_info* out);
 
+// Milestone 6 (Amendment 19): controller button values of the last VR frame whose actions were read (OpenXR actions
+// "fire" and "grab", xrGetActionStateFloat right after xrSyncActions, in vr_begin_frame on the render path of the main
+// thread). Index 0 = left hand, 1 = right hand. An inactive action (no binding / no controller) reads as value 0 there.
+// False = no read so far (no -vr_openxr, VR not running, actions unavailable).
+struct vr_input_info
+{
+	u32 frame;               // VR frame the values were read in (vr_frame_info::frame numbering, as g_vr_track.frame)
+	u32 seq;                 // read counter: +1 per read, never reset (tells a new read from the same one seen again)
+	int gun;                 // gun hand index (-vr_gun_hand): 0 = left, 1 = right
+	float trigger[2];        // fire action value, 0..1
+	float grab[2];           // grab action value, 0..1 (a click binding gives 0 or 1)
+	bool trigger_active[2];  // XrActionStateFloat::isActive
+	bool grab_active[2];
+};
+extern ENGINE_API bool (*g_vr_get_input)(vr_input_info* out);
+
 // Milestone 3: the mapping from the tracking space (engine axes) to the world, shared by the camera and the gun.
 // track_to_world = game camera of this frame * inverse(head pose of the first VR frame). Set by the level render loop
 // before the eyes are rendered, active only while the eyes of a VR frame are being rendered.

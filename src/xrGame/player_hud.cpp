@@ -17,6 +17,9 @@
 #include "Inventory.h"
 #include "../xrEngine/Effector.h"
 #include "../xrEngine/CameraManager.h"
+#include "../xrEngine/xr_ioconsole.h"
+#include "UIGameCustom.h"
+#include "xr_level_controller.h"
 #include <typeinfo>
 
 extern int g_nearwall;
@@ -2061,7 +2064,7 @@ struct vr_2h_switches
 		else if (force)
 			Msg("* [vr3] two-hand: on (force always)");
 		else
-			Msg("* [vr3] two-hand: on (no input source)");
+			Msg("* [vr3] two-hand: on (controller input)");
 	}
 };
 static const vr_2h_switches& vr_2h()
@@ -2070,16 +2073,142 @@ static const vr_2h_switches& vr_2h()
 	return s;
 }
 
-// TODO(GammaVR, "controller input mapping" milestone): the off hand's real grip button goes here. No controller button
-// input exists in the engine yet, so for now the input is held only when forced by -vr_2h_force (test switch).
+// Milestone 6 (Amendment 19): the off hand's grab input, as held by vr_input_update (hysteresis state after the values
+// of the last processed VR frame). Written in vr_input_update (CLevel::OnFrame, FrameMove, main thread) and read by
+// vr_2h_input_held from the HUD placement (render_hud, render path, main thread). Both run on the main thread, one after
+// the other (FrameMove ends before the render starts; neither runs inside the GameThread secondary task), so a plain
+// bool suffices.
+static bool s_vr_grab_held = false;
+
+// The off hand's grip input: the controller's grab input (s_vr_grab_held) OR the -vr_2h_force test switch; never with
+// -vr_2h_off.
 static bool vr_2h_input_held()
 {
 	const vr_2h_switches& S = vr_2h();
 	if (S.off)
 		return false;
-	if (S.force)
-		return !S.window || (int(g_vr_track.frame) >= S.from && int(g_vr_track.frame) <= S.to);
+	if (S.force && (!S.window || (int(g_vr_track.frame) >= S.from && int(g_vr_track.frame) <= S.to)))
+		return true;
+	return s_vr_grab_held;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// GammaVR milestone 6 (Amendment 19): controller input mapping. Once per game update (CLevel::OnFrame, FrameMove, main
+// thread), for each NEW read of the controller buttons (g_vr_get_input, read in the previous render after xrSyncActions):
+//  - hysteresis per hand and input: pressed when value >= 0.7, released when value <= 0.5 (inactive reads as 0);
+//    every edge of both hands and both inputs is logged ([vr3in]);
+//  - gun hand trigger -> the actor's kWPN_FIRE key press / release (CActor::IR_OnKeyboardPress / Release);
+//  - off hand grab -> s_vr_grab_held (two-handed grab, vr_2h_input_held);
+//  - off hand trigger and gun hand grab: nothing (edges logged only);
+//  - in the -vr_dbg_grip <from> <to> window: one [vr3inp] line per VR frame read.
+extern bool g_bDisableAllInput;
+static bool vr_hyst_step(bool& on, float v)
+{
+	if (!on && v >= 0.7f)
+	{
+		on = true;
+		return true;
+	}
+	if (on && v <= 0.5f)
+	{
+		on = false;
+		return true;
+	}
 	return false;
+}
+
+// The checks a real kWPN_FIRE key press passes in CLevel::IR_OnKeyboardPress before it reaches the actor, where they apply
+// to an input without a key code: level ready, input not disabled by script, no dialog / menu on top, console closed,
+// game not paused; plus: the actor exists, is alive and is the current entity (the one the key would go to).
+static bool vr_fire_allowed(CActor* A)
+{
+	if (!A || !g_pGameLevel || !Level().bReady || Device.dwPrecacheFrame)
+		return false;
+	if (Level().CurrentEntity() != A || !A->g_Alive())
+		return false;
+	if (g_bDisableAllInput || Device.Paused())
+		return false;
+	if (CurrentGameUI() && CurrentGameUI()->TopInputReceiver())
+		return false;
+	if (Console && Console->bVisible)
+		return false;
+	return true;
+}
+
+void vr_input_update()
+{
+	static bool s_trig[2] = { false, false }, s_grab[2] = { false, false };
+	static u32 s_seq = 0;
+	static bool s_seen = false;
+	static bool s_fire_sent = false;    // a kWPN_FIRE press was given to s_fire_actor and not yet released
+	static CActor* s_fire_actor = nullptr;
+	static int s_from = -1, s_to = -1;
+	static bool s_parsed = false;
+	if (!s_parsed)
+	{
+		s_parsed = true;
+		if (LPCSTR p = strstr(Core.Params, "-vr_dbg_grip "))
+			if (sscanf(p + 13, "%d %d", &s_from, &s_to) != 2)
+				s_from = s_to = -1;
+	}
+
+	vr_input_info I;
+	if (!g_vr_get_input || !g_vr_get_input(&I))
+		return;
+	const int gun = I.gun ? 1 : 0, off = 1 - gun;
+	bool fire_press_edge = false;
+	if (!s_seen || I.seq != s_seq)
+	{
+		s_seen = true;
+		s_seq = I.seq;
+		for (int h = 0; h < 2; ++h)
+		{
+			const float tv = I.trigger_active[h] ? I.trigger[h] : 0.f;
+			const float gv = I.grab_active[h] ? I.grab[h] : 0.f;
+			if (vr_hyst_step(s_trig[h], tv))
+			{
+				Msg("* [vr3in] frame %u hand %c %s %s value %.3f", I.frame, h ? 'R' : 'L', "trigger", s_trig[h] ? "press" : "release", tv);
+				if (h == gun && s_trig[h])
+					fire_press_edge = true;
+			}
+			if (vr_hyst_step(s_grab[h], gv))
+				Msg("* [vr3in] frame %u hand %c %s %s value %.3f", I.frame, h ? 'R' : 'L', "grab", s_grab[h] ? "press" : "release", gv);
+		}
+		s_vr_grab_held = s_grab[off];
+		if (s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to)
+			Msg("* [vr3inp] frame %u L trigger %.3f grab %.3f active %d %d R trigger %.3f grab %.3f active %d %d gun_hand %c fire_pressed %d grab_held %d",
+				I.frame, I.trigger[0], I.grab[0], I.trigger_active[0] ? 1 : 0, I.grab_active[0] ? 1 : 0,
+				I.trigger[1], I.grab[1], I.trigger_active[1] ? 1 : 0, I.grab_active[1] ? 1 : 0,
+				gun ? 'R' : 'L', s_trig[gun] ? 1 : 0, s_vr_grab_held ? 1 : 0);
+	}
+
+	// gun hand trigger -> kWPN_FIRE, the same actor entry point a key press reaches (CActor::IR_OnKeyboardPress/Release)
+	CActor* A = g_actor;
+	if (s_fire_sent && s_fire_actor != A)
+	{
+		s_fire_sent = false; // the actor the press went to is gone or replaced: nothing to release on it
+		s_fire_actor = nullptr;
+	}
+	const bool allowed = vr_fire_allowed(A);
+	if (s_fire_sent && (!s_trig[gun] || !allowed))
+	{
+		A->IR_OnKeyboardRelease(kWPN_FIRE);
+		s_fire_sent = false;
+		s_fire_actor = nullptr;
+		Msg("* [vr3key] frame %u kWPN_FIRE release%s", I.frame, allowed ? "" : " (input no longer allowed)");
+	}
+	if (fire_press_edge)
+	{
+		if (allowed && !s_fire_sent)
+		{
+			A->IR_OnKeyboardPress(kWPN_FIRE);
+			s_fire_sent = true;
+			s_fire_actor = A;
+			Msg("* [vr3key] frame %u kWPN_FIRE press", I.frame);
+		}
+		else if (!allowed)
+			Msg("* [vr3key] frame %u kWPN_FIRE press blocked (no live current actor, paused, menu, console or input disabled)", I.frame);
+	}
 }
 
 // out = v made perpendicular to the unit vector axis (Gram-Schmidt), unit; false when v is (nearly) parallel to axis

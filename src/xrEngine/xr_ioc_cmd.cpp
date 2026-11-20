@@ -1117,6 +1117,7 @@ ENGINE_API float ps_r_stereo_ipd = 0.064f;
 #include "vr_hooks.h"
 ENGINE_API bool (*g_vr_begin_frame)(vr_eye_view* views, vr_frame_info* info) = nullptr;
 ENGINE_API bool (*g_vr_get_grip)(vr_grip_info* out) = nullptr;
+ENGINE_API bool (*g_vr_get_input)(vr_input_info* out) = nullptr;
 ENGINE_API vr_track_state g_vr_track; // zero-initialised: inactive
 ENGINE_API vr_base_state g_vr_base; // zero-initialised: not valid, yaw not set
 ENGINE_API void (*g_vr_eye_done)(int eye) = nullptr;
