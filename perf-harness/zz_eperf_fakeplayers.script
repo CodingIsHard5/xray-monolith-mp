@@ -9,7 +9,12 @@ local N = tonumber(string.match(cl, "%-fp_n%s+(%d+)") or "") or nil
 local mode = string.match(cl, "%-fp_mode%s+(%a+)") or "full"
 local do_script = (mode == "full" or mode == "script")
 local do_items = (mode == "full" or mode == "items")
+local t_real = string.find(cl, "-fp_time", 1, true) ~= nil       -- time the REAL player's call with the same timer
+local t_hand = string.find(cl, "-fp_handlers", 1, true) ~= nil   -- per-handler time, split real call / repeat calls
 local upd, extra_us, extra_calls = 0, 0, 0
+local real_us, real_calls = 0, 0
+local phase = "other"   -- "real" inside the real binder call, "repeat" inside the fake calls
+local hagg = {}         -- "phase|callback|src" -> { calls, us }
 local boxes, loadout, want_items, made_items, stage = {}, {}, 0, 0, 0
 local BOX = "inv_backpack"
 
@@ -22,10 +27,19 @@ local function write()
 	if not f then return end
 	local online = 0
 	for _, id in ipairs(boxes) do if level.object_by_id(id) then online = online + 1 end end
+	f:write("#real_calls,", real_calls, ",real_total_ms,", string.format("%.3f", real_us / 1000), "\n")
 	f:write("n,mode,player_updates,extra_calls,extra_total_ms,loadout_items,items_wanted,items_made,boxes,boxes_online,actor_alive\n")
 	f:write(string.format("%d,%s,%d,%d,%.3f,%d,%d,%d,%d,%d,%s\n", N, mode, upd, extra_calls, extra_us / 1000, #loadout,
 		want_items, made_items, #boxes, online, tostring(db.actor and db.actor:alive())))
 	f:close()
+	if t_hand then
+		local h = io.open(getFS():update_path("$logs$", "fake_handlers.csv"), "w")
+		if h then
+			h:write("phase,callback,handler,calls,total_ms\n")
+			for k, r in pairs(hagg) do h:write((string.gsub(k, "|", ",")), ",", r[1], ",", string.format("%.3f", r[2] / 1000), "\n") end
+			h:close()
+		end
+	end
 end
 local function nop(self, delta) end
 
@@ -64,14 +78,66 @@ function on_game_start()
 	local ab = bind_stalker and bind_stalker.actor_binder
 	if not (ab and ab.update) then printf("* fake_players: actor binder NOT found") return end
 	local real = ab.update
+	if t_hand then
+		local intercepts
+		for i = 1, 20 do
+			local n, v = debug.getupvalue(axr_main.make_callback, i)
+			if not n then break end
+			if n == "intercepts" then intercepts = v end
+		end
+		if intercepts then
+			local orig_make = axr_main.make_callback
+			local src_cache = {}
+			local function src_of(f)
+				local c = src_cache[f]
+				if c then return c end
+				if type(f) == "function" then
+					local inf = debug.getinfo(f, "S")
+					c = (string.match(inf.short_src or "?", "([%w_%-]+)%.script") or tostring(inf.short_src)) .. ":" .. tostring(inf.linedefined)
+				else c = "userdata" end
+				src_cache[f] = c
+				return c
+			end
+			local function by_index(t, a, b) return t[a] < t[b] end
+			axr_main.make_callback = function(name, ...)
+				local tbl = intercepts[name]
+				if not tbl then return orig_make(name, ...) end
+				for f, _ in spairs(tbl, by_index) do
+					local stop = timer()
+					if type(f) == "function" then f(...) elseif f[name] then f[name](f, ...) end
+					local us = stop()
+					if upd > 60 then
+						local k = phase .. "|" .. name .. "|" .. src_of(f)
+						local r = hagg[k]
+						if not r then r = { 0, 0 } hagg[k] = r end
+						r[1] = r[1] + 1
+						r[2] = r[2] + us
+					end
+				end
+			end
+			printf("* fake_players: per-handler timing installed")
+		else printf("* fake_players: intercepts not reachable, -fp_handlers OFF") t_hand = false end
+	end
 	ab.update = function(self, delta)
-		local r = real(self, delta)
+		local r
+		if (t_real or t_hand) and upd >= 60 then
+			phase = "real"
+			local stop = timer()
+			r = real(self, delta)
+			real_us = real_us + stop()
+			real_calls = real_calls + 1
+			phase = "other"
+		else
+			r = real(self, delta)
+		end
 		upd = upd + 1
 		if do_items and N > 0 and stage < 2 then items_step() end
 		if N > 0 and (do_script or mode == "empty") and upd > 60 then
 			local f = do_script and real or nop
 			local stop = timer()
+			phase = "repeat"
 			for i = 1, N do f(self, delta) end
+			phase = "other"
 			extra_us = extra_us + stop()
 			extra_calls = extra_calls + N
 		end
