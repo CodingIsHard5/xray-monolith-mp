@@ -76,3 +76,21 @@ WHAT IS READ, and the rule (fixed now):
 - Network thread by name: predicted 8, 8, 10, 11, 14, 20 ms per second (+/- 2) in the six windows.
 Not answered by one boot: whether the live binder adds anything over retired binders under the same clean conditions;
 that needs a clean full-arm boot beside this one (asked of the Overseer, not assumed).
+
+## Amendment 3, 2026-11-20 15:51: paired clean boots (Overseer approved one clean FULL-arm boot). Before the first boot.
+Two boots back to back on the same scratch tree (mp_spike instruments removed), full first:
+- FC: tools/coop_series.sh fc            (no -fp_inert flag: joined players' binders retire at the first update, as in A/B)
+- I2: tools/coop_series.sh i2 -fp_inert2 (stock first update inside a protected call, then empty)
+Same windows and join schedule, each boot under its own EXCLUSIVE claim. Controls R (online radius, no step, no MP_ANCHOR
+line) and A (last A-Life-rate write before every window is the stock reset) apply to BOTH boots; control B (empty update
+under 0.01 ms, 70-95 calls per second) applies to I2; in FC every joined actor must show exactly 1 update call and a
+"binder RETIRED" line. A boot failing its controls is void and the pair is not scored.
+THE RULE NOW (replaces amendment 2's rule; read ARM AGAINST ARM ONLY): D(w) = I2(w) - FC(w), mean main-thread ms per
+second, for windows 3-6 (1, 2, 4, 8 players). Known boot-to-boot spread with identical setups: up to 12 (A vs B), 9 (z vs z2).
+- READING CONFIRMED (a live scriptless binder adds nothing resolvable; the void arm's +75-105 was the A-Life sweep):
+  |D| <= 25 in all four windows AND I2's worst frame per window under 20 ms.
+- READING KILLED: D >= 60 at window 3, or I2's worst frames 30 ms or more while FC's stay under 20.
+- Otherwise PARTIAL, with the numbers.
+Reported without a rule: both arms in 20 s blocks (steps over 30 flagged "world not steady"); the network thread by name
+in both arms (predicted 8, 8, 10, 11, 14, 20 +/- 2); amendment 2's absolute band (105-165) as information only.
+No capacity number is derived from any of this.
