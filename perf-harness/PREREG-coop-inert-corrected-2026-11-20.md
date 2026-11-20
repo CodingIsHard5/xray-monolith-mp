@@ -156,3 +156,10 @@ opens after votv (claim text containing "bh") and gammavr (claim text containing
 released after T0. Then: fingerprint compared with FC2's (differs -> no boot), the unchanged driver joins the queue and
 claims, 6 h give-up with withdrawal from the queue. Proven on live state at arming: "waiting: votv bh: not yet granted;
 gammavr 7c: not yet granted". Measurement, rule and controls are untouched by this.
+
+## Note (2026-11-20 18:03) - I2 attempt of 17:59 gave no data; re-armed with a load condition (Overseer ruling)
+
+The server did not come up within 180 s at load 8.4 (another worker's whole-disk search); stopped, nothing sampled.
+Ruling: this does not use the retry. Re-armed with the same audit-log gate (already open) plus: the boot is attempted
+only after the 1-minute load has been under 2 for 3 straight minutes (7 readings 30 s apart). Give-up 3 h.
+Amendment 6's pairing conditions, the rule and the controls are unchanged.

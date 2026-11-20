@@ -7,7 +7,7 @@
 # claims; refused -> retry every 120 s, staying queued). Gives up 6 h after start and withdraws from the queue.
 set -u; P=~/Projects/StalkerGameEngine; cd "$P"; T="$HOME/.claude/overseer/tools"; L="$HOME/.claude/overseer/quiet-audit.log"
 GATEONLY=0; [ "${1:-}" = "--gate-only" ] && { GATEONLY=1; shift; }
-T0="${1:?need T0}"; START=$(date +%s); GIVEUP=$((START + 6*3600))
+T0="${1:?need T0}"; START=$(date +%s); GIVEUP=$((START + ${GIVEUP_H:-6}*3600))
 gate() { awk -v t0="$T0" '
   function ts() { return $1 " " $2 }
   ts() < t0 { next }
@@ -22,7 +22,7 @@ if [ $GATEONLY = 1 ]; then gate; exit $?; fi
 note() { timeout 60 "$T/notify-overseer.sh" engineperf - <<<"$1" >/dev/null 2>&1; }
 last=0
 until g=$(gate); do now=$(date +%s)
-  [ $now -ge $GIVEUP ] && { echo "$(date +%T) GIVE UP after 6 h: $g"; note "engineperf: i2 waiter GAVE UP after 6 h: $g. Nothing booted, not in the queue."; exit 5; }
+  [ $now -ge $GIVEUP ] && { echo "$(date +%T) GIVE UP: $g"; note "engineperf: i2 waiter GAVE UP after 6 h: $g. Nothing booted, not in the queue."; exit 5; }
   [ $((now - last)) -ge 1800 ] && { echo "$(date +%T) status: $g"; last=$now; }
   sleep 30
 done
@@ -31,7 +31,15 @@ tools/coop_hash.sh > out/i2_hashes_before.txt
 cmp out/i2_hashes_before.txt out/coop_fc2/hashes_after.txt || { echo "FINGERPRINT DIFFERS from fc2; i2 NOT started"; note "engineperf: i2 NOT started: scratch fingerprint differs from fc2's. Nothing booted."; exit 6; }
 echo "fingerprint equals fc2's"
 while :; do
-  [ $(date +%s) -ge $GIVEUP ] && { "$T/quiet-required.sh" withdraw engineperf | tail -1; echo "$(date +%T) GIVE UP after 6 h: gate open, no slot"; note "engineperf: i2 waiter GAVE UP after 6 h: gate opened but no exclusive slot. Nothing booted; withdrawn from the queue."; exit 5; }
+  [ $(date +%s) -ge $GIVEUP ] && { "$T/quiet-required.sh" withdraw engineperf | tail -1; echo "$(date +%T) GIVE UP: gate open, no slot"; note "engineperf: i2 waiter GAVE UP after 6 h: gate opened but no exclusive slot. Nothing booted; withdrawn from the queue."; exit 5; }
+  # Load condition (Overseer, 18:0x): start only when the 1-min load has been under 2 for 3 straight minutes
+  # (7 readings 30 s apart, all under 2). Any reading of 2 or more restarts the count.
+  n=0; while [ $n -lt 7 ] && [ $(date +%s) -lt $GIVEUP ]; do l=$(cut -d' ' -f1 /proc/loadavg)
+    if awk -v l="$l" 'BEGIN{exit !(l<2)}'; then n=$((n+1)); else n=0; fi
+    now=$(date +%s); [ $((now - last)) -ge 900 ] && { echo "$(date +%T) status: load $l, $n of 7 readings under 2"; last=$now; }
+    [ $n -lt 7 ] && sleep 30; done
+  [ $n -ge 7 ] || continue
+  echo "$(date +%T) load under 2 for 3 min (now $(cut -d' ' -f1-3 /proc/loadavg)); trying to claim"
   ( sleep 100; [ -s out/coop_i2/conditions.txt ] && grep -q "^start" out/coop_i2/conditions.txt && [ $(( $(date +%s) - $(stat -c %Y out/coop_i2/conditions.txt) )) -lt 200 ] && note "engineperf: i2 (inert boot) STARTED $(head -1 out/coop_i2/conditions.txt | cut -d' ' -f2-3) under my EXCLUSIVE claim, after: $g" ) &
   tools/coop_series.sh i2 -fp_inert2; rc=$?; echo "$(date +%T) === i2 rc=$rc"
   [ $rc = 3 ] || break
