@@ -1,8 +1,8 @@
 #!/bin/bash
 # queue_i2.sh [--gate-only] "T0" -- waiter for the inert boot i2 (Overseer order d83ae9, 2026-11-20).
 # Gate reads the quiet-claim AUDIT LOG only (no process names): open only after, both later than T0,
-#   votv has had a claim whose text contains "bh" GRANTED and then RELEASED, and
-#   gammavr has had a claim whose text contains "7c" GRANTED and then RELEASED.
+#   votv (by=votv, lane A) has had its claim "what=pair bh2 ..." GRANTED and then RELEASED, and
+#   gammavr has had its claim containing "7c attempt 5" GRANTED and then RELEASED.
 # After the gate: check the fingerprint against fc2's, then run the series driver (it joins the WANT queue and
 # claims; refused -> retry every 120 s, staying queued). Gives up 6 h after start and withdraws from the queue.
 set -u; P=~/Projects/StalkerGameEngine; cd "$P"; T="$HOME/.claude/overseer/tools"; L="$HOME/.claude/overseer/quiet-audit.log"
@@ -11,12 +11,12 @@ T0="${1:?need T0}"; START=$(date +%s); GIVEUP=$((START + 6*3600))
 gate() { awk -v t0="$T0" '
   function ts() { return $1 " " $2 }
   ts() < t0 { next }
-  ($3=="CLAIM"||$3=="CLAIM2") && $4=="by=votv"    && tolower($0) ~ /what=.*bh/ && !vg { vg=ts(); next }
-  ($3=="CLAIM"||$3=="CLAIM2") && $4=="by=gammavr" && tolower($0) ~ /what=.*7c/ && !gg { gg=ts(); next }
-  vg && !vr && ($3=="RELEASE"||$3=="RELEASE2") && $4=="by=votv"    { vr=ts() }
-  gg && !gr && ($3=="RELEASE"||$3=="RELEASE2") && $4=="by=gammavr" { gr=ts() }
-  END { s = "votv bh: " (vg ? "granted " vg (vr ? ", released " vr : ", not yet released") : "not yet granted") \
-            "; gammavr 7c: " (gg ? "granted " gg (gr ? ", released " gr : ", not yet released") : "not yet granted")
+  ($3=="CLAIM"||$3=="CLAIM2") && $4=="by=votv"    && index($0, "what=pair bh2 ") && !vg { vg=ts(); next }
+  ($3=="CLAIM"||$3=="CLAIM2") && $4=="by=gammavr" && index($0, "7c attempt 5") && !gg { gg=ts(); next }
+  vg && !vr && $3 ~ /^RELEASE[0-9]*$/ && $4=="by=votv"    { vr=ts() }
+  gg && !gr && $3 ~ /^RELEASE[0-9]*$/ && $4=="by=gammavr" { gr=ts() }
+  END { s = "votv bh2: " (vg ? "granted " vg (vr ? ", released " vr : ", not yet released") : "not yet granted") \
+            "; gammavr 7c attempt 5: " (gg ? "granted " gg (gr ? ", released " gr : ", not yet released") : "not yet granted")
         if (vr && gr) { print "open: " s; exit 0 } print "waiting: " s " (since " t0 ")"; exit 1 }' "$L"; }
 if [ $GATEONLY = 1 ]; then gate; exit $?; fi
 note() { timeout 60 "$T/notify-overseer.sh" engineperf - <<<"$1" >/dev/null 2>&1; }
