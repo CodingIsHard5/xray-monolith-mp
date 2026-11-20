@@ -631,10 +631,15 @@ void CActor::cam_Update(float dt, float fFOV)
 		static const CActor* s_vr_who = nullptr;
 		static float s_vr_fall = 0.f, s_vr_box_age = 1000.f; // seconds
 		static u32 s_vr_box = u32(-1);
+		static float s_vr_hold = 0.27f; // seconds
 		{
 			const u32 box = character_physics_support()->movement()->BoxID();
 			if (box != s_vr_box)
 			{
+				// milestone 7c attempt 5 (Amendment 29): after a change to a TALLER body box (standing up; box ids
+				// 0 standing, 1 crouch, 2 low crouch) the body can settle late (measured: +13 mm in one frame 0.63 s
+				// after standing up from low crouch); the return hold below then lasts 1.0 s instead of 0.27 s
+				s_vr_hold = (s_vr_box != u32(-1) && box < s_vr_box) ? 1.0f : 0.27f;
 				s_vr_box = box;
 				s_vr_box_age = 0.f;
 			}
@@ -653,13 +658,22 @@ void CActor::cam_Update(float dt, float fFOV)
 				// taken up slowly, only while travelling faster than 0.1 m/s and outside that pause: at most 4 cm/s.
 				const float fdt = _max(Device.fTimeDelta, 0.0005f);
 				const bool swap_pause = s_vr_box_age <= 0.27f;
+				// attempt 5: return hold, from the end of the 0.27 s pause until 1.0 s after standing up. A body move
+				// back TOWARD the feet height (the late settle) is not followed and there is no re-centring; a move
+				// away from it (stairs up, a step down) is followed as usual. The fall rule keeps its own 0.27 s.
+				const bool ret_hold = !swap_pause && s_vr_box_age <= s_vr_hold;
 				if (!swap_pause)
 				{
 					float d = o.y - s_vr_prev.y;
 					const float st = 1.5f * trav;
 					clamp(d, -st, st);
+					if (ret_hold)
+					{
+						const float away = o.y - s_vr_feet;
+						d = d > 0.f ? _max(0.f, _min(d, away)) : _min(0.f, _max(d, away));
+					}
 					s_vr_feet += d;
-					if (trav / fdt > 0.1f)
+					if (!ret_hold && trav / fdt > 0.1f)
 					{
 						float r = o.y - s_vr_feet;
 						const float rm = 0.04f * fdt;
