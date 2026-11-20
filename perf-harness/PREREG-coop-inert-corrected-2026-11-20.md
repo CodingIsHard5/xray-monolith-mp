@@ -118,3 +118,11 @@ Changes, committed before the next boot:
 4. Pre-stated: if the fixed trace shows that the reset is never queued or never runs (rate left at 65,534), control A
    is FAILED as written, the boot is void, the pair is not scored, and that is reported as a finding about this server.
 Rule, windows, other controls: exactly as amendment 3.
+
+## Amendment 5 (2026-11-20 16:22) - trace gate before the paired boots (Overseer condition)
+
+The retry of the pair is approved on one condition: the fixed rate trace must prove itself first. The driver now gates
+every boot: within 60 s of the host's first update the server log must show "RATE reinit (stock sets 65534)", then
+"RATE reset queued", then "RATE reset ran (stock sets 20)". If not, the driver stops the server, releases the box and
+exits 4; I report at once, I2 is not started, and (Overseer) that does not count as the retry being used.
+The gate adds up to 60 s before window 1 in both arms alike. Nothing else changes; rule and controls as amendment 3/4.

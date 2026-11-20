@@ -18,6 +18,11 @@ SV=""; LOG=""
 for i in $(seq 1 90); do sleep 2; LOG=$(ls $S/sv/appdata/logs/xray_*.log 2>/dev/null | head -1); [ -n "$LOG" ] && grep -aq "sv_binder: first update of actor id" "$LOG" && break; done
 SV=$($L svpid); echo "server pid=$SV rss=$(awk '/VmRSS/{print $2}' /proc/$SV/status) kB ready after $((i*2))s"
 [ -n "$SV" ] && grep -aq "sv_binder: first update" "$LOG" || { echo "FAIL: server not ready"; tail -5 $S/sv/appdata/logs/stderr.log; exit 1; }
+# Trace gate (Overseer condition, amendment 5): within 60 s of the host's first update the log must show the rate
+# raised at reinit AND the stock reset queued AND run. Otherwise stop, release, exit 4 (the trap does both).
+GATE=0; for i in $(seq 1 30); do grep -aq "RATE reinit (stock sets 65534)" "$LOG" && grep -aq "RATE reset queued" "$LOG" && grep -aq "RATE reset ran (stock sets 20)" "$LOG" && { GATE=1; break; }; sleep 2; done
+grep -a "sv_binder: RATE" "$LOG" | head -5 | tee -a "$O/conditions.txt"
+[ $GATE = 1 ] && echo "TRACE GATE passed after $((i*2-2))s" | tee -a "$O/conditions.txt" || { echo "TRACE GATE FAILED: no reinit/queued/ran trio within 60 s" | tee -a "$O/conditions.txt"; cp "$LOG" "$O/server.log" 2>/dev/null; exit 4; }
 proof() { # which process and thread the sampler reads (Overseer condition after the smoke)
   echo "--- sampler proof $1 $(date '+%T'): pid=$SV tid=$SV (main thread = thread whose id equals the process id)"
   echo "tid comm: $(cat /proc/$SV/task/$SV/comm)   process exe args: $(tr '\0' ' ' < /proc/$SV/cmdline | cut -c1-160)"
