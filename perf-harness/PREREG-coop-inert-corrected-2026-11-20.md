@@ -163,3 +163,11 @@ The server did not come up within 180 s at load 8.4 (another worker's whole-disk
 Ruling: this does not use the retry. Re-armed with the same audit-log gate (already open) plus: the boot is attempted
 only after the 1-minute load has been under 2 for 3 straight minutes (7 readings 30 s apart). Give-up 3 h.
 Amendment 6's pairing conditions, the rule and the controls are unchanged.
+
+## Note (2026-11-20 18:48) - I2 waiter order flipped (Overseer ruling): claim first, settle the load inside the claim
+
+The waiter of 18:04 never started a boot: it waited for load under 2 before claiming, and other workers' jobs kept the
+load at 4-8. New order: join the queue for an EXCLUSIVE claim now; once granted, wait inside the claim until the 1-minute
+load has been under 2 for 3 straight minutes; if that has not happened 20 minutes after the grant, release and report;
+otherwise boot I2 with the unchanged driver. Audit-log gate re-proved (open), fingerprint equal to FC2's. Give-up 3 h.
+Amendment 6's pairing conditions, the rule and the controls are unchanged.

@@ -30,21 +30,29 @@ echo "$(date +%T) gate $g"
 tools/coop_hash.sh > out/i2_hashes_before.txt
 cmp out/i2_hashes_before.txt out/coop_fc2/hashes_after.txt || { echo "FINGERPRINT DIFFERS from fc2; i2 NOT started"; note "engineperf: i2 NOT started: scratch fingerprint differs from fc2's. Nothing booted."; exit 6; }
 echo "fingerprint equals fc2's"
-while :; do
-  [ $(date +%s) -ge $GIVEUP ] && { "$T/quiet-required.sh" withdraw engineperf | tail -1; echo "$(date +%T) GIVE UP: gate open, no slot"; note "engineperf: i2 waiter GAVE UP after 6 h: gate opened but no exclusive slot. Nothing booted; withdrawn from the queue."; exit 5; }
-  # Load condition (Overseer, 18:0x): start only when the 1-min load has been under 2 for 3 straight minutes
-  # (7 readings 30 s apart, all under 2). Any reading of 2 or more restarts the count.
-  n=0; while [ $n -lt 7 ] && [ $(date +%s) -lt $GIVEUP ]; do l=$(cut -d' ' -f1 /proc/loadavg)
-    if awk -v l="$l" 'BEGIN{exit !(l<2)}'; then n=$((n+1)); else n=0; fi
-    now=$(date +%s); [ $((now - last)) -ge 900 ] && { echo "$(date +%T) status: load $l, $n of 7 readings under 2"; last=$now; }
-    [ $n -lt 7 ] && sleep 30; done
-  [ $n -ge 7 ] || continue
-  echo "$(date +%T) load under 2 for 3 min (now $(cut -d' ' -f1-3 /proc/loadavg)); trying to claim"
-  ( sleep 100; [ -s out/coop_i2/conditions.txt ] && grep -q "^start" out/coop_i2/conditions.txt && [ $(( $(date +%s) - $(stat -c %Y out/coop_i2/conditions.txt) )) -lt 200 ] && note "engineperf: i2 (inert boot) STARTED $(head -1 out/coop_i2/conditions.txt | cut -d' ' -f2-3) under my EXCLUSIVE claim, after: $g" ) &
-  tools/coop_series.sh i2 -fp_inert2; rc=$?; echo "$(date +%T) === i2 rc=$rc"
-  [ $rc = 3 ] || break
-  wait; sleep 120
+# Order (Overseer, 18:5x): queue and CLAIM FIRST, so the claim system drains the box; then wait INSIDE the claim for the
+# 1-min load to be under 2 for 3 straight minutes (7 readings 30 s apart); if that has not happened 20 min after the
+# grant, release and report. The claim text is exactly the driver's own, so the driver's claim is a same-text renewal.
+WHAT="EXCLUSIVE: co-op server + up to 8 headless clients, series i2 (scratch copy, port 5461)"
+"$T/quiet-required.sh" want engineperf EXCLUSIVE 2>&1 | tail -1
+ok=0
+while [ $(date +%s) -lt $GIVEUP ]; do
+  o=$("$T/quiet-required.sh" claim engineperf 45 "$WHAT" 2>&1); echo "$o" | grep -q "^claimed" && { ok=1; break; }
+  now=$(date +%s); [ $((now - last)) -ge 900 ] && { echo "$(date +%T) status: queued, claim refused: $(echo "$o" | head -1 | cut -c1-140)"; last=$now; }
+  sleep 60
 done
+[ $ok = 1 ] || { "$T/quiet-required.sh" withdraw engineperf | tail -1; echo "$(date +%T) GIVE UP: no exclusive slot"; note "engineperf: i2 waiter GAVE UP: gate open but no exclusive slot. Nothing booted; withdrawn from the queue."; exit 5; }
+GRANT=$(date +%s); echo "$(date +%T) claim granted, load $(cut -d' ' -f1-3 /proc/loadavg); waiting inside the claim for load under 2 for 3 min"
+n=0; while [ $n -lt 7 ] && [ $(( $(date +%s) - GRANT )) -lt 1200 ]; do l=$(cut -d' ' -f1 /proc/loadavg)
+  if awk -v l="$l" 'BEGIN{exit !(l<2)}'; then n=$((n+1)); else n=0; fi
+  echo "$(date +%T) load $l ($n of 7)"; [ $n -lt 7 ] && sleep 30; done
+if [ $n -lt 7 ]; then "$T/quiet-required.sh" release engineperf 2>&1 | tail -1
+  echo "$(date +%T) load did not settle within 20 min of the grant (now $(cut -d' ' -f1-3 /proc/loadavg)); released, i2 NOT started"
+  note "engineperf: i2 NOT started: held the box 20 min but the 1-min load never stayed under 2 for 3 min (now $(cut -d' ' -f1-3 /proc/loadavg)). Released; not queued."; exit 7; fi
+echo "$(date +%T) load settled ($(cut -d' ' -f1-3 /proc/loadavg)); starting i2"
+( sleep 100; [ -s out/coop_i2/conditions.txt ] && grep -q "^start" out/coop_i2/conditions.txt && [ $(( $(date +%s) - $(stat -c %Y out/coop_i2/conditions.txt) )) -lt 200 ] && note "engineperf: i2 (inert boot) STARTED $(head -1 out/coop_i2/conditions.txt | cut -d' ' -f2-3) under my EXCLUSIVE claim (granted $(date -d @$GRANT +%T), load settled first), after: $g" ) &
+tools/coop_series.sh i2 -fp_inert2; rc=$?; echo "$(date +%T) === i2 rc=$rc"
+[ $rc = 3 ] && "$T/quiet-required.sh" release engineperf 2>&1 | tail -1
 wait; "$T/quiet-required.sh" withdraw engineperf 2>&1 | tail -1
 [ $rc = 0 ] || note "engineperf: i2 ended rc=$rc (4 = trace gate failed, 1 = server not ready). See my next report."
 exit $rc
