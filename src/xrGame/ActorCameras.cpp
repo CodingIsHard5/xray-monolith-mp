@@ -646,21 +646,37 @@ void CActor::cam_Update(float dt, float fFOV)
 				s_vr_feet = o.y;
 			else
 			{
-				float d = o.y - s_vr_feet;
-				const float st = 1.5f * trav;
-				clamp(d, -st, st);
-				s_vr_feet += d;
+				// milestone 7c attempt 4 (Amendment 28): while travelling, the feet height takes the body's height CHANGE of
+				// this frame (at most 1.5 x the travel: stairs and slopes come through), and NOT within 0.27 s after a
+				// body-box change (the swap jolts the body by several cm, also while walking). What is then left between
+				// the feet height and the body (a jolt's net effect, the body sitting low for a while after a swap) is
+				// taken up slowly, only while travelling faster than 0.1 m/s and outside that pause: at most 4 cm/s.
+				const float fdt = _max(Device.fTimeDelta, 0.0005f);
+				const bool swap_pause = s_vr_box_age <= 0.27f;
+				if (!swap_pause)
+				{
+					float d = o.y - s_vr_prev.y;
+					const float st = 1.5f * trav;
+					clamp(d, -st, st);
+					s_vr_feet += d;
+					if (trav / fdt > 0.1f)
+					{
+						float r = o.y - s_vr_feet;
+						const float rm = 0.04f * fdt;
+						clamp(r, -rm, rm);
+						s_vr_feet += r;
+					}
+				}
 				// milestone 7c attempt 3 (Amendment 27): a fall is followed, measured in seconds so that it does not depend
 				// on the frame rate. A fall speed of at least 0.30 m/s starts a 0.10 s latch; while it runs and the body is
 				// below the feet height and the last body-box change is more than 0.27 s ago, the feet height goes down
 				// to the body. (The box swap moves the body a few cm for some frames; that must stay out of the view.)
 				// Upward moves in place are not followed.
-				const float fdt = _max(Device.fTimeDelta, 0.0005f);
 				if ((s_vr_prev.y - o.y) / fdt >= 0.30f)
 					s_vr_fall = 0.10f;
 				else if (s_vr_fall > 0.f)
 					s_vr_fall -= fdt;
-				if (s_vr_fall > 0.f && s_vr_box_age > 0.27f && o.y < s_vr_feet)
+				if (s_vr_fall > 0.f && !swap_pause && o.y < s_vr_feet)
 				{
 					s_vr_feet = o.y;
 					++g_vr_base.fall_count;
