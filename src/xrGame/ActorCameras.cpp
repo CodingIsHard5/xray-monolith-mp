@@ -618,7 +618,35 @@ void CActor::cam_Update(float dt, float fFOV)
 		Fvector box0;
 		character_physics_support()->movement()->Boxes()[0].getsize(box0);
 		const float vr_h = vr_base_height(this, CurrentHeight, m_fCamHeightFactor * (box0.y - cammera_into_collision_shift));
-		g_vr_base.pos.set(o.x, o.y + vr_h + current_ik_cam_shift + (fPrevCamPos - flCurrentPlayerY), o.z);
+		// milestone 7b attempt 2 (Amendment 24): the VR view must not inherit the body's vertical corrections (the game
+		// lifts the body a few cm for some frames when it swaps the body box, and rests it at slightly different heights
+		// per box). The base hangs on a VR feet height that (1) follows the body's height only as far as the body
+		// travels horizontally (slope 1.5: stairs and slopes come through, spread over the travel), (2) never differs
+		// from the body's height by more than 15 cm (falls, jumps, lifts), (3) snaps on a teleport or a new actor.
+		// Standing still, the body can move underneath and the view stays on the tracked head. -vr_feet_raw = the old
+		// behaviour (the flat camera's stair smoothing), kept for the control run.
+		static const bool s_feet_raw = !!strstr(Core.Params, "-vr_feet_raw");
+		static float s_vr_feet = 0.f;
+		static Fvector s_vr_prev = {0.f, 0.f, 0.f};
+		static const CActor* s_vr_who = nullptr;
+		{
+			const float tx = o.x - s_vr_prev.x, tz = o.z - s_vr_prev.z;
+			const float trav = _sqrt(tx * tx + tz * tz);
+			if (s_vr_who != this || _abs(o.y - s_vr_feet) > 1.f || trav > 2.f)
+				s_vr_feet = o.y;
+			else
+			{
+				float d = o.y - s_vr_feet;
+				const float st = 1.5f * trav;
+				clamp(d, -st, st);
+				s_vr_feet += d;
+				clamp(s_vr_feet, o.y - 0.15f, o.y + 0.15f);
+			}
+			s_vr_prev = o;
+			s_vr_who = this;
+		}
+		const float vr_feet = s_feet_raw ? o.y + (fPrevCamPos - flCurrentPlayerY) : s_vr_feet;
+		g_vr_base.pos.set(o.x, vr_feet + vr_h + current_ik_cam_shift, o.z);
 		g_vr_base.actor_pos.set(o); // milestone 7: logged with the frame this base is used in
 		const Fvector& d = cameras[eacFirstEye]->vDirection;
 		g_vr_base.aim_heading = atan2f(d.x, d.z);
