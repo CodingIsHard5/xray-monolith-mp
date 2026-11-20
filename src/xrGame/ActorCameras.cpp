@@ -629,17 +629,17 @@ void CActor::cam_Update(float dt, float fFOV)
 		static float s_vr_feet = 0.f;
 		static Fvector s_vr_prev = {0.f, 0.f, 0.f};
 		static const CActor* s_vr_who = nullptr;
-		static int s_vr_fall = 0, s_vr_box_age = 1000;
+		static float s_vr_fall = 0.f, s_vr_box_age = 1000.f; // seconds
 		static u32 s_vr_box = u32(-1);
 		{
 			const u32 box = character_physics_support()->movement()->BoxID();
 			if (box != s_vr_box)
 			{
 				s_vr_box = box;
-				s_vr_box_age = 0;
+				s_vr_box_age = 0.f;
 			}
-			else if (s_vr_box_age < 1000)
-				++s_vr_box_age;
+			else if (s_vr_box_age < 1000.f)
+				s_vr_box_age += Device.fTimeDelta;
 			const float tx = o.x - s_vr_prev.x, tz = o.z - s_vr_prev.z;
 			const float trav = _sqrt(tx * tx + tz * tz);
 			if (s_vr_who != this || _abs(o.y - s_vr_feet) > 1.f || trav > 2.f)
@@ -650,15 +650,17 @@ void CActor::cam_Update(float dt, float fFOV)
 				const float st = 1.5f * trav;
 				clamp(d, -st, st);
 				s_vr_feet += d;
-				// milestone 7c attempt 2 (Amendment 26): a fall is followed. When the body is below the feet height and
-				// dropped at least 10 mm this frame (or did within the last 3 frames, for the landing), the feet height
-				// goes down to the body. Not within 8 frames after a body-box change: the box swap moves the body a few
-				// cm for some frames and that must stay out of the view. Upward moves in place are not followed.
-				if (s_vr_prev.y - o.y >= 0.010f)
-					s_vr_fall = 3;
-				else if (s_vr_fall > 0)
-					--s_vr_fall;
-				if (s_vr_fall > 0 && s_vr_box_age > 8 && o.y < s_vr_feet)
+				// milestone 7c attempt 3 (Amendment 27): a fall is followed, measured in seconds so that it does not depend
+				// on the frame rate. A fall speed of at least 0.30 m/s starts a 0.10 s latch; while it runs and the body is
+				// below the feet height and the last body-box change is more than 0.27 s ago, the feet height goes down
+				// to the body. (The box swap moves the body a few cm for some frames; that must stay out of the view.)
+				// Upward moves in place are not followed.
+				const float fdt = _max(Device.fTimeDelta, 0.0005f);
+				if ((s_vr_prev.y - o.y) / fdt >= 0.30f)
+					s_vr_fall = 0.10f;
+				else if (s_vr_fall > 0.f)
+					s_vr_fall -= fdt;
+				if (s_vr_fall > 0.f && s_vr_box_age > 0.27f && o.y < s_vr_feet)
 				{
 					s_vr_feet = o.y;
 					++g_vr_base.fall_count;
