@@ -629,7 +629,17 @@ void CActor::cam_Update(float dt, float fFOV)
 		static float s_vr_feet = 0.f;
 		static Fvector s_vr_prev = {0.f, 0.f, 0.f};
 		static const CActor* s_vr_who = nullptr;
+		static int s_vr_fall = 0, s_vr_box_age = 1000;
+		static u32 s_vr_box = u32(-1);
 		{
+			const u32 box = character_physics_support()->movement()->BoxID();
+			if (box != s_vr_box)
+			{
+				s_vr_box = box;
+				s_vr_box_age = 0;
+			}
+			else if (s_vr_box_age < 1000)
+				++s_vr_box_age;
 			const float tx = o.x - s_vr_prev.x, tz = o.z - s_vr_prev.z;
 			const float trav = _sqrt(tx * tx + tz * tz);
 			if (s_vr_who != this || _abs(o.y - s_vr_feet) > 1.f || trav > 2.f)
@@ -640,6 +650,16 @@ void CActor::cam_Update(float dt, float fFOV)
 				const float st = 1.5f * trav;
 				clamp(d, -st, st);
 				s_vr_feet += d;
+				// milestone 7c attempt 2 (Amendment 26): a fall is followed. When the body is below the feet height and
+				// dropped at least 10 mm this frame (or did within the last 3 frames, for the landing), the feet height
+				// goes down to the body. Not within 8 frames after a body-box change: the box swap moves the body a few
+				// cm for some frames and that must stay out of the view. Upward moves in place are not followed.
+				if (s_vr_prev.y - o.y >= 0.010f)
+					s_vr_fall = 3;
+				else if (s_vr_fall > 0)
+					--s_vr_fall;
+				if (s_vr_fall > 0 && s_vr_box_age > 8 && o.y < s_vr_feet)
+					s_vr_feet = o.y;
 				clamp(s_vr_feet, o.y - 0.15f, o.y + 0.15f);
 			}
 			s_vr_prev = o;
