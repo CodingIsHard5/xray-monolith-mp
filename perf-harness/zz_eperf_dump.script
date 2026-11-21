@@ -211,8 +211,142 @@ local function on_update()
 	end
 end
 
+-- ===== tier (b) NORMAL-MODE path (2026-11-20). Used only with -tb_dump and WITHOUT -det_mode; the det path above never
+-- calls anything in this block. No reseed, no os.time/os.clock override, no RNG tracing, no det_* console commands.
+--   -tb_dump -det_tag <t> -det_times a,b,c : alife_dump_<t>_<k>.txt (same format) + tb_extra_<t>_<k>.txt at the start point
+--     (k=0) and at each listed engine time, quit after the last. Without -det_times: -det_interval/-det_checkpoints as above.
+--   -tb_skip N [-tb_skip_at s, default 60]  : must-fail control, skip the first N OFFLINE squad updates after that time
+--   -tb_walk s                              : every s engine seconds teleport the actor to the next smart terrain of its
+--     level (route = that level's smart terrains sorted by id, cyclic, fixed per save)
+local tb = not active and string.find(cl, "-tb_dump", 1, true) ~= nil
+local tb_skip_n = tonumber(string.match(cl, "%-tb_skip%s+(%d+)")) or 0
+local tb_skip_at = (tonumber(string.match(cl, "%-tb_skip_at%s+(%d+)")) or 60) * 1000
+local tb_skip_done, tb_skip_first, tb_skip_last = 0, nil, nil
+local tb_walk = tonumber(string.match(cl, "%-tb_walk%s+(%d+)"))
+local tb_route, tb_step = nil, 0
+
+local function tb_extra(k)
+	local path = getFS():update_path("$logs$", string.format("tb_extra_%s_%d.txt", tag, k))
+	local f = io.open(path, "w")
+	if not f then printf(string.format("! tb_dump: cannot open %s", path)) return end
+	local sim, gg = alife(), game_graph()
+	local function lvl(gv) return s(g(function() return sim:level_name(gg:vertex(gv):level_id()) end)) end
+	f:write(string.format("#tb_extra %d engine_ms %d upd %d\n", k, time_global() - start_t, upd))
+	f:write("info passes ", pass_count, "\n", "info time_ms ", time_global() - start_t, "\n")
+	f:write("info skip_n ", tb_skip_n, "\n", "info skip_done ", tb_skip_done, "\n", "info walk_step ", tb_step, "\n")
+	f:write("info skip_at_ms ", tb_skip_at, "\n", "info skip_first_ms ", s(tb_skip_first), "\n", "info skip_last_ms ", s(tb_skip_last), "\n")
+	f:write("info actor_level ", s(g(function() return level.name() end)), "\n")
+	-- sq <id> <section> <level> <game vertex> <smart id> <npc count>
+	-- cr <id> <section> <kind stalker|monster|-> <alive 0|1> <level> <game vertex> <squad id> <smart id>
+	-- sm <id> <name> <level> <assigned npc count>
+	for id = 0, 65534 do
+		local se = sim:object(id)
+		if se then
+			local gv = se.m_game_vertex_id
+			local alive = g(function() return se:alive() end)
+			if alive ~= nil then
+				local c = g(function() return se:clsid() end)
+				local kind = (c and g(function() return IsStalker(nil, c) end) and "stalker") or (c and g(function() return IsMonster(nil, c) end) and "monster") or "-"
+				f:write(string.format("cr\t%d\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n", id, se:section_name(), kind, alive and 1 or 0, lvl(gv), s(gv),
+					s(se.group_id), s(se.m_smart_terrain_id)))
+			end
+			if se.current_action ~= nil or se.assigned_target_id ~= nil or se.current_target_id ~= nil then
+				f:write(string.format("sq\t%d\t%s\t%s\t%s\t%s\t%s\n", id, se:section_name(), lvl(gv), s(gv), s(se.smart_id),
+					s(g(function() return se:npc_count() end))))
+			end
+			if se.npc_info ~= nil then
+				local c = 0 for _ in pairs(se.npc_info) do c = c + 1 end
+				f:write(string.format("sm\t%d\t%s\t%s\t%d\n", id, se:name(), lvl(gv), c))
+			end
+		end
+	end
+	f:write("#end\n")
+	f:close()
+end
+
+local function tb_walk_step()
+	if not tb_route then
+		tb_route = {}
+		local sim, gg = alife(), game_graph()
+		local here = g(function() return gg:vertex(db.actor:game_vertex_id()):level_id() end)
+		for id = 0, 65534 do
+			local se = sim:object(id)
+			if se and se.npc_info ~= nil and here and g(function() return gg:vertex(se.m_game_vertex_id):level_id() end) == here then
+				tb_route[#tb_route + 1] = se
+			end
+		end -- ascending id order by construction
+		printf(string.format("* tb_walk: route of %d smart terrains, step every %d s", #tb_route, tb_walk))
+	end
+	if #tb_route == 0 or time_global() - start_t < (tb_step + 1) * tb_walk * 1000 then return end
+	tb_step = tb_step + 1
+	local se = tb_route[(tb_step - 1) % #tb_route + 1]
+	local p = g(function() return level.vertex_position(se.m_level_vertex_id) end)
+	if p then db.actor:set_actor_position(p) end
+	printf(string.format("* tb_walk: step %d at engine_ms %d -> smart %d (%s) hp=%.3f", tb_step, time_global() - start_t, se.id, se:name(), db.actor.health))
+end
+
+local function tb_on_update()
+	if not start_t then
+		start_t = time_global()
+		dump(0)
+		tb_extra(0)
+		get_console():execute("flush")
+	end
+	upd = upd + 1
+	if tb_walk and tb_walk > 0 then tb_walk_step() end
+	if done < total and time_global() - start_t >= (times[done + 1] or (done + 1) * interval) then
+		done = done + 1
+		dump(done)
+		tb_extra(done)
+		if done >= total then quit_at = upd end
+		get_console():execute("flush")
+	end
+	if upd % 300 == 0 then get_console():execute("flush") end
+	if quit_at and upd >= quit_at then
+		quit_at = nil
+		get_console():execute("quit")
+	end
+end
+
+local function tb_start()
+	-- pass counter (same definition as -det_counters: a frame in which an offline squad/smart script update ran);
+	-- installed BEFORE the skip wrapper, so a skipped update is not counted
+	local cls = sim_squad_scripted and sim_squad_scripted.sim_squad_scripted
+	if cls then
+		local counted_update = cls.update
+		cls.update = function(self, ...) if not self.online then note_pass() end return counted_update(self, ...) end
+	end
+	local st = smart_terrain and smart_terrain.se_smart_terrain
+	if st and st.update then
+		local smart_update = st.update
+		st.update = function(self, ...) if not self.online then note_pass() end return smart_update(self, ...) end
+	end
+	-- same rule as -det_perturb skip -det_perturb_n N
+	if tb_skip_n > 0 and cls then
+		local real_update = cls.update
+		cls.update = function(self, ...)
+			if tb_skip_done < tb_skip_n and start_t and time_global() - start_t >= tb_skip_at and not self.online then
+				tb_skip_done = tb_skip_done + 1
+				local t = time_global() - start_t
+				tb_skip_first = tb_skip_first or t
+				tb_skip_last = t
+				if tb_skip_done == tb_skip_n then
+					printf(string.format("* tb_skip: done n=%d skip_at_ms=%d first_ms=%d last_ms=%d", tb_skip_n, tb_skip_at, tb_skip_first, tb_skip_last))
+				end
+				return
+			end
+			return real_update(self, ...)
+		end
+	end
+	RegisterScriptCallback("actor_on_update", tb_on_update)
+	printf(string.format("* tb_dump: installed (tag %s, %d checkpoints, skip %d at %d ms, walk %s)", tag, total, tb_skip_n, tb_skip_at, tostring(tb_walk)))
+end
+
 function on_game_start()
-	if not active then return end
+	if not active then
+		if tb then tb_start() end
+		return
+	end
 	-- Wall-clock-free os.time/os.clock for scripts (loadscreen.script seeds math.random from os.time() on every
 	-- load screen). The engine-side override in script_storage.cpp does not survive to this point, so do it here.
 	local os_time = os.time
