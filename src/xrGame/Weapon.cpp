@@ -1430,6 +1430,8 @@ void CWeapon::OnH_B_Chield()
 
 extern u32 hud_adj_mode;
 
+extern bool vr_no_idle_fidget(); // player_hud.cpp: VR only
+
 bool CWeapon::AllowBore()
 {
 	return !Actor()->is_safemode();
@@ -1461,7 +1463,7 @@ void CWeapon::UpdateCL()
 				!IsZoomed() &&
 				g_player_hud->attached_item(1) == NULL)
 			{
-				if (AllowBore())
+				if (AllowBore() && !vr_no_idle_fidget())
 					SwitchState(eBore);
 
 				ResetSubStateTime();

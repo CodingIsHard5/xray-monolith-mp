@@ -245,6 +245,8 @@ void CMissile::OnH_B_Independent(bool just_before_destroy)
 
 extern u32 hud_adj_mode;
 
+extern bool vr_no_idle_fidget(); // player_hud.cpp: VR only
+
 void CMissile::UpdateCL()
 {
 	m_dwStateTime += Device.dwTimeDelta;
@@ -256,7 +258,7 @@ void CMissile::UpdateCL()
 	{
 		if (hud_adj_mode == 0 && g_player_hud->script_anim_part == u8(-1) && GetState() == eIdle && (Device.dwTimeGlobal - m_dw_curr_substate_time > 20000))
 		{
-			if (!pActor->is_safemode())
+			if (!pActor->is_safemode() && !vr_no_idle_fidget())
 				SwitchState(eBore);
 
 			ResetSubStateTime();

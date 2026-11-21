@@ -1459,6 +1459,21 @@ struct vr_reload_state
 };
 static vr_reload_state s_vr_rl = {};
 
+// VR only: a gun (or bolt, grenade) held in the hand does not start the game's idle fidget animation ("anm_bore") by
+// itself; in the flat game g_vr_track.head0_set is never set, so nothing changes there. -vr_fidget = the game's own.
+bool vr_no_idle_fidget()
+{
+	static int s_on = -1;
+	if (!g_vr_track.head0_set)
+		return false;
+	if (s_on < 0)
+	{
+		s_on = strstr(Core.Params, "-vr_fidget") ? 0 : 1;
+		Msg("* [vr3] idle fidget animation %s", s_on ? "off for the held item" : "ON (-vr_fidget): the game's own");
+	}
+	return s_on == 1;
+}
+
 static bool vr_reload_manual(CWeaponMagazined* W)
 {
 	vr_reload_state& S = s_vr_rl;
