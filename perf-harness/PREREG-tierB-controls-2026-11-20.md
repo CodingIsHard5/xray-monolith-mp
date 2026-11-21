@@ -129,3 +129,10 @@ Fixed before slice 1 and committed with this note:
 - Self-test tools/selftest/tb_settle_selftest.sh: fake load 3.0 then 1.5 -> waits, then starts at 1.5; witness W1
   (wait removed) starts at 3.0; witness W2 (heavy process present) waits to the cap; settle precedes both guards.
   All passed at 2026-11-21 03:43:14 EST.
+
+## Note (2026-11-21 18:09:21 EST): slices at any hour (Overseer; Caden away six days, "use the PC whenever")
+
+- The 01:00-08:00 window is lifted (TB_ANYTIME=1). Each slice: at most 3 h under one EXCLUSIVE claim through WANT.
+  After each slice: release, then wait 25 min or until another worker holds the box, whichever is first, before the
+  next WANT. Unchanged: settle wait before every run, 21-min run timeout, protected-title and Roblox checks.
+  Self-test cases added for the gap. Scheduling only; no rule, threshold or statistic changed.

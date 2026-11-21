@@ -21,4 +21,12 @@ r=$(TB_LOADAVG_FILE=$F/la TB_HEAVY_CMD="echo 180%:other" TB_SETTLE_POLL=1 TB_SET
 if grep -q ' cap$' <<<"$r"; then echo "PASS witness W2 (heavy process) waits to the cap: $r"; else echo "FAIL W2: $r"; fail=1; fi
 a=$(grep -n 'settle) before' tools/tb_slice.sh | cut -d: -f1); b=$(grep -n 'SL_END - \$(date' tools/tb_slice.sh | cut -d: -f1); c=$(grep -n 'secs_to_8) -lt 1320' tools/tb_slice.sh | cut -d: -f1)
 if [ -n "$a" ] && [ "$a" -lt "$b" ] && [ "$a" -lt "$c" ]; then echo "PASS settle (line $a) precedes the guards (lines $b, $c)"; else echo "FAIL guard order $a $b $c"; fail=1; fi
+# yield_gap (2026-11-21, any-hour slices): ends early when another worker holds the box, else after TB_GAP s.
+g=$(sed -n '/^yield_gap()/,/gap: \${TB_GAP/p' tools/tb_slice.sh | sed 's/sleep 30/sleep 1/')
+mkdir -p $F/T; printf '#!/bin/bash\necho "HELD: 2026-11-21 10:00:00 gammavr 60 x"\n' > $F/T/quiet-required.sh; chmod +x $F/T/quiet-required.sh
+r=$(T=$F/T TB_GAP=5 bash -c "log() { echo \"\$*\"; }"$'\n'"$g"$'\n'"yield_gap")
+grep -q 'another worker claimed after 0s' <<<"$r" && echo "PASS gap ends at once when another worker holds the box" || { echo "FAIL gap/other: $r"; fail=1; }
+printf '#!/bin/bash\necho "HELD: 2026-11-21 10:00:00 engineperf 30 x"\necho clear\n' > $F/T/quiet-required.sh
+t0=$(date +%s); r=$(T=$F/T TB_GAP=3 bash -c "log() { echo \"\$*\"; }"$'\n'"$g"$'\n'"yield_gap"); dt=$(( $(date +%s) - t0 ))
+grep -q 'gap: 3s passed' <<<"$r" && [ $dt -ge 3 ] && echo "PASS gap runs its full length when only engineperf shows (${dt}s)" || { echo "FAIL gap/self: $r"; fail=1; }
 exit $fail

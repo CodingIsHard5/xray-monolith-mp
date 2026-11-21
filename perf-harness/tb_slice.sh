@@ -18,8 +18,14 @@ log() { echo "$(date '+%F %T') $*" | tee -a $ST/slice.log; }
 note() { timeout 60 "$T/notify-overseer.sh" $W - <<<"engineperf: $1" >/dev/null 2>&1; }
 # TB_END_H (default 8): hour the nightly window closes. TB_ONE_SLICE=1: leave after one slice (or one failed attempt).
 END_H="${TB_END_H:-8}"
-in_window() { local h; h=$(date +%-H); [ "$h" -ge 1 ] && [ "$h" -lt "$END_H" ]; }
-secs_to_8() { echo $(( $(date -d "today $END_H:00" +%s) - $(date +%s) )); }
+# TB_ANYTIME=1 (Overseer 2026-11-21, Caden away 6 days): no wall-clock window; slices at any hour.
+in_window() { [ "${TB_ANYTIME:-0}" = 1 ] && return 0; local h; h=$(date +%-H); [ "$h" -ge 1 ] && [ "$h" -lt "$END_H" ]; }
+secs_to_8() { [ "${TB_ANYTIME:-0}" = 1 ] && { echo 999999; return; }; echo $(( $(date -d "today $END_H:00" +%s) - $(date +%s) )); }
+# yield_gap: after a slice, wait TB_GAP s (default 1500) or until another worker holds the box, whichever is first.
+yield_gap() { local t0; t0=$(date +%s)
+  while [ $(( $(date +%s) - t0 )) -lt "${TB_GAP:-1500}" ]; do
+    "$T/quiet-required.sh" check 2>/dev/null | awk '($1=="HELD:"||$1=="SLOT2:") && $4!="engineperf"{f=1} END{exit !f}' && { log "gap: another worker claimed after $(( $(date +%s) - t0 ))s"; return; }
+    sleep 30; done; log "gap: ${TB_GAP:-1500}s passed"; }
 pending() { { grep -v '^#' tools/tb_order.txt; cat $ST/rerun.txt; } | while IFS='|' read -r tag env extra; do [ -n "$tag" ] && ! grep -qx "$tag" $ST/done.txt && echo "$tag|$env|$extra"; done; }
 # smoke_ok [extra-file [dump-file]]: the engine (wine) writes CRLF; every field is read from a CR-stripped copy ($x).
 smoke_ok() { local raw=${1:-out/tb_smoke/tb_extra_smoke_3.txt} dump=${2:-out/tb_smoke/alife_dump_smoke_3.txt} x
@@ -77,6 +83,6 @@ while [ -n "$(pending)" ]; do
   note "tier (b) controls: slice ended $(date +%T): $n runs this slice, $(grep -c . $ST/done.txt) of 42 done, $left left. Reason: ${stop:-list finished}."
   [ "${HARD:-0}" = 1 ] && { log "STOPPED on a failed run; not continuing without a ruling"; exit 4; }
   [ "${TB_ONE_SLICE:-0}" = 1 ] && [ "$left" -gt 0 ] && { log "one slice only tonight (TB_ONE_SLICE): leaving, $left left for a later night"; exit 0; }
-  [ "$left" -gt 0 ] && sleep 300          # gap between slices so queued workers get the box
+  [ "$left" -gt 0 ] && yield_gap          # gap between slices so queued workers get the box
 done
 log "all runs done"; note "tier (b) controls: ALL runs done ($(grep -c . $ST/done.txt)). Scoring next, as registered."; exit 0
