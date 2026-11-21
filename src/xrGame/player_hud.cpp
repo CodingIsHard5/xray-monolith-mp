@@ -3515,6 +3515,8 @@ void player_hud::vr_log_grip_frame()
 		gt.x, gt.y, gt.z, gp_txt, bar_txt, G.lag, g_vr_kick.pitch, g_vr_kick.yaw, aim_txt, mz_txt, bw_txt, ca_txt, h2_txt);
 }
 
+static bool vr_mag_log_window(); // below (milestone 8b); also gates the 10a [vr3flat] line
+
 bool player_hud::vr_place_at_grip()
 {
 	attachable_hud_item* item = m_attached_items[0] ? m_attached_items[0] : m_attached_items[1];
@@ -3527,6 +3529,29 @@ bool player_hud::vr_place_at_grip()
 	target.mul_43(g_vr_track.track_to_world, gun_track); // grip pose first, then tracking space -> world
 	const Fmatrix grip_world = target; // milestone 4: the controller grip pose in the world (rigid), pivot of the kick
 
+	// milestone 10a note 9: with the game's PDA as the active item, its own (flat game) pose relative to the HUD base
+	// (m_transform, the camera the flat game holds it in front of), before the VR placement replaces it
+	if (vr_mag_log_window() && item->m_parent_hud_item && item->m_parent_hud_item->has_object() &&
+		smart_cast<CPda*>(&item->m_parent_hud_item->object()))
+	{
+		static u32 s_flat_frame = u32(-1);
+		if (s_flat_frame != g_vr_track.frame)
+		{
+			s_flat_frame = g_vr_track.frame;
+			Fmatrix inv, rel;
+			inv.invert(m_transform);
+			rel.mul_43(inv, item->m_item_transform);
+			Fvector a[3] = {rel.i, rel.j, rel.k};
+			for (Fvector& v : a)
+				v.normalize_safe();
+			Fvector toeye = Fvector().set(rel.c).invert();
+			toeye.normalize_safe();
+			const float facing = rad2deg(acosf(_max(-1.f, _min(1.f, a[1].dotproduct(toeye)))));
+			Msg("* [vr3flat] frame %u item %s pos %.5f %.5f %.5f i %.5f %.5f %.5f j %.5f %.5f %.5f k %.5f %.5f %.5f facing_deg %.2f",
+				g_vr_track.frame, item->m_sect_name.c_str(), rel.c.x, rel.c.y, rel.c.z, a[0].x, a[0].y, a[0].z,
+				a[1].x, a[1].y, a[1].z, a[2].x, a[2].y, a[2].z, facing);
+		}
+	}
 	// keep the item's own scale (if its transform has one): only position and orientation are replaced
 	const Fmatrix& cur = item->m_item_transform;
 	const float si = cur.i.magnitude(), sj = cur.j.magnitude(), sk = cur.k.magnitude();
@@ -4125,6 +4150,8 @@ struct vr_pda_vis
 	shared_str sect;       // PDA item section the copy was made for
 	bool failed;
 	Fvector grip_pos, screen_c;
+	Fvector grip_rot;      // pitch, yaw, roll degrees, as the gun's grip_rot (Amendment 34 note 9)
+	Fmatrix frame_inv;     // inverse(translate(grip_pos) * Rframe), model placement relative to the off hand
 	bool screen_set;
 	Fmatrix xf;            // as drawn
 	bool frozen;           // -vr_pda_noattach: xf kept from the first draw after opening
@@ -4205,25 +4232,42 @@ static void vr_pda_draw(IDSGraphManager* DM)
 					src = fam;
 			}
 		}
+		V.grip_rot.set(0.f, 0.f, 0.f);
 		if (src && !C.off)
+		{
 			V.grip_pos = C.ini->r_fvector3(src, "grip_pos");
+			if (C.ini->line_exist(src, "grip_rot"))
+				V.grip_rot = C.ini->r_fvector3(src, "grip_rot");
+		}
+		{
+			// Rframe as vr_grip_lookup builds it for the gun: R = Ry(yaw) * Rx(-pitch) * Rz(roll); frame = R with c = grip_pos
+			Fmatrix Ry, Rx, Rz, R, F;
+			Ry.rotateY(deg2rad(V.grip_rot.y));
+			Rx.rotateX(-deg2rad(V.grip_rot.x));
+			Rz.rotateZ(deg2rad(V.grip_rot.z));
+			R.mul_43(Ry, Rx);
+			R.mulB_43(Rz);
+			F.set(R);
+			F.c.set(V.grip_pos);
+			V.frame_inv.invert(F);
+		}
 		if (src && C.ini->line_exist(src, "screen_c"))
 		{
 			V.screen_c = C.ini->r_fvector3(src, "screen_c");
 			V.screen_set = true;
 		}
-		Msg("* [vr3pda] copy of %s: model %s %s; grip_pos %.4f %.4f %.4f from %s%s; screen_c %.4f %.4f %.4f (%s)", V.sect.c_str(),
-			iv ? iv : "(none)", V.vis ? "made" : "NOT made", V.grip_pos.x, V.grip_pos.y, V.grip_pos.z, src ? src : "none",
+		Msg("* [vr3pda] copy of %s: model %s %s; grip_pos %.4f %.4f %.4f grip_rot %.3f %.3f %.3f from %s%s; screen_c %.4f %.4f %.4f (%s)", V.sect.c_str(),
+			iv ? iv : "(none)", V.vis ? "made" : "NOT made", V.grip_pos.x, V.grip_pos.y, V.grip_pos.z,
+			V.grip_rot.x, V.grip_rot.y, V.grip_rot.z, src ? src : "none",
 			C.off ? " (-vr_grip_off)" : "", V.screen_c.x, V.screen_c.y, V.screen_c.z, V.screen_set ? "config" : "model origin");
 	}
 	if (!V.vis)
 		return;
-	Fmatrix off_track, off_w, ginv;
+	Fmatrix off_track, off_w;
 	vr_pose_matrix(G.off, off_track);
 	off_w.mul_43(g_vr_track.track_to_world, off_track);
-	ginv.translate(Fvector().set(V.grip_pos).invert());
 	if (!(S.noattach && V.frozen))
-		V.xf.mul_43(off_w, ginv);
+		V.xf.mul_43(off_w, V.frame_inv);
 	V.frozen = true;
 	if (V.K)
 	{
@@ -4234,8 +4278,20 @@ static void vr_pda_draw(IDSGraphManager* DM)
 	// read back for the log: the model transform as passed to the draw; what it should be, worked out separately
 	S.drawn++;
 	S.pda_w.set(V.xf.c);
-	Fvector gp_neg = Fvector().set(V.grip_pos).invert();
-	off_w.transform_tiny(S.want_w, gp_neg);
+	// want: the model origin as the off hand + offset puts it, worked out without frame_inv: origin = -(R^T * grip_pos)
+	{
+		Fmatrix Ry, Rx, Rz, R, Rt;
+		Ry.rotateY(deg2rad(V.grip_rot.y));
+		Rx.rotateX(-deg2rad(V.grip_rot.x));
+		Rz.rotateZ(deg2rad(V.grip_rot.z));
+		R.mul_43(Ry, Rx);
+		R.mulB_43(Rz);
+		Rt.transpose(R);
+		Fvector o;
+		Rt.transform_dir(o, V.grip_pos);
+		o.invert();
+		off_w.transform_tiny(S.want_w, o);
+	}
 	S.place_ok = true;
 	if (vr_mag_log_window())
 	{
@@ -4245,7 +4301,14 @@ static void vr_pda_draw(IDSGraphManager* DM)
 		float px = -1.f, py = -1.f;
 		if (!vr_hud_pixel(sc, px, py))
 			px = py = -1.f;
-		Msg("* [vr3pdav] frame %u eye %d px %.2f %.2f screen_world %.4f %.4f %.4f", g_vr_track.frame, eye, px, py, sc.x, sc.y, sc.z);
+		// facing: the screen normal (model +y, note 9) against the direction from the screen centre to this eye, degrees
+		Fvector n, toeye;
+		V.xf.transform_dir(n, Fvector().set(0.f, 1.f, 0.f));
+		n.normalize_safe();
+		toeye.sub(Device.vCameraPosition, sc);
+		toeye.normalize_safe();
+		const float facing = rad2deg(acosf(_max(-1.f, _min(1.f, n.dotproduct(toeye)))));
+		Msg("* [vr3pdav] frame %u eye %d px %.2f %.2f screen_world %.4f %.4f %.4f facing_deg %.2f", g_vr_track.frame, eye, px, py, sc.x, sc.y, sc.z, facing);
 		if (int(g_vr_track.frame) == S.grid_frame)
 			for (int a = -4; a <= 4; ++a)
 				for (int b = -4; b <= 4; ++b)
