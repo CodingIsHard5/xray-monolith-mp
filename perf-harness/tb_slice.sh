@@ -29,6 +29,15 @@ smoke_ok() { local raw=${1:-out/tb_smoke/tb_extra_smoke_3.txt} dump=${2:-out/tb_
   st=$(awk -F'\t' '$1=="cr" && $4=="stalker"' $x | wc -l); mo=$(awk -F'\t' '$1=="cr" && $4=="monster"' $x | wc -l); sm=$(grep -c '^sm' $x); rm -f "$x"
   echo "smoke: passes=$passes squads=$sq squads_without_level=$sqbad stalkers=$st monsters=$mo smarts=$sm"
   [ "${passes:-0}" -gt 0 ] && [ "$sq" -gt 50 ] && [ "$sqbad" -eq 0 ] && [ "$st" -gt 50 ] && [ "$mo" -gt 50 ] && [ "$sm" -gt 50 ]; }
+# settle: before EVERY run wait until the 1-minute load < 2 AND no other heavy process (Overseer ruling 2026-11-21).
+# Cap TB_SETTLE_MAX s (default 300, checked every 15 s); past the cap the run starts anyway and tb_run.sh marks it DISTURBED as before.
+# Prints "settle wait=<s>s load=<l1> heavy=[...] <ok|cap>". TB_LOADAVG_FILE / TB_HEAVY_CMD / TB_SETTLE_POLL exist for the self-test.
+heavy_ps() { ps -eo pcpu,pid,comm,args --sort=-pcpu | awk 'NR>1 && $1>=100 && $3!~/wineserver|Xvfb/ {print $1"%:"$3}' | head -5 | tr '\n' ' '; }
+settle() { local t0 l1 hv; t0=$(date +%s)
+  while :; do l1=$(cut -d' ' -f1 "${TB_LOADAVG_FILE:-/proc/loadavg}"); hv=$(${TB_HEAVY_CMD:-heavy_ps})
+    awk -v l="$l1" 'BEGIN{exit !(l<2)}' && [ -z "${hv// /}" ] && { echo "settle wait=$(( $(date +%s) - t0 ))s load=$l1 heavy=[] ok"; return 0; }
+    [ $(( $(date +%s) - t0 )) -ge "${TB_SETTLE_MAX:-300}" ] && { echo "settle wait=$(( $(date +%s) - t0 ))s load=$l1 heavy=[$hv] cap"; return 1; }
+    sleep "${TB_SETTLE_POLL:-15}"; done; }
 FIRST=1; total_done=0; HARD=0
 while [ -n "$(pending)" ]; do
   [ $(date +%s) -ge $END_ALL ] && { log "GIVE UP: nights used up, $(pending | wc -l) runs left"; note "tier (b) controls: scheduler GAVE UP after ${TB_NIGHTS:-4} nights, $(pending | wc -l) runs left."; exit 5; }
@@ -46,6 +55,7 @@ while [ -n "$(pending)" ]; do
   while :; do
     line=$(pending | head -1); [ -n "$line" ] || break
     IFS='|' read -r tag env extra <<<"$line"
+    log "$(settle) before $tag"                                  # wait counts against the guards below
     [ $(( SL_END - $(date +%s) )) -lt 1320 ] && { stop="slice time used"; break; }
     [ $(secs_to_8) -lt 1320 ] && { stop="$END_H:00 reached"; break; }
     "$T/protected-title-check.sh" >/dev/null 2>&1 && { stop="protected title running"; break; }

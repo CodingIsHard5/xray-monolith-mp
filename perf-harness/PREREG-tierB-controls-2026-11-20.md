@@ -114,3 +114,18 @@ Fixed before slice 1 and committed with this note:
 - Smoke judged: PASSED ON RE-READ AFTER A CHECKER FIX (Overseer ruling, 01:04, verified d23cec937). Values from
   out/tb_smoke/tb_extra_smoke_3.txt: passes 382, squads 575, squads without a level 0 (on field 4), stalkers 806,
   monsters 329, smarts 477; every registered threshold met. No threshold, rule, run order or statistic changed.
+
+## Note (2026-11-21 03:43:14 EST): between-runs settle wait (prospective; Overseer ruling)
+
+- Slice 1 (01:05:40-03:41:46, 2026-11-21): 10 runs, all rc 0; 9 flagged DISTURBED (1-minute load at start 2.10-3.75,
+  heavy_others empty every time). Each flagged run started about 2 s after the previous engine exited, so the load
+  was the tail of my own previous run: the scheduler settled the load only at slice start. Only r01 (load 1.08) is clean.
+- Those 9 (d10_01, r02, d100_01, r03, d1000_01, s01, h01, r04, d10_02) STAY EXCLUDED: their data is kept, unscored,
+  and will not be re-scored. Their _rr re-runs stand as queued.
+- From slice 2 on: before EVERY run the scheduler waits until the 1-minute load is below 2 and no other process is at
+  >= 100 % CPU, checking every 15 s, capped at 5 min; past the cap the run starts and tb_run.sh marks it DISTURBED as
+  before. The wait length is logged ("settle wait=..s"). The wait comes before the slice-time and 04:00 guards, so it
+  counts against them. The threshold stays at 2; no rule, threshold or statistic changed.
+- Self-test tools/selftest/tb_settle_selftest.sh: fake load 3.0 then 1.5 -> waits, then starts at 1.5; witness W1
+  (wait removed) starts at 3.0; witness W2 (heavy process present) waits to the cap; settle precedes both guards.
+  All passed at 2026-11-21 03:43:14 EST.
