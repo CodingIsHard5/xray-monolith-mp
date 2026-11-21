@@ -1507,6 +1507,108 @@ bool vr_reload_block(CWeaponMagazined* W)
 	return true;
 }
 
+// milestone 9a (Amendment 32): holsters, logic only. Two zones fixed to the body (head position, head yaw only), on the
+// gun-hand side: hip = firearm slot 2, shoulder = firearm slot 3. A grip press of the GUN hand inside a zone sends that
+// slot's key, as a player would: draws it, puts it away when it is the one held, or changes to it. Empty slot or press
+// outside both zones: nothing. All in tracking space, from the poses of the same read as the buttons.
+// -vr_holster_off = no zones. -vr_holster_hip / -vr_holster_shoulder "side down forward" (m), -vr_holster_radius r.
+struct vr_holster_state
+{
+	bool parsed, off;
+	float hip[3], sho[3], radius; // side (towards the gun hand), down, forward
+	bool prev_grab;
+};
+static vr_holster_state s_vr_hol = {false, false, {0.20f, 0.60f, 0.05f}, {0.20f, 0.10f, -0.15f}, 0.15f, false};
+
+static void vr_holster_update(const vr_input_info& I, CActor* A, bool allowed, bool grab_gun, bool log)
+{
+	vr_holster_state& S = s_vr_hol;
+	if (!S.parsed)
+	{
+		S.parsed = true;
+		S.off = !!strstr(Core.Params, "-vr_holster_off");
+		float a, b, c;
+		if (LPCSTR q = strstr(Core.Params, "-vr_holster_hip "))
+			if (sscanf(q + 16, "%f %f %f", &a, &b, &c) == 3)
+				S.hip[0] = a, S.hip[1] = b, S.hip[2] = c;
+		if (LPCSTR q = strstr(Core.Params, "-vr_holster_shoulder "))
+			if (sscanf(q + 21, "%f %f %f", &a, &b, &c) == 3)
+				S.sho[0] = a, S.sho[1] = b, S.sho[2] = c;
+		if (LPCSTR q = strstr(Core.Params, "-vr_holster_radius "))
+			if (sscanf(q + 19, "%f", &a) == 1 && a > 0.01f && a < 1.f)
+				S.radius = a;
+		if (S.off)
+			Msg("* [vr3hol] holsters OFF (-vr_holster_off)");
+		else
+			Msg("* [vr3hol] holsters on: hip (slot 2) side %.3f down %.3f forward %.3f, shoulder (slot 3) side %.3f down %.3f forward %.3f, radius %.3f",
+				S.hip[0], S.hip[1], S.hip[2], S.sho[0], S.sho[1], S.sho[2], S.radius);
+	}
+	const bool press = grab_gun && !S.prev_grab;
+	S.prev_grab = grab_gun; // a press seen while the zones cannot act is consumed, not kept for later
+	const int gun = I.gun ? 1 : 0;
+	const bool geo = I.head.valid && I.grip[gun].valid;
+	const bool can = !S.off && allowed && g_vr_track.head0_set && A && !A->Holder() && A->m_inventory;
+	Fvector zc[2];
+	zc[0].set(0.f, 0.f, 0.f);
+	zc[1].set(0.f, 0.f, 0.f);
+	float d[2] = {1000.f, 1000.f};
+	if (geo)
+	{
+		Fvector hf, hr;
+		vr_quat_rotate(I.head.qx, I.head.qy, I.head.qz, I.head.qw, Fvector().set(0.f, 0.f, 1.f), hf);
+		hf.y = 0.f;
+		if (hf.magnitude() < 0.01f)
+			hf.set(0.f, 0.f, 1.f);
+		hf.normalize();
+		hr.set(hf.z, 0.f, -hf.x);
+		const float side = gun ? 1.f : -1.f;
+		for (int z = 0; z < 2; ++z)
+		{
+			const float* o = z ? S.sho : S.hip;
+			zc[z].set(I.head.pos);
+			zc[z].y -= o[1];
+			zc[z].mad(hr, side * o[0]);
+			zc[z].mad(hf, o[2]);
+			d[z] = I.grip[gun].pos.distance_to(zc[z]);
+		}
+	}
+	LPCSTR ev = "none";
+	u16 cur = NO_ACTIVE_SLOT;
+	LPCSTR sect = "none";
+	bool has[2] = {false, false};
+	if (A && A->m_inventory)
+	{
+		CInventory& inv = A->inventory();
+		cur = inv.GetActiveSlot();
+		if (PIItem it = inv.ActiveItem())
+			sect = it->m_section_id.size() ? it->m_section_id.c_str() : "none";
+		has[0] = !!inv.ItemFromSlot(INV_SLOT_2);
+		has[1] = !!inv.ItemFromSlot(INV_SLOT_3);
+		if (press && can && geo)
+		{
+			// the nearer zone when the hand is inside both (they do not overlap with the default places)
+			int z = -1;
+			if (d[0] <= S.radius)
+				z = 0;
+			if (d[1] <= S.radius && (z < 0 || d[1] < d[0]))
+				z = 1;
+			if (z >= 0 && has[z])
+			{
+				const u16 slot = z ? INV_SLOT_3 : INV_SLOT_2;
+				ev = (cur == slot) ? "away" : (cur == INV_SLOT_2 || cur == INV_SLOT_3) ? "change" : "draw";
+				A->IR_OnKeyboardPress(kWPN_1 + int(slot) - int(KNIFE_SLOT));
+			}
+			else if (z >= 0)
+				ev = "empty";
+		}
+	}
+	if (log)
+		Msg("* [vr3hol] frame %u on %d slot %u section %s has %d %d grab %d geo %d d_hip %.4f d_sho %.4f event %s hip_track %.4f %.4f %.4f sho_track %.4f %.4f %.4f hand_track %.4f %.4f %.4f",
+			I.frame, can ? 1 : 0, unsigned(cur), sect, has[0] ? 1 : 0, has[1] ? 1 : 0, grab_gun ? 1 : 0, geo ? 1 : 0, d[0], d[1], ev,
+			zc[0].x, zc[0].y, zc[0].z, zc[1].x, zc[1].y, zc[1].z,
+			geo ? I.grip[gun].pos.x : 0.f, geo ? I.grip[gun].pos.y : 0.f, geo ? I.grip[gun].pos.z : 0.f);
+}
+
 // once per new controller read, in the game update
 static void vr_reload_update(const vr_input_info& I, CActor* A, bool allowed, bool grab, bool log)
 {
@@ -2863,6 +2965,8 @@ void vr_input_update()
 		s_vr_grab_held = s_grab[off];
 		// milestone 8a (Amendment 31): manual reload
 		vr_reload_update(I, g_actor, vr_fire_allowed(g_actor), s_vr_grab_held, s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to);
+		// milestone 9a (Amendment 32): holsters (gun hand's grip)
+		vr_holster_update(I, g_actor, vr_fire_allowed(g_actor), s_grab[gun], s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to);
 		if (s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to)
 			Msg("* [vr3inp] frame %u L trigger %.3f grab %.3f active %d %d R trigger %.3f grab %.3f active %d %d gun_hand %c fire_pressed %d grab_held %d",
 				I.frame, I.trigger[0], I.grab[0], I.trigger_active[0] ? 1 : 0, I.grab_active[0] ? 1 : 0,
