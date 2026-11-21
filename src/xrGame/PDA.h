@@ -97,7 +97,9 @@ protected:
 	float m_fLR_MovingFactor;
 	float m_fLR_InertiaFactor;
 	float m_fUD_InertiaFactor;
+public: // GammaVR milestone 10a: read by the VR free-hand PDA (player_hud.cpp)
 	bool hasEnoughBatteryPower(){ return (!IsUsingCondition() || (m_PdaEnabled && IsUsingCondition() && GetCondition() > m_fLowestBatteryCharge)); }
+protected:
 	static void _BCL JoystickCallback(CBoneInstance* B);
 	bool m_bNoticedEmptyBattery;
 	bool m_LastMBZoom;

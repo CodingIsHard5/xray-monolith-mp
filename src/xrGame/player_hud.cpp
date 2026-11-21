@@ -29,6 +29,9 @@
 #include "WeaponRPG7.h"
 #include "WeaponRG6.h"
 #include "WeaponAmmo.h" // GammaVR milestone 8b
+#include "PDA.h" // GammaVR milestone 10a
+#include "Actor_Flags.h"
+#include "ui/UIPdaWnd.h"
 #include <typeinfo>
 
 extern int g_nearwall;
@@ -1622,6 +1625,191 @@ static void vr_holster_update(const vr_input_info& I, CActor* A, bool allowed, b
 			geo ? I.grip[gun].pos.x : 0.f, geo ? I.grip[gun].pos.y : 0.f, geo ? I.grip[gun].pos.z : 0.f);
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// GammaVR milestone 10a step 1 (SPIKE_PLAN Amendment 34 note 7; Caden 2026-11-21: "if they keep a gun in the other hand keep
+// their gun"): the PDA in the FREE (off) hand while the gun stays the active item. The off hand's grip press in the chest
+// zone (head - 0.30 m down, 0.15 m forward in head yaw, radius 0.075) with no magazine in that hand shows the game's PDA
+// window (CUIPdaWnd ShowDialog(false) + Enable(false), as CPda::UpdateCL does for the 3D PDA) WITHOUT Activate(PDA_SLOT);
+// the screen texture rtPDA is drawn whenever that window is shown (CLevel::OnRender). A copy of the PDA's HUD model is
+// drawn at the off hand (vr_pda_draw, the 8b hand-magazine pattern). The same press again hides it. While VR shows it and
+// its input is NOT enabled, it does not stop the VR controls (vr_fire_allowed). The off hand holding the PDA does nothing
+// else (its grip is not passed to the magazine / support logic) until the grip is let go after closing.
+//   -vr_pda_off        control: the zone does nothing
+//   -vr_pda_noattach   TEST ONLY (mutation witness P2w): the copy stays where it was opened, not moved with the hand
+//   -vr_pda_gamepath   TEST ONLY (mutation witness P7w): the press uses the game's own kACTIVE_JOBS path (gun put away)
+//   -vr_pda_grid F     TEST ONLY (build check b): on VR frame F, log a grid of PDA model points projected per eye
+// Log (log window -vr_dbg_grip): [vr3pda] per VR frame, line format defined in tools/xr_m10a_check.py.
+struct vr_pda_state
+{
+	bool parsed, off, noattach, gamepath;
+	int grid_frame;
+	float zone_down, zone_fwd, radius;
+	bool shown;            // VR showed the PDA window and has not hidden it
+	bool prev_grab, block; // off-hand grip last update; the off hand's grip is kept from the other logic
+	u32 drawn, drawn_seen; // copy draws (render side, counted) and the count seen by the last log line
+	bool place_ok;         // pda / want below are from a draw
+	Fvector pda_w, want_w; // the copy's model origin as drawn / off hand + offset (render side, same frame)
+	Fvector zone_track, off_track, head_track;
+	float d_zone;
+	bool in_zone, empty;
+	u32 ev_frame;
+	LPCSTR ev;
+};
+static vr_pda_state s_vr_pda = {};
+
+static void vr_pda_parse()
+{
+	vr_pda_state& S = s_vr_pda;
+	if (S.parsed)
+		return;
+	S.parsed = true;
+	S.off = !!strstr(Core.Params, "-vr_pda_off");
+	S.noattach = !!strstr(Core.Params, "-vr_pda_noattach");
+	S.gamepath = !!strstr(Core.Params, "-vr_pda_gamepath");
+	S.grid_frame = -1;
+	if (LPCSTR q = strstr(Core.Params, "-vr_pda_grid "))
+		if (sscanf(q + 13, "%d", &S.grid_frame) != 1)
+			S.grid_frame = -1;
+	S.zone_down = 0.30f, S.zone_fwd = 0.15f, S.radius = 0.075f;
+	S.ev = "none";
+	S.ev_frame = u32(-1);
+	Msg("* [vr3pda] PDA in the free hand: %s%s%s%s; zone down %.3f forward %.3f radius %.3f", S.off ? "OFF (-vr_pda_off)" : "on",
+		S.noattach ? ", -vr_pda_noattach (TEST ONLY: not moved with the hand)" : "",
+		S.gamepath ? ", -vr_pda_gamepath (TEST ONLY: the game's own path, gun put away)" : "",
+		S.grid_frame >= 0 ? ", -vr_pda_grid (TEST ONLY)" : "", S.zone_down, S.zone_fwd, S.radius);
+}
+
+static CUIPdaWnd* vr_pda_wnd()
+{
+	return (CurrentGameUI() && &CurrentGameUI()->GetPdaMenu() != nullptr) ? &CurrentGameUI()->GetPdaMenu() : nullptr;
+}
+
+// the VR-shown PDA window, input not enabled: it does not stop the VR controls (vr_fire_allowed)
+static bool vr_pda_passes_input(CUIDialogWnd* top)
+{
+	const vr_pda_state& S = s_vr_pda;
+	CUIPdaWnd* W = vr_pda_wnd();
+	return S.shown && !S.gamepath && W && top == W && W->IsShown() && !W->IsEnabled();
+}
+
+static void vr_pda_hide(LPCSTR why)
+{
+	vr_pda_state& S = s_vr_pda;
+	if (CUIPdaWnd* W = vr_pda_wnd())
+		if (W->IsShown())
+			W->HideDialog();
+	S.shown = false;
+	if (why)
+		Msg("* [vr3pda] PDA window hidden: %s", why);
+}
+
+// returns true while the off hand's grip must be kept from the magazine / support logic
+static bool vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, bool grab_off, bool log)
+{
+	vr_pda_state& S = s_vr_pda;
+	vr_pda_parse();
+	const int gun = I.gun ? 1 : 0, off = 1 - gun;
+	const bool press = grab_off && !S.prev_grab;
+	S.prev_grab = grab_off;
+	const bool geo = I.head.valid && I.grip[off].valid;
+	S.d_zone = 1000.f;
+	S.in_zone = false;
+	if (geo)
+	{
+		Fvector hf;
+		vr_quat_rotate(I.head.qx, I.head.qy, I.head.qz, I.head.qw, Fvector().set(0.f, 0.f, 1.f), hf);
+		hf.y = 0.f;
+		if (hf.magnitude() < 0.01f)
+			hf.set(0.f, 0.f, 1.f);
+		hf.normalize();
+		S.zone_track.set(I.head.pos);
+		S.zone_track.y -= S.zone_down;
+		S.zone_track.mad(hf, S.zone_fwd);
+		S.off_track.set(I.grip[off].pos);
+		S.head_track.set(I.head.pos);
+		S.d_zone = I.grip[off].pos.distance_to(S.zone_track);
+		S.in_zone = S.d_zone <= S.radius;
+	}
+	S.empty = !s_vr_rl.hand_mag;
+	CUIPdaWnd* W = vr_pda_wnd();
+	PIItem pi = (A && A->m_inventory) ? A->inventory().ItemFromSlot(PDA_SLOT) : nullptr;
+	CPda* pda = smart_cast<CPda*>(pi);
+	// shown by VR, hidden by something else (another menu, a level change): VR forgets it
+	if (S.shown && !S.gamepath && (!W || !W->IsShown()))
+	{
+		S.shown = false;
+		Msg("* [vr3pda] frame %u the PDA window was hidden by the game", I.frame);
+	}
+	// the PDA item left the PDA slot (dropped, moved) while VR shows it: close it
+	if (S.shown && !S.gamepath && !pda)
+		vr_pda_hide("the PDA item left the PDA slot");
+	const bool can = !S.off && allowed && g_vr_track.head0_set && A && !A->Holder() && A->m_inventory && W;
+	LPCSTR ev = "none";
+	if (press && can && geo && S.in_zone)
+	{
+		if (S.gamepath)
+		{
+			// TEST ONLY witness: the game's own key path (Inventory::Action -> Activate(PDA_SLOT) / back)
+			A->inventory().Action(kACTIVE_JOBS, CMD_START);
+			ev = S.shown ? "close" : "open";
+			S.shown = !S.shown;
+		}
+		else if (S.shown)
+		{
+			vr_pda_hide(nullptr);
+			ev = "close";
+		}
+		else if (!S.empty)
+			ev = "refused_hand_full";
+		else if (!pda)
+			ev = "refused_no_pda";
+		else if (!pda->hasEnoughBatteryPower())
+			ev = "refused_battery";
+		else if (!psActorFlags.test(AF_3D_PDA))
+			ev = "refused_no_3d_pda";
+		else
+		{
+			W->ShowDialog(false); // don't hide indicators, as CPda::UpdateCL
+			W->Enable(false);     // no input: the VR controls stay alive
+			S.shown = true;
+			ev = "open";
+		}
+	}
+	if (S.shown && !S.gamepath && W && W->IsShown())
+	{
+		// what CPda::UpdateCL does for the active PDA, which this one is not: content update and the screen's shader factors
+		if (!W->IsEnabled())
+			W->Update();
+		if (pda)
+			W->m_power = pda->GetCondition();
+		g_pGamePersistent->pda_shader_data.pda_display_factor = 1.f;
+		g_pGamePersistent->pda_shader_data.pda_displaybrightness = 1.f;
+	}
+	// event names other than open / close are logged, but the per-frame line carries only open / close / none
+	const bool oc = !strcmp(ev, "open") || !strcmp(ev, "close");
+	if (strcmp(ev, "none"))
+		Msg("* [vr3pdae] frame %u event %s d_zone %.4f empty %d", I.frame, ev, S.d_zone, S.empty ? 1 : 0);
+	if (S.shown)
+		S.block = true;
+	else if (!grab_off)
+		S.block = false;
+	if (log)
+	{
+		const bool drawn = S.drawn != S.drawn_seen;
+		S.drawn_seen = S.drawn;
+		const Fvector& P = S.pda_w;
+		const Fvector& Q = S.want_w;
+		Msg("* [vr3pda] frame %u on %d shown %d zone %d empty %d event %s d_zone %.4f pda %.5f %.5f %.5f want %.5f %.5f %.5f place %d window %d enabled %d top %d zone_track %.4f %.4f %.4f off_track %.4f %.4f %.4f head_track %.4f %.4f %.4f",
+			I.frame, S.off ? 0 : 1, drawn ? 1 : 0, S.in_zone ? 1 : 0, S.empty ? 1 : 0, oc ? ev : "none", S.d_zone,
+			P.x, P.y, P.z, Q.x, Q.y, Q.z, S.place_ok ? 1 : 0, (W && W->IsShown()) ? 1 : 0, (W && W->IsEnabled()) ? 1 : 0,
+			(W && CurrentGameUI()->TopInputReceiver() == W) ? 1 : 0,
+			S.zone_track.x, S.zone_track.y, S.zone_track.z, S.off_track.x, S.off_track.y, S.off_track.z,
+			S.head_track.x, S.head_track.y, S.head_track.z);
+		S.place_ok = false;
+	}
+	return S.block;
+}
+
 // milestone 8b: loose ammo on the ground near the actor, as the world has it (for the [vr3mag] log)
 static void vr_mag_ground(CActor* A, int& count, int& rounds, u16& last_id, Fvector& last_pos, float& ground_y)
 {
@@ -2558,8 +2746,8 @@ static bool vr_fire_allowed(CActor* A)
 		return false;
 	if (g_bDisableAllInput || Device.Paused())
 		return false;
-	if (CurrentGameUI() && CurrentGameUI()->TopInputReceiver())
-		return false;
+	if (CurrentGameUI() && CurrentGameUI()->TopInputReceiver() && !vr_pda_passes_input(CurrentGameUI()->TopInputReceiver()))
+		return false; // milestone 10a: except the PDA window VR showed in the free hand, its input not enabled
 	if (Console && Console->bVisible)
 		return false;
 	return true;
@@ -3103,6 +3291,9 @@ void vr_input_update()
 				Msg("* [vr3in] frame %u hand %c %s %s value %.3f", I.frame, h ? 'R' : 'L', "grab", s_grab[h] ? "press" : "release", gv);
 		}
 		s_vr_grab_held = s_grab[off];
+		// milestone 10a step 1: the PDA in the free hand (off hand's grip in the chest zone); that hand does nothing else
+		if (vr_pda_update(I, g_actor, vr_fire_allowed(g_actor), s_grab[off], s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to))
+			s_vr_grab_held = false;
 		// milestone 8a (Amendment 31): manual reload
 		vr_reload_update(I, g_actor, vr_fire_allowed(g_actor), s_vr_grab_held, s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to);
 		// milestone 9a (Amendment 32): holsters (gun hand's grip)
@@ -3742,9 +3933,12 @@ void vr_mag_reset()
 	s_vr_mv.copy_failed = false;
 }
 
+static void vr_pda_reset(); // milestone 10a, below
+
 // called when the HUD is destroyed (level unload): nothing of the reload state is carried into another game
 void vr_reload_reset()
 {
+	vr_pda_reset();
 	vr_reload_state& S = s_vr_rl;
 	if (S.hand_mag && !S.hand_cart.empty())
 		Msg("! [vr3mag] the HUD was destroyed with a magazine of %u rounds in the hand: not saved", u32(S.hand_cart.size()));
@@ -3920,10 +4114,160 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 	}
 }
 
+// GammaVR milestone 10a step 1: the PDA's HUD model drawn at the off hand while VR shows the PDA window (see vr_pda_state).
+// Placement: off-hand pose * inverse(translate(grip_pos)), grip_pos of the PDA section or its family in the VR grip config
+// (Amendment 34 note 5; grip_rot is not measured for the PDA and is not applied). screen_c (optional, same section) = the
+// screen centre in model space for the [vr3pdav] pixel line (model origin when absent).
+struct vr_pda_vis
+{
+	IRenderVisual* vis;
+	IKinematics* K;
+	shared_str sect;       // PDA item section the copy was made for
+	bool failed;
+	Fvector grip_pos, screen_c;
+	bool screen_set;
+	Fmatrix xf;            // as drawn
+	bool frozen;           // -vr_pda_noattach: xf kept from the first draw after opening
+};
+static vr_pda_vis s_vr_pv = {};
+
+static void vr_pda_copy_delete()
+{
+	vr_pda_vis& V = s_vr_pv;
+	if (V.vis)
+		::Render->model_Delete(V.vis);
+	V.vis = nullptr;
+	V.K = nullptr;
+}
+
+// HUD destroyed (level unload): the copy goes with the renderer's models, the VR-shown state is forgotten
+static void vr_pda_reset()
+{
+	vr_pda_copy_delete();
+	s_vr_pv.sect = nullptr;
+	s_vr_pv.failed = false;
+	s_vr_pv.frozen = false;
+	s_vr_pda.shown = false;
+	s_vr_pda.block = false;
+}
+
+static void vr_pda_draw(IDSGraphManager* DM)
+{
+	vr_pda_state& S = s_vr_pda;
+	vr_pda_vis& V = s_vr_pv;
+	if (!S.parsed || S.gamepath)
+		return;
+	if (!S.shown)
+	{
+		V.frozen = false;
+		return;
+	}
+	CActor* A = g_actor;
+	PIItem pi = (A && A->m_inventory) ? A->inventory().ItemFromSlot(PDA_SLOT) : nullptr;
+	vr_grip_info G;
+	if (!pi || !g_vr_get_grip || !g_vr_get_grip(&G) || !G.off.valid)
+		return;
+	if (V.sect != pi->m_section_id)
+	{
+		vr_pda_copy_delete();
+		V.sect = pi->m_section_id;
+		V.failed = false;
+		V.frozen = false;
+		LPCSTR hud = pSettings->line_exist(V.sect, "hud") ? pSettings->r_string(V.sect, "hud") : nullptr;
+		LPCSTR iv = (hud && pSettings->line_exist(hud, "item_visual")) ? pSettings->r_string(hud, "item_visual") : nullptr;
+		if (iv)
+		{
+			::Render->hud_loading = true;
+			V.vis = ::Render->model_Create(iv);
+			::Render->hud_loading = false;
+			V.K = V.vis ? V.vis->dcast_PKinematics() : nullptr;
+		}
+		V.failed = !V.vis;
+		// grip_pos / screen_c: the item's own section, then its family (as vr_grip_lookup)
+		V.grip_pos.set(0.f, 0.f, 0.f);
+		V.screen_c.set(0.f, 0.f, 0.f);
+		V.screen_set = false;
+		LPCSTR src = nullptr;
+		const vr_grip_cfg& C = vr_grip_config();
+		if (C.ini && C.ini->section_exist(V.sect.c_str()))
+		{
+			if (C.ini->line_exist(V.sect.c_str(), "grip_pos"))
+				src = V.sect.c_str();
+			else if (C.ini->line_exist(V.sect.c_str(), "family"))
+			{
+				static string64 fam;
+				LPCSTR f = C.ini->r_string(V.sect.c_str(), "family");
+				if (strstr(f, "family_") == f)
+					xr_strcpy(fam, f);
+				else
+					xr_sprintf(fam, "family_%s", f);
+				if (C.ini->section_exist(fam) && C.ini->line_exist(fam, "grip_pos"))
+					src = fam;
+			}
+		}
+		if (src && !C.off)
+			V.grip_pos = C.ini->r_fvector3(src, "grip_pos");
+		if (src && C.ini->line_exist(src, "screen_c"))
+		{
+			V.screen_c = C.ini->r_fvector3(src, "screen_c");
+			V.screen_set = true;
+		}
+		Msg("* [vr3pda] copy of %s: model %s %s; grip_pos %.4f %.4f %.4f from %s%s; screen_c %.4f %.4f %.4f (%s)", V.sect.c_str(),
+			iv ? iv : "(none)", V.vis ? "made" : "NOT made", V.grip_pos.x, V.grip_pos.y, V.grip_pos.z, src ? src : "none",
+			C.off ? " (-vr_grip_off)" : "", V.screen_c.x, V.screen_c.y, V.screen_c.z, V.screen_set ? "config" : "model origin");
+	}
+	if (!V.vis)
+		return;
+	Fmatrix off_track, off_w, ginv;
+	vr_pose_matrix(G.off, off_track);
+	off_w.mul_43(g_vr_track.track_to_world, off_track);
+	ginv.translate(Fvector().set(V.grip_pos).invert());
+	if (!(S.noattach && V.frozen))
+		V.xf.mul_43(off_w, ginv);
+	V.frozen = true;
+	if (V.K)
+	{
+		V.K->CalculateBones_Invalidate();
+		V.K->CalculateBones(TRUE);
+	}
+	DM->add_Dynamic(V.vis, &V.xf);
+	// read back for the log: the model transform as passed to the draw; what it should be, worked out separately
+	S.drawn++;
+	S.pda_w.set(V.xf.c);
+	Fvector gp_neg = Fvector().set(V.grip_pos).invert();
+	off_w.transform_tiny(S.want_w, gp_neg);
+	S.place_ok = true;
+	if (vr_mag_log_window())
+	{
+		const int eye = g_stereo_bench_eye;
+		Fvector sc;
+		V.xf.transform_tiny(sc, V.screen_c);
+		float px = -1.f, py = -1.f;
+		if (!vr_hud_pixel(sc, px, py))
+			px = py = -1.f;
+		Msg("* [vr3pdav] frame %u eye %d px %.2f %.2f screen_world %.4f %.4f %.4f", g_vr_track.frame, eye, px, py, sc.x, sc.y, sc.z);
+		if (int(g_vr_track.frame) == S.grid_frame)
+			for (int a = -4; a <= 4; ++a)
+				for (int b = -4; b <= 4; ++b)
+					for (int c = -4; c <= 4; ++c)
+					{
+						const Fvector m = Fvector().set(0.02f * a, 0.02f * b, 0.02f * c);
+						Fvector w;
+						V.xf.transform_tiny(w, m);
+						float gx = -1.f, gy = -1.f;
+						if (!vr_hud_pixel(w, gx, gy))
+							gx = gy = -1.f;
+						Msg("* [vr3pdag] frame %u eye %d model %.3f %.3f %.3f px %.2f %.2f", g_vr_track.frame, eye, m.x, m.y, m.z, gx, gy);
+					}
+	}
+}
+
 void player_hud::render_hud(IDSGraphManager* DM)
 {
 	if (g_vr_track.active)
 		vr_dbg_base_log(false, g_vr_track.frame); // GammaVR diagnostic, only with -vr_dbg_base
+	if (g_vr_track.active && g_vr_track.head0_set)
+		vr_pda_draw(DM); // GammaVR milestone 10a: the PDA in the free hand (drawn with or without a held item)
 	bool b_r0 = ((m_attached_items[0] && m_attached_items[0]->need_renderable()) || script_anim_part == 0 || script_anim_part == 2);
 	bool b_r1 = ((m_attached_items[1] && m_attached_items[1]->need_renderable()) || script_anim_part == 1 || script_anim_part == 2);
 
