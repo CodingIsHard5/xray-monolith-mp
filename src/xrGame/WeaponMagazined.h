@@ -94,6 +94,12 @@ public:
 	CWeaponMagazined(ESoundTypes eSoundType = SOUND_TYPE_WEAPON_SUBMACHINEGUN);
 	// GammaVR milestone 8a (Amendment 31): fill the magazine from the inventory with no animation (manual reload)
 	void VrFillMagazine() { ReloadMagazine(); }
+	// GammaVR milestone 8b (Amendment 33): the magazine as a thing with its own rounds. No animation, nothing else changes.
+	void VrMagTake(xr_vector<CCartridge>& dst);          // the gun's rounds go to dst, the gun is empty; nothing is spawned
+	void VrMagPut(xr_vector<CCartridge>& src);           // src becomes the gun's magazine (the gun must be empty)
+	void VrMagFromInventory(xr_vector<CCartridge>& dst); // dst is filled from the inventory, up to the magazine size
+	bool VrMagToInventory(xr_vector<CCartridge>& src, u32 parent_id = 0xffffffff); // the rounds go back to the inventory stock (false: nowhere to put them, src untouched)
+	int VrMagDrop(xr_vector<CCartridge>& src, const Fvector& pos); // the rounds become ammo boxes in the world at pos; rounds dropped
 	virtual ~CWeaponMagazined();
 
 	virtual void Load(LPCSTR section);

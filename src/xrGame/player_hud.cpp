@@ -28,6 +28,7 @@
 #include "WeaponPistol.h"
 #include "WeaponRPG7.h"
 #include "WeaponRG6.h"
+#include "WeaponAmmo.h" // GammaVR milestone 8b
 #include <typeinfo>
 
 extern int g_nearwall;
@@ -832,6 +833,8 @@ player_hud::player_hud()
 	}
 }
 
+void vr_reload_reset(); // GammaVR milestone 8b (below)
+
 player_hud::~player_hud()
 {
 	IRenderVisual* v = m_model->dcast_RenderVisual();
@@ -843,6 +846,7 @@ player_hud::~player_hud()
 	m_model_2 = nullptr;
 
 	delete_script_anim_item_model();
+	vr_reload_reset(); // GammaVR milestone 8b: the hand magazine's model copy, and the reload state
 
 	delete_data(m_hand_motions);
 	delete_data(m_script_layers);
@@ -1456,6 +1460,13 @@ struct vr_reload_state
 	bool prev_grab;
 	bool blocked_evt;        // the game's reload was refused since the last log line
 	xr_vector<u16> out;      // ids of the guns whose magazine is out
+	// milestone 8b (Amendment 33): the magazine in the hand is a thing with its own rounds
+	bool simple;             // -vr_mag_simple: milestone 8a's behaviour (control)
+	xr_vector<CCartridge> hand_cart; // the rounds of the magazine in the off hand
+	u16 hand_gun;            // the gun that magazine belongs to
+	int dropped;             // rounds dropped to the ground so far
+	Fvector off_world;       // the off hand in the world (measured with the distances)
+	string64 cfg_bone;       // mag_bone of the VR grip config for the held item ("" = "magazine")
 };
 static vr_reload_state s_vr_rl = {};
 
@@ -1481,7 +1492,9 @@ static bool vr_reload_manual(CWeaponMagazined* W)
 	{
 		S.parsed = true;
 		S.off = !!strstr(Core.Params, "-vr_reload_auto");
+		S.simple = !!strstr(Core.Params, "-vr_mag_simple");
 		Msg("* [vr3rl] manual reload %s", S.off ? "OFF (-vr_reload_auto): the game's own reload" : "on");
+		Msg("* [vr3mag] magazines as objects %s", S.simple ? "OFF (-vr_mag_simple): milestone 8a's behaviour" : "on");
 	}
 	if (S.off || !W || !g_vr_track.head0_set)
 		return false;
@@ -1609,6 +1622,30 @@ static void vr_holster_update(const vr_input_info& I, CActor* A, bool allowed, b
 			geo ? I.grip[gun].pos.x : 0.f, geo ? I.grip[gun].pos.y : 0.f, geo ? I.grip[gun].pos.z : 0.f);
 }
 
+// milestone 8b: loose ammo on the ground near the actor, as the world has it (for the [vr3mag] log)
+static void vr_mag_ground(CActor* A, int& count, int& rounds, u16& last_id, Fvector& last_pos)
+{
+	count = rounds = 0;
+	last_id = u16(-1);
+	last_pos.set(0.f, 0.f, 0.f);
+	if (!A)
+		return;
+	for (u32 i = 0, n = Level().Objects.o_count(); i < n; ++i)
+	{
+		CObject* O = Level().Objects.o_get_by_iterator(i);
+		CWeaponAmmo* am = O ? smart_cast<CWeaponAmmo*>(O) : nullptr;
+		if (!am || am->H_Parent() || am->getDestroy() || am->Position().distance_to(A->Position()) > 3.f)
+			continue;
+		++count;
+		rounds += int(am->m_boxCurr);
+		if (last_id == u16(-1) || am->ID() > last_id)
+		{
+			last_id = am->ID();
+			last_pos.set(am->Position());
+		}
+	}
+}
+
 // once per new controller read, in the game update
 static void vr_reload_update(const vr_input_info& I, CActor* A, bool allowed, bool grab, bool log)
 {
@@ -1624,12 +1661,46 @@ static void vr_reload_update(const vr_input_info& I, CActor* A, bool allowed, bo
 		ev = "reload_blocked";
 		S.blocked_evt = false;
 	}
+	// milestone 8b: [vr3mag] event, and the log line of this update
+	LPCSTR mev = "none";
+	auto mag_log = [&](CWeaponMagazined* G)
+	{
+		if (!log)
+			return;
+		int gc, gr;
+		u16 gid;
+		Fvector gp;
+		vr_mag_ground(A, gc, gr, gid, gp);
+		const int ammo = G ? G->GetAmmoElapsed() : -1;
+		Msg("* [vr3mag] frame %u simple %d active %d mag %s gun_rounds %d hand_mag %d hand_rounds %d inv %d dropped %d event %s ground %d ground_rounds %d last_id %u last_pos %.4f %.4f %.4f hand_world %.4f %.4f %.4f",
+			I.frame, S.simple ? 1 : 0, S.active ? 1 : 0, S.mag_in ? "in" : "out", ammo, S.hand_mag ? 1 : 0, int(S.hand_cart.size()),
+			G ? G->GetSuitableAmmoTotal() - ammo : -1, S.dropped, mev, gc, gr, unsigned(gid), gp.x, gp.y, gp.z,
+			S.off_world.x, S.off_world.y, S.off_world.z);
+	};
+	// a magazine in the hand whose gun is no longer the one held (or nothing is held): its rounds go back to the stock
+	if (!S.simple && S.hand_mag && (!S.active || W->ID() != S.hand_gun))
+	{
+		// through its gun if that still exists (in the inventory or lying on the ground), else through the gun now held
+		CWeaponMagazined* G0 = smart_cast<CWeaponMagazined*>(Level().Objects.net_Find(S.hand_gun));
+		if (!G0)
+			G0 = W;
+		if (G0 && A && (G0->H_Parent() == A ? G0->VrMagToInventory(S.hand_cart) : G0->VrMagToInventory(S.hand_cart, A->ID())))
+			mev = "stow";
+		else
+		{
+			Msg("! [vr3mag] frame %u the magazine in the hand lost its gun: %u rounds gone", I.frame, u32(S.hand_cart.size()));
+			S.hand_cart.clear();
+			mev = "lost";
+		}
+		S.hand_mag = false;
+	}
 	if (!S.active)
 	{
 		S.hand_mag = false;
 		S.mag_in = true;
 		if (log)
 			Msg("* [vr3rl] frame %u inactive event %s ammo %d state %u", I.frame, ev, W ? W->GetAmmoElapsed() : -1, W ? W->GetState() : 0u);
+		mag_log(W);
 		return;
 	}
 	if (S.cfg_set)
@@ -1665,13 +1736,26 @@ static void vr_reload_update(const vr_input_info& I, CActor* A, bool allowed, bo
 		{
 			if (S.d_pouch <= 0.15f)
 			{
+				if (!S.simple && !S.hand_mag)
+				{
+					W->VrMagFromInventory(S.hand_cart); // 8b: the fresh magazine takes its rounds now
+					S.hand_gun = id;
+					mev = "pouch_take";
+				}
 				S.hand_mag = true;
 				S.hand_far = S.d_mag > 0.14f;
 				ev = "pouch";
 			}
 			else if (!out && !S.hand_mag && ready && S.d_mag <= 0.10f && S.d_mag < S.d_sup)
 			{
-				W->UnloadMagazine(true);
+				if (S.simple)
+					W->UnloadMagazine(true);
+				else
+				{
+					W->VrMagTake(S.hand_cart); // 8b: the rounds stay in the magazine
+					S.hand_gun = id;
+					mev = "out";
+				}
 				S.out.push_back(id);
 				out = true;
 				S.hand_mag = true;
@@ -1681,7 +1765,13 @@ static void vr_reload_update(const vr_input_info& I, CActor* A, bool allowed, bo
 		}
 		else if (grab && S.hand_mag && S.hand_far && out && ready && S.d_mag <= 0.10f)
 		{
-			W->VrFillMagazine();
+			if (S.simple)
+				W->VrFillMagazine();
+			else
+			{
+				W->VrMagPut(S.hand_cart);
+				mev = "in";
+			}
 			it = std::find(S.out.begin(), S.out.end(), id);
 			if (it != S.out.end())
 				S.out.erase(it);
@@ -1694,6 +1784,39 @@ static void vr_reload_update(const vr_input_info& I, CActor* A, bool allowed, bo
 	{
 		S.hand_mag = false;
 		ev = "put_away";
+		if (!S.simple)
+		{
+			if (geo && S.d_pouch <= 0.15f)
+			{
+				W->VrMagToInventory(S.hand_cart); // into the pouch as it is: the rounds go back to the stock
+				mev = "pouch_put";
+			}
+			else if (geo && out && ready && S.d_mag <= 0.10f)
+			{
+				W->VrMagPut(S.hand_cart); // let go at the gun: back in
+				it = std::find(S.out.begin(), S.out.end(), id);
+				if (it != S.out.end())
+					S.out.erase(it);
+				out = false;
+				ev = "in";
+				mev = "in";
+			}
+			else if (geo)
+			{
+				S.dropped += W->VrMagDrop(S.hand_cart, S.off_world); // let go anywhere else: on the ground, as ammo
+				mev = "drop";
+			}
+			else
+			{
+				W->VrMagToInventory(S.hand_cart); // hand not tracked: nothing is thrown away
+				mev = "stow";
+			}
+			if (!S.hand_cart.empty()) // nowhere to put them (not expected for a gun in the hand)
+			{
+				Msg("! [vr3mag] frame %u %u rounds of the magazine in the hand could not be put anywhere", I.frame, u32(S.hand_cart.size()));
+				S.hand_cart.clear();
+			}
+		}
 	}
 	S.mag_in = !out;
 	if (log)
@@ -1703,6 +1826,7 @@ static void vr_reload_update(const vr_input_info& I, CActor* A, bool allowed, bo
 			I.frame, out ? "out" : "in", S.hand_mag ? 1 : 0, ammo, W->GetSuitableAmmoTotal() - ammo, W->GetState(), ev, geo ? 1 : 0,
 			S.d_mag, S.d_pouch, S.d_sup, S.mag_track.x, S.mag_track.y, S.mag_track.z, S.pouch_track.x, S.pouch_track.y, S.pouch_track.z, S.sup_track.x, S.sup_track.y, S.sup_track.z);
 	}
+	mag_log(W);
 }
 
 // GammaVR milestone 3b (Amendment 10 note 3) test switches, parsed once.
@@ -1953,6 +2077,11 @@ static void vr_grip_lookup(attachable_hud_item* item)
 				s_vr_rl.cfg_down = C.ini->r_float(cand[n], "mag_down");
 				s_vr_rl.cfg_set = true;
 			}
+		// milestone 8b: the magazine bone of this item's HUD model, if it is not called "magazine"
+		s_vr_rl.cfg_bone[0] = 0;
+		for (int n = 0; n < 2 && !s_vr_rl.cfg_bone[0]; ++n)
+			if (cand[n] && C.ini->section_exist(cand[n]) && C.ini->line_exist(cand[n], "mag_bone"))
+				xr_strcpy(s_vr_rl.cfg_bone, C.ini->r_string(cand[n], "mag_bone"));
 	}
 	if (s_vr_support_on)
 		Msg("* [vr3] support point for %s: %.3f m", obj_sect.c_str(), s_vr_support_dist);
@@ -3287,6 +3416,7 @@ bool player_hud::vr_place_at_grip()
 				RS.d_mag = v2_off.distance_to(mp);
 				RS.d_sup = s_vr_support_on ? v2_off.distance_to(sp2) : 1000.f;
 				RS.d_pouch = v2_off.distance_to(pc);
+				RS.off_world.set(v2_off);
 				Fmatrix inv;
 				inv.invert(g_vr_track.track_to_world);
 				inv.transform_tiny(RS.mag_track, mp);
@@ -3551,6 +3681,224 @@ void vr_dbg_base_log(bool flat, u32 frame)
 		g_actor->m_fLookoutFactor, g_actor->CurrentHeight, g_vr_base.cam_point.x, g_vr_base.cam_point.y, g_vr_base.cam_point.z);
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// GammaVR milestone 8b (Amendment 33): what is seen of the magazine. While the held gun's magazine is out, its magazine
+// bone (and the bones under it) is hidden on the gun. While the off hand holds a magazine, a second copy of the gun's
+// HUD model is drawn at that hand with only those bones: every bone of the copy has an overwriting callback, the
+// magazine's bones take the transforms the gun's own model had while its magazine was last shown, all others are scaled
+// to nothing. Render path, once per eye pass, after the gun is placed.
+struct vr_mag_vis
+{
+	IKinematics* gun;       // the gun model the data below belongs to
+	u16 bone;               // its magazine bone (BI_NONE: none, nothing is hidden or drawn)
+	u64 mask;               // the magazine bone and all bones under it
+	bool cache_ok;          // rest[] holds the magazine bones' transforms (gun model space)
+	u32 shown_frame, shown_n; // VR frames in a row the gun's magazine bone has been visible
+	bool hid;               // the gun's magazine bone is hidden by this code (only then is it shown again here)
+	bool copy_failed;       // no usable copy for this model: not tried again until the model changes
+	Fmatrix rest[64];
+	IRenderVisual* copy_vis;
+	IKinematics* copy;
+	Fmatrix copy_bone[64];  // what the copy's bone callbacks write
+	Fmatrix copy_xf;        // the copy's world transform of this pass (kept: the HUD pass holds the pointer)
+};
+static vr_mag_vis s_vr_mv = {nullptr, BI_NONE, 0, false, u32(-1), 0, false, false};
+
+static void _BCL vr_mag_bone_cb(CBoneInstance* P)
+{
+	P->mTransform.set(*(Fmatrix*)P->callback_param());
+}
+
+static void vr_mag_copy_delete()
+{
+	vr_mag_vis& V = s_vr_mv;
+	if (V.copy_vis)
+		::Render->model_Delete(V.copy_vis);
+	V.copy_vis = nullptr;
+	V.copy = nullptr;
+}
+
+// called when the HUD is destroyed, and when the held model changes
+void vr_mag_reset()
+{
+	vr_mag_copy_delete();
+	s_vr_mv.gun = nullptr;
+	s_vr_mv.bone = BI_NONE;
+	s_vr_mv.mask = 0;
+	s_vr_mv.cache_ok = false;
+	s_vr_mv.shown_n = 0;
+	s_vr_mv.hid = false;
+	s_vr_mv.copy_failed = false;
+}
+
+// called when the HUD is destroyed (level unload): nothing of the reload state is carried into another game
+void vr_reload_reset()
+{
+	vr_reload_state& S = s_vr_rl;
+	if (S.hand_mag && !S.hand_cart.empty())
+		Msg("! [vr3mag] the HUD was destroyed with a magazine of %u rounds in the hand: not saved", u32(S.hand_cart.size()));
+	S.hand_cart.clear();
+	S.hand_mag = false;
+	S.out.clear();
+	S.dropped = 0;
+	vr_mag_reset();
+}
+
+static void vr_mag_mask(IKinematics* K, u16 b, u64& mask)
+{
+	mask |= u64(1) << b;
+	const IBoneData& D = K->GetBoneData(b);
+	for (u16 i = 0, n = D.GetNumChildren(); i < n; ++i)
+		vr_mag_mask(K, D.GetChild(i).GetSelfID(), mask);
+}
+
+static bool vr_mag_log_window()
+{
+	static int s_from = -1, s_to = -1;
+	static bool s_parsed = false;
+	if (!s_parsed)
+	{
+		s_parsed = true;
+		if (LPCSTR p = strstr(Core.Params, "-vr_dbg_grip "))
+			if (sscanf(p + 13, "%d %d", &s_from, &s_to) != 2)
+				s_from = s_to = -1;
+	}
+	return s_from >= 0 && int(g_vr_track.frame) >= s_from && int(g_vr_track.frame) <= s_to;
+}
+
+void player_hud::vr_mag_draw(IDSGraphManager* DM)
+{
+	vr_reload_state& S = s_vr_rl;
+	vr_mag_vis& V = s_vr_mv;
+	attachable_hud_item* item = m_attached_items[0] ? m_attached_items[0] : m_attached_items[1];
+	if (!item || !item->m_model || S.off || S.simple)
+		return;
+	IKinematics* K = item->m_model;
+	if (V.gun != K)
+	{
+		vr_mag_reset();
+		V.gun = K;
+		const u16 b = K->LL_BoneID(S.cfg_bone[0] ? S.cfg_bone : "magazine");
+		if (b != BI_NONE && K->LL_BoneCount() <= 64)
+		{
+			V.bone = b;
+			vr_mag_mask(K, b, V.mask);
+			// a magazine bone found hidden on a gun reloaded by hand was hidden here earlier (the gun was put away with its magazine out)
+			V.hid = S.active && !K->LL_GetBoneVisible(b);
+		}
+		Msg("* [vr3mag] model %s magazine bone %s: %s", item->m_sect_name.c_str(), S.cfg_bone[0] ? S.cfg_bone : "magazine",
+			V.bone != BI_NONE ? "found" : "none (nothing is hidden or drawn for this item)");
+	}
+	const bool log = vr_mag_log_window();
+	const int eye = g_stereo_bench_eye;
+	if (V.bone == BI_NONE)
+	{
+		if (log)
+			Msg("* [vr3magv] frame %u eye %d bone 0 gun_shown 1 hand_shown 0", g_vr_track.frame, eye);
+		return;
+	}
+	// the gun's own magazine: remembered while it is shown (two frames in a row, so every bone under it is calculated)
+	const bool vis_now = !!K->LL_GetBoneVisible(V.bone);
+	if (V.shown_frame != g_vr_track.frame)
+	{
+		V.shown_frame = g_vr_track.frame;
+		V.shown_n = vis_now ? V.shown_n + 1 : 0;
+		if (vis_now && V.shown_n >= 2 && K->LL_GetTransform(V.bone).i.magnitude() > 0.01f)
+		{
+			for (u16 b = 0, n = K->LL_BoneCount(); b < n; ++b)
+				if (V.mask & (u64(1) << b))
+					V.rest[b].set(K->LL_GetTransform(b));
+			V.cache_ok = true;
+		}
+	}
+	const bool hide = S.active && !S.mag_in && V.cache_ok; // not remembered yet: shown until it is
+	if (hide)
+	{
+		item->set_bone_visible(S.cfg_bone[0] ? S.cfg_bone : "magazine", FALSE, TRUE);
+		V.hid = true;
+	}
+	else if (V.hid) // only what was hidden here is shown again; a bone hidden by an animation or a script is left alone
+	{
+		V.hid = false;
+		item->set_bone_visible(S.cfg_bone[0] ? S.cfg_bone : "magazine", TRUE, TRUE);
+		if (item->m_parent_hud_item && item->m_parent_hud_item->has_object())
+			if (CWeapon* w = smart_cast<CWeapon*>(&item->m_parent_hud_item->object()))
+				w->HUD_VisualBulletUpdate(true); // showing the bone shows every round under it: back to the rounds the gun has
+	}
+
+	// the magazine in the off hand
+	bool hand = false;
+	Fvector mag_w, hand_w, gun_mag_w;
+	mag_w.set(0.f, 0.f, 0.f);
+	hand_w.set(0.f, 0.f, 0.f);
+	float scale = 0.f;
+	item->m_item_transform.transform_tiny(gun_mag_w, V.cache_ok ? V.rest[V.bone].c : Fvector().set(0.f, 0.f, 0.f));
+	vr_grip_info G;
+	if (S.active && S.hand_mag && V.cache_ok && g_vr_get_grip && g_vr_get_grip(&G) && G.gun.valid && G.off.valid)
+	{
+		if (!V.copy && !V.copy_failed)
+		{
+			::Render->hud_loading = true;
+			V.copy_vis = ::Render->model_Create(pSettings->r_string(item->m_sect_name, "item_visual"));
+			::Render->hud_loading = false;
+			V.copy = V.copy_vis ? V.copy_vis->dcast_PKinematics() : nullptr;
+			if (V.copy && V.copy->LL_BoneCount() == K->LL_BoneCount())
+			{
+				for (u16 b = 0, n = V.copy->LL_BoneCount(); b < n; ++b)
+				{
+					V.copy_bone[b].scale(0.f, 0.f, 0.f);
+					V.copy->LL_GetBoneInstance(b).set_callback(bctCustom, vr_mag_bone_cb, &V.copy_bone[b], TRUE);
+				}
+				V.copy->LL_SetBonesVisible(V.mask);
+				Msg("* [vr3mag] hand magazine model made from %s (%u bones)", item->m_sect_name.c_str(), u32(V.copy->LL_BoneCount()));
+			}
+			else
+			{
+				Msg("! [vr3mag] no hand magazine model for %s", item->m_sect_name.c_str());
+				vr_mag_copy_delete();
+				V.copy_failed = true;
+			}
+		}
+		if (V.copy)
+		{
+			for (u16 b = 0, n = V.copy->LL_BoneCount(); b < n; ++b)
+				if (V.mask & (u64(1) << b))
+					V.copy_bone[b].set(V.rest[b]);
+			V.copy->CalculateBones_Invalidate();
+			V.copy->CalculateBones(TRUE);
+			// the gun as the off hand would hold it, moved so the magazine bone's origin is at that hand
+			Fmatrix gun_track, off_track, grip_w, off_w, inv, rel;
+			vr_pose_matrix(G.gun, gun_track);
+			vr_pose_matrix(G.off, off_track);
+			grip_w.mul_43(g_vr_track.track_to_world, gun_track);
+			off_w.mul_43(g_vr_track.track_to_world, off_track);
+			inv.invert(grip_w);
+			rel.mul_43(inv, item->m_item_transform);
+			V.copy_xf.mul_43(off_w, rel);
+			Fvector at;
+			V.copy_xf.transform_tiny(at, V.rest[V.bone].c);
+			V.copy_xf.c.add(Fvector().sub(off_w.c, at));
+			DM->add_Dynamic(V.copy_vis, &V.copy_xf);
+			hand = true;
+			const Fmatrix& bt = V.copy->LL_GetTransform(V.bone); // the bone as the copy really has it
+			V.copy_xf.transform_tiny(mag_w, bt.c);
+			scale = bt.i.magnitude();
+			hand_w.set(off_w.c);
+		}
+	}
+	if (log)
+	{
+		float mx = -1.f, my = -1.f, gx = -1.f, gy = -1.f;
+		if (hand)
+			vr_hud_pixel(mag_w, mx, my);
+		if (V.cache_ok)
+			vr_hud_pixel(gun_mag_w, gx, gy);
+		Msg("* [vr3magv] frame %u eye %d bone 1 gun_shown %d hand_shown %d cache %d mag_world %.4f %.4f %.4f hand_world %.4f %.4f %.4f bone_scale %.4f mag_px %.2f %.2f gun_mag_px %.2f %.2f size %u %u",
+			g_vr_track.frame, eye, K->LL_GetBoneVisible(V.bone) ? 1 : 0, hand ? 1 : 0, V.cache_ok ? 1 : 0, mag_w.x, mag_w.y, mag_w.z,
+			hand_w.x, hand_w.y, hand_w.z, scale, mx, my, gx, gy, Device.dwWidth, Device.dwHeight);
+	}
+}
+
 void player_hud::render_hud(IDSGraphManager* DM)
 {
 	if (g_vr_track.active)
@@ -3598,6 +3946,9 @@ void player_hud::render_hud(IDSGraphManager* DM)
 
 	if (m_attached_items[SCOPE_ATTACH_IDX])
 		m_attached_items[SCOPE_ATTACH_IDX]->render(DM, vis_rot ? &m_vr_draw_xform[SCOPE_ATTACH_IDX] : nullptr);
+
+	if (g_vr_track.active && g_vr_track.head0_set)
+		vr_mag_draw(DM); // GammaVR milestone 8b: the gun's magazine hidden while out, the magazine in the off hand
 
 	if (script_anim_item_model)
 	{

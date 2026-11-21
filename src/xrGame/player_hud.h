@@ -387,6 +387,7 @@ public:
 	void vr_log_gun_bones(); // GammaVR milestone 3b: bone list of the held item and the -vr_barrel_bones visible axis
 	void vr_log_grip_point(); // GammaVR milestone 3c: hands bone list, -vr_grip_bones grip point, barrel bones in model space
 	void vr_log_grip_frame(); // GammaVR milestone 3d: -vr_dbg_grip per-frame grip / gun / barrel line
+	void vr_mag_draw(IDSGraphManager* DM); // GammaVR milestone 8b: magazine bone of the gun hidden while out; magazine drawn at the off hand
 	void vr_cache_fire(); // GammaVR milestone 4: world muzzle and barrel line of the held item as drawn -> g_vr_fire
 	void render_item_ui();
 	bool render_item_ui_query();

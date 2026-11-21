@@ -51,6 +51,8 @@ namespace
 		XrResult head_r = XR_SUCCESS;
 		float eye_scale = 1.f;
 		bool dump = false;
+		u32 dump_at[8] = {};     // -vr_dump_at "f1 f2 ...": further VR frames whose eye pictures and masks are written (with -vr_dump)
+		int dump_at_n = 0;
 		bool views_logged = false;
 
 		// milestone 3: controller grip poses (action set with one pose action, subaction paths left/right)
@@ -625,6 +627,15 @@ namespace
 			if (LPCSTR p = strstr(Core.Params, "-vr_eye_scale "))
 				sscanf(p + 14, "%f", &vr.eye_scale);
 			vr.dump = !!strstr(Core.Params, "-vr_dump");
+			if (LPCSTR q = strstr(Core.Params, "-vr_dump_at "))
+			{
+				int f[8];
+				const int n = sscanf(q + 12, "%d %d %d %d %d %d %d %d", &f[0], &f[1], &f[2], &f[3], &f[4], &f[5], &f[6], &f[7]);
+				for (int i = 0; i < n && i < 8; ++i)
+					if (f[i] > 0)
+						vr.dump_at[vr.dump_at_n++] = u32(f[i]);
+				Msg("* [vr] dump: %d further frames (-vr_dump_at)", vr.dump_at_n);
+			}
 			if (LPCSTR m = strstr(Core.Params, "-vr_mono_eye "))
 			{
 				int e = -1;
@@ -1191,7 +1202,10 @@ namespace
 			{
 				HW.pContext->CopyResource(E.tex[idx], bb);
 				bb->Release();
-				if (vr.dump && (vr.frames_run == 200 || vr.frames_run == 300))
+				bool dump_now = vr.frames_run == 200 || vr.frames_run == 300;
+				for (int i = 0; i < vr.dump_at_n; ++i)
+					dump_now = dump_now || vr.frames_run == vr.dump_at[i];
+				if (vr.dump && dump_now)
 				{
 					vr_dump_image(e, E.tex[idx]);
 					vr_dump_hud_mask(e);

@@ -22,6 +22,9 @@
 #include "script_game_object.h"
 #include "player_hud.h"
 #include "HudSound.h"
+#include "ai_space.h" // GammaVR milestone 8b: a dropped magazine's rounds as ammo in the world
+#include "alife_simulator.h"
+#include "ai_object_location.h"
 
 #include "../build_config_defines.h"
 #include "WeaponRG6.h"
@@ -484,6 +487,136 @@ void CWeaponMagazined::UnloadMagazine(bool spawn_ammo)
 		}
 		if (l_it->second /*&& !unlimited_ammo()*/) SpawnAmmo(l_it->second, l_it->first);
 	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// GammaVR milestone 8b (Amendment 33): magazines with their own rounds (called by the VR manual reload in player_hud.cpp)
+static void vr_mag_count(xr_vector<CCartridge>& src, xr_vector<std::pair<shared_str, u32>>& out)
+{
+	for (const CCartridge& c : src)
+	{
+		bool found = false;
+		for (auto& e : out)
+			if (e.first == c.m_ammoSect)
+			{
+				++e.second;
+				found = true;
+				break;
+			}
+		if (!found)
+			out.push_back(std::make_pair(c.m_ammoSect, 1u));
+	}
+	src.clear();
+}
+
+void CWeaponMagazined::VrMagTake(xr_vector<CCartridge>& dst)
+{
+	dst.clear();
+	dst.swap(m_magazine);
+	iAmmoElapsed = 0;
+	m_BriefInfo_CalcFrame = 0;
+	last_hide_bullet = -1;
+	HUD_VisualBulletUpdate();
+}
+
+void CWeaponMagazined::VrMagPut(xr_vector<CCartridge>& src)
+{
+	if (!m_magazine.empty()) // not expected: keep the gun's rounds, the hand's go back to the stock
+	{
+		VrMagToInventory(src);
+		return;
+	}
+	m_magazine.swap(src);
+	src.clear();
+	iAmmoElapsed = int(m_magazine.size());
+	if (!m_magazine.empty() && m_magazine.back().m_LocalAmmoType < m_ammoTypes.size())
+		m_ammoType = m_magazine.back().m_LocalAmmoType;
+	m_BriefInfo_CalcFrame = 0;
+	last_hide_bullet = -1;
+	HUD_VisualBulletUpdate();
+}
+
+void CWeaponMagazined::VrMagFromInventory(xr_vector<CCartridge>& dst)
+{
+	// the game's own fill, run on an empty magazine set aside from the gun's
+	xr_vector<CCartridge> keep;
+	keep.swap(m_magazine);
+	const int elapsed = iAmmoElapsed;
+	const u8 type = m_ammoType;
+	const bool misfire = bMisfire, jam_only = bClearJamOnly, need = m_needReload;
+	const u8 queued = m_set_next_ammoType_on_reload; // a chosen next type stays chosen: every fresh magazine is of that type
+	bMisfire = false;
+	iAmmoElapsed = 0;
+	ReloadMagazine();
+	dst.clear();
+	dst.swap(m_magazine);
+	m_magazine.swap(keep);
+	iAmmoElapsed = elapsed;
+	bMisfire = misfire;
+	bClearJamOnly = jam_only;
+	m_needReload = need;
+	m_set_next_ammoType_on_reload = queued;
+	if (!m_magazine.empty())
+		m_ammoType = type;
+	m_BriefInfo_CalcFrame = 0;
+}
+
+bool CWeaponMagazined::VrMagToInventory(xr_vector<CCartridge>& src, u32 parent_id)
+{
+	// parent_id given: the rounds go to that object's inventory as new boxes (the gun itself may lie on the ground)
+	if (parent_id == 0xffffffff && !H_Parent())
+		return false; // nowhere to put them: src is left as it is
+	xr_vector<std::pair<shared_str, u32>> n;
+	vr_mag_count(src, n);
+	for (auto& e : n)
+	{
+		if (parent_id == 0xffffffff && m_pInventory)
+			if (CWeaponAmmo* a = smart_cast<CWeaponAmmo*>(m_pInventory->GetAny(e.first.c_str())))
+			{
+				const u32 free_n = u32(a->m_boxSize - a->m_boxCurr);
+				const u32 add = free_n < e.second ? free_n : e.second;
+				a->m_boxCurr = u16(a->m_boxCurr + add);
+				e.second -= add;
+			}
+		if (e.second)
+			SpawnAmmo(e.second, e.first.c_str(), parent_id);
+	}
+	m_BriefInfo_CalcFrame = 0;
+	return true;
+}
+
+int CWeaponMagazined::VrMagDrop(xr_vector<CCartridge>& src, const Fvector& pos)
+{
+	CGameObject* owner = smart_cast<CGameObject*>(H_Parent());
+	if (!ai().get_alife() || !owner)
+	{
+		VrMagToInventory(src); // no world to put them in: back to the stock (src stays as it is if that cannot be done either)
+		return 0;
+	}
+	xr_vector<std::pair<shared_str, u32>> n;
+	vr_mag_count(src, n);
+	int dropped = 0;
+	for (auto& e : n)
+	{
+		const u32 box = (u32)_max(1, pSettings->r_s32(e.first.c_str(), "box_size"));
+		while (e.second)
+		{
+			const u32 k = e.second > box ? box : e.second;
+			CSE_Abstract* item = const_cast<CALifeSimulator*>(ai().get_alife())->spawn_item(e.first.c_str(), pos, owner->ai_location().level_vertex_id(),
+				owner->ai_location().game_vertex_id(), ALife::_OBJECT_ID(-1));
+			CSE_ALifeItemAmmo* ammo = item ? smart_cast<CSE_ALifeItemAmmo*>(item) : nullptr;
+			if (!ammo)
+			{
+				SpawnAmmo(e.second, e.first.c_str()); // not expected: what is left goes back to the stock
+				break;
+			}
+			ammo->a_elapsed = (u16)k; // as the script call create_ammo does: set before the object goes online
+			dropped += int(k);
+			e.second -= k;
+		}
+	}
+	m_BriefInfo_CalcFrame = 0;
+	return dropped;
 }
 
 void CWeaponMagazined::ReloadMagazine()
