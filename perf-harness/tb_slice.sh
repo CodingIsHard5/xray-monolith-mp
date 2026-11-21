@@ -21,10 +21,12 @@ END_H="${TB_END_H:-8}"
 in_window() { local h; h=$(date +%-H); [ "$h" -ge 1 ] && [ "$h" -lt "$END_H" ]; }
 secs_to_8() { echo $(( $(date -d "today $END_H:00" +%s) - $(date +%s) )); }
 pending() { { grep -v '^#' tools/tb_order.txt; cat $ST/rerun.txt; } | while IFS='|' read -r tag env extra; do [ -n "$tag" ] && ! grep -qx "$tag" $ST/done.txt && echo "$tag|$env|$extra"; done; }
-smoke_ok() { local d=out/tb_smoke x=out/tb_smoke/tb_extra_smoke_3.txt
-  [ -s $d/alife_dump_smoke_3.txt ] && [ -s $x ] || { echo "smoke: dump 3 missing"; return 1; }
-  local passes sq sqbad st mo sm; passes=$(tr -d "\r" < $x | awk '$1=="info" && $2=="passes"{print $3}'); sq=$(grep -c '^sq' $x); sqbad=$(awk -F'\t' '$1=="sq" && ($3=="-"||$3=="nil"||$3=="")' $x | wc -l)
-  st=$(awk -F'\t' '$1=="cr" && $4=="stalker"' $x | wc -l); mo=$(awk -F'\t' '$1=="cr" && $4=="monster"' $x | wc -l); sm=$(grep -c '^sm' $x)
+# smoke_ok [extra-file [dump-file]]: the engine (wine) writes CRLF; every field is read from a CR-stripped copy ($x).
+smoke_ok() { local raw=${1:-out/tb_smoke/tb_extra_smoke_3.txt} dump=${2:-out/tb_smoke/alife_dump_smoke_3.txt} x
+  [ -s "$dump" ] && [ -s "$raw" ] || { echo "smoke: dump 3 missing"; return 1; }
+  x=$(mktemp); tr -d '\r' < "$raw" > "$x"
+  local passes sq sqbad st mo sm; passes=$(awk '$1=="info" && $2=="passes"{print $3}' $x); sq=$(grep -c '^sq' $x); sqbad=$(awk -F'\t' '$1=="sq" && ($4=="-"||$4=="nil"||$4=="")' $x | wc -l)
+  st=$(awk -F'\t' '$1=="cr" && $4=="stalker"' $x | wc -l); mo=$(awk -F'\t' '$1=="cr" && $4=="monster"' $x | wc -l); sm=$(grep -c '^sm' $x); rm -f "$x"
   echo "smoke: passes=$passes squads=$sq squads_without_level=$sqbad stalkers=$st monsters=$mo smarts=$sm"
   [ "${passes:-0}" -gt 0 ] && [ "$sq" -gt 50 ] && [ "$sqbad" -eq 0 ] && [ "$st" -gt 50 ] && [ "$mo" -gt 50 ] && [ "$sm" -gt 50 ]; }
 FIRST=1; total_done=0; HARD=0

@@ -113,7 +113,7 @@ def parse_dump(p):
     d = {"section": {}, "alive": {}, "smart_npcs": {}, "complete": False}
     with open(p, encoding="utf-8", errors="replace") as f:
         for ln in f:
-            ln = ln.rstrip("\n")
+            ln = ln.rstrip("\r\n")
             if ln.startswith("#"):
                 if ln.startswith("#actor"):
                     d["complete"] = True
@@ -137,7 +137,7 @@ def parse_extra(p):
     e = {"info": {}, "sq": {}, "cr": {}, "sm": {}}
     with open(p, encoding="utf-8", errors="replace") as f:
         for ln in f:
-            t = ln.rstrip("\n").split("\t") if "\t" in ln else ln.split()
+            t = ln.rstrip("\r\n").split("\t") if "\t" in ln else ln.split()
             if not t:
                 continue
             if t[0] == "info" and len(t) >= 3:

@@ -98,3 +98,19 @@ Fixed before slice 1 and committed with this note:
   than speed alone; a statistic struck by SPEED is therefore "sensitive to the low-end settings", stated as such;
 - fingerprint at arming (tools/tb_hash.sh RefDet14.exe bench1): exe bc0426a10810f461, scripts d2b14bc4bfbf01ea,
   configs a1c31bfb1d88f4ab, save d4a4cb0f30c90d39, overlay 5f96c97bf40ae93f; recorded again at every slice.
+
+## Note (2026-11-21 01:05:26 EST): checker defect found at the smoke; no rule or threshold changed
+
+- Slice 1 opened 01:00:20 on 2026-11-21. The smoke run finished clean (rc 0, 01:03:56). The scheduler's field check
+  (smoke_ok in tb_slice.sh) then reported a failure and stopped the slice, as registered.
+- Cause: a defect in the checker, not in the run. The engine (under wine) writes CRLF line ends, so the field read
+  "382\r" and the shell integer test errored. Found in the same sweep: the "squads without a level" count read
+  field 3 (squad section) instead of field 4 (level), so that guard could never have fired.
+- Fix (checker only): every smoke field is now read from a CR-stripped copy; the level guard reads field 4; the
+  Python parsers in tier_b.py strip CR explicitly (text mode already did). tb_hash only hashes bytes; tb_run.sh and
+  the other greps in tb_slice.sh read files written by bash (LF). New self-test tools/selftest/tb_smoke_selftest.sh:
+  a CRLF fixture must be green; witness W1 (CR strip removed) must be red with "integer expression expected";
+  witness W2 (one squad with level "-") must be red. All four checks passed at 2026-11-21 01:05:26 EST.
+- Smoke judged: PASSED ON RE-READ AFTER A CHECKER FIX (Overseer ruling, 01:04, verified d23cec937). Values from
+  out/tb_smoke/tb_extra_smoke_3.txt: passes 382, squads 575, squads without a level 0 (on field 4), stalkers 806,
+  monsters 329, smarts 477; every registered threshold met. No threshold, rule, run order or statistic changed.
