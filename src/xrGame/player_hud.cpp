@@ -1730,7 +1730,10 @@ static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const 
 		press[h] = grab[h] && !S.prev_grab[h];
 		S.prev_grab[h] = grab[h];
 	}
-	const bool geo = I.head.valid && I.grip[0].valid && I.grip[1].valid;
+	// per hand: opening and closing need the head and that hand; passing needs both hands
+	const bool geo_h[2] = {I.head.valid && I.grip[0].valid, I.head.valid && I.grip[1].valid};
+	const bool geo = geo_h[0] || geo_h[1];
+	const bool geo2 = geo_h[0] && geo_h[1];
 	float dz[2] = {1000.f, 1000.f};
 	S.d_zone = 1000.f;
 	S.d_hands = 1000.f;
@@ -1749,10 +1752,12 @@ static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const 
 		S.off_track.set(I.grip[off].pos);
 		S.head_track.set(I.head.pos);
 		for (int h = 0; h < 2; ++h)
-			dz[h] = I.grip[h].pos.distance_to(S.zone_track);
+			if (geo_h[h])
+				dz[h] = I.grip[h].pos.distance_to(S.zone_track);
 		S.d_zone = dz[off];
 		S.in_zone = dz[off] <= S.radius;
-		S.d_hands = I.grip[0].pos.distance_to(I.grip[1].pos);
+		if (geo2)
+			S.d_hands = I.grip[0].pos.distance_to(I.grip[1].pos);
 	}
 	S.empty = !s_vr_rl.hand_mag;
 	CUIPdaWnd* W = vr_pda_wnd();
@@ -1769,7 +1774,7 @@ static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const 
 	if (S.shown && !S.gamepath && !pda)
 		vr_pda_hide("the PDA item left the PDA slot");
 	// an item became active in the gun hand while that hand holds the PDA (the game's own keys): close it
-	if (S.shown && !S.gamepath && S.hand == gun && !gun_empty)
+	if (S.shown && !S.gamepath && !S.passgun && S.hand == gun && !gun_empty)
 		vr_pda_hide("an item became active in the hand holding the PDA");
 	const bool can = !S.off && allowed && g_vr_track.head0_set && A && !A->Holder() && A->m_inventory && W;
 	LPCSTR ev = "none";
@@ -1795,7 +1800,7 @@ static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const 
 			ev = "close";
 			ev_hand = S.hand;
 		}
-		else if (press[o] && S.d_hands <= S.pass_r)
+		else if (press[o] && geo2 && S.d_hands <= S.pass_r)
 		{
 			ev_hand = o;
 			if (o == gun && !gun_empty && !S.passgun)
