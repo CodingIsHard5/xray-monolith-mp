@@ -16,8 +16,10 @@ WHAT="EXCLUSIVE: headless tier (b) control runs (one engine at a time, lowest pr
 END_ALL=$(( $(date +%s) + ${TB_NIGHTS:-4} * 86400 ))
 log() { echo "$(date '+%F %T') $*" | tee -a $ST/slice.log; }
 note() { timeout 60 "$T/notify-overseer.sh" $W - <<<"engineperf: $1" >/dev/null 2>&1; }
-in_window() { local h; h=$(date +%-H); [ "$h" -ge 1 ] && [ "$h" -lt 8 ]; }
-secs_to_8() { echo $(( $(date -d "today 08:00" +%s) - $(date +%s) )); }
+# TB_END_H (default 8): hour the nightly window closes. TB_ONE_SLICE=1: leave after one slice (or one failed attempt).
+END_H="${TB_END_H:-8}"
+in_window() { local h; h=$(date +%-H); [ "$h" -ge 1 ] && [ "$h" -lt "$END_H" ]; }
+secs_to_8() { echo $(( $(date -d "today $END_H:00" +%s) - $(date +%s) )); }
 pending() { { grep -v '^#' tools/tb_order.txt; cat $ST/rerun.txt; } | while IFS='|' read -r tag env extra; do [ -n "$tag" ] && ! grep -qx "$tag" $ST/done.txt && echo "$tag|$env|$extra"; done; }
 smoke_ok() { local d=out/tb_smoke x=out/tb_smoke/tb_extra_smoke_3.txt
   [ -s $d/alife_dump_smoke_3.txt ] && [ -s $x ] || { echo "smoke: dump 3 missing"; return 1; }
@@ -34,7 +36,7 @@ while [ -n "$(pending)" ]; do
     if ! "$T/protected-title-check.sh" >/dev/null 2>&1 && ! pgrep -x sober >/dev/null; then
       "$T/quiet-required.sh" claim $W 30 "$WHAT" 2>&1 | grep -q '^claimed' && { ok=1; break; }; fi
     sleep 60; done
-  [ $ok = 1 ] || { "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1; log "no slot before 08:00 tonight"; note "tier (b) controls: no exclusive slot inside tonight's window; nothing run in this attempt."; sleep 600; continue; }
+  [ $ok = 1 ] || { "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1; log "no slot before $END_H:00 tonight"; note "tier (b) controls: no exclusive slot inside tonight's window; nothing run in this attempt."; [ "${TB_ONE_SLICE:-0}" = 1 ] && exit 6; sleep 600; continue; }
   SL_START=$(date +%s); SL_END=$(( SL_START + 3*3600 )); n=0; stop=""
   log "slice granted, load $(cut -d' ' -f1-3 /proc/loadavg)"
   for i in $(seq 1 20); do awk -v l="$(cut -d' ' -f1 /proc/loadavg)" 'BEGIN{exit !(l<2)}' && break; sleep 30; done
@@ -43,7 +45,7 @@ while [ -n "$(pending)" ]; do
     line=$(pending | head -1); [ -n "$line" ] || break
     IFS='|' read -r tag env extra <<<"$line"
     [ $(( SL_END - $(date +%s) )) -lt 1320 ] && { stop="slice time used"; break; }
-    [ $(secs_to_8) -lt 1320 ] && { stop="08:00 reached"; break; }
+    [ $(secs_to_8) -lt 1320 ] && { stop="$END_H:00 reached"; break; }
     "$T/protected-title-check.sh" >/dev/null 2>&1 && { stop="protected title running"; break; }
     pgrep -x sober >/dev/null && { stop="Roblox running"; break; }
     "$T/quiet-required.sh" claim $W 30 "$WHAT" >/dev/null 2>&1          # same-text renewal for this run
@@ -62,6 +64,7 @@ while [ -n "$(pending)" ]; do
   log "slice end: $n runs this slice, $(grep -c . $ST/done.txt) done in all, $left left. ${stop:-list finished}"
   note "tier (b) controls: slice ended $(date +%T): $n runs this slice, $(grep -c . $ST/done.txt) of 42 done, $left left. Reason: ${stop:-list finished}."
   [ "${HARD:-0}" = 1 ] && { log "STOPPED on a failed run; not continuing without a ruling"; exit 4; }
+  [ "${TB_ONE_SLICE:-0}" = 1 ] && [ "$left" -gt 0 ] && { log "one slice only tonight (TB_ONE_SLICE): leaving, $left left for a later night"; exit 0; }
   [ "$left" -gt 0 ] && sleep 300          # gap between slices so queued workers get the box
 done
 log "all runs done"; note "tier (b) controls: ALL runs done ($(grep -c . $ST/done.txt)). Scoring next, as registered."; exit 0
