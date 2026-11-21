@@ -1,0 +1,43 @@
+# tag | env | extra engine flags   (PREREG-tierB-controls, fixed before slice 1)
+smoke|TB_TIMES=60,120,180|
+r01||
+d10_01||-tb_skip 10 -tb_skip_at 60
+r02||
+d100_01||-tb_skip 100 -tb_skip_at 60
+r03||
+d1000_01||-tb_skip 1000 -tb_skip_at 60
+s01|BENCH_LOWEND=1|
+h01||
+r04||
+d10_02||-tb_skip 10 -tb_skip_at 60
+r05||
+d100_02||-tb_skip 100 -tb_skip_at 60
+r06||
+d1000_02||-tb_skip 1000 -tb_skip_at 60
+s02|BENCH_LOWEND=1|
+h02||
+r07||
+d10_03||-tb_skip 10 -tb_skip_at 60
+r08||
+d100_03||-tb_skip 100 -tb_skip_at 60
+r09||
+d1000_03||-tb_skip 1000 -tb_skip_at 60
+s03|BENCH_LOWEND=1|
+h03||
+r10||
+d10_04||-tb_skip 10 -tb_skip_at 60
+r11||
+d100_04||-tb_skip 100 -tb_skip_at 60
+r12||
+d1000_04||-tb_skip 1000 -tb_skip_at 60
+s04|BENCH_LOWEND=1|
+h04||
+r13||
+d10_05||-tb_skip 10 -tb_skip_at 60
+r14||
+d100_05||-tb_skip 100 -tb_skip_at 60
+r15||
+d1000_05||-tb_skip 1000 -tb_skip_at 60
+s05|BENCH_LOWEND=1|
+h05||
+walk||-tb_walk 60

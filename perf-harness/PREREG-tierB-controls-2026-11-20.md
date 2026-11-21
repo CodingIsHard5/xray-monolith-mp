@@ -85,3 +85,16 @@ If fewer than three statistics survive, tier (b) as designed is not usable on th
 None exists, and none may be built before Caden rules on the plan. By the plan's staged route (section 5) the first
 candidate would be stage A1: the co-op branch and this branch on one base (the dev-mt worker model merged with
 renderless-r0; trial merge done in a scratch clone, never pushed). Its tier (b) check would be A1 against stock.
+
+## Approval and arming (2026-11-20 19:48)
+
+APPROVED as registered by the Overseer on 2026-11-20, including the 1 % bar; first slice 01:00 on 2026-11-21.
+Fixed before slice 1 and committed with this note:
+- run order: tools/tb_order.txt (42 lines: smoke; then five cycles of r, d10, r, d100, r, d1000, s, h; then walk);
+- scheduler: tools/tb_slice.sh (wall-clock gate 01:00-08:00, slices of at most 3 h, EXCLUSIVE through WANT, title and
+  Roblox checks before every run, stop on any failed run or failed smoke field check, notices to the Overseer);
+- reference exe: run/bin/RefDet14.exe (the tier (a) reference build), save bench1; runner priority nice 19, idle I/O;
+- SPEED runs use the low-end bench settings unchanged (cores 0-3, 8 GB, reported VRAM 2,048 MB), so they change more
+  than speed alone; a statistic struck by SPEED is therefore "sensitive to the low-end settings", stated as such;
+- fingerprint at arming (tools/tb_hash.sh RefDet14.exe bench1): exe bc0426a10810f461, scripts d2b14bc4bfbf01ea,
+  configs a1c31bfb1d88f4ab, save d4a4cb0f30c90d39, overlay 5f96c97bf40ae93f; recorded again at every slice.

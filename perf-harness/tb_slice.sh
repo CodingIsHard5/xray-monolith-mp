@@ -1,0 +1,67 @@
+#!/bin/bash
+# tb_slice.sh -- overnight scheduler for the tier (b) CONTROL runs (PREREG-tierB-controls-2026-11-20, approved by the
+# Overseer). Works through tools/tb_order.txt, one run at a time, in slices:
+#   * wall-clock gate: a slice opens only between 01:00 and 08:00 local time;
+#   * EXCLUSIVE claim through the WANT queue, held for one slice of at most 3 h, then released and re-queued;
+#   * a run starts only if 22 min are left in the slice and before 08:00;
+#   * protected-title and Roblox checks before every run (either one up = the slice ends);
+#   * after the grant, waits up to 10 min inside the claim for the 1-min load to fall under 2;
+#   * smoke run first; if its new dump fields are not filled, everything stops (prereg section 7);
+#   * any run with rc != 0 ends the slice and is reported (no workaround); a DISTURBED run is re-queued once;
+#   * notifies the Overseer at the first boot, at each slice end with the run count, and on any stop.
+# State: out/tb_state/done.txt (tags finished), out/tb_state/slice.log. Gives up after TB_NIGHTS nights (default 4).
+set -u; P=~/Projects/StalkerGameEngine; cd "$P"; T="$HOME/.claude/overseer/tools"; W=engineperf
+EXE="${TB_EXE:-RefDet14.exe}"; SAVE=bench1; ST=out/tb_state; mkdir -p $ST; touch $ST/done.txt $ST/rerun.txt
+WHAT="EXCLUSIVE: headless tier (b) control runs (one engine at a time, lowest priority)"
+END_ALL=$(( $(date +%s) + ${TB_NIGHTS:-4} * 86400 ))
+log() { echo "$(date '+%F %T') $*" | tee -a $ST/slice.log; }
+note() { timeout 60 "$T/notify-overseer.sh" $W - <<<"engineperf: $1" >/dev/null 2>&1; }
+in_window() { local h; h=$(date +%-H); [ "$h" -ge 1 ] && [ "$h" -lt 8 ]; }
+secs_to_8() { echo $(( $(date -d "today 08:00" +%s) - $(date +%s) )); }
+pending() { { grep -v '^#' tools/tb_order.txt; cat $ST/rerun.txt; } | while IFS='|' read -r tag env extra; do [ -n "$tag" ] && ! grep -qx "$tag" $ST/done.txt && echo "$tag|$env|$extra"; done; }
+smoke_ok() { local d=out/tb_smoke x=out/tb_smoke/tb_extra_smoke_3.txt
+  [ -s $d/alife_dump_smoke_3.txt ] && [ -s $x ] || { echo "smoke: dump 3 missing"; return 1; }
+  local passes sq sqbad st mo sm; passes=$(awk '$1=="info" && $2=="passes"{print $3}' $x); sq=$(grep -c '^sq' $x); sqbad=$(awk -F'\t' '$1=="sq" && ($3=="-"||$3=="nil"||$3=="")' $x | wc -l)
+  st=$(awk -F'\t' '$1=="cr" && $4=="stalker"' $x | wc -l); mo=$(awk -F'\t' '$1=="cr" && $4=="monster"' $x | wc -l); sm=$(grep -c '^sm' $x)
+  echo "smoke: passes=$passes squads=$sq squads_without_level=$sqbad stalkers=$st monsters=$mo smarts=$sm"
+  [ "${passes:-0}" -gt 0 ] && [ "$sq" -gt 50 ] && [ "$sqbad" -eq 0 ] && [ "$st" -gt 50 ] && [ "$mo" -gt 50 ] && [ "$sm" -gt 50 ]; }
+FIRST=1; total_done=0; HARD=0
+while [ -n "$(pending)" ]; do
+  [ $(date +%s) -ge $END_ALL ] && { log "GIVE UP: nights used up, $(pending | wc -l) runs left"; note "tier (b) controls: scheduler GAVE UP after ${TB_NIGHTS:-4} nights, $(pending | wc -l) runs left."; exit 5; }
+  until in_window && [ $(secs_to_8) -gt 1500 ]; do sleep 120; done          # wall-clock gate
+  "$T/quiet-required.sh" want $W EXCLUSIVE >/dev/null 2>&1; ok=0
+  while in_window && [ $(secs_to_8) -gt 1500 ]; do
+    if ! "$T/protected-title-check.sh" >/dev/null 2>&1 && ! pgrep -x sober >/dev/null; then
+      "$T/quiet-required.sh" claim $W 30 "$WHAT" 2>&1 | grep -q '^claimed' && { ok=1; break; }; fi
+    sleep 60; done
+  [ $ok = 1 ] || { "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1; log "no slot before 08:00 tonight"; note "tier (b) controls: no exclusive slot inside tonight's window; nothing run in this attempt."; sleep 600; continue; }
+  SL_START=$(date +%s); SL_END=$(( SL_START + 3*3600 )); n=0; stop=""
+  log "slice granted, load $(cut -d' ' -f1-3 /proc/loadavg)"
+  for i in $(seq 1 20); do awk -v l="$(cut -d' ' -f1 /proc/loadavg)" 'BEGIN{exit !(l<2)}' && break; sleep 30; done
+  tools/tb_hash.sh "$EXE" $SAVE > $ST/hash_$(date +%m%d_%H%M).txt 2>&1
+  while :; do
+    line=$(pending | head -1); [ -n "$line" ] || break
+    IFS='|' read -r tag env extra <<<"$line"
+    [ $(( SL_END - $(date +%s) )) -lt 1320 ] && { stop="slice time used"; break; }
+    [ $(secs_to_8) -lt 1320 ] && { stop="08:00 reached"; break; }
+    "$T/protected-title-check.sh" >/dev/null 2>&1 && { stop="protected title running"; break; }
+    pgrep -x sober >/dev/null && { stop="Roblox running"; break; }
+    "$T/quiet-required.sh" claim $W 30 "$WHAT" >/dev/null 2>&1          # same-text renewal for this run
+    log "run $tag env=[$env] extra=[$extra] load $(cut -d' ' -f1-3 /proc/loadavg)"
+    [ $FIRST = 1 ] && { FIRST=0; note "tier (b) controls: FIRST BOOT now ($tag) under my EXCLUSIVE claim, slice granted $(date -d @$SL_START +%T)."; }
+    env TB_NOCLAIM=1 TB_EXE="$EXE" $env tools/tb_run.sh "$tag" $SAVE $extra > $ST/run_$tag.log 2>&1; rc=$?
+    log "run $tag rc=$rc $(grep -a '^end ' out/tb_$tag/conditions.txt 2>/dev/null | cut -c1-90)"
+    [ $rc = 0 ] || { stop="run $tag ended rc=$rc (3 = protected title, 4 = engine exited early, 5 = timeout)"; [ $rc = 3 ] || HARD=1; break; }
+    if [ "$tag" = smoke ]; then if r=$(smoke_ok); then log "$r"; else log "$r"; stop="SMOKE FAILED its field check: $r"; HARD=1; break; fi; fi
+    echo "$tag" >> $ST/done.txt; n=$((n+1)); total_done=$((total_done+1))
+    if grep -q '^DISTURBED' out/tb_$tag/conditions.txt 2>/dev/null && [ "$tag" != smoke ] && [[ "$tag" != *_rr ]]; then
+      grep -v '^#' tools/tb_order.txt | awk -F'|' -v t="$tag" '$1==t{print t"_rr|"$2"|"$3}' >> $ST/rerun.txt; log "run $tag DISTURBED (load at start >= 2): excluded, re-run queued as ${tag}_rr"; fi
+  done
+  "$T/quiet-required.sh" release $W >/dev/null 2>&1; "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1
+  left=$(pending | wc -l)
+  log "slice end: $n runs this slice, $(grep -c . $ST/done.txt) done in all, $left left. ${stop:-list finished}"
+  note "tier (b) controls: slice ended $(date +%T): $n runs this slice, $(grep -c . $ST/done.txt) of 42 done, $left left. Reason: ${stop:-list finished}."
+  [ "${HARD:-0}" = 1 ] && { log "STOPPED on a failed run; not continuing without a ruling"; exit 4; }
+  [ "$left" -gt 0 ] && sleep 300          # gap between slices so queued workers get the box
+done
+log "all runs done"; note "tier (b) controls: ALL runs done ($(grep -c . $ST/done.txt)). Scoring next, as registered."; exit 0

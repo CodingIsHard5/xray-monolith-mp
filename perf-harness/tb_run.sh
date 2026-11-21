@@ -45,7 +45,7 @@ LOWPFX=""; if [ "${BENCH_LOWEND:-0}" = 1 ]; then
   echo "lowend: cores=${BENCH_CORES:-0-3} mem=${BENCH_MEM:-8G} vram_reported_mb=${BENCH_VRAM_MB:-2048}" >> "$OUT/conditions.txt"
 fi
 ( cd "$RUN" && ALSOFT_DRIVERS=null SDL_AUDIODRIVER=dummy WINEDLLOVERRIDES="d3dcompiler_47=n" WINEDEBUG=-all \
-  $LOWPFX nice -n 10 wine explorer "/desktop=etb$$,1280x720" "Z:${RUN//\//\\}\\bin\\$EXE" -nointro -dbg \
+  $LOWPFX nice -n 19 ionice -c3 wine explorer "/desktop=etb$$,1280x720" "Z:${RUN//\//\\}\\bin\\$EXE" -nointro -dbg \
   -start "server($SAVE/single/alife/load)" "client(localhost)" -tb_dump -det_tag "$TAG" -det_times "$TIMES" "$@" \
   > "$OUT/wine_stderr.log" 2>&1 ) &
 START=$(date +%s); RC=1; PEAK=0; AFF=""
