@@ -1623,11 +1623,12 @@ static void vr_holster_update(const vr_input_info& I, CActor* A, bool allowed, b
 }
 
 // milestone 8b: loose ammo on the ground near the actor, as the world has it (for the [vr3mag] log)
-static void vr_mag_ground(CActor* A, int& count, int& rounds, u16& last_id, Fvector& last_pos)
+static void vr_mag_ground(CActor* A, int& count, int& rounds, u16& last_id, Fvector& last_pos, float& ground_y)
 {
 	count = rounds = 0;
 	last_id = u16(-1);
 	last_pos.set(0.f, 0.f, 0.f);
+	ground_y = -9999.f; // no ground found under it (or no loose ammo)
 	if (!A)
 		return;
 	for (u32 i = 0, n = Level().Objects.o_count(); i < n; ++i)
@@ -1643,6 +1644,15 @@ static void vr_mag_ground(CActor* A, int& count, int& rounds, u16& last_id, Fvec
 			last_id = am->ID();
 			last_pos.set(am->Position());
 		}
+	}
+	if (last_id != u16(-1))
+	{
+		// the level's static geometry straight below it, from 1 m above (milestone 8b note 6: does it rest on the ground)
+		collide::rq_result R;
+		Fvector st;
+		st.set(last_pos.x, last_pos.y + 1.f, last_pos.z);
+		if (Level().ObjectSpace.RayPick(st, Fvector().set(0.f, -1.f, 0.f), 3.f, collide::rqtStatic, R, nullptr))
+			ground_y = st.y - R.range;
 	}
 }
 
@@ -1670,12 +1680,13 @@ static void vr_reload_update(const vr_input_info& I, CActor* A, bool allowed, bo
 		int gc, gr;
 		u16 gid;
 		Fvector gp;
-		vr_mag_ground(A, gc, gr, gid, gp);
+		float gy;
+		vr_mag_ground(A, gc, gr, gid, gp, gy);
 		const int ammo = G ? G->GetAmmoElapsed() : -1;
-		Msg("* [vr3mag] frame %u simple %d active %d mag %s gun_rounds %d hand_mag %d hand_rounds %d inv %d dropped %d event %s ground %d ground_rounds %d last_id %u last_pos %.4f %.4f %.4f hand_world %.4f %.4f %.4f",
+		Msg("* [vr3mag] frame %u simple %d active %d mag %s gun_rounds %d hand_mag %d hand_rounds %d inv %d dropped %d event %s ground %d ground_rounds %d last_id %u last_pos %.4f %.4f %.4f hand_world %.4f %.4f %.4f ground_y %.4f",
 			I.frame, S.simple ? 1 : 0, S.active ? 1 : 0, S.mag_in ? "in" : "out", ammo, S.hand_mag ? 1 : 0, int(S.hand_cart.size()),
 			G ? G->GetSuitableAmmoTotal() - ammo : -1, S.dropped, mev, gc, gr, unsigned(gid), gp.x, gp.y, gp.z,
-			S.off_world.x, S.off_world.y, S.off_world.z);
+			S.off_world.x, S.off_world.y, S.off_world.z, gy);
 	};
 	// a magazine in the hand whose gun is no longer the one held (or nothing is held): its rounds go back to the stock
 	if (!S.simple && S.hand_mag && (!S.active || W->ID() != S.hand_gun))
@@ -3791,6 +3802,16 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 	}
 	const bool log = vr_mag_log_window();
 	const int eye = g_stereo_bench_eye;
+	// milestone 8b note 6: what the skeleton holds for the gun's magazine bone as this pass begins (after the last bone
+	// calculation, before this pass's own call): the scale of its render transform, 0 = not drawn. Read back, not our call.
+	const float gun_rscale = V.bone != BI_NONE ? K->LL_GetBoneInstance(V.bone).mRenderTransform.i.magnitude() : -1.f;
+	static int s_nohide = -1; // -vr_mag_nohide: TEST ONLY (mutation witness of the logged check), off by default
+	if (s_nohide < 0)
+	{
+		s_nohide = strstr(Core.Params, "-vr_mag_nohide") ? 1 : 0;
+		if (s_nohide)
+			Msg("! [vr3mag] -vr_mag_nohide: TEST ONLY, the gun's magazine is NOT hidden while it is out");
+	}
 	if (V.bone == BI_NONE)
 	{
 		if (log)
@@ -3811,7 +3832,7 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 			V.cache_ok = true;
 		}
 	}
-	const bool hide = S.active && !S.mag_in && V.cache_ok; // not remembered yet: shown until it is
+	const bool hide = S.active && !S.mag_in && V.cache_ok && !s_nohide; // not remembered yet: shown until it is
 	if (hide)
 	{
 		item->set_bone_visible(S.cfg_bone[0] ? S.cfg_bone : "magazine", FALSE, TRUE);
@@ -3893,9 +3914,9 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 			vr_hud_pixel(mag_w, mx, my);
 		if (V.cache_ok)
 			vr_hud_pixel(gun_mag_w, gx, gy);
-		Msg("* [vr3magv] frame %u eye %d bone 1 gun_shown %d hand_shown %d cache %d mag_world %.4f %.4f %.4f hand_world %.4f %.4f %.4f bone_scale %.4f mag_px %.2f %.2f gun_mag_px %.2f %.2f size %u %u",
+		Msg("* [vr3magv] frame %u eye %d bone 1 gun_shown %d hand_shown %d cache %d mag_world %.4f %.4f %.4f hand_world %.4f %.4f %.4f bone_scale %.4f mag_px %.2f %.2f gun_mag_px %.2f %.2f size %u %u gun_rscale %.4f",
 			g_vr_track.frame, eye, K->LL_GetBoneVisible(V.bone) ? 1 : 0, hand ? 1 : 0, V.cache_ok ? 1 : 0, mag_w.x, mag_w.y, mag_w.z,
-			hand_w.x, hand_w.y, hand_w.z, scale, mx, my, gx, gy, Device.dwWidth, Device.dwHeight);
+			hand_w.x, hand_w.y, hand_w.z, scale, mx, my, gx, gy, Device.dwWidth, Device.dwHeight, gun_rscale);
 	}
 }
 
