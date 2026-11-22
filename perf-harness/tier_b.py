@@ -14,6 +14,8 @@ Statistics for a pair of runs (x, y) at dump k:
   D  |deaths_x - deaths_y|; death = creature id (alive= field, actor id 0 excluded) alive at dump 0 and absent or
      alive=false at dump k                                               (needs dump 0)
   U  |passes_x - passes_y| / mean(passes_x, passes_y) at dump k (0 if both 0)
+  C  sum over I1..I6 of |I_j(x) - I_j(y)|; I_j = consistency counts (creature vs its squad: squad exists, level,
+     vertex, smart; squad npc count vs creatures naming it; smart population vs its squads)   (needs tb_extra)
      (needs tb_extra "info passes" or det_counters "info passes")
 A statistic that needs a field a run lacks is reported as "n/a (field missing: ...)"; nothing is guessed.
 
@@ -51,7 +53,7 @@ import random
 import re
 import sys
 
-STATS = ["P", "L", "V", "M", "D", "U"]
+STATS = ["P", "L", "V", "M", "D", "U", "C"]
 PERM_EXACT_MAX = 20000
 BANDS = [80, 85, 90, 95, 97.5, 99, 100]
 
@@ -223,7 +225,40 @@ def stat_U(a, b, k):
     return 0.0 if m == 0 else abs(pa - pb) / m
 
 
-FUNCS = {"P": stat_P, "L": stat_L, "V": stat_V, "M": stat_M, "D": stat_D, "U": stat_U}
+def invariants(r, k):
+    """I1..I6 consistency counts at dump k (PREREG-tierB-statC; same as perf-harness/tb_invariants.awk)."""
+    e = need_extra(r, k)
+    sq, cr, sm = e["sq"], e["cr"], e["sm"]
+    members, i = {}, [0] * 6
+    for cid, c in cr.items():
+        s = c["squad"]
+        if s == "-":
+            continue
+        members[s] = members.get(s, 0) + 1
+        q = sq.get(int(s)) if s.isdigit() else None
+        if q is None:
+            i[0] += 1                                   # I1 creature names a squad that is not there
+            continue
+        i[1] += c["level"] != q["level"]                # I2
+        i[2] += c["gv"] != q["gv"]                      # I3
+        i[4] += c["smart"] != q["smart"]                # I5
+    pop = {}
+    for sid, q in sq.items():
+        n = int(q["npcs"]) if q["npcs"].isdigit() else None   # "-" = npc_count unavailable (stock: 2 helicopters)
+        i[3] += n is None or members.get(str(sid), 0) != n    # I4 (unavailable counts as a mismatch, as in the awk)
+        n = n or 0
+        if q["smart"] != "-":
+            pop[q["smart"]] = pop.get(q["smart"], 0) + n
+    for mid, m in sm.items():
+        i[5] += pop.get(str(mid), 0) != m["npcs"]       # I6
+    return i
+
+
+def stat_C(a, b, k):
+    return sum(abs(x - y) for x, y in zip(invariants(a, k), invariants(b, k)))
+
+
+FUNCS = {"P": stat_P, "L": stat_L, "V": stat_V, "M": stat_M, "D": stat_D, "U": stat_U, "C": stat_C}
 
 
 def stat(name, a, b, k):

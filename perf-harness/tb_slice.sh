@@ -11,7 +11,7 @@
 #   * notifies the Overseer at the first boot, at each slice end with the run count, and on any stop.
 # State: out/tb_state/done.txt (tags finished), out/tb_state/slice.log. Gives up after TB_NIGHTS nights (default 4).
 set -u; P=~/Projects/StalkerGameEngine; cd "$P"; T="$HOME/.claude/overseer/tools"; W=engineperf
-EXE="${TB_EXE:-RefDet14.exe}"; SAVE=bench1; ST=out/tb_state; mkdir -p $ST; touch $ST/done.txt $ST/rerun.txt
+EXE="${TB_EXE:-RefDet14.exe}"; SAVE=bench1; ST=${TB_STATE:-out/tb_state}; ORDER=${TB_ORDER:-tools/tb_order.txt}; mkdir -p $ST; touch $ST/done.txt $ST/rerun.txt
 WHAT="EXCLUSIVE: headless tier (b) control runs (one engine at a time, lowest priority)"
 END_ALL=$(( $(date +%s) + ${TB_NIGHTS:-4} * 86400 ))
 log() { echo "$(date '+%F %T') $*" | tee -a $ST/slice.log; }
@@ -33,7 +33,7 @@ yield_gap() { local t0 since el cut who AL="${TB_AUDIT_LOG:-$HOME/.claude/overse
       if ! tail -n 5000 "$AL" | awk -v s="$cut" 'substr($0,1,19)>=s && /refused/ && $4!="by=engineperf"{f=1} END{exit !f}'; then
         log "gap: ${who#by=} claimed and released, nobody refused in the last 5 min; after ${el}s"; return; fi; fi
     sleep 30; done; }
-pending() { { cat $ST/rerun.txt; grep -v '^#' tools/tb_order.txt; } | while IFS='|' read -r tag env extra; do [ -n "$tag" ] && ! grep -qx "$tag" $ST/done.txt && echo "$tag|$env|$extra"; done; }
+pending() { { cat $ST/rerun.txt; grep -v '^#' $ORDER; } | while IFS='|' read -r tag env extra; do [ -n "$tag" ] && ! grep -qx "$tag" $ST/done.txt && echo "$tag|$env|$extra"; done; }
 # smoke_ok [extra-file [dump-file]]: the engine (wine) writes CRLF; every field is read from a CR-stripped copy ($x).
 smoke_ok() { local raw=${1:-out/tb_smoke/tb_extra_smoke_3.txt} dump=${2:-out/tb_smoke/alife_dump_smoke_3.txt} x
   [ -s "$dump" ] && [ -s "$raw" ] || { echo "smoke: dump 3 missing"; return 1; }
@@ -53,6 +53,13 @@ settle() { local t0 l1 hv; t0=$(date +%s)
     sleep "${TB_SETTLE_POLL:-15}"; done; }
 # pending() lists the _rr re-runs before the rest of the order (Overseer 2026-11-22: re-runs are the data).
 # TB_WALK_TIMEOUT (default 1500 s): run cap for the walk smoke only; all other runs keep TB_TIMEOUT.
+# smokec_ok: statistic C smoke (PREREG-tierB-statC section 6): the smoke fields as before, plus I5 >= 50 at the last
+# dump and the "tb_lostreg: done n=100" line in the engine log.
+smokec_ok() { local d=${1:-out/tb_smokec} t=${2:-smokec} x r i5; x=$d/tb_extra_${t}_3.txt
+  r=$(smoke_ok "$x" $d/alife_dump_${t}_3.txt) || { echo "$r"; return 1; }
+  i5=$(awk -f engine/perf-harness/tb_invariants.awk "$x" | grep -o 'I5 smart=[0-9]*' | cut -d= -f2)
+  grep -qa 'tb_lostreg: done n=100' $d/xray.log || { echo "$r I5=$i5; no 'tb_lostreg: done n=100' line"; return 1; }
+  echo "$r I5=$i5"; [ "${i5:-0}" -ge 50 ]; }
 FIRST=1; total_done=0; HARD=0
 [ "${TB_GAP_FIRST:-0}" = 1 ] && yield_gap        # restarted right after a slice: honour the gap first
 while [ -n "$(pending)" ]; do
@@ -83,15 +90,16 @@ while [ -n "$(pending)" ]; do
     env TB_NOCLAIM=1 TB_EXE="$EXE" TB_TIMEOUT=$tmo $env tools/tb_run.sh "$tag" $SAVE $extra > $ST/run_$tag.log 2>&1; rc=$?
     log "run $tag rc=$rc $(grep -a '^end ' out/tb_$tag/conditions.txt 2>/dev/null | cut -c1-90)"
     [ $rc = 0 ] || { stop="run $tag ended rc=$rc (3 = protected title, 4 = engine exited early, 5 = timeout)"; [ $rc = 3 ] || HARD=1; break; }
+    if [ "$tag" = smokec ]; then if r=$(smokec_ok); then log "$r"; else log "$r"; stop="SMOKE FAILED its field check: $r"; HARD=1; break; fi; fi
     if [ "$tag" = smoke ]; then if r=$(smoke_ok); then log "$r"; else log "$r"; stop="SMOKE FAILED its field check: $r"; HARD=1; break; fi; fi
     echo "$tag" >> $ST/done.txt; n=$((n+1)); total_done=$((total_done+1))
     if grep -q '^DISTURBED' out/tb_$tag/conditions.txt 2>/dev/null && [ "$tag" != smoke ] && [[ "$tag" != *_rr ]]; then
-      grep -v '^#' tools/tb_order.txt | awk -F'|' -v t="$tag" '$1==t{print t"_rr|"$2"|"$3}' >> $ST/rerun.txt; log "run $tag DISTURBED (load at start >= 2): excluded, re-run queued as ${tag}_rr"; fi
+      grep -v '^#' $ORDER | awk -F'|' -v t="$tag" '$1==t{print t"_rr|"$2"|"$3}' >> $ST/rerun.txt; log "run $tag DISTURBED (load at start >= 2): excluded, re-run queued as ${tag}_rr"; fi
   done
   "$T/quiet-required.sh" release $W >/dev/null 2>&1; "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1
   left=$(pending | wc -l)
   log "slice end: $n runs this slice, $(grep -c . $ST/done.txt) done in all, $left left. ${stop:-list finished}"
-  note "tier (b) controls: slice ended $(date +%T): $n runs this slice, $(grep -c . $ST/done.txt) of 42 done, $left left. Reason: ${stop:-list finished}."
+  note "tier (b) controls: slice ended $(date +%T): $n runs this slice, $(grep -c . $ST/done.txt) of $(grep -vc '^#' $ORDER) done, $left left. Reason: ${stop:-list finished}."
   [ "${HARD:-0}" = 1 ] && { log "STOPPED on a failed run; not continuing without a ruling"; exit 4; }
   [ "${TB_ONE_SLICE:-0}" = 1 ] && [ "$left" -gt 0 ] && { log "one slice only tonight (TB_ONE_SLICE): leaving, $left left for a later night"; exit 0; }
   [ "$left" -gt 0 ] && yield_gap          # gap between slices so queued workers get the box

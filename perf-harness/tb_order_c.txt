@@ -1,0 +1,22 @@
+# tag | env | extra engine flags   (PREREG-tierB-statC-2026-11-22, fixed before the first run)
+smokec|TB_TIMES=60,120,180|-tb_lostreg 100
+ri01||
+lr1_01||-tb_lostreg 1
+lr10_01||-tb_lostreg 10
+lr100_01||-tb_lostreg 100
+ri02||
+lr1_02||-tb_lostreg 1
+lr10_02||-tb_lostreg 10
+lr100_02||-tb_lostreg 100
+ri03||
+lr1_03||-tb_lostreg 1
+lr10_03||-tb_lostreg 10
+lr100_03||-tb_lostreg 100
+ri04||
+lr1_04||-tb_lostreg 1
+lr10_04||-tb_lostreg 10
+lr100_04||-tb_lostreg 100
+ri05||
+lr1_05||-tb_lostreg 1
+lr10_05||-tb_lostreg 10
+lr100_05||-tb_lostreg 100

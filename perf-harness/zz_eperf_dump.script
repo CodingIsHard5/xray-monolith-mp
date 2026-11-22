@@ -222,6 +222,12 @@ local tb = not active and string.find(cl, "-tb_dump", 1, true) ~= nil
 local tb_skip_n = tonumber(string.match(cl, "%-tb_skip%s+(%d+)")) or 0
 local tb_skip_at = (tonumber(string.match(cl, "%-tb_skip_at%s+(%d+)")) or 60) * 1000
 local tb_skip_done, tb_skip_first, tb_skip_last = 0, nil, nil
+--   -tb_lostreg N [-tb_lostreg_at s, default 60] : must-fail control for statistic C (PREREG-tierB-statC): after a
+--     normal OFFLINE squad update, unregister ONE member (whose smart is the squad's smart) from that smart via the
+--     smart's own unregister_npc, N times in all; the squad keeps its smart_id (a lost registration, same work)
+local tb_lr_n = tonumber(string.match(cl, "%-tb_lostreg%s+(%d+)")) or 0
+local tb_lr_at = (tonumber(string.match(cl, "%-tb_lostreg_at%s+(%d+)")) or 60) * 1000
+local tb_lr_done, tb_lr_first, tb_lr_last = 0, nil, nil
 local tb_walk = tonumber(string.match(cl, "%-tb_walk%s+(%d+)"))
 local tb_route, tb_step = nil, 0
 
@@ -235,6 +241,7 @@ local function tb_extra(k)
 	f:write("info passes ", pass_count, "\n", "info time_ms ", time_global() - start_t, "\n")
 	f:write("info skip_n ", tb_skip_n, "\n", "info skip_done ", tb_skip_done, "\n", "info walk_step ", tb_step, "\n")
 	f:write("info skip_at_ms ", tb_skip_at, "\n", "info skip_first_ms ", s(tb_skip_first), "\n", "info skip_last_ms ", s(tb_skip_last), "\n")
+	f:write("info lostreg_n ", tb_lr_n, "\n", "info lostreg_done ", tb_lr_done, "\n", "info lostreg_first_ms ", s(tb_lr_first), "\n", "info lostreg_last_ms ", s(tb_lr_last), "\n")
 	f:write("info actor_level ", s(g(function() return level.name() end)), "\n")
 	-- sq <id> <section> <level> <game vertex> <smart id> <npc count>
 	-- cr <id> <section> <kind stalker|monster|-> <alive 0|1> <level> <game vertex> <squad id> <smart id>
@@ -338,8 +345,34 @@ local function tb_start()
 			return real_update(self, ...)
 		end
 	end
+	if tb_lr_n > 0 and cls then
+		local real_update2 = cls.update
+		cls.update = function(self, ...)
+			local r = real_update2(self, ...)
+			if tb_lr_done < tb_lr_n and start_t and time_global() - start_t >= tb_lr_at and not self.online and self.smart_id then
+				local smart = alife_object(self.smart_id)
+				if smart and smart.unregister_npc then
+					for k in self:squad_members() do
+						local se = alife_object(k.id)
+						if se and se.m_smart_terrain_id == self.smart_id then
+							smart:unregister_npc(se)
+							tb_lr_done = tb_lr_done + 1
+							local t = time_global() - start_t
+							tb_lr_first = tb_lr_first or t
+							tb_lr_last = t
+							if tb_lr_done == tb_lr_n then
+								printf(string.format("* tb_lostreg: done n=%d at_ms=%d first_ms=%d last_ms=%d", tb_lr_n, tb_lr_at, tb_lr_first, tb_lr_last))
+							end
+							break
+						end
+					end
+				end
+			end
+			return r
+		end
+	end
 	RegisterScriptCallback("actor_on_update", tb_on_update)
-	printf(string.format("* tb_dump: installed (tag %s, %d checkpoints, skip %d at %d ms, walk %s)", tag, total, tb_skip_n, tb_skip_at, tostring(tb_walk)))
+	printf(string.format("* tb_dump: installed (tag %s, %d checkpoints, skip %d at %d ms, walk %s, lostreg %d at %d ms)", tag, total, tb_skip_n, tb_skip_at, tostring(tb_walk), tb_lr_n, tb_lr_at))
 end
 
 function on_game_start()

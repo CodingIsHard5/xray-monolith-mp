@@ -68,3 +68,19 @@ Stop rules as before: a crash, timeout or failed smoke check stops the series an
 
 Any later claim: "passes tier (b) with C; limits: U about 4 % of A-Life work; C <detection limit> lost registrations;
 stationary player". C covers lost registrations only, not every kind of wrong work.
+
+## Note (2026-11-22 07:46:15 EST): built and checked at the desk, before any run
+
+- Section 5 done: tier_b.py null on the 15 existing references with C added, band 97.5: overall false-fail 4.5 %
+  (unchanged), C's own rate 0.000. Honest caveat: C is 0 here only because all 15 references give identical counts;
+  the 4-in-50 world-event rate seen across all dumps (e.g. h05) is not inside this reference set. Output:
+  perf-harness/tierB_null_withC_2026-11-22.txt.
+- tier_b.py: statistic C added (invariants() + stat_C; I4 counts an unavailable npc_count, the 2 stock helicopters, as
+  a mismatch, exactly like tb_invariants.awk). Python and awk give identical I1..I6 on all 50 existing runs.
+- Overlay: -tb_lostreg N [-tb_lostreg_at s] added (purely additive, 34 lines; syntax-checked with luac 5.1); tb_extra
+  gains four "info lostreg_*" lines. Overlay hash now cd7a6ad68b84d994 (run tree = harness copy); the ri runs test
+  exactly this overlay.
+- Self-test tools/selftest/tb_statC_selftest.sh: a CRLF fixture with one lost registration gives C = 1 on I5 only;
+  witness W4 (I5 check removed) gives C = 0. Passes. The CRLF and settle self-tests still pass.
+- Scheduler: TB_ORDER / TB_STATE select tools/tb_order_c.txt and out/tbc_state; smoke check smokec_ok as in section 6,
+  tested: a stock run fails it (I5 = 1, no done line), a doctored copy with 60 lost registrations passes.
