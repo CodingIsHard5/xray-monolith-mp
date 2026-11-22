@@ -33,7 +33,7 @@ yield_gap() { local t0 since el cut who AL="${TB_AUDIT_LOG:-$HOME/.claude/overse
       if ! tail -n 5000 "$AL" | awk -v s="$cut" 'substr($0,1,19)>=s && /refused/ && $4!="by=engineperf"{f=1} END{exit !f}'; then
         log "gap: ${who#by=} claimed and released, nobody refused in the last 5 min; after ${el}s"; return; fi; fi
     sleep 30; done; }
-pending() { { grep -v '^#' tools/tb_order.txt; cat $ST/rerun.txt; } | while IFS='|' read -r tag env extra; do [ -n "$tag" ] && ! grep -qx "$tag" $ST/done.txt && echo "$tag|$env|$extra"; done; }
+pending() { { cat $ST/rerun.txt; grep -v '^#' tools/tb_order.txt; } | while IFS='|' read -r tag env extra; do [ -n "$tag" ] && ! grep -qx "$tag" $ST/done.txt && echo "$tag|$env|$extra"; done; }
 # smoke_ok [extra-file [dump-file]]: the engine (wine) writes CRLF; every field is read from a CR-stripped copy ($x).
 smoke_ok() { local raw=${1:-out/tb_smoke/tb_extra_smoke_3.txt} dump=${2:-out/tb_smoke/alife_dump_smoke_3.txt} x
   [ -s "$dump" ] && [ -s "$raw" ] || { echo "smoke: dump 3 missing"; return 1; }
@@ -51,6 +51,8 @@ settle() { local t0 l1 hv; t0=$(date +%s)
     awk -v l="$l1" 'BEGIN{exit !(l<2)}' && [ -z "${hv// /}" ] && { echo "settle wait=$(( $(date +%s) - t0 ))s load=$l1 heavy=[] ok"; return 0; }
     [ $(( $(date +%s) - t0 )) -ge "${TB_SETTLE_MAX:-300}" ] && { echo "settle wait=$(( $(date +%s) - t0 ))s load=$l1 heavy=[$hv] cap"; return 1; }
     sleep "${TB_SETTLE_POLL:-15}"; done; }
+# pending() lists the _rr re-runs before the rest of the order (Overseer 2026-11-22: re-runs are the data).
+# TB_WALK_TIMEOUT (default 1500 s): run cap for the walk smoke only; all other runs keep TB_TIMEOUT.
 FIRST=1; total_done=0; HARD=0
 [ "${TB_GAP_FIRST:-0}" = 1 ] && yield_gap        # restarted right after a slice: honour the gap first
 while [ -n "$(pending)" ]; do
@@ -77,7 +79,8 @@ while [ -n "$(pending)" ]; do
     "$T/quiet-required.sh" claim $W 30 "$WHAT" >/dev/null 2>&1          # same-text renewal for this run
     log "run $tag env=[$env] extra=[$extra] load $(cut -d' ' -f1-3 /proc/loadavg)"
     [ $FIRST = 1 ] && { FIRST=0; note "tier (b) controls: FIRST BOOT now ($tag) under my EXCLUSIVE claim, slice granted $(date -d @$SL_START +%T)."; }
-    env TB_NOCLAIM=1 TB_EXE="$EXE" $env tools/tb_run.sh "$tag" $SAVE $extra > $ST/run_$tag.log 2>&1; rc=$?
+    tmo=${TB_TIMEOUT:-1800}; [ "$tag" = walk ] && tmo=${TB_WALK_TIMEOUT:-1500}
+    env TB_NOCLAIM=1 TB_EXE="$EXE" TB_TIMEOUT=$tmo $env tools/tb_run.sh "$tag" $SAVE $extra > $ST/run_$tag.log 2>&1; rc=$?
     log "run $tag rc=$rc $(grep -a '^end ' out/tb_$tag/conditions.txt 2>/dev/null | cut -c1-90)"
     [ $rc = 0 ] || { stop="run $tag ended rc=$rc (3 = protected title, 4 = engine exited early, 5 = timeout)"; [ $rc = 3 ] || HARD=1; break; }
     if [ "$tag" = smoke ]; then if r=$(smoke_ok); then log "$r"; else log "$r"; stop="SMOKE FAILED its field check: $r"; HARD=1; break; fi; fi

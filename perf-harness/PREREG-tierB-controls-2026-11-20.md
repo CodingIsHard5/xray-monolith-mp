@@ -145,3 +145,17 @@ Fixed before slice 1 and committed with this note:
   another worker has claimed and since released (audit log) AND nobody has been refused a claim in the last 5 min.
   Self-test cases: claimed+released with no refusal ends early; a refusal in the last 5 min waits the full gap;
   witness W3 (refusal check removed) ends early. All passed. Scheduling only; no rule, threshold or statistic changed.
+
+## Note (2026-11-22 04:35:37 EST): WALK smoke attempt 1 timed out - a STALL, not a slow walk
+
+- Run walk (04:13:00-04:34:03, 2026-11-22; cap 1260 s): checkpoints 0 and 1 written; checkpoint 2 (900 s) never written; rc 5.
+- Pace was normal: checkpoint 1 (300 s engine) at 04:18, and 442 s of engine time by 04:20:29, i.e. engine time ran with
+  wall time. The engine log file was last written at 04:20:29 (it otherwise gets a line every 1-4 s), then nothing for
+  13.5 min until the cap. The last lines show walk step 7 (bar_zastava_dogs_lair_2, hp 1.000) and three dog hits on the
+  actor (0.17, 0.15, 0.09); no death line. Judged: STALL (engine stopped progressing), cause unknown: no CPU samples
+  existed, so I cannot say whether it hung idle, spun, or sat on an error dialog. The walk's own route puts the player in
+  a dog lair, which is relevant to the "keeps the player alive" question.
+- Ruling (Overseer): the 9 _rr re-runs go first (they are the data); then ONE walk retry with its own cap, 1500 s
+  (load under 1 min + 15 min + margin); all other runs keep 1260 s. If it fails again: record the moving-player case as
+  a STATED LIMIT and score. tb_run.sh now writes cpu_samples.txt about once a minute (engine CPU ticks, process state,
+  log size; read-only /proc reads) so a second stall can be classified.
