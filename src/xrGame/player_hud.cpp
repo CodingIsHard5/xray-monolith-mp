@@ -3,6 +3,7 @@
 #include "Level.h"
 #include "HudItem.h"
 #include "ui_base.h"
+#include "UICursor.h"
 #include "actor.h"
 #include "physic_item.h"
 #include "static_cast_checked.hpp"
