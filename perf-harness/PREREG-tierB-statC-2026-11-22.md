@@ -130,3 +130,50 @@ Outputs: perf-harness/tierB_statC_step1_2026-11-22.txt, tierB_statC_score_2026-1
    Rule B adds nothing, and the "fragile p" concern does not arise; their verdict is Rule A against the threshold.
 5. Claims language from now on: "passes tier (b) incl. C; limits: U about 4 % of A-Life work; C 10 lost registrations
    (P sees them too); I1-I4 unproven; stationary player".
+
+## Note (2026-11-22 13:34:42 EST): desk findings after the C result (Overseer rulings 1-4); nothing re-scored
+
+(1) Recorded: C accepted with limit 10, validated through I5/I6 only, no evidence of value over P on this control.
+
+(3) U at dose 1, desk examination. 900-s pass counts: 34 stock runs (15 ref, 5 hold, 5 speed, 5 ri, 4 originals of
+re-runs) lie in 1,918-1,927, mean about 1,922. lr1: 1,926, 1,927, 1,930, 1,928, 1,927 (three above every stock value).
+lr10: 1,922, 1,929, 1,925, 1,930, 1,926 (also raised; it passed only because two runs were low). lr100: 1,919-1,924 (not
+raised). Conditions: runs interleaved ri, lr1, lr10, lr100 in each cycle across 07:51-13:25; start load 1.6-2.0; no
+other heavy process; settle waits 15-105 s with no group pattern. FINDING: a small rise of about +5 passes at doses 1
+and 10, absent at 100, with no difference in conditions I can find. It is not a clear dose effect (not monotonic),
+and a run-position effect (lr1 always runs second) cannot be excluded with this design. Unexplained; recorded.
+
+(2) Second control, aimed at I1-I4 and NOT P, desk trace (engine source + scripts):
+- A creature's squad link (group_id) and the squad's member list are written together, in one engine function each:
+  CSE_ALifeOnlineOfflineGroup::register_member / unregister_member (alife_online_offline_group.cpp l.105, l.153).
+  group_id is read-only from Lua (xrServer_Objects_ALife_Monsters_script4.cpp l.94).
+- Half a transfer from Lua (A:unregister_member(m) with no register into B) stays consistent in the engine. The member
+  shows squad "-" and drops out of I1-I5, A's npc_count falls by one and agrees. It reaches I6 only.
+- A double registration (B:register_member(m) while m is still in A) WOULD break I4 (and I2/I3/I5 if B is elsewhere)
+  without touching npc_info (so not P). But register_member removes the member from the graph and schedule
+  registries a second time; its VERIFYs are compiled out in release, so I cannot show at the desk that the engine
+  survives it. I do not propose running it.
+- So there is NO Lua-side lost write that safely reaches I1-I4 without P. The faithful control is an ENGINE-side test
+  hook: behind a command-line flag in a test build, N times drop the member-list erase (or insert) in
+  unregister_member / register_member. That is exactly the bookkeeping a threaded A-Life change would touch. Cost: a
+  new test exe (build via CI or local cross-build), 5 inertness refs on it, 3 doses x 5, about 6 h of box plus the
+  build. It changes engine source (test-only code behind a flag, not an optimisation). Needs a ruling; not prereg'd.
+
+(4) Rule B replacement for discrete or near-constant statistics (PROPOSED, prospective; earlier verdicts keep their
+registered scoring). Applies to the statistics whose R1 x R2 stock noise is a single value (now P, D, C). Rule B'
+replaces Rule B for them:
+  for each candidate run c, s_c = median over r in R1 of d(c, r); c DEVIATES if s_c > the governing Rule A threshold.
+  B' FAILS if 3 or more of the 5 candidate runs deviate. Verdict = Rule A AND B'.
+- Null (tools: perf-harness/tb_ruleb2_sim.py): only 34 stock dumps exist, not 50+ (the other dumps are doses). Among
+  the 24 stock runs outside R1/R2, 2 deviate (h05, ri03, both world events, on P, D and C at once), so p0 is about
+  0.10 (95 % upper bound about 0.26). Resampling 2000 random R1/R2/C splits of the 34: B' false-fail 0 of 2000 for P, D
+  and C (the pool holds only 2 deviant runs, so 3 cannot co-occur; this simulation cannot show a rate above 0).
+  Binomial at p0 = 0.10: P(>= 3 of 5) = 0.9 %; at the 0.26 bound: about 11 %. Overall false-fail of the full rule on
+  the 34 runs (old rule for L, V, M, U): 4.6 % at band 97.5 (old rule alone; B' added 0 in the simulation).
+  An adaptive cut taken from a per-split p0 estimate was tried and REJECTED (1.6 % false fails from splits where p0 was
+  estimated near 0).
+- Power on existing doses (R1/R2 as registered, threshold 0): lr1, lr10, lr100: P 5/5 and C 5/5 deviate -> FAIL; D 1/5
+  -> pass. d10, d100, d1000: P, D, C at most 2/5 -> pass. With C's widened threshold 2: lr1 C 1/5 -> pass, lr10 and
+  lr100 5/5 -> FAIL.
+- Weakness stated: with p0 near 0.10, two world-event runs in one candidate group of five are not rare (about 7 %); B'
+  tolerates them (needs 3).
