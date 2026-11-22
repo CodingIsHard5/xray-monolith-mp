@@ -60,6 +60,13 @@ smokec_ok() { local d=${1:-out/tb_smokec} t=${2:-smokec} x r i5; x=$d/tb_extra_$
   i5=$(awk -f engine/perf-harness/tb_invariants.awk "$x" | grep -o 'I5 smart=[0-9]*' | cut -d= -f2)
   grep -qa 'tb_lostreg: done n=100' $d/xray.log || { echo "$r I5=$i5; no 'tb_lostreg: done n=100' line"; return 1; }
   echo "$r I5=$i5"; [ "${i5:-0}" -ge 50 ]; }
+# smokel_ok: lost-link smoke (PREREG-tierB-statC2): smoke fields, hook present, I4 >= 50 at the last dump, done line.
+smokel_ok() { local d=${1:-out/tb_smokel} t=${2:-smokel} x r i4; x=$d/tb_extra_${t}_3.txt
+  r=$(smoke_ok "$x" $d/alife_dump_${t}_3.txt) || { echo "$r"; return 1; }
+  i4=$(awk -f engine/perf-harness/tb_invariants.awk "$x" | grep -o 'I4 count=[0-9]*' | cut -d= -f2)
+  tr -d '\r' < "$x" | grep -q '^info lostlink_hook ok' || { echo "$r I4=$i4; test hook MISSING in this exe"; return 1; }
+  grep -qa 'tb_lostlink: done n=100' $d/xray.log || { echo "$r I4=$i4; no 'tb_lostlink: done n=100' line"; return 1; }
+  echo "$r I4=$i4"; [ "${i4:-0}" -ge 50 ]; }
 FIRST=1; total_done=0; HARD=0
 [ "${TB_GAP_FIRST:-0}" = 1 ] && yield_gap        # restarted right after a slice: honour the gap first
 while [ -n "$(pending)" ]; do
@@ -92,6 +99,7 @@ while [ -n "$(pending)" ]; do
     env TB_NOCLAIM=1 TB_EXE="$EXE" TB_TIMEOUT=$tmo $env tools/tb_run.sh "$tag" $SAVE $extra > $ST/run_$tag.log 2>&1; rc=$?
     log "run $tag rc=$rc $(grep -a '^end ' out/tb_$tag/conditions.txt 2>/dev/null | cut -c1-90)"
     [ $rc = 0 ] || { stop="run $tag ended rc=$rc (3 = protected title, 4 = engine exited early, 5 = timeout)"; [ $rc = 3 ] || HARD=1; break; }
+    if [ "$tag" = smokel ]; then if r=$(smokel_ok); then log "$r"; else log "$r"; stop="SMOKE FAILED its field check: $r"; HARD=1; break; fi; fi
     if [ "$tag" = smokec ]; then if r=$(smokec_ok); then log "$r"; else log "$r"; stop="SMOKE FAILED its field check: $r"; HARD=1; break; fi; fi
     if [ "$tag" = smoke ]; then if r=$(smoke_ok); then log "$r"; else log "$r"; stop="SMOKE FAILED its field check: $r"; HARD=1; break; fi; fi
     echo "$tag" >> $ST/done.txt; n=$((n+1)); total_done=$((total_done+1))

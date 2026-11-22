@@ -395,10 +395,23 @@ def cmd_score(a):
         res = score_stat(dist, i1, i2, ic, [a.band], a.seed)
         print("%s  R1xR2 noise: %s" % (s, " ".join(fmt(v) for v in res["noise"])))
         print("%s  C xR1 cand : %s" % (s, " ".join(fmt(v) for v in res["cand"])))
+        thr_over = dict(x.split("=") for x in a.thr.split(",") if "=" in x) if a.thr else {}
+        if s in thr_over:   # governing threshold fixed earlier by a registered rule (e.g. C widened to 2)
+            print("%s  governing threshold %s (registered override; band threshold was %s)" % (s, thr_over[s], fmt(res["thr"][a.band])))
+            res["thr"][a.band] = float(thr_over[s])
         ok, ra, rb = verdict(res, a.band)
+        rule = "perm_p=%.4f rule_B" % res["p"]
+        if s in parse_stats(a.ruleb2) if a.ruleb2 else False:
+            # Rule B' (PREREG-tierB-statC notes, adopted 2026-11-22): a candidate run deviates if its median distance to
+            # R1 exceeds the governing threshold; FAIL if 3 or more of the candidate runs deviate.
+            T = res["thr"][a.band]
+            dev = sum(1 for c in ic if median([M[s][(c, r)] for r in i1]) > T + 1e-12)
+            rb = dev < 3
+            ok = ra and rb
+            rule = "deviating=%d/%d rule_B'" % (dev, len(ic))
         overall = overall and ok
-        print("%s  median(CxR1)=%s  P%s(R1xR2)=%s  rule_A=%s  perm_p=%.4f rule_B=%s  -> %s" % (
-            s, fmt(res["med"]), a.band, fmt(res["thr"][a.band]), "ok" if ra else "FAIL", res["p"], "ok" if rb else "FAIL",
+        print("%s  median(CxR1)=%s  P%s(R1xR2)=%s  rule_A=%s  %s=%s  -> %s" % (
+            s, fmt(res["med"]), a.band, fmt(res["thr"][a.band]), "ok" if ra else "FAIL", rule, "ok" if rb else "FAIL",
             "PASS" if ok else "FAIL"))
     if not scorable:
         print("OVERALL: NOT SCORABLE (a selected statistic is n/a)")
@@ -522,6 +535,8 @@ def main():
     p.add_argument("--band", type=float, default=90)
     p.add_argument("--stats", default=",".join(STATS))
     p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--ruleb2", default="", help="statistics scored with Rule B' instead of Rule B, e.g. P,D,C")
+    p.add_argument("--thr", default="", help="registered governing thresholds, e.g. C=2")
     p = sub.add_parser("null")
     p.add_argument("--ref", nargs="+", required=True)
     p.add_argument("--n", type=int, default=5)

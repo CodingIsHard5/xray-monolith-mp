@@ -1,0 +1,23 @@
+# tag | env | extra engine flags   (PREREG-tierB-statC2-2026-11-22; ALL runs on TB_EXE=TestHook14.exe)
+# order within each cycle shuffled with random.Random(20261122) (Overseer: no fixed run position)
+smokel|TB_TIMES=60,120,180|-tb_lostlink 100
+ti01||
+ll100_01||-tb_lostlink 100
+ll10_01||-tb_lostlink 10
+ll1_01||-tb_lostlink 1
+ll10_02||-tb_lostlink 10
+ll1_02||-tb_lostlink 1
+ll100_02||-tb_lostlink 100
+ti02||
+ll10_03||-tb_lostlink 10
+ll1_03||-tb_lostlink 1
+ll100_03||-tb_lostlink 100
+ti03||
+ti04||
+ll1_04||-tb_lostlink 1
+ll10_04||-tb_lostlink 10
+ll100_04||-tb_lostlink 100
+ti05||
+ll100_05||-tb_lostlink 100
+ll10_05||-tb_lostlink 10
+ll1_05||-tb_lostlink 1

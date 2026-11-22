@@ -228,6 +228,12 @@ local tb_skip_done, tb_skip_first, tb_skip_last = 0, nil, nil
 local tb_lr_n = tonumber(string.match(cl, "%-tb_lostreg%s+(%d+)")) or 0
 local tb_lr_at = (tonumber(string.match(cl, "%-tb_lostreg_at%s+(%d+)")) or 60) * 1000
 local tb_lr_done, tb_lr_first, tb_lr_last = 0, nil, nil
+--   -tb_lostlink N [-tb_lostlink_at s, default 60] : must-fail control for I1-I4 (PREREG-tierB-statC2), TEST EXE ONLY:
+--     after a normal OFFLINE squad update of a squad not hit before and with >= 2 members, call the test hook
+--     squad:tb_lose_member_link(first member) once (member leaves the list, keeps its group_id); N squads in all.
+local tb_ll_n = tonumber(string.match(cl, "%-tb_lostlink%s+(%d+)")) or 0
+local tb_ll_at = (tonumber(string.match(cl, "%-tb_lostlink_at%s+(%d+)")) or 60) * 1000
+local tb_ll_done, tb_ll_first, tb_ll_last, tb_ll_hit, tb_ll_missing = 0, nil, nil, {}, false
 local tb_walk = tonumber(string.match(cl, "%-tb_walk%s+(%d+)"))
 local tb_route, tb_step = nil, 0
 
@@ -242,6 +248,7 @@ local function tb_extra(k)
 	f:write("info skip_n ", tb_skip_n, "\n", "info skip_done ", tb_skip_done, "\n", "info walk_step ", tb_step, "\n")
 	f:write("info skip_at_ms ", tb_skip_at, "\n", "info skip_first_ms ", s(tb_skip_first), "\n", "info skip_last_ms ", s(tb_skip_last), "\n")
 	f:write("info lostreg_n ", tb_lr_n, "\n", "info lostreg_done ", tb_lr_done, "\n", "info lostreg_first_ms ", s(tb_lr_first), "\n", "info lostreg_last_ms ", s(tb_lr_last), "\n")
+	f:write("info lostlink_n ", tb_ll_n, "\n", "info lostlink_done ", tb_ll_done, "\n", "info lostlink_first_ms ", s(tb_ll_first), "\n", "info lostlink_last_ms ", s(tb_ll_last), "\n", "info lostlink_hook ", tb_ll_missing and "missing" or "ok", "\n")
 	f:write("info actor_level ", s(g(function() return level.name() end)), "\n")
 	-- sq <id> <section> <level> <game vertex> <smart id> <npc count>
 	-- cr <id> <section> <kind stalker|monster|-> <alive 0|1> <level> <game vertex> <squad id> <smart id>
@@ -365,6 +372,33 @@ local function tb_start()
 							end
 							break
 						end
+					end
+				end
+			end
+			return r
+		end
+	end
+	if tb_ll_n > 0 and cls then
+		local real_update3 = cls.update
+		cls.update = function(self, ...)
+			local r = real_update3(self, ...)
+			if tb_ll_done < tb_ll_n and not tb_ll_missing and start_t and time_global() - start_t >= tb_ll_at and not self.online and not tb_ll_hit[self.id] then
+				if not self.tb_lose_member_link then
+					tb_ll_missing = true
+					printf("! tb_lostlink: tb_lose_member_link is not in this exe (test hook build required)")
+				elseif self:npc_count() >= 2 then
+					for k in self:squad_members() do
+						if self:tb_lose_member_link(k.id) then
+							tb_ll_hit[self.id] = true
+							tb_ll_done = tb_ll_done + 1
+							local t = time_global() - start_t
+							tb_ll_first = tb_ll_first or t
+							tb_ll_last = t
+							if tb_ll_done == tb_ll_n then
+								printf(string.format("* tb_lostlink: done n=%d at_ms=%d first_ms=%d last_ms=%d", tb_ll_n, tb_ll_at, tb_ll_first, tb_ll_last))
+							end
+						end
+						break
 					end
 				end
 			end
