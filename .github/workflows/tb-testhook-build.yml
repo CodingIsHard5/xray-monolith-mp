@@ -1,0 +1,61 @@
+name: TB-TestHook-Build
+run-name: TB test-hook build ${{ github.ref_name }} @ ${{ github.sha }}
+
+# TEST-ONLY build for tier (b) controls (PREREG-tierB-statC2). Same solution and flags as Perf-Build, plus
+# XRAY_TB_TESTHOOKS, which compiles in CSE_ALifeOnlineOfflineGroup::tb_lose_member_link and its Lua binding.
+# Runs only on the test/tb-hooks branch. Its exe is renamed TestHook*.exe locally and is never a candidate or shipped.
+on:
+  push:
+    branches: [ "test/tb-hooks" ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-build
+  cancel-in-progress: false
+
+env:
+  SOLUTION_FILE_PATH: src/engine-vs2022.sln
+
+jobs:
+  build:
+    name: DX11-MT-profiled-TESTHOOKS
+    runs-on: windows-latest
+    steps:
+    - name: Configure Pagefile
+      uses: al-cheb/configure-pagefile-action@v1.3
+      with:
+        minimum-size: 8GB
+        maximum-size: 8GB
+        disk-root: "C:"
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        persist-credentials: false
+    - name: setup-msbuild
+      uses: microsoft/setup-msbuild@v1.3.1
+      with:
+        msbuild-architecture: "x64"
+    - name: Build DX11 with the CSV profiler backend AND the tier (b) test hooks
+      env:
+        CL: /DXRCORE_PROFILER_AGG /DXRAY_TB_TESTHOOKS
+      run: msbuild /m /p:Configuration=DX11 /flp:"logfile=tb_testhook_build.log;verbosity=normal" ${{ env.SOLUTION_FILE_PATH }}
+    - name: Upload build log
+      if: always()
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: tb_testhook_build_log
+        path: tb_testhook_build.log
+        if-no-files-found: "warn"
+        retention-days: 7
+    - name: Upload binaries
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: tb_testhook_DX11_bin
+        path: |
+          ./_build/_game/bin_dbg/*.exe
+          ./_build/_game/bin_dbg/*.pdb
+        if-no-files-found: "error"
+        retention-days: 7

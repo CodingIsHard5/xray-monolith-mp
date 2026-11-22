@@ -156,6 +156,12 @@ void CSE_ALifeOnlineOfflineGroup::unregister_member(ALife::_OBJECT_ID member_id)
 	//	CALifeLevelRegistry			&level = graph.level();
 
 	MEMBERS::iterator I = m_members.find(member_id);
+#ifdef XRAY_TB_TESTHOOKS
+	// TEST ONLY: a member cut loose by tb_lose_member_link is no longer in the list; when it dies offline, the script
+	// still calls unregister_member for it. Stock never reaches this (VERIFY below), so the guard only exists here.
+	if (I == m_members.end())
+		return;
+#endif
 	VERIFY(I != m_members.end());
 	VERIFY((*I).second->m_group_id == ID);
 	(*I).second->m_group_id = 0xffff;
@@ -169,6 +175,21 @@ void CSE_ALifeOnlineOfflineGroup::unregister_member(ALife::_OBJECT_ID member_id)
 		m_flags.set(flUsedAI_Locations,FALSE);
 	}
 }
+
+#ifdef XRAY_TB_TESTHOOKS
+// TEST ONLY - tier (b) must-fail control (PREREG-tierB-statC2), compiled only into the separately named test exe.
+// A lost write of the kind a race inside unregister_member could leave: the member leaves the squad's member list,
+// but its group_id still names the squad and it is NOT put back into the graph or the scheduler. Squads with a single
+// member are refused (an empty squad changes flags and behaviour). Returns true when the link was cut.
+bool CSE_ALifeOnlineOfflineGroup::tb_lose_member_link(ALife::_OBJECT_ID member_id)
+{
+	MEMBERS::iterator I = m_members.find(member_id);
+	if (I == m_members.end() || m_members.size() < 2)
+		return false;
+	m_members.erase(I);
+	return true;
+}
+#endif
 
 CSE_ALifeOnlineOfflineGroup::MEMBER* CSE_ALifeOnlineOfflineGroup::member(ALife::_OBJECT_ID member_id, bool no_assert)
 {

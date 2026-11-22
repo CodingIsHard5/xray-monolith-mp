@@ -559,6 +559,10 @@ public:
 	virtual bool need_update(CSE_ALifeDynamicObject* object);
 	void register_member(ALife::_OBJECT_ID member_id);
 	void unregister_member(ALife::_OBJECT_ID member_id);
+#ifdef XRAY_TB_TESTHOOKS
+	// TEST ONLY - tier (b) control (PREREG-tierB-statC2). Never defined in a candidate or shipped build.
+	bool tb_lose_member_link(ALife::_OBJECT_ID member_id);
+#endif
 	void notify_on_member_death(MEMBER* member);
 	MEMBER* member(ALife::_OBJECT_ID member_id, bool no_assert = false);
 	virtual void on_before_register();

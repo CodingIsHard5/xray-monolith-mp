@@ -99,6 +99,9 @@ void CSE_ALifeOnlineOfflineGroup::script_register(lua_State* L)
 #ifdef XRGAME_EXPORTS
 		.def("register_member", &CSE_ALifeOnlineOfflineGroup::register_member)
 		.def("unregister_member", &CSE_ALifeOnlineOfflineGroup::unregister_member)
+#ifdef XRAY_TB_TESTHOOKS
+		.def("tb_lose_member_link", &CSE_ALifeOnlineOfflineGroup::tb_lose_member_link)	// TEST ONLY (PREREG-tierB-statC2)
+#endif
 		.def("commander_id", &CSE_ALifeOnlineOfflineGroup::commander_id)
 		.def("squad_members", &CSE_ALifeOnlineOfflineGroup::squad_members, return_stl_iterator)
 		.def("npc_count", &CSE_ALifeOnlineOfflineGroup::npc_count)
