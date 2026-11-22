@@ -1844,7 +1844,7 @@ static bool vr_pda_surface(const Fvector& from, float& y)
 // as CUIWindow::OnMouseAction dispatches
 static CUIWindow* vr_pda_under(CUIWindow* w, float x, float y)
 {
-	WINDOW_LIST& L = w->GetChildWndList();
+	auto& L = w->GetChildWndList();
 	for (auto it = L.rbegin(); it != L.rend(); ++it)
 	{
 		CUIWindow* c = *it;
