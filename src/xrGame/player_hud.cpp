@@ -1892,6 +1892,11 @@ bool vr_pda_touch_marker()
 	return S.cursor_shown && S.shown;
 }
 
+// The VR frame vr_pda_update is processing, for logs written by UI code it calls (note 31: the spot-selection line carries
+// its own frame instead of being dated by line order). Logging only.
+static u32 s_vr_pda_frame = 0;
+u32 vr_pda_log_frame() { return s_vr_pda_frame; }
+
 // Step 2 (note 17; Caden: "if they put it away and switch hands let them"): the PDA can be held in either hand.
 //   - open: a hand's grip press in the chest zone opens it in THAT hand: the off hand as step 1 (no magazine in it), the gun
 //     hand only while no item is active (the gun put away);
@@ -1905,6 +1910,7 @@ static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const 
 {
 	vr_pda_state& S = s_vr_pda;
 	vr_pda_parse();
+	s_vr_pda_frame = I.frame;
 	const int gun = I.gun ? 1 : 0, off = 1 - gun;
 	bool press[2];
 	for (int h = 0; h < 2; ++h)
