@@ -1643,6 +1643,10 @@ struct vr_pda_state
 {
 	bool parsed, off, noattach, gamepath;
 	bool nomirror, passgun; // TEST ONLY witnesses of step 2 (note 17)
+	// step 3 input probe (note 20), TEST ONLY: -vr_pda_cursor "F:x:y,..." puts the UI cursor at UI point (x, y) on VR frame F;
+	// -vr_surf_scan F logs, on VR frame F, a 25 x 25 grid of downward ray picks (static geometry) around the head
+	int cur_n, cur_f[8], surf_frame;
+	float cur_x[8], cur_y[8];
 	int grid_frame;
 	float zone_down, zone_fwd, radius, pass_r;
 	bool shown;            // VR showed the PDA window and has not hidden it
@@ -1671,6 +1675,30 @@ static void vr_pda_parse()
 	S.gamepath = !!strstr(Core.Params, "-vr_pda_gamepath");
 	S.nomirror = !!strstr(Core.Params, "-vr_pda_nomirror");
 	S.passgun = !!strstr(Core.Params, "-vr_pda_passgun");
+	S.cur_n = 0;
+	if (LPCSTR q = strstr(Core.Params, "-vr_pda_cursor "))
+	{
+		q += 15;
+		while (S.cur_n < 8)
+		{
+			int f, used = 0;
+			float x, y;
+			if (sscanf(q, "%d:%f:%f%n", &f, &x, &y, &used) != 3 || used <= 0)
+				break;
+			S.cur_f[S.cur_n] = f, S.cur_x[S.cur_n] = x, S.cur_y[S.cur_n] = y;
+			++S.cur_n;
+			q += used;
+			if (*q != ',')
+				break;
+			++q;
+		}
+	}
+	S.surf_frame = -1;
+	if (LPCSTR q = strstr(Core.Params, "-vr_surf_scan "))
+		if (sscanf(q + 14, "%d", &S.surf_frame) != 1)
+			S.surf_frame = -1;
+	if (S.cur_n || S.surf_frame >= 0)
+		Msg("* [vr3pda] TEST ONLY step-3 probe: %d cursor placements, surface scan at frame %d", S.cur_n, S.surf_frame);
 	S.grid_frame = -1;
 	if (LPCSTR q = strstr(Core.Params, "-vr_pda_grid "))
 		if (sscanf(q + 13, "%d", &S.grid_frame) != 1)
@@ -1761,6 +1789,45 @@ static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const 
 	}
 	S.empty = !s_vr_rl.hand_mag;
 	CUIPdaWnd* W = vr_pda_wnd();
+	// step 3 probe (TEST ONLY): UI cursor placements, and the surface scan
+	for (int c = 0; c < S.cur_n; ++c)
+		if (int(I.frame) == S.cur_f[c])
+		{
+			GetUICursor().SetUICursorPosition(Fvector2().set(S.cur_x[c], S.cur_y[c]));
+			const Fvector2 got = GetUICursor().GetCursorPosition();
+			Msg("* [vr3pdac] frame %u cursor set %.1f %.1f read %.1f %.1f top %d", I.frame, S.cur_x[c], S.cur_y[c], got.x, got.y,
+				(W && CurrentGameUI()->TopInputReceiver() == W) ? 1 : 0);
+		}
+	if (int(I.frame) == S.surf_frame && I.head.valid && g_vr_track.head0_set)
+	{
+		Fvector hw;
+		g_vr_track.track_to_world.transform_tiny(hw, I.head.pos);
+		Msg("* [vr3surf] frame %u head_world %.4f %.4f %.4f grid 25 x 25 step 0.10 m, rays down from head + 0.20 m", I.frame, hw.x, hw.y, hw.z);
+		for (int a = -12; a <= 12; ++a)
+			for (int b = -12; b <= 12; ++b)
+			{
+				Fvector st;
+				st.set(hw.x + 0.1f * a, hw.y + 0.2f, hw.z + 0.1f * b);
+				collide::rq_result R;
+				float below = -1.f, ny = 0.f;
+				if (Level().ObjectSpace.RayPick(st, Fvector().set(0.f, -1.f, 0.f), 3.f, collide::rqtStatic, R, nullptr))
+				{
+					below = R.range - 0.2f;
+					if (R.element >= 0)
+					{
+						CDB::TRI* T = Level().ObjectSpace.GetStaticTris() + R.element;
+						Fvector* V = Level().ObjectSpace.GetStaticVerts();
+						Fvector e1, e2, n;
+						e1.sub(V[T->verts[1]], V[T->verts[0]]);
+						e2.sub(V[T->verts[2]], V[T->verts[0]]);
+						n.crossproduct(e1, e2);
+						n.normalize_safe();
+						ny = _abs(n.y);
+					}
+				}
+				Msg("* [vr3surf] dx %.2f dz %.2f below_head %.4f ny %.3f", 0.1f * a, 0.1f * b, below, ny);
+			}
+	}
 	PIItem pi = (A && A->m_inventory) ? A->inventory().ItemFromSlot(PDA_SLOT) : nullptr;
 	CPda* pda = smart_cast<CPda*>(pi);
 	const bool gun_empty = A && A->m_inventory && !A->inventory().ActiveItem();
