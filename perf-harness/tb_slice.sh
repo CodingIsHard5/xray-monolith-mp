@@ -52,6 +52,7 @@ settle() { local t0 l1 hv; t0=$(date +%s)
     [ $(( $(date +%s) - t0 )) -ge "${TB_SETTLE_MAX:-300}" ] && { echo "settle wait=$(( $(date +%s) - t0 ))s load=$l1 heavy=[$hv] cap"; return 1; }
     sleep "${TB_SETTLE_POLL:-15}"; done; }
 FIRST=1; total_done=0; HARD=0
+[ "${TB_GAP_FIRST:-0}" = 1 ] && yield_gap        # restarted right after a slice: honour the gap first
 while [ -n "$(pending)" ]; do
   [ $(date +%s) -ge $END_ALL ] && { log "GIVE UP: nights used up, $(pending | wc -l) runs left"; note "tier (b) controls: scheduler GAVE UP after ${TB_NIGHTS:-4} nights, $(pending | wc -l) runs left."; exit 5; }
   until in_window && [ $(secs_to_8) -gt 1500 ]; do sleep 120; done          # wall-clock gate
