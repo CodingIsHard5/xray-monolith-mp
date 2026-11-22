@@ -1166,6 +1166,8 @@ void CUIMapWnd::SpotSelected(CUIWindow* w)
 		return;
 	}
 	CMapLocation* ml = sp->MapLocation();
+	// GammaVR milestone 10a step 3 (note 28): the selection a touch on a map spot makes, for the log
+	Msg("* [vr3pdas] spot selected id %u type %s level %s", u32(ml->ObjectID()), ml->spot_type ? ml->spot_type : "-", ml->GetLevelName().c_str());
 
 	CGameTask* t = Level().GameTaskManager().HasGameTask(ml, true);
 	if (t)

@@ -35,6 +35,8 @@
 #include "ui/UIPdaWnd.h"
 #include "ui/UITabControl.h" // GammaVR milestone 10a step 3: tab rects for the log
 #include "ui/UITabButton.h"
+#include "map_spot.h"     // GammaVR milestone 10a step 3: map spot rects for the log (note 28)
+#include "map_location.h"
 #include <typeinfo>
 
 extern int g_nearwall;
@@ -1838,20 +1840,42 @@ static bool vr_pda_surface(const Fvector& from, float& y)
 	return true;
 }
 
-// the deepest shown window under a UI point (absolute UI units), for the log
+// the deepest shown window under a UI point (absolute UI units), for the log: the topmost child first (the last drawn),
+// as CUIWindow::OnMouseAction dispatches
 static CUIWindow* vr_pda_under(CUIWindow* w, float x, float y)
 {
-	for (CUIWindow* c : w->GetChildWndList())
+	WINDOW_LIST& L = w->GetChildWndList();
+	for (auto it = L.rbegin(); it != L.rend(); ++it)
 	{
+		CUIWindow* c = *it;
 		if (!c || !c->IsShown())
 			continue;
 		Frect r;
 		c->GetAbsoluteRect(r);
 		if (r.in(x, y))
-			if (CUIWindow* d = vr_pda_under(c, x, y))
-				return d;
+			return vr_pda_under(c, x, y);
 	}
 	return w;
+}
+
+// TEST ONLY log (-vr_pda_tabs): the shown map spots inside the cursor box, with their UI rects (note 28)
+static void vr_pda_log_spots(CUIWindow* w, const Frect& box, u32 frame, int& n)
+{
+	for (CUIWindow* c : w->GetChildWndList())
+	{
+		if (!c || !c->IsShown() || n >= 80)
+			continue;
+		if (CMapSpot* sp = smart_cast<CMapSpot*>(c))
+		{
+			Frect r;
+			sp->GetAbsoluteRect(r);
+			CMapLocation* ml = sp->MapLocation();
+			if (r.right >= box.left && r.left <= box.right && r.bottom >= box.top && r.top <= box.bottom)
+				Msg("* [vr3pdab] frame %u spot %d id %u type %s rect %.1f %.1f %.1f %.1f", frame, n++, ml ? u32(ml->ObjectID()) : 0u,
+					(ml && ml->spot_type) ? ml->spot_type : "-", r.left, r.top, r.right, r.bottom);
+		}
+		vr_pda_log_spots(c, box, frame, n);
+	}
 }
 
 static void vr_pda_click(CUIPdaWnd* W, float x, float y, EUIMessages m)
@@ -2247,6 +2271,9 @@ static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const 
 			}
 			Msg("* [vr3pdab] frame %u active %s cursor_box %.1f %.1f %.1f %.1f", I.frame, W->GetActiveSection(), W->m_cursor_box.left,
 				W->m_cursor_box.top, W->m_cursor_box.right, W->m_cursor_box.bottom);
+			int ns = 0;
+			vr_pda_log_spots(W, W->m_cursor_box, I.frame, ns);
+			Msg("* [vr3pdab] frame %u map spots logged %d", I.frame, ns);
 		}
 	}
 	if (S.shown && !S.gamepath && W && W->IsShown())
