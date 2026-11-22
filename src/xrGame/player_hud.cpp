@@ -1794,6 +1794,7 @@ static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const 
 	for (int c = 0; c < S.cur_n; ++c)
 		if (int(I.frame) == S.cur_f[c])
 		{
+			GetUICursor().Show(); // the game shows it only for a window with input on (note 22); TEST ONLY here
 			GetUICursor().SetUICursorPosition(Fvector2().set(S.cur_x[c], S.cur_y[c]));
 			const Fvector2 got = GetUICursor().GetCursorPosition();
 			Msg("* [vr3pdac] frame %u cursor set %.1f %.1f read %.1f %.1f top %d", I.frame, S.cur_x[c], S.cur_y[c], got.x, got.y,
