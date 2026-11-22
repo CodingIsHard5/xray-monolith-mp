@@ -33,6 +33,8 @@
 #include "PDA.h" // GammaVR milestone 10a
 #include "Actor_Flags.h"
 #include "ui/UIPdaWnd.h"
+#include "ui/UITabControl.h" // GammaVR milestone 10a step 3: tab rects for the log
+#include "ui/UITabButton.h"
 #include <typeinfo>
 
 extern int g_nearwall;
@@ -1662,8 +1664,37 @@ struct vr_pda_state
 	bool in_zone, empty;
 	u32 ev_frame;
 	LPCSTR ev;
+	// step 3 (note 26): set down on a surface, pick up, touch with two hands
+	bool touchclick;       // -vr_pda_touchclick (user option): pushing the tip into the screen clicks, no trigger
+	float mapshift;        // -vr_pda_mapshift DX (TEST ONLY witness T2s): DX UI units added to the touch's UI x
+	int tabs_frame;        // -vr_pda_tabs F (TEST ONLY): log the tab buttons' UI rects on VR frame F
+	bool placed;           // lying on a surface (both hands free)
+	Fmatrix place_xf;      // its model transform (world) while placed
+	Fvector place_c;       // its screen centre (world) while placed
+	float surf_y;          // the surface's world height under it
+	bool prev_trig[2];
+	bool touching[2];      // tip in the touch band and inside the cursor box, by hand
+	float ui[2][2], depth[2]; // the touch's UI point and depth (model y above the screen plane), by hand
+	int touch_hand;        // the hand driving the cursor (-1: none)
+	int btn_hand;          // the hand whose click is down (-1: none)
+	bool pushed[2];        // touch-to-click: past the push depth
+	bool above[2];         // touch-to-click: was above the screen plane, inside the box, since the last push
+	bool gun_consumed;     // the gun hand's trigger went to the PDA (not the gun) this update
+	Fvector tip_w[2];      // the tips (world), for the log
+	float head_d;          // head to the placed screen centre (world), metres
+	bool cursor_shown;     // VR showed the UI cursor (marker) and has not hidden it
+	float btn_x, btn_y;    // where the click went down
 };
 static vr_pda_state s_vr_pda = {};
+// step 3 (note 24, A): the screen's UI -> model map from the PDA model's screen mesh (dev_pda_green_hud.ogf, child 2,
+// shader pda_overlay, UVs read with tools/xr_db_read.py): model = O + x * U + y * V, U along -z, V along -x
+static const float VR_PDA_UI_OX = 0.03744f, VR_PDA_UI_OY = 0.01641f, VR_PDA_UI_OZ = 0.07398f;
+static const float VR_PDA_UI_UZ = -0.00012835f, VR_PDA_UI_VX = -0.00009648f;
+static const float VR_PDA_UI_CX = 0.00039f, VR_PDA_UI_CZ = 0.00826f; // UI (512, 384) in model x / z
+static const float VR_PDA_BOTTOM_Y = 0.0021f;                         // the model's lowest point (bounding box)
+static const float VR_PDA_TIP = 0.08f, VR_PDA_BAND = 0.02f, VR_PDA_PUSH = 0.005f;
+static const float VR_PDA_SURF = 0.10f, VR_PDA_PICK_R = 0.12f, VR_PDA_AUTOCLOSE = 2.0f;
+bool vr_pda_touch_marker(); // CLevel::OnRender: draw the UI cursor on the PDA screen while a VR touch is active
 
 static void vr_pda_parse()
 {
@@ -1704,6 +1735,22 @@ static void vr_pda_parse()
 	if (LPCSTR q = strstr(Core.Params, "-vr_pda_grid "))
 		if (sscanf(q + 13, "%d", &S.grid_frame) != 1)
 			S.grid_frame = -1;
+	S.touchclick = !!strstr(Core.Params, "-vr_pda_touchclick");
+	S.mapshift = 0.f;
+	if (LPCSTR q = strstr(Core.Params, "-vr_pda_mapshift "))
+		if (sscanf(q + 17, "%f", &S.mapshift) != 1)
+			S.mapshift = 0.f;
+	S.tabs_frame = -1;
+	if (LPCSTR q = strstr(Core.Params, "-vr_pda_tabs "))
+		if (sscanf(q + 13, "%d", &S.tabs_frame) != 1)
+			S.tabs_frame = -1;
+	S.touch_hand = S.btn_hand = -1;
+	Msg("* [vr3pdat] step 3: set down / pick up / touch; click %s%s%s; tip %.3f band %.3f surface %.3f pick %.3f autoclose %.2f",
+		S.touchclick ? "touch to click (-vr_pda_touchclick)" : "tip plus trigger",
+		S.mapshift != 0.f ? "; -vr_pda_mapshift (TEST ONLY)" : "", S.tabs_frame >= 0 ? "; -vr_pda_tabs (TEST ONLY)" : "",
+		VR_PDA_TIP, VR_PDA_BAND, VR_PDA_SURF, VR_PDA_PICK_R, VR_PDA_AUTOCLOSE);
+	if (S.mapshift != 0.f)
+		Msg("* [vr3pdat] mapshift %.2f UI units", S.mapshift);
 	S.zone_down = 0.30f, S.zone_fwd = 0.15f, S.radius = 0.075f, S.pass_r = 0.15f;
 	S.ev = "none";
 	S.ev_frame = u32(-1);
@@ -1728,15 +1775,94 @@ static bool vr_pda_passes_input(CUIDialogWnd* top)
 	return S.shown && !S.gamepath && W && top == W && W->IsShown() && !W->IsEnabled();
 }
 
+// step 3: end any touch: a click that is down goes up where it went down, the marker is hidden (if VR showed it)
+static void vr_pda_touch_end(CUIPdaWnd* W, u32 frame)
+{
+	vr_pda_state& S = s_vr_pda;
+	if (S.btn_hand >= 0)
+	{
+		if (W && W->IsShown())
+			W->OnMouseAction(S.btn_x, S.btn_y, WINDOW_LBUTTON_UP);
+		Msg("* [vr3pdae] frame %u event up hand %c ui %.1f %.1f (touch ended)", frame, S.btn_hand == 1 ? 'R' : 'L', S.btn_x, S.btn_y);
+		S.btn_hand = -1;
+	}
+	S.touch_hand = -1;
+	S.touching[0] = S.touching[1] = false;
+	S.pushed[0] = S.pushed[1] = false;
+	if (S.cursor_shown)
+	{
+		GetUICursor().Hide();
+		S.cursor_shown = false;
+	}
+}
+
 static void vr_pda_hide(LPCSTR why)
 {
 	vr_pda_state& S = s_vr_pda;
+	vr_pda_touch_end(vr_pda_wnd(), g_vr_track.frame);
+	S.placed = false;
 	if (CUIPdaWnd* W = vr_pda_wnd())
 		if (W->IsShown())
 			W->HideDialog();
 	S.shown = false;
 	if (why)
 		Msg("* [vr3pda] PDA window hidden: %s", why);
+}
+
+// step 3 helpers
+static bool vr_pda_held_xf(Fmatrix& xf, Fvector& screen_c); // the held copy's model transform as last drawn (below, by the draw)
+
+// a static surface straight below 'from' within VR_PDA_SURF (|normal y| >= 0.9): its height
+static bool vr_pda_surface(const Fvector& from, float& y)
+{
+	if (!g_pGameLevel || !Level().bReady)
+		return false;
+	Fvector st = from;
+	st.y += 0.02f;
+	collide::rq_result R;
+	if (!Level().ObjectSpace.RayPick(st, Fvector().set(0.f, -1.f, 0.f), VR_PDA_SURF + 0.02f, collide::rqtStatic, R, nullptr))
+		return false;
+	if (R.element < 0)
+		return false;
+	CDB::TRI* T = Level().ObjectSpace.GetStaticTris() + R.element;
+	Fvector* V = Level().ObjectSpace.GetStaticVerts();
+	Fvector e1, e2, n;
+	e1.sub(V[T->verts[1]], V[T->verts[0]]);
+	e2.sub(V[T->verts[2]], V[T->verts[0]]);
+	n.crossproduct(e1, e2);
+	n.normalize_safe();
+	if (_abs(n.y) < 0.9f)
+		return false;
+	y = st.y - R.range;
+	return true;
+}
+
+// the deepest shown window under a UI point (absolute UI units), for the log
+static CUIWindow* vr_pda_under(CUIWindow* w, float x, float y)
+{
+	for (CUIWindow* c : w->GetChildWndList())
+	{
+		if (!c || !c->IsShown())
+			continue;
+		Frect r;
+		c->GetAbsoluteRect(r);
+		if (r.in(x, y))
+			if (CUIWindow* d = vr_pda_under(c, x, y))
+				return d;
+	}
+	return w;
+}
+
+static void vr_pda_click(CUIPdaWnd* W, float x, float y, EUIMessages m)
+{
+	W->OnMouseAction(x, y, WINDOW_MOUSE_MOVE);
+	W->OnMouseAction(x, y, m);
+}
+
+bool vr_pda_touch_marker()
+{
+	const vr_pda_state& S = s_vr_pda;
+	return S.cursor_shown && S.shown;
 }
 
 // Step 2 (note 17; Caden: "if they put it away and switch hands let them"): the PDA can be held in either hand.
@@ -1748,7 +1874,7 @@ static void vr_pda_hide(LPCSTR why)
 //   - while the gun hand holds it, that hand's grip is kept from the holsters (no draw into a hand holding the PDA), and an
 //     item becoming active anyway (the game's own keys) closes it.
 // Returns the hands whose grip must be kept from the other logic: bit 0 = left, bit 1 = right.
-static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const bool grab[2], bool log)
+static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const bool grab[2], const bool trig[2], bool log)
 {
 	vr_pda_state& S = s_vr_pda;
 	vr_pda_parse();
@@ -1836,7 +1962,9 @@ static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const 
 	// shown by VR, hidden by something else (another menu, a level change): VR forgets it
 	if (S.shown && !S.gamepath && (!W || !W->IsShown()))
 	{
+		vr_pda_touch_end(W, I.frame);
 		S.shown = false;
+		S.placed = false;
 		Msg("* [vr3pda] frame %u the PDA window was hidden by the game", I.frame);
 	}
 	// the PDA item left the PDA slot (dropped, moved) while VR shows it: close it
@@ -1860,14 +1988,82 @@ static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const 
 			S.hand = off;
 		}
 	}
+	else if (can && geo && S.shown && S.placed)
+	{
+		// step 3: pick up, either hand's grip press within VR_PDA_PICK_R of the placed screen centre (step-2 refusals)
+		for (int k = 0; k < 2 && ev_hand < 0; ++k)
+		{
+			const int h = k == 0 ? off : gun;
+			if (!press[h] || !I.grip[h].valid)
+				continue;
+			Fvector hw;
+			g_vr_track.track_to_world.transform_tiny(hw, I.grip[h].pos);
+			if (hw.distance_to(S.place_c) > VR_PDA_PICK_R)
+				continue;
+			ev_hand = h;
+			if (h == gun && !gun_empty)
+				ev = "refused_gun_held";
+			else if (h == off && !S.empty)
+				ev = "refused_hand_full";
+			else
+			{
+				vr_pda_touch_end(W, I.frame);
+				S.placed = false;
+				S.hand = h;
+				ev = "pickup";
+			}
+		}
+	}
 	else if (can && geo && S.shown)
 	{
 		const int o = 1 - S.hand;
+		Fmatrix hxf;
+		Fvector hsc;
 		if (press[S.hand] && dz[S.hand] <= S.radius)
 		{
 			vr_pda_hide(nullptr);
 			ev = "close";
 			ev_hand = S.hand;
+		}
+		else if (press[S.hand] && I.grip[S.hand].valid && vr_pda_held_xf(hxf, hsc))
+		{
+			// step 3: set down, the holding hand's press with a surface within VR_PDA_SURF below the screen centre
+			ev_hand = S.hand;
+			float sy;
+			if (!vr_pda_surface(hsc, sy))
+				ev = "refused_no_surface";
+			else
+			{
+				Fvector hw, fw, ft;
+				g_vr_track.track_to_world.transform_tiny(hw, I.grip[S.hand].pos);
+				const vr_pose& G = I.grip[S.hand];
+				vr_quat_rotate(G.qx, G.qy, G.qz, G.qw, Fvector().set(0.f, 0.f, 1.f), ft);
+				g_vr_track.track_to_world.transform_dir(fw, ft);
+				fw.y = 0.f;
+				if (fw.magnitude() < 0.01f)
+				{
+					vr_quat_rotate(I.head.qx, I.head.qy, I.head.qz, I.head.qw, Fvector().set(0.f, 0.f, 1.f), ft);
+					g_vr_track.track_to_world.transform_dir(fw, ft);
+					fw.y = 0.f;
+				}
+				if (fw.magnitude() < 0.01f)
+					fw.set(0.f, 0.f, 1.f);
+				fw.normalize();
+				Fmatrix& X = S.place_xf;
+				X.identity();
+				X.i.set(fw);
+				X.j.set(0.f, 1.f, 0.f);
+				X.k.crossproduct(X.i, X.j);
+				X.c.set(hw);
+				X.c.mad(X.i, -VR_PDA_UI_CX);
+				X.c.mad(X.k, -VR_PDA_UI_CZ);
+				X.c.y = sy - VR_PDA_BOTTOM_Y;
+				X.transform_tiny(S.place_c, Fvector().set(VR_PDA_UI_CX, VR_PDA_UI_OY, VR_PDA_UI_CZ));
+				S.surf_y = sy;
+				S.placed = true;
+				vr_pda_touch_end(W, I.frame);
+				ev = "setdown";
+			}
 		}
 		else if (press[o] && geo2 && S.d_hands <= S.pass_r)
 		{
@@ -1912,6 +2108,142 @@ static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const 
 			}
 		}
 	}
+	// step 3: auto-close a placed PDA when the head is more than VR_PDA_AUTOCLOSE from it
+	S.head_d = -1.f;
+	if (S.shown && S.placed && I.head.valid)
+	{
+		Fvector hw;
+		g_vr_track.track_to_world.transform_tiny(hw, I.head.pos);
+		S.head_d = hw.distance_to(S.place_c);
+		if (S.head_d > VR_PDA_AUTOCLOSE)
+		{
+			vr_pda_hide(nullptr);
+			ev = "autoclose";
+			ev_hand = -1;
+		}
+	}
+	// step 3: touch (placed, or held with the other hand touching)
+	S.gun_consumed = false;
+	{
+		Fmatrix xf;
+		Fvector hsc;
+		bool have = false;
+		if (S.shown && !S.gamepath && W && W->IsShown())
+		{
+			if (S.placed)
+				xf.set(S.place_xf), have = true;
+			else
+				have = vr_pda_held_xf(xf, hsc);
+		}
+		Fmatrix inv;
+		if (have)
+			inv.invert(xf);
+		const bool was[2] = {S.touching[0], S.touching[1]};
+		for (int h = 0; h < 2; ++h)
+		{
+			S.touching[h] = false;
+			S.depth[h] = 1000.f;
+			const vr_pose& G = I.grip[h];
+			if (!G.valid)
+				continue;
+			Fvector ft, tt;
+			vr_quat_rotate(G.qx, G.qy, G.qz, G.qw, Fvector().set(0.f, 0.f, VR_PDA_TIP), ft);
+			tt.add(G.pos, ft);
+			g_vr_track.track_to_world.transform_tiny(S.tip_w[h], tt);
+			if (!have || (!S.placed && h == S.hand))
+				continue;
+			Fvector m;
+			inv.transform_tiny(m, S.tip_w[h]);
+			S.ui[h][0] = (m.z - VR_PDA_UI_OZ) / VR_PDA_UI_UZ + S.mapshift;
+			S.ui[h][1] = (m.x - VR_PDA_UI_OX) / VR_PDA_UI_VX;
+			S.depth[h] = m.y - VR_PDA_UI_OY;
+			const Frect& B = W->m_cursor_box;
+			const bool inside = S.ui[h][0] >= B.left && S.ui[h][0] <= B.right && S.ui[h][1] >= B.top && S.ui[h][1] <= B.bottom;
+			const float lo = S.touchclick ? -VR_PDA_BAND : 0.f;
+			S.touching[h] = inside && S.depth[h] >= lo && S.depth[h] <= VR_PDA_BAND;
+			if (S.touching[h] && !was[h])
+				S.touch_hand = h; // the hand touching most recently drives the cursor
+			if (S.touchclick)
+			{
+				if (inside && S.depth[h] > 0.f && !S.pushed[h])
+					S.above[h] = true;
+				if (!S.touching[h])
+					S.above[h] = false;
+			}
+		}
+		if (S.touch_hand >= 0 && !S.touching[S.touch_hand])
+			S.touch_hand = S.touching[0] ? 0 : (S.touching[1] ? 1 : -1);
+		if (S.touch_hand >= 0)
+		{
+			const float x = S.ui[S.touch_hand][0], y = S.ui[S.touch_hand][1];
+			GetUICursor().SetUICursorPosition(Fvector2().set(x, y));
+			W->OnMouseAction(x, y, WINDOW_MOUSE_MOVE);
+			if (!S.cursor_shown)
+			{
+				GetUICursor().Show();
+				S.cursor_shown = true;
+			}
+		}
+		else if (S.cursor_shown && S.btn_hand < 0)
+		{
+			GetUICursor().Hide();
+			S.cursor_shown = false;
+		}
+		for (int h = 0; h < 2; ++h)
+		{
+			const bool tpress = trig[h] && !S.prev_trig[h];
+			S.prev_trig[h] = trig[h];
+			if (h == gun && (S.touching[h] || S.btn_hand == h) && trig[h])
+				S.gun_consumed = true; // the gun hand's trigger goes to the PDA while it touches or its click is down
+			bool down = false, up = false;
+			if (!S.touchclick)
+			{
+				down = tpress && S.touching[h] && S.btn_hand < 0;
+				up = S.btn_hand == h && !trig[h];
+			}
+			else
+			{
+				down = S.touching[h] && S.above[h] && S.depth[h] < -VR_PDA_PUSH && S.btn_hand < 0;
+				up = S.btn_hand == h && (!S.touching[h] || S.depth[h] > 0.f);
+			}
+			if (down)
+			{
+				S.btn_hand = h;
+				S.btn_x = S.ui[h][0], S.btn_y = S.ui[h][1];
+				S.pushed[h] = true;
+				S.above[h] = false;
+				CUIWindow* u = vr_pda_under(W, S.btn_x, S.btn_y);
+				vr_pda_click(W, S.btn_x, S.btn_y, WINDOW_LBUTTON_DOWN);
+				Msg("* [vr3pdae] frame %u event down hand %c ui %.1f %.1f depth %.4f under %s '%s' section %s", I.frame, h ? 'R' : 'L',
+					S.btn_x, S.btn_y, S.depth[h], u ? typeid(*u).name() : "-", u ? u->WindowName().c_str() : "", W->GetActiveSection());
+			}
+			else if (up && W)
+			{
+				const float x = S.touching[h] ? S.ui[h][0] : S.btn_x, y = S.touching[h] ? S.ui[h][1] : S.btn_y;
+				vr_pda_click(W, x, y, WINDOW_LBUTTON_UP);
+				S.btn_hand = -1;
+				S.pushed[h] = false;
+				Msg("* [vr3pdae] frame %u event up hand %c ui %.1f %.1f section %s", I.frame, h ? 'R' : 'L', x, y, W->GetActiveSection());
+			}
+		}
+	}
+	if (S.shown && W && int(I.frame) == S.tabs_frame)
+	{
+		// TEST ONLY: the tab buttons' absolute UI rects (the step-3 targets are declared from these)
+		if (CUITabControl* tc = W->GetTabControl())
+		{
+			int n = 0;
+			for (CUITabButton* b : *tc->GetButtonsVector())
+			{
+				Frect r;
+				b->GetAbsoluteRect(r);
+				Msg("* [vr3pdab] frame %u tab %d id %s rect %.1f %.1f %.1f %.1f shown %d", I.frame, n++, b->m_btn_id.c_str(), r.left, r.top,
+					r.right, r.bottom, b->IsShown() ? 1 : 0);
+			}
+			Msg("* [vr3pdab] frame %u active %s cursor_box %.1f %.1f %.1f %.1f", I.frame, W->GetActiveSection(), W->m_cursor_box.left,
+				W->m_cursor_box.top, W->m_cursor_box.right, W->m_cursor_box.bottom);
+		}
+	}
 	if (S.shown && !S.gamepath && W && W->IsShown())
 	{
 		// what CPda::UpdateCL does for the active PDA, which this one is not: content update and the screen's shader factors
@@ -1930,7 +2262,7 @@ static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const 
 	// a hand is kept from the other logic while it holds the PDA, and after that until its grip is let go
 	for (int h = 0; h < 2; ++h)
 	{
-		if (S.shown && S.hand == h)
+		if (S.shown && !S.placed && S.hand == h)
 			S.block[h] = true;
 		else if (!grab[h])
 			S.block[h] = false;
@@ -1949,8 +2281,14 @@ static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const 
 			S.head_track.x, S.head_track.y, S.head_track.z, S.hand ? 'R' : 'L', S.shown ? 1 : 0, S.d_hands, dz[0], dz[1],
 			gun_empty ? 1 : 0, S.block[0] ? 1 : 0, S.block[1] ? 1 : 0);
 		S.place_ok = false;
+		const Fvector2 cp = GetUICursor().GetCursorPosition();
+		Msg("* [vr3pdat] frame %u placed %d place_c %.4f %.4f %.4f surf_y %.4f head_d %.4f touch %d %d ui %.1f %.1f %.1f %.1f depth %.4f %.4f touch_hand %d btn_hand %d cursor %d %.1f %.1f section %s tip %.4f %.4f %.4f %.4f %.4f %.4f gun_consumed %d",
+			I.frame, S.placed ? 1 : 0, S.place_c.x, S.place_c.y, S.place_c.z, S.surf_y, S.head_d, S.touching[0] ? 1 : 0, S.touching[1] ? 1 : 0,
+			S.ui[0][0], S.ui[0][1], S.ui[1][0], S.ui[1][1], S.depth[0], S.depth[1], S.touch_hand, S.btn_hand,
+			(S.cursor_shown && GetUICursor().IsVisible()) ? 1 : 0, cp.x, cp.y, (W && S.shown) ? W->GetActiveSection() : "-",
+			S.tip_w[0].x, S.tip_w[0].y, S.tip_w[0].z, S.tip_w[1].x, S.tip_w[1].y, S.tip_w[1].z, S.gun_consumed ? 1 : 0);
 	}
-	return (S.block[0] ? 1 : 0) | (S.block[1] ? 2 : 0);
+	return (S.block[0] ? 1 : 0) | (S.block[1] ? 2 : 0) | (S.gun_consumed ? 4 : 0);
 }
 
 // milestone 8b: loose ammo on the ground near the actor, as the world has it (for the [vr3mag] log)
@@ -3435,7 +3773,9 @@ void vr_input_update()
 		}
 		s_vr_grab_held = s_grab[off];
 		// milestone 10a steps 1-2: the PDA in either hand (grip in the chest zone, or passed); the hand holding it does nothing else
-		const int pda_block = vr_pda_update(I, g_actor, vr_fire_allowed(g_actor), s_grab, s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to);
+		const int pda_block = vr_pda_update(I, g_actor, vr_fire_allowed(g_actor), s_grab, s_trig, s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to);
+		if (pda_block & 4)
+			fire_press_edge = false; // step 3: the gun hand's trigger clicked the PDA, not the gun
 		if (pda_block & (1 << off))
 			s_vr_grab_held = false;
 		// milestone 8a (Amendment 31): manual reload
@@ -4325,6 +4665,16 @@ static void vr_pda_reset()
 	s_vr_pda.block[0] = s_vr_pda.block[1] = false;
 }
 
+static bool vr_pda_held_xf(Fmatrix& xf, Fvector& screen_c)
+{
+	const vr_pda_vis& V = s_vr_pv;
+	if (!V.vis || !V.frozen || !s_vr_pda.shown || s_vr_pda.placed)
+		return false;
+	xf.set(V.xf);
+	V.xf.transform_tiny(screen_c, V.screen_c);
+	return true;
+}
+
 static void vr_pda_draw(IDSGraphManager* DM)
 {
 	vr_pda_state& S = s_vr_pda;
@@ -4344,7 +4694,7 @@ static void vr_pda_draw(IDSGraphManager* DM)
 	// the pose of the hand holding it (step 2): the off hand's, or the gun hand's (G.gun: the converted grip pose)
 	const int gun_h = G.hand == 'R' ? 1 : 0;
 	const vr_pose& HP = (S.hand == gun_h) ? G.gun : G.off;
-	if (!HP.valid)
+	if (!HP.valid && !S.placed)
 		return;
 	const bool right = S.hand == 1;
 	if (V.sect != pi->m_section_id)
@@ -4427,10 +4777,15 @@ static void vr_pda_draw(IDSGraphManager* DM)
 	if (!V.vis)
 		return;
 	Fmatrix off_track, off_w; // the holding hand's pose (named off_ from step 1)
-	vr_pose_matrix(HP, off_track);
-	off_w.mul_43(g_vr_track.track_to_world, off_track);
-	if (!(S.noattach && V.frozen))
-		V.xf.mul_43(off_w, (right && !S.nomirror) ? V.frame_inv_r : V.frame_inv);
+	if (S.placed)
+		V.xf.set(S.place_xf); // step 3: lying on the surface
+	else
+	{
+		vr_pose_matrix(HP, off_track);
+		off_w.mul_43(g_vr_track.track_to_world, off_track);
+		if (!(S.noattach && V.frozen))
+			V.xf.mul_43(off_w, (right && !S.nomirror) ? V.frame_inv_r : V.frame_inv);
+	}
 	V.frozen = true;
 	if (V.K)
 	{
@@ -4442,6 +4797,9 @@ static void vr_pda_draw(IDSGraphManager* DM)
 	S.drawn++;
 	S.pda_w.set(V.xf.c);
 	// want: the model origin as the off hand + offset puts it, worked out without frame_inv: origin = -(R^T * grip_pos)
+	if (S.placed)
+		S.want_w.set(V.xf.c); // placed: no hand offset applies
+	else
 	{
 		Fmatrix Ry, Rx, Rz, R, Rt;
 		Ry.rotateY(deg2rad(V.grip_rot.y));

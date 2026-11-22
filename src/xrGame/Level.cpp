@@ -1290,7 +1290,8 @@ extern void draw_wnds_rects();
 extern bool use_reshade;
 extern void render_reshade_effects();
 
-extern int ps_r4_hdr10_pda; // NOTE: this is a hack to avoid double HDR tonemapping the PDA
+extern int ps_r4_hdr10_pda;
+extern bool vr_pda_touch_marker(); // GammaVR milestone 10a step 3 (player_hud.cpp) // NOTE: this is a hack to avoid double HDR tonemapping the PDA
 
 void CLevel::OnRender()
 {
@@ -1340,6 +1341,10 @@ void CLevel::OnRender()
 				if (is_top)
 					cursor->OnRender();
 			}
+			// GammaVR milestone 10a step 3 (note 26): the VR touch marker; the VR-shown window has input off, so the block
+			// above never draws the cursor for it
+			if (cursor && vr_pda_touch_marker() && !pda->IsEnabled())
+				cursor->OnRender();
 			Render->RenderToTarget(Render->rtPDA);
 
 			ps_r4_hdr10_pda = 0;
