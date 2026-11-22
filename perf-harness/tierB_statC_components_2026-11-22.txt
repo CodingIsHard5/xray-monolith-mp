@@ -1,0 +1,15 @@
+lr1_01 [31, 0, 15, 2, 2, 13] lostreg_done 1 passes 1926
+lr1_02 [31, 0, 15, 2, 2, 13] lostreg_done 1 passes 1927
+lr1_03 [36, 0, 13, 2, 2, 13] lostreg_done 1 passes 1930
+lr1_04 [31, 0, 15, 2, 2, 13] lostreg_done 1 passes 1928
+lr1_05 [31, 0, 15, 2, 2, 13] lostreg_done 1 passes 1927
+lr10_01 [33, 0, 15, 2, 11, 20] lostreg_done 10 passes 1922
+lr10_02 [31, 0, 15, 2, 11, 20] lostreg_done 10 passes 1929
+lr10_03 [31, 0, 15, 2, 11, 20] lostreg_done 10 passes 1925
+lr10_04 [31, 0, 15, 2, 11, 20] lostreg_done 10 passes 1930
+lr10_05 [31, 0, 15, 2, 11, 20] lostreg_done 10 passes 1926
+lr100_01 [31, 0, 15, 2, 101, 60] lostreg_done 100 passes 1924
+lr100_02 [33, 0, 14, 2, 101, 60] lostreg_done 100 passes 1924
+lr100_03 [31, 0, 15, 2, 101, 60] lostreg_done 100 passes 1923
+lr100_04 [31, 0, 15, 2, 101, 60] lostreg_done 100 passes 1923
+lr100_05 [31, 0, 15, 2, 101, 60] lostreg_done 100 passes 1919

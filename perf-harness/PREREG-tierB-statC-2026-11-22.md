@@ -99,3 +99,34 @@ stationary player". C covers lost registrations only, not every kind of wrong wo
      beside it, and the widened one governs. The widened threshold is then also used for every later candidate.
   4. The inertness check (ri as a candidate on all seven statistics) is scored as registered either way; its
      medians already absorb one world-event run in five.
+
+## RESULTS (2026-11-22 13:26:20 EST) - scored once, as registered (21 runs 07:47-13:25, 2026-11-22; none DISTURBED; smoke I5 = 101)
+
+Outputs: perf-harness/tierB_statC_step1_2026-11-22.txt, tierB_statC_score_2026-11-22.txt, tierB_statC_components_2026-11-22.txt.
+
+1. Stock side (rule 1): ri01, ri02, ri04, ri05 equal R1 on every check. ri03 DIFFERS: I1 = 33 (R1: 31), C = 2 against
+   every R1 run (a world event: two creatures name a squad that is gone). Reported here. Rule 3 applies: WIDENED
+   threshold for C = 2 (governs, also for later candidates); the registered threshold 0 is shown beside.
+2. Inertness (ri as candidate, seven statistics): PASS on all seven. The new overlay is inert; the old references and
+   band stay valid.
+3. Doses (components I1..I6 per run in the components file; lostreg_done = N in every run):
+   - I5 = 2 / 11 / 101 in all 15 runs: EXACTLY as predicted.
+   - I6 = 13 / 20 / 60 (stock 12): predicted 0 change - WRONG. npc_info is filled for off-level smarts too; my reading
+     of update_jobs was wrong. So C distance = 2 / 18 / 148, not the predicted 1 / 10 / 100.
+   - C, registered threshold 0: FAIL at 1, 10, 100. C, WIDENED threshold 2 (governs): dose 1 PASS (median 2 <= 2),
+     dose 10 FAIL (18), dose 100 FAIL (148). DETECTION LIMIT of C = 10 lost registrations (governing), 1 under the
+     registered threshold. Monotonic.
+   - P (existing statistic, smart npc counts) ALSO FAILS at every dose (median 1 / 10 / 99). Predicted "every other
+     statistic passes" - WRONG. Consequence: this control does not show C seeing anything P could not already see.
+     C's added value rests on I1-I4, which stay UNPROVEN.
+   - U: predicted PASS at all doses - WRONG at dose 1: FAIL (median 0.0026 vs 0.0025, p = 0.008; the lr1 runs did
+     1,926-1,930 passes against about 1,922). U PASSES at 10 and 100. Non-monotonic, so I read it as a U false fail or
+     an unexplained effect, not as "dose 1 changes the amount of work". The must-hold "U passes at all doses" is NOT
+     met as registered; reported, not explained away.
+   - Must-hold "dose 100 fails on C": MET.
+4. Finding about the decision rule (applies to all of tier (b)): Rule B (permutation of median distances) cannot fail
+   a gross effect on near-constant data. For C and P at dose 100, p = 1.000, because any labelling with a majority of
+   candidate runs in G1 gives the same median gap. Every C and P failure above comes from Rule A alone. So for C and P,
+   Rule B adds nothing, and the "fragile p" concern does not arise; their verdict is Rule A against the threshold.
+5. Claims language from now on: "passes tier (b) incl. C; limits: U about 4 % of A-Life work; C 10 lost registrations
+   (P sees them too); I1-I4 unproven; stationary player".
