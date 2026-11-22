@@ -1798,7 +1798,7 @@ static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const 
 			Msg("* [vr3pdac] frame %u cursor set %.1f %.1f read %.1f %.1f top %d", I.frame, S.cur_x[c], S.cur_y[c], got.x, got.y,
 				(W && CurrentGameUI()->TopInputReceiver() == W) ? 1 : 0);
 		}
-	if (int(I.frame) == S.surf_frame && I.head.valid && g_vr_track.head0_set)
+	if (int(I.frame) == S.surf_frame && I.head.valid && g_vr_track.head0_set && g_pGameLevel && Level().bReady)
 	{
 		Fvector hw;
 		g_vr_track.track_to_world.transform_tiny(hw, I.head.pos);
