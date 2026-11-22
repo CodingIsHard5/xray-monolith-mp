@@ -53,7 +53,7 @@ DONE="$RUN/appdata/logs/alife_dump_${TAG}_$NLAST.txt"
 while :; do
   sleep 5
   for EP in $(pgrep -f "bin\\\\$EXE"); do [ -z "$AFF" ] && AFF=$(awk '/Cpus_allowed_list/{print $2}' /proc/$EP/status 2>/dev/null) && [ -n "$AFF" ] && echo "engine pid $EP cpus_allowed=$AFF" >> "$OUT/conditions.txt"; R=$(awk '/VmRSS/{print $2}' /proc/$EP/status 2>/dev/null); [ "${R:-0}" -gt "$PEAK" ] && PEAK=$R
-    [ $(( ($(date +%s) - START) % 60 )) -lt 5 ] && echo "$(date +%T) pid $EP cpu_ticks $(awk '{print $14+$15}' /proc/$EP/stat 2>/dev/null) state $(awk '{print $3}' /proc/$EP/stat 2>/dev/null) log_bytes $(stat -c %s "$LOG" 2>/dev/null)" >> "$OUT/cpu_samples.txt"; done   # progress sample about once a minute (read-only)
+    [ $(( ($(date +%s) - START) % 60 )) -lt 5 ] && echo "$(date +%T) pid $EP comm $(cat /proc/$EP/comm 2>/dev/null | tr ' ' '_') cpu_ticks $(sed 's/.*) //' /proc/$EP/stat 2>/dev/null | awk '{print $12+$13}') state $(sed 's/.*) //' /proc/$EP/stat 2>/dev/null | awk '{print $1}') log_bytes $(stat -c %s "$LOG" 2>/dev/null)" >> "$OUT/cpu_samples.txt"; done   # progress sample about once a minute (read-only)
   if "$T/protected-title-check.sh" >/dev/null 2>&1; then echo "ABORT: protected title started"; RC=3; break; fi
   if [ -s "$DONE" ] && grep -qa "^#actor" "$DONE" && grep -qa "^#end" "$RUN/appdata/logs/tb_extra_${TAG}_$NLAST.txt" 2>/dev/null; then RC=0; sleep 8; break; fi
   if ! pgrep -f "bin\\\\$EXE" >/dev/null 2>&1 && [ $(( $(date +%s) - START )) -gt 30 ]; then echo "engine exited early"; RC=4; break; fi

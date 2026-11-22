@@ -173,3 +173,29 @@ Fixed before slice 1 and committed with this note:
   DOSE 1000 = d1000_01_rr, d1000_02..05. SPEED = s01_rr, s02..05.
 - WALK: failed twice (stalls at 04:20:29 and 07:20:42, both right after walk step 7 into bar_zastava_dogs_lair_2 and
   dog hits on the actor). Moving-player case = STATED LIMIT of tier (b).
+
+## RESULTS (2026-11-22 07:39:31 EST) - scored once, exactly as registered (band 97.5 frozen in a9e71fce1 first)
+
+Output: perf-harness/tierB_score_2026-11-22.txt (all pair values listed).
+- HOLD (out-of-sample, must pass): PASS on all six statistics. Instrument passes its own stock-vs-stock check.
+- DOSE 10 (0.71 lost updates/min averaged; about 0.04 % of offline squad updates): PASS.
+- DOSE 100 (7.1/min; about 0.4 %): PASS.
+- DOSE 1000 (71/min averaged, 1,676/min inside the 36-s skip window; about 4 %): FAIL, on U ONLY (median 0.0258 against
+  a threshold of 0.0025, p = 0.024). P, L, V, M, D all PASS even at this dose.
+- Monotonic: yes (only the largest dose fails). DETECTION LIMIT = dose 1000, about 4 % of the offline squad updates of
+  the run. Share computed as skipped / (offline update rate measured inside the skip window, 1,613-1,676 per minute,
+  x 15 min = about 25,000); the "from U's pass count" route in section 5 needs a squads-per-pass number the runs do
+  not record, so I used the measured rate instead and say so.
+- 1 % BAR: NOT MET (about 4 % > 1 %). Per section 5 this goes to the Overseer to decide; I do not decide it.
+- SPEED (low-end settings): PASS on all six; NO statistic struck. Six statistics remain.
+- WALK: stated limit (two stalls, see above). Tier (b) covers the stationary-player scenario only.
+- Predictions (section 8): band 95 or 97.5 - RIGHT (97.5). HOLD passes - RIGHT. Dose 1000 fails, dose 10 passes -
+  RIGHT. Detection limit between 0.1 % and 2 % - WRONG (about 4 %). SPEED strikes V and maybe U - WRONG (strikes
+  nothing).
+- Honest reading: the only statistic that sees lost updates is U, the A-Life pass count (dose 1000: 1,872 passes
+  against about 1,922). The state statistics (where squads are, who died, what exists) did not move beyond stock noise
+  even with about 4 % of offline updates lost. As built, tier (b) catches a change in how much A-Life work is done; it
+  would not catch a change that does the same amount of work but does it wrongly, unless that shows in deaths or
+  placement more strongly than a 4 % loss does.
+- Side observation: some stock runs differ from all others by an event involving 5 deaths (h05 against R1; D = 5,
+  M about 20). Rare world events exist in the stock noise; the rule's medians absorbed them.
