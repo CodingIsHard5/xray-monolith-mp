@@ -159,3 +159,17 @@ Fixed before slice 1 and committed with this note:
   (load under 1 min + 15 min + margin); all other runs keep 1260 s. If it fails again: record the moving-player case as
   a STATED LIMIT and score. tb_run.sh now writes cpu_samples.txt about once a minute (engine CPU ticks, process state,
   log size; read-only /proc reads) so a second stall can be classified.
+
+## BAND FROZEN (2026-11-22 07:38:33 EST) - before HOLD, DOSE or SPEED are scored
+
+- Runs used (section 4): REF = r01, r02_rr, r03_rr, r04_rr, r05..r15 (the three flagged REF runs replaced by their
+  re-runs, as ruled). `tier_b.py null --n 5 --k 3`: 2000 of 756,756 splits (seed 1). Output:
+  perf-harness/tierB_null_2026-11-22.txt.
+- Overall false-fail by band: 80 12.1 %, 85 6.8 %, 90 5.8 %, 95 5.1 %, 97.5 4.5 %, 99 4.5 %, 100 4.4 %.
+- FROZEN BAND = 97.5 (smallest with <= 5 %). No statistic dropped. Per statistic at 97.5: P 0.000, L 0.019,
+  V 0.007, M 0.008, D 0.000, U 0.011.
+- Groups for the next steps (fixed now): R1 = r01, r02_rr, r03_rr, r04_rr, r05; R2 = r06..r10.
+  HOLD = h01_rr, h02..h05. DOSE 10 = d10_01_rr, d10_02_rr, d10_03..05; DOSE 100 = d100_01_rr, d100_02..05;
+  DOSE 1000 = d1000_01_rr, d1000_02..05. SPEED = s01_rr, s02..05.
+- WALK: failed twice (stalls at 04:20:29 and 07:20:42, both right after walk step 7 into bar_zastava_dogs_lair_2 and
+  dog hits on the actor). Moving-player case = STATED LIMIT of tier (b).
