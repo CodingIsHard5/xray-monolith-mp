@@ -21,11 +21,18 @@ END_H="${TB_END_H:-8}"
 # TB_ANYTIME=1 (Overseer 2026-11-21, Caden away 6 days): no wall-clock window; slices at any hour.
 in_window() { [ "${TB_ANYTIME:-0}" = 1 ] && return 0; local h; h=$(date +%-H); [ "$h" -ge 1 ] && [ "$h" -lt "$END_H" ]; }
 secs_to_8() { [ "${TB_ANYTIME:-0}" = 1 ] && { echo 999999; return; }; echo $(( $(date -d "today $END_H:00" +%s) - $(date +%s) )); }
-# yield_gap: after a slice, wait TB_GAP s (default 1500) or until another worker holds the box, whichever is first.
-yield_gap() { local t0; t0=$(date +%s)
-  while [ $(( $(date +%s) - t0 )) -lt "${TB_GAP:-1500}" ]; do
-    "$T/quiet-required.sh" check 2>/dev/null | awk '($1=="HELD:"||$1=="SLOT2:") && $4!="engineperf"{f=1} END{exit !f}' && { log "gap: another worker claimed after $(( $(date +%s) - t0 ))s"; return; }
-    sleep 30; done; log "gap: ${TB_GAP:-1500}s passed"; }
+# yield_gap (Overseer ruling 2026-11-21): after a slice, WANT again only when (a) TB_GAP s (default 1500) have
+# passed, or (b) another worker has CLAIMED and since RELEASED (audit log, after our release) AND nobody other than
+# us has been refused a claim in the last 5 min. TB_AUDIT_LOG exists for the self-test.
+yield_gap() { local t0 since el cut who AL="${TB_AUDIT_LOG:-$HOME/.claude/overseer/quiet-audit.log}"
+  t0=$(date +%s); since=$(date -d @$t0 '+%F %T')
+  while :; do el=$(( $(date +%s) - t0 ))
+    [ $el -ge "${TB_GAP:-1500}" ] && { log "gap: ${TB_GAP:-1500}s passed"; return; }
+    who=$(tail -n 5000 "$AL" | awk -v s="$since" 'substr($0,1,19)>=s && $3=="CLAIM" && $4!="by=engineperf"{c[$4]=1} substr($0,1,19)>=s && $3=="RELEASE" && ($4 in c){w=$4} END{print w}')
+    if [ -n "$who" ]; then cut=$(date -d "-300 sec" '+%F %T')
+      if ! tail -n 5000 "$AL" | awk -v s="$cut" 'substr($0,1,19)>=s && /refused/ && $4!="by=engineperf"{f=1} END{exit !f}'; then
+        log "gap: ${who#by=} claimed and released, nobody refused in the last 5 min; after ${el}s"; return; fi; fi
+    sleep 30; done; }
 pending() { { grep -v '^#' tools/tb_order.txt; cat $ST/rerun.txt; } | while IFS='|' read -r tag env extra; do [ -n "$tag" ] && ! grep -qx "$tag" $ST/done.txt && echo "$tag|$env|$extra"; done; }
 # smoke_ok [extra-file [dump-file]]: the engine (wine) writes CRLF; every field is read from a CR-stripped copy ($x).
 smoke_ok() { local raw=${1:-out/tb_smoke/tb_extra_smoke_3.txt} dump=${2:-out/tb_smoke/alife_dump_smoke_3.txt} x

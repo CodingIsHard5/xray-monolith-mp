@@ -136,3 +136,12 @@ Fixed before slice 1 and committed with this note:
   After each slice: release, then wait 25 min or until another worker holds the box, whichever is first, before the
   next WANT. Unchanged: settle wait before every run, 21-min run timeout, protected-title and Roblox checks.
   Self-test cases added for the gap. Scheduling only; no rule, threshold or statistic changed.
+
+## Note (2026-11-22 00:39:41 EST): fairer gap between slices (Overseer ruling)
+
+- Slice 2 ended at 21:46:40 on 2026-11-21. The old gap ended at 0 s because itrzone held a handoff pre-claim. My WANT
+  then refused gammavr's claims from 21:48 to 21:57.
+- New rule, applied after slice 3 ended (00:38:35, 2026-11-22): WANT again only when (a) 25 min have passed, or (b)
+  another worker has claimed and since released (audit log) AND nobody has been refused a claim in the last 5 min.
+  Self-test cases: claimed+released with no refusal ends early; a refusal in the last 5 min waits the full gap;
+  witness W3 (refusal check removed) ends early. All passed. Scheduling only; no rule, threshold or statistic changed.
