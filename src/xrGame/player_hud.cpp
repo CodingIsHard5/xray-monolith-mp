@@ -1789,6 +1789,7 @@ static void vr_pda_touch_end(CUIPdaWnd* W, u32 frame)
 	S.touch_hand = -1;
 	S.touching[0] = S.touching[1] = false;
 	S.pushed[0] = S.pushed[1] = false;
+	S.above[0] = S.above[1] = false; // a new click needs the tip above the screen again
 	if (S.cursor_shown)
 	{
 		GetUICursor().Hide();
@@ -1855,6 +1856,8 @@ static CUIWindow* vr_pda_under(CUIWindow* w, float x, float y)
 
 static void vr_pda_click(CUIPdaWnd* W, float x, float y, EUIMessages m)
 {
+	// the child hit test (HitClipPass) reads the UI cursor: it must be at the click point
+	GetUICursor().SetUICursorPosition(Fvector2().set(x, y));
 	W->OnMouseAction(x, y, WINDOW_MOUSE_MOVE);
 	W->OnMouseAction(x, y, m);
 }
@@ -2030,12 +2033,14 @@ static int vr_pda_update(const vr_input_info& I, CActor* A, bool allowed, const 
 			// step 3: set down, the holding hand's press with a surface within VR_PDA_SURF below the screen centre
 			ev_hand = S.hand;
 			float sy;
-			if (!vr_pda_surface(hsc, sy))
+			Fvector hw, fw, ft;
+			g_vr_track.track_to_world.transform_tiny(hw, I.grip[S.hand].pos);
+			// the surface is checked where the screen centre will go (above the hand point), at the held screen's height
+			const Fvector probe = Fvector().set(hw.x, hsc.y, hw.z);
+			if (!vr_pda_surface(probe, sy))
 				ev = "refused_no_surface";
 			else
 			{
-				Fvector hw, fw, ft;
-				g_vr_track.track_to_world.transform_tiny(hw, I.grip[S.hand].pos);
 				const vr_pose& G = I.grip[S.hand];
 				vr_quat_rotate(G.qx, G.qy, G.qz, G.qw, Fvector().set(0.f, 0.f, 1.f), ft);
 				g_vr_track.track_to_world.transform_dir(fw, ft);
@@ -3733,6 +3738,7 @@ void vr_input_update()
 	static bool s_trig[2] = { false, false }, s_grab[2] = { false, false };
 	static u32 s_seq = 0;
 	static bool s_seen = false;
+	static bool s_pda_trig_held = false; // step 3: the gun hand's trigger went to the PDA and is still held
 	static bool s_fire_sent = false;    // a kWPN_FIRE press was given to s_fire_actor and not yet released
 	static CActor* s_fire_actor = nullptr;
 	static int s_from = -1, s_to = -1;
@@ -3775,7 +3781,10 @@ void vr_input_update()
 		// milestone 10a steps 1-2: the PDA in either hand (grip in the chest zone, or passed); the hand holding it does nothing else
 		const int pda_block = vr_pda_update(I, g_actor, vr_fire_allowed(g_actor), s_grab, s_trig, s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to);
 		if (pda_block & 4)
+		{
 			fire_press_edge = false; // step 3: the gun hand's trigger clicked the PDA, not the gun
+			s_pda_trig_held = true;  // and the gun gets nothing until that trigger is let go
+		}
 		if (pda_block & (1 << off))
 			s_vr_grab_held = false;
 		// milestone 8a (Amendment 31): manual reload
@@ -3797,7 +3806,11 @@ void vr_input_update()
 		s_fire_actor = nullptr;
 	}
 	const bool allowed = vr_fire_allowed(A);
-	if (s_fire_sent && (!s_trig[gun] || !allowed))
+	if (s_pda_trig_held && !s_trig[gun])
+		s_pda_trig_held = false; // step 3: the trigger the PDA took was let go
+	if (s_pda_trig_held)
+		fire_press_edge = false;
+	if (s_fire_sent && (!s_trig[gun] || !allowed || s_pda_trig_held))
 	{
 		A->IR_OnKeyboardRelease(kWPN_FIRE);
 		s_fire_sent = false;
