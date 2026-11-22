@@ -61,3 +61,12 @@ smokel ti01 ll100_01 ll10_01 ll1_01 ll10_02 ll1_02 ll100_02 ti02 ll10_03 ll1_03 
 As proposed in PREREG-tierB-statC notes (4); implemented as tier_b.py score --ruleb2 P,D,C (--thr C=2 carries the
 governing C threshold). Limits on the record: its null comes from only 34 stock runs with 2 deviants; the false-fail
 rate is somewhere between 0.9 % and about 11 %. Earlier verdicts keep their registered scoring.
+
+## 6. Test exe installed (after the predictions above, before any run)
+
+CI run 45056221898 (TB-TestHook-Build, test/tb-hooks @ 2c09c6773) green 2026-11-22 18:59 UTC; artifact
+tb_testhook_DX11_bin installed as run/bin/TestHook14.exe (pdb kept outside run/bin so bin_libs is unchanged).
+String check "tb_lose_member_link": TestHook14.exe 1 (positive control), PerfDX11 / RefDet10-14 / StockJune 0.
+Overlay harness/zz_eperf_dump.script copied to run/gamedata/scripts (identical by cmp).
+tb_hash.sh TestHook14.exe bench1: exe d7c34cff31f2a095 (RefDet14 bc0426a10810f461); every other line equal to the
+RefDet14 fingerprint (bin_libs c0b49c85c74b7ab9, scripts ea7bb8198cfbcdaf, overlay 2b79a817a08a1e7f, tools 5ec50c2c9ed26ed9).
