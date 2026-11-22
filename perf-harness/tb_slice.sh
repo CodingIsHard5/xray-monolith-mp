@@ -65,10 +65,12 @@ FIRST=1; total_done=0; HARD=0
 while [ -n "$(pending)" ]; do
   [ $(date +%s) -ge $END_ALL ] && { log "GIVE UP: nights used up, $(pending | wc -l) runs left"; note "tier (b) controls: scheduler GAVE UP after ${TB_NIGHTS:-4} nights, $(pending | wc -l) runs left."; exit 5; }
   until in_window && [ $(secs_to_8) -gt 1500 ]; do sleep 120; done          # wall-clock gate
-  "$T/quiet-required.sh" want $W EXCLUSIVE >/dev/null 2>&1; ok=0
+  # WANT only if we do not already hold the box (a restart while holding queued a WANT that then sat in the queue
+  # for the whole slice and handed the box back to us at release: 2026-11-22 07:46-10:33, Overseer fairness ruling)
+  "$T/quiet-required.sh" check 2>/dev/null | awk -v w=$W '$1=="HELD:" && $4==w{f=1} END{exit !f}' || "$T/quiet-required.sh" want $W EXCLUSIVE >/dev/null 2>&1; ok=0
   while in_window && [ $(secs_to_8) -gt 1500 ]; do
     if ! "$T/protected-title-check.sh" >/dev/null 2>&1 && ! pgrep -x sober >/dev/null; then
-      "$T/quiet-required.sh" claim $W 30 "$WHAT" 2>&1 | grep -q '^claimed' && { ok=1; break; }; fi
+      "$T/quiet-required.sh" claim $W 30 "$WHAT" 2>&1 | grep -q '^claimed' && { ok=1; "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1; break; }; fi   # holding now: no queue entry of ours may remain
     sleep 60; done
   [ $ok = 1 ] || { "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1; log "no slot before $END_H:00 tonight"; note "tier (b) controls: no exclusive slot inside tonight's window; nothing run in this attempt."; [ "${TB_ONE_SLICE:-0}" = 1 ] && exit 6; sleep 600; continue; }
   SL_START=$(date +%s); SL_END=$(( SL_START + 3*3600 )); n=0; stop=""
@@ -96,7 +98,7 @@ while [ -n "$(pending)" ]; do
     if grep -q '^DISTURBED' out/tb_$tag/conditions.txt 2>/dev/null && [ "$tag" != smoke ] && [[ "$tag" != *_rr ]]; then
       grep -v '^#' $ORDER | awk -F'|' -v t="$tag" '$1==t{print t"_rr|"$2"|"$3}' >> $ST/rerun.txt; log "run $tag DISTURBED (load at start >= 2): excluded, re-run queued as ${tag}_rr"; fi
   done
-  "$T/quiet-required.sh" release $W >/dev/null 2>&1; "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1
+  "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1; "$T/quiet-required.sh" release $W >/dev/null 2>&1   # withdraw FIRST, so release wakes the next worker, never us
   left=$(pending | wc -l)
   log "slice end: $n runs this slice, $(grep -c . $ST/done.txt) done in all, $left left. ${stop:-list finished}"
   note "tier (b) controls: slice ended $(date +%T): $n runs this slice, $(grep -c . $ST/done.txt) of $(grep -vc '^#' $ORDER) done, $left left. Reason: ${stop:-list finished}."

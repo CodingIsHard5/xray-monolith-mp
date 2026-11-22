@@ -39,4 +39,10 @@ alog "CLAIM    by=itrzone id=x mins=45 what=y"
 r=$(gap "$g"); wait; [ "${r%%|*}" -ge 4 ] && echo "PASS gap: other still holding (no release) -> waits the full gap" || { echo "FAIL gap/holding: $r"; fail=1; }
 alog "CLAIM    by=engineperf id=x mins=30 what=y" "RELEASE  by=engineperf was=engineperf"
 r=$(gap "$g"); wait; [ "${r%%|*}" -ge 4 ] && echo "PASS gap: only our own claim/release -> waits the full gap" || { echo "FAIL gap/self: $r"; fail=1; }
+# queue hygiene (2026-11-22 fairness fix): no WANT while we hold the box; withdraw after claiming; withdraw before release
+mkdir -p $F/Q; printf '#!/bin/bash\necho "$*" >> %s/Q/calls; [ "$1" = check ] && echo "HELD: 2026-11-22 10:00:00 engineperf 30 x"; exit 0\n' "$F" > $F/Q/quiet-required.sh; chmod +x $F/Q/quiet-required.sh
+wl=$(grep -m1 'want \$W EXCLUSIVE' "$S"); T=$F/Q W=engineperf bash -c "$wl" >/dev/null 2>&1
+grep -q '^want' $F/Q/calls 2>/dev/null && { echo "FAIL WANT sent while holding"; fail=1; } || echo "PASS no WANT while holding the box"
+grep -q "grep -q '^claimed' && { ok=1; \"\$T/quiet-required.sh\" withdraw" "$S" && echo "PASS withdraw right after a successful claim" || { echo "FAIL no withdraw after claim"; fail=1; }
+grep -q 'withdraw \$W >/dev/null 2>&1; "\$T/quiet-required.sh" release \$W' "$S" && echo "PASS withdraw comes before release at slice end" || { echo "FAIL release before withdraw"; fail=1; }
 exit $fail
