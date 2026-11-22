@@ -84,3 +84,18 @@ stationary player". C covers lost registrations only, not every kind of wrong wo
   witness W4 (I5 check removed) gives C = 0. Passes. The CRLF and settle self-tests still pass.
 - Scheduler: TB_ORDER / TB_STATE select tools/tb_order_c.txt and out/tbc_state; smoke check smokec_ok as in section 6,
   tested: a stock run fails it (I5 = 1, no done line), a doctored copy with 60 lost registrations passes.
+
+## Note (2026-11-22 07:47:18 EST): limit and stock-side rule (Overseer; written before any run of this series is read or scored)
+
+- LIMIT: the control exercises I5 only. C's sensitivity through I1, I2, I3, I4 and I6 stays UNPROVEN; any claim says
+  "C validated on lost registrations (I5) only".
+- STOCK-SIDE CHANGE: the reference noise for C is exactly 0, so p is fragile. Stock C does move in rare world events
+  (4 of 50 dumps so far, on I1 and I3; e.g. h05 has C = 6 against every reference). Rule, fixed now:
+  1. The five ri runs are read first. For each, its C distance to every R1 run is reported, per component.
+  2. If no ri run differs from R1 on C: the doses are scored as registered (threshold P97.5 of R1 x R2 = 0).
+  3. If any ri run differs (on any component, I5 included): the change is REPORTED with the run and component, and
+     every dose group is scored on C against a WIDENED stock range: threshold = the largest C distance between any ri
+     run and any R1 run, in place of 0; Rule B is unchanged. The verdict under the registered threshold is reported
+     beside it, and the widened one governs. The widened threshold is then also used for every later candidate.
+  4. The inertness check (ri as a candidate on all seven statistics) is scored as registered either way; its
+     medians already absorb one world-event run in five.
