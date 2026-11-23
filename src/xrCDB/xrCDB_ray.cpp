@@ -187,7 +187,7 @@ public:
 
 void _stab(const AABBNoLeafNode* node)
 {
-    PROF_EVENT("xrCDB_ray::_stab")
+    PROF_EVENT_HOT("xrCDB_ray::_stab")
 	// Intersection filter stoping 
 	//if (!continue_work)
 	//	return;

@@ -231,7 +231,7 @@ CUIWindow::~CUIWindow()
 
 void CUIWindow::Draw()
 {
-	PROF_EVENT("CUIWindow::Draw");
+	PROF_EVENT_HOT("CUIWindow::Draw");
 	xrCriticalSectionGuard guard(csUi);
 	for (CUIWindow* W : m_ChildWndList)
 	{
@@ -258,7 +258,7 @@ void CUIWindow::Draw(float x, float y)
 
 void CUIWindow::Update()
 {
-	PROF_EVENT("CUIWindow::Update");
+	PROF_EVENT_HOT("CUIWindow::Update");
 	CUIDialogWnd* TIR = CurrentGameUI() ? CurrentGameUI()->TopInputReceiver() : nullptr;
 
 	if (GetUICursor().IsVisible() || (TIR && !TIR->NeedCursor()))

@@ -136,3 +136,11 @@ namespace xrprof
 #	define PROF_EVENT(Name)
 #	define PROF_EVENT_DYNAMIC(...) {};
 #endif
+
+// PROF_EVENT_HOT: for call sites hit thousands of times per frame. /DXRCORE_PROFILER_COARSE compiles them out
+// (measurement builds only, to keep probe overhead out of the per-pass totals); otherwise identical to PROF_EVENT.
+#if defined(XRCORE_PROFILER_COARSE)
+#	define PROF_EVENT_HOT(...)
+#else
+#	define PROF_EVENT_HOT(...) PROF_EVENT(__VA_ARGS__)
+#endif
