@@ -4716,7 +4716,8 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 		{
 			for (u16 b = 0, n = K->LL_BoneCount(); b < n; ++b)
 				if (V.mask & (u64(1) << b))
-					V.rest[b].set(K->LL_GetTransform(b));
+					V.rest[b].set(K->LL_GetBoneInstance(b).mTransformHidden); // 8c: the bone's own pose even while it is hidden
+					// (a hidden bone's mTransform sits at its parent's origin, SkeletonRigid.cpp BuildBoneMatrix)
 			V.cache_ok = true;
 		}
 	}
@@ -4772,6 +4773,7 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 		}
 	int hand_n = -1;
 	u32 hand_exp = 0, hand_rb = 0;
+	float hand_top = -1.f;
 
 	// the magazine in the off hand
 	bool hand = false;
@@ -4835,6 +4837,8 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 			for (int i = 0; i < V.rnd_n; ++i) // read back: what the copy's skeleton will draw each round with
 				if (V.copy->LL_GetBoneInstance(V.rnd[i]).mRenderTransform.i.magnitude() > 0.5f)
 					hand_rb |= u32(1) << i;
+			if (V.rnd_n) // read back: where the top round (the list's last entry) is drawn, from the copy's magazine bone
+				hand_top = V.copy->LL_GetTransform(V.rnd[V.rnd_n - 1]).c.distance_to(V.copy->LL_GetTransform(V.bone).c);
 			// the gun as the off hand would hold it, moved so the magazine bone's origin is at that hand
 			Fmatrix gun_track, off_track, grip_w, off_w, inv, rel;
 			vr_pose_matrix(G.gun, gun_track);
@@ -4871,9 +4875,9 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 		for (int i = 0; i < V.rnd_n; ++i)
 			if (K->LL_GetBoneInstance(V.rnd[i]).mRenderTransform.i.magnitude() > 0.5f)
 				gun_rb |= u32(1) << i;
-		Msg("* [vr3rndv] frame %u eye %d N %d engine %d off %d gun_n %d gun_shown %d gun_exp %x gun_rb %x hand %d hand_n %d hand_exp %x hand_rb %x",
+		Msg("* [vr3rndv] frame %u eye %d N %d engine %d off %d gun_n %d gun_shown %d gun_exp %x gun_rb %x hand %d hand_n %d hand_exp %x hand_rb %x hand_top %.5f",
 			g_vr_track.frame, eye, V.rnd_n, V.rnd_engine ? 1 : 0, s_rnd_off ? 1 : 0, gun_n, K->LL_GetBoneVisible(V.bone) ? 1 : 0, gun_exp, gun_rb,
-			hand ? 1 : 0, hand_n, hand_exp, hand_rb);
+			hand ? 1 : 0, hand_n, hand_exp, hand_rb, hand_top);
 	}
 }
 
