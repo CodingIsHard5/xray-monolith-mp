@@ -55,3 +55,12 @@ CLOSED as a harness artefact. Both earlier stalls fit this (same lair, same hit 
 My guess was wrong: I said deadlock at about 60 %.
 Consequence for later work: any headless run that walks the actor near mutants (P1) must keep the actor alive
 (god mode or a health refill each tick) or treat death as an end state. Otherwise a run "hangs" on the death screen.
+
+### Why the log had no death line (Overseer follow-up, recorded for the next reader)
+In this setup the actor's death writes nothing to the engine log. The last lines before death are the GAMMA hit
+handlers' own prints ("current hitter", "Damage to actor") and a pain sound. After death the game shows the death
+screen. The walk harness and most scripts that print run from the actor's update, which no longer prints, and A-Life
+is quiet, so the log simply stops. The engine is still alive: in this run the main thread used 0.15 core in state S.
+So "the log stopped" is NOT evidence of a hang in headless runs. Check for a death or other screen first (screenshot),
+then CPU. Whether stock X-Ray logs actor death in some other mode was not checked in source; this is from the
+log and the screenshot only.
