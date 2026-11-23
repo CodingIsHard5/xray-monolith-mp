@@ -3886,8 +3886,20 @@ static void vr_item_update(const vr_input_info& I, CActor* A, bool grab, bool of
 	vr_item_state& S = s_vr_item;
 	vr_item_parse();
 	S.claims = false;
-	if (S.off || !A || !A->m_inventory)
+	if (!A || !A->m_inventory)
 		return;
+	if (S.off)
+	{
+		// -vr_use_off (TEST ONLY, the control): nothing acts, but the per-frame line is written exactly as in an active run
+		// (Amendment 37 note 9: a control must produce the same log lines as its active run)
+		int cn[4], cu[4], dn, du;
+		for (int i = 0; i < 4; ++i)
+			vr_item_section_count(A, g_quick_use_slots[i], cn[i], cu[i]);
+		vr_item_section_count(A, "items_anm_dummy", dn, du);
+		Msg("* [vr11s] frame %u state %d sect '%s' d_pouch %.4f %.4f d_zone %.4f grab %d free %d dummy %d pending %d age %.3f counts %d/%d %d/%d %d/%d %d/%d",
+			I.frame, 0, "", 1000.f, 1000.f, 1000.f, grab ? 1 : 0, off_free ? 1 : 0, dn > 0 ? 1 : 0, 0, 0.f, cn[0], cu[0], cn[1], cu[1], cn[2], cu[2], cn[3], cu[3]);
+		return;
+	}
 	const int gun = I.gun ? 1 : 0, off = 1 - gun;
 	const bool press = grab && !S.prev_grab;
 	S.prev_grab = grab;
