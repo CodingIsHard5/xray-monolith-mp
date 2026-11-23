@@ -1118,6 +1118,14 @@ BOOL CWeapon::net_Spawn(CSE_Abstract* DC)
 	}
 
 	m_ammoType = E->ammo_type;
+	// B1-T1 crash diagnosis (measurement only, perf/diag-ammo): log an out-of-range ammo index BEFORE it is used.
+	// Behaviour is unchanged: the read below still happens exactly as in RefDet14.
+	if (m_ammoType >= m_ammoTypes.size())
+	{
+		Msg("! [B1DIAG] CWeapon::net_Spawn ammo_type %u >= ammo_class size %u: name [%s] section [%s] id %u parent %u",
+			(u32)m_ammoType, (u32)m_ammoTypes.size(), *cName(), *cNameSect(), (u32)E->ID, (u32)E->ID_Parent);
+		xrLogger::FlushLog();
+	}
 	SetState(E->wpn_state);
 	SetNextState(E->wpn_state);
 

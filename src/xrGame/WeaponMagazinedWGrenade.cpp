@@ -85,6 +85,13 @@ BOOL CWeaponMagazinedWGrenade::net_Spawn(CSE_Abstract* DC)
 
 	iAmmoElapsed2 = weapon->a_elapsed_grenades.grenades_count;
 	m_ammoType2 = weapon->a_elapsed_grenades.grenades_type;
+	// B1-T1 crash diagnosis (measurement only, perf/diag-ammo): log an out-of-range grenade index before it is used
+	if (m_ammoType2 >= m_ammoTypes2.size())
+	{
+		Msg("! [B1DIAG] CWeaponMagazinedWGrenade::net_Spawn grenades_type %u >= grenade_class size %u: name [%s] section [%s] id %u parent %u",
+			(u32)m_ammoType2, (u32)m_ammoTypes2.size(), *cName(), *cNameSect(), (u32)weapon->ID, (u32)weapon->ID_Parent);
+		xrLogger::FlushLog();
+	}
 
 	m_DefaultCartridge2.Load(m_ammoTypes2[m_ammoType2].c_str(), m_ammoType2);
 
