@@ -6,6 +6,7 @@ extern ENGINE_API int g_stereo_bench_eye;
 #include "../../xrEngine/customhud.h"
 #include "../../xrEngine/xr_object.h"
 #include "../xrRender/SkeletonCustom.h"
+#include "../../xrEngine/fmesh.h"
 #include "../../xrParticles/ParticlesAsyncManager.h"
 
 #include "../xrRender/QueryHelper.h"
@@ -645,8 +646,9 @@ void CRender::model_DebugTree(IRenderVisual* V, const Fmatrix& xf, LPCSTR tex, L
 	if (!v)
 		return;
 	xr_vector<IRenderVisual*>* ch = v->get_children();
-	if (CKinematics* K = smart_cast<CKinematics*>(v))
+	if (v->Type == MT_SKELETON_ANIM || v->Type == MT_SKELETON_RIGID)
 	{
+		CKinematics* K = (CKinematics*)v;
 		Fvector T;
 		xf.transform_tiny(T, K->vis.sphere.P);
 		float D = Device.vCameraPosition.distance_to(T);
