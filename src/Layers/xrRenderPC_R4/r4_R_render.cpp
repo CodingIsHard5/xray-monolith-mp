@@ -596,8 +596,29 @@ static int vr_retarget_visual(dxRender_Visual* v, LPCSTR from_tex, LPCSTR to_sha
 			}
 			if (hit)
 			{
+				// made as a HUD model's shaders are (the visual was loaded with hud_loading set)
+				const bool prev_hud = ::Render->hud_loading;
+				::Render->hud_loading = true;
 				ref_shader ns;
 				ns.create(to_shader, base);
+				::Render->hud_loading = prev_hud;
+				// 10c build check: the old and new shader's elements (present, priority, strict, distort, emissive, passes)
+				auto dump = [](LPCSTR tag, Shader* X) {
+					for (u32 k = 0; X && k < SHADER_ELEMENTS_MAX; ++k)
+					{
+						ShaderElement* Q = X->E[k]._get();
+						if (!Q)
+						{
+							Msg("* [vr3wstsh] %s E[%u] none", tag, k);
+							continue;
+						}
+						Msg("* [vr3wstsh] %s E[%u] prio %u strict %u distort %u emissive %u passes %u tex %u", tag, k, (u32)Q->flags.iPriority,
+							(u32)Q->flags.bStrictB2F, (u32)Q->flags.bDistort, (u32)Q->flags.bEmissive, (u32)Q->passes.size(),
+							(Q->passes.size() && Q->passes[0]->T._get()) ? (u32)Q->passes[0]->T->size() : 0u);
+					}
+				};
+				dump("old", S);
+				dump("new", ns._get());
 				if (ns._get())
 				{
 					v->shader = ns;
