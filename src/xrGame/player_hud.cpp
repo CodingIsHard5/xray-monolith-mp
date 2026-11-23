@@ -1478,8 +1478,14 @@ struct vr_reload_state
 	Fvector off_world;       // the off hand in the world (measured with the distances)
 	string64 cfg_bone;       // mag_bone of the VR grip config for the held item ("" = "magazine")
 	string256 cfg_rounds;    // milestone 8c: round_bones of the VR grip config ("" = the game's own bullet_bones, or none)
+	// milestone 11a (Amendment 37 note 11): a magazine pull made while the gun is not ready (being drawn again, e.g. after
+	// FDDA's skip) is queued and carried out when the gun is ready, if the grip is still held; dropped on release; 2.0 s cap
+	bool q_on;
+	float q_age;
+	u32 q_frame;
 };
 static vr_reload_state s_vr_rl = {};
+static const float VR_RL_QUEUE_CAP = 2.0f;
 
 // VR only: a gun (or bolt, grenade) held in the hand does not start the game's idle fidget animation ("anm_bore") by
 // itself; in the flat game g_vr_track.head0_set is never set, so nothing changes there. -vr_fidget = the game's own.
@@ -2415,6 +2421,28 @@ static void vr_reload_update(const vr_input_info& I, CActor* A, bool allowed, bo
 		}
 		S.hand_mag = false;
 	}
+	// the queued pull (note 11): age, release, cap; queued here while no gun is active at all
+	if (S.q_on)
+	{
+		S.q_age += Device.fTimeDelta;
+		if (!grab)
+		{
+			S.q_on = false;
+			Msg("* [vr3rlq] frame %u queued pull dropped: grip released (age %.3f s)", I.frame, S.q_age);
+		}
+		else if (S.q_age >= VR_RL_QUEUE_CAP - 0.001f)
+		{
+			S.q_on = false;
+			Msg("* [vr3rlq] frame %u queued pull expired (age %.3f s)", I.frame, S.q_age);
+		}
+	}
+	if (!S.active && press && !S.q_on && !S.hand_mag && S.geo && S.geo_frame + 2 >= I.frame && S.d_mag <= 0.10f)
+	{
+		S.q_on = true;
+		S.q_age = 0.f;
+		S.q_frame = I.frame;
+		Msg("* [vr3rlq] frame %u pull queued: no gun active yet (d_mag %.4f)", I.frame, S.d_mag);
+	}
 	if (!S.active)
 	{
 		S.hand_mag = false;
@@ -2449,13 +2477,27 @@ static void vr_reload_update(const vr_input_info& I, CActor* A, bool allowed, bo
 	}
 	const bool geo = S.geo && S.geo_frame + 2 >= I.frame;
 	const bool ready = !W->IsPending();
-	if (geo)
+	bool q_now = false; // the queued pull is carried out this frame (the gun is ready, the grip still held)
+	if (S.q_on && ready && grab && !out && !S.hand_mag)
+	{
+		S.q_on = false;
+		q_now = true;
+		Msg("* [vr3rlq] frame %u queued pull carried out (queued at %u, age %.3f s)", I.frame, S.q_frame, S.q_age);
+	}
+	if (geo || q_now)
 	{
 		if (S.hand_mag && S.d_mag > 0.14f)
 			S.hand_far = true;
-		if (press)
+		if (press && !ready && !S.q_on && !out && !S.hand_mag && S.d_pouch > 0.15f && S.d_mag <= 0.10f && S.d_mag < S.d_sup)
 		{
-			if (S.d_pouch <= 0.15f)
+			S.q_on = true;
+			S.q_age = 0.f;
+			S.q_frame = I.frame;
+			Msg("* [vr3rlq] frame %u pull queued: the gun is not ready (state %u, d_mag %.4f)", I.frame, W->GetState(), S.d_mag);
+		}
+		if (press || q_now)
+		{
+			if (!q_now && S.d_pouch <= 0.15f)
 			{
 				if (!S.simple && !S.hand_mag)
 				{
@@ -2467,7 +2509,7 @@ static void vr_reload_update(const vr_input_info& I, CActor* A, bool allowed, bo
 				S.hand_far = S.d_mag > 0.14f;
 				ev = "pouch";
 			}
-			else if (!out && !S.hand_mag && ready && S.d_mag <= 0.10f && S.d_mag < S.d_sup)
+			else if (!out && !S.hand_mag && ready && (q_now || (S.d_mag <= 0.10f && S.d_mag < S.d_sup)))
 			{
 				if (S.simple)
 					W->UnloadMagazine(true);
@@ -3896,8 +3938,8 @@ static void vr_item_update(const vr_input_info& I, CActor* A, bool grab, bool of
 		for (int i = 0; i < 4; ++i)
 			vr_item_section_count(A, g_quick_use_slots[i], cn[i], cu[i]);
 		vr_item_section_count(A, "items_anm_dummy", dn, du);
-		Msg("* [vr11s] frame %u state %d sect '%s' d_pouch %.4f %.4f d_zone %.4f grab %d free %d dummy %d pending %d age %.3f counts %d/%d %d/%d %d/%d %d/%d",
-			I.frame, 0, "", 1000.f, 1000.f, 1000.f, grab ? 1 : 0, off_free ? 1 : 0, dn > 0 ? 1 : 0, 0, 0.f, cn[0], cu[0], cn[1], cu[1], cn[2], cu[2], cn[3], cu[3]);
+		Msg("* [vr11s] frame %u state %d sect '%s' d_pouch %.4f %.4f d_zone %.4f grab %d free %d dummy %d pending %d age %.3f counts %d/%d %d/%d %d/%d %d/%d t %.4f",
+			I.frame, 0, "", 1000.f, 1000.f, 1000.f, grab ? 1 : 0, off_free ? 1 : 0, dn > 0 ? 1 : 0, 0, 0.f, cn[0], cu[0], cn[1], cu[1], cn[2], cu[2], cn[3], cu[3], Device.fTimeGlobal);
 		return;
 	}
 	const int gun = I.gun ? 1 : 0, off = 1 - gun;
@@ -4034,9 +4076,9 @@ static void vr_item_update(const vr_input_info& I, CActor* A, bool grab, bool of
 	int cn[4], cu[4];
 	for (int i = 0; i < 4; ++i)
 		vr_item_section_count(A, g_quick_use_slots[i], cn[i], cu[i]);
-	Msg("* [vr11s] frame %u state %d sect '%s' d_pouch %.4f %.4f d_zone %.4f grab %d free %d dummy %d pending %d age %.3f counts %d/%d %d/%d %d/%d %d/%d",
+	Msg("* [vr11s] frame %u state %d sect '%s' d_pouch %.4f %.4f d_zone %.4f grab %d free %d dummy %d pending %d age %.3f counts %d/%d %d/%d %d/%d %d/%d t %.4f",
 		I.frame, S.state, S.state ? S.sect.c_str() : "", S.d_p[0], S.d_p[1], S.d_z, grab ? 1 : 0, off_free ? 1 : 0, S.dummy ? 1 : 0,
-		S.pending ? 1 : 0, S.pending ? S.age : 0.f, cn[0], cu[0], cn[1], cu[1], cn[2], cu[2], cn[3], cu[3]);
+		S.pending ? 1 : 0, S.pending ? S.age : 0.f, cn[0], cu[0], cn[1], cu[1], cn[2], cu[2], cn[3], cu[3], Device.fTimeGlobal);
 }
 // the model in the hand (drawn by player_hud::render_hud with the PDA and the wrist)
 struct vr_item_vis
