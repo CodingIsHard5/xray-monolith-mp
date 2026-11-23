@@ -108,3 +108,24 @@ is written in the run report from the S line (expected 0 in single player).
 ## Scorer addendum (pre-run, ITRZone f8e8273, blob 8ea73f79)
 p1_check.py skips export lines with t < 0 (the 15 s settle wait after load). Nothing else changed. Scored with --switch 450 --actor-id <from meta's S line>.
 Driver: tools/p1_run.sh (copy in perf-harness/), Overseer GO 2026-11-23.
+
+## R1 "on" (2026-11-23 00:15:38-00:19:54): VOID, stopped as registered. R2 not run. Nothing scored.
+Two independent reasons, each enough on its own:
+1. ACTOR DEATH at track time about 150 s (screenshot out/p1/on/screen.png: GAME OVER). The registered rule says any
+   death voids the run. Cause, from source: GAMMA's grok_actor_damage_balancer.script applies actor damage ITSELF in its
+   own actor_on_before_hit (set_health_ex(actor.health - damage), line 751; it sets ret_value=false itself, lines 648
+   and 853). So cancelling the engine hit in my handler does not stop that damage, and the handler order is not fixed.
+   My backup refill at < 0.5 fired 21+ times (min health 0.274) and could not keep up with several cats (hits about
+   0.24) and a bandit. My mechanism was wrong. The Overseer's requirement (invulnerable, hits logged) was NOT met.
+2. NOT EXCLUSIVE: an ITR2 process (IntoTheRadius2 on :88, started 23:43:43, about 2.2 cores, "GameThread") ran during
+   the whole run. Its slot-2 claim had expired at 00:13:59 (STALE2) while the process kept running. tb_run logged
+   heavy_others=[215%:GameThread] at start, but my p1_run.sh settle checked only load (1.81 < 2). That is a driver
+   gap of mine: r1_series.sh also checks heavy processes.
+Facts seen in the void run (NOT scored, exploratory only): 107 hits logged in about 150 s (cats cat_weak_d/cat_strong_a,
+one bandit), so h lines with hitter_kind m are written. Export cost mean 560 us, max 7.2 ms per tick, above my
+0.05-0.5 ms predicted range (and the machine was shared). Memory RssAnon about 3.3 GB, VmRSS about 17 GB. The switch
+distance at load was 1250 (auto_switch), as expected.
+Proposed for the ONE retry (needs Overseer OK, as an amendment before any run): (a) g_god on (the engine zeroes hit power)
+PLUS a refill to 1.0 on EVERY actor update instead of below 0.5, so that one balancer hit (capped by its own line 733) cannot
+reach 0. The hit log is unchanged. (b) The driver refuses to start a run while any other process uses 100 % or more
+of a core (as r1_series), with the 5-minute settle cap.
