@@ -12,12 +12,22 @@
 --                         seq,<seq>,<t_xray_ms>,<t_track_s> | a,x,y,z,yaw,health | o,id,section,kind,x,y,z,yaw,health,alive,best_enemy,dist | end,<seq>
 --                       instead of P1's CSV. Meta goes to Z:\dev\shm\itrz_b1\meta_<t>.csv (plus W,<seq>,<us> per tick) and
 --                       hit lines to hits_<t>.csv there. Implies -p1_export. Without -b1_snap, P1 behaves exactly as before.
+--   -t2_pose            B1-T2 (perf-harness/PREREG-B1-T2-xray-side-2026-11-23.md). Implies -b1_snap. The track is NOT
+--                       used: the actor follows Z:\dev\shm\itrz_b1\pose.txt (ITRZone's writer):
+--                         seq,<n>,<utc_ms>,<state>,<zone>,<keep|freeze> | p,x,y,z,yaw_rad,hp | k,<id>... | end,<n>
+--                       The snapshot header gains <level>,<run_id> (run_id from -t2_run <utc ms of launch>, set by the
+--                       driver on every start). Meta lines: P (pose applied), STALE/RESUME, HOLD (off-mesh), KILL, PAUSE.
+--                       -t2_pause allows device():pause on away/dead + freeze (only after the pre-flight boot check).
+--                       Without -t2_pose every path is exactly as in T1.
 --   Track time t starts WAIT_MS after the first update (the actor holds the t=0 point meanwhile, t < 0), so GAMMA's
 --   auto_switch (1250 m for 10 s after load, then 450 m; configs\alife.ltx) has settled before the track starts.
 local cl = command_line and command_line() or ""
 local active = string.find(cl, "-p1", 1, true) ~= nil
 if not active then return end
-local b1 = string.find(cl, "-b1_snap", 1, true) ~= nil
+local t2 = string.find(cl, "-t2_pose", 1, true) ~= nil
+local b1 = t2 or string.find(cl, "-b1_snap", 1, true) ~= nil
+local t2_run = string.match(cl, "%-t2_run%s+(%d+)") or "0"
+local t2_pause_ok = string.find(cl, "-t2_pause", 1, true) ~= nil
 local do_export = b1 or string.find(cl, "-p1_export", 1, true) ~= nil
 local DIR = b1 and "Z:\\dev\\shm\\itrz_b1\\" or "Z:\\dev\\shm\\p1\\"
 local seq = 0
@@ -65,7 +75,8 @@ local function yaw(o) local d = o:direction(); return math.atan2(d.x, d.z) end
 local function export_b1(now, t, tm)
 	seq = seq + 1
 	local a = db.actor; local ap = a:position(); local present = {}
-	local L = { string.format("seq,%d,%d,%.2f", seq, now, t), string.format("a,%.3f,%.3f,%.3f,%.4f,%.4f", ap.x, ap.y, ap.z, yaw(a), a.health) }
+	local hdr = t2 and string.format("seq,%d,%d,%.2f,%s,%s", seq, now, t, level.name(), t2_run) or string.format("seq,%d,%d,%.2f", seq, now, t)
+	local L = { hdr, string.format("a,%.3f,%.3f,%.3f,%.4f,%.4f", ap.x, ap.y, ap.z, yaw(a), a.health) }
 	for id, st in pairs(db.storage) do
 		local o = st.object
 		if o and id ~= 0 and (o:is_monster() or o:is_stalker()) then
@@ -109,13 +120,57 @@ local function export(now, t)
 	exp_n, exp_sum = exp_n + 1, exp_sum + us; if us > exp_max then exp_max = us end; exp_times[exp_n] = us
 end
 
+-- B1-T2 pose reader: accept only seq,n ... end,n with n newer; strip \r (Wine CRLF); torn reads counted
+local p_last, p_last_t, p_stale, p_torn, p_holds, p_paused, p_lx, p_ly, p_lz = 0, nil, false, 0, 0, false, nil, nil, nil
+local p_killed, p_torn_n = {}, nil
+local function t2_pose(a, now, t)
+	local f = io.open(DIR .. "pose.txt", "rb"); if not f then return end
+	local first = f:read("*l"); first = first and string.gsub(first, "\r", "")
+	local n = first and tonumber(string.match(first, "^seq,(%d+),"))
+	if not n or n <= p_last then f:close()
+		if p_last_t and not p_stale and now - p_last_t >= 1000 then p_stale = true; m(string.format("STALE,%.2f,%d,%d", t, now, p_last)) end
+		return end
+	local rest = f:read("*a") or ""; f:close()
+	local _, utc, state, zone, aw = string.match(first, "^seq,(%d+),(%d+),([^,]+),([^,]+),([^,]+)$")
+	local px, py, pz, pyaw; local kills = {}; local endn
+	for line in string.gmatch(rest, "[^\r\n]+") do
+		local x, y, z, yw = string.match(line, "^p,([^,]+),([^,]+),([^,]+),([^,]+),")
+		if x then px, py, pz, pyaw = tonumber(x), tonumber(y), tonumber(z), tonumber(yw) end
+		local k = string.match(line, "^k,(%d+)$"); if k then kills[#kills + 1] = tonumber(k) end
+		local e = string.match(line, "^end,(%d+)$"); if e then endn = tonumber(e) end
+	end
+	if endn ~= n or not utc or not px then   -- torn: count and log once per seq; a file left torn still goes stale
+		if n ~= p_torn_n then p_torn_n = n; p_torn = p_torn + 1; m(string.format("TORN,%d,%d", now, n)) end
+		if p_last_t and not p_stale and now - p_last_t >= 1000 then p_stale = true; m(string.format("STALE,%.2f,%d,%d", t, now, p_last)) end
+		return end
+	p_last = n; p_last_t = now
+	if p_stale then p_stale = false; m(string.format("RESUME,%.2f,%d,%d", t, now, n)) end
+	if zone ~= level.name() then m(string.format("ZONE_MISMATCH,%d,%d,%s", now, n, zone)); return end
+	for _, id in ipairs(kills) do
+		if not p_killed[id] then local o = level.object_by_id(id)
+			if o and o:alive() then o:kill(a); p_killed[id] = true; m(string.format("KILL,%d,%d,%d", now, n, id)) end end
+	end
+	local hold_state = state ~= "play"
+	if hold_state and aw == "freeze" and not p_paused then
+		if t2_pause_ok then device():pause(true); p_paused = true; m(string.format("PAUSE,%d,%d,%s", now, n, state))
+		else m(string.format("FREEZE_UNSUPPORTED,%d,%d,%s", now, n, state)) end
+	elseif not hold_state and p_paused then device():pause(false); p_paused = false; m(string.format("UNPAUSE,%d,%d", now, n)) end
+	if hold_state then return end
+	local v = vector():set(px, py, pz); local vid = level.vertex_id(v)
+	if vid ~= 4294967295 and math.abs(level.vertex_position(vid).y - py) <= 2.0 then p_lx, p_ly, p_lz = px, py, pz
+	else p_holds = p_holds + 1; m(string.format("HOLD,%d,%d", now, n)) end
+	if p_lx then a:set_actor_position(vector():set(p_lx, p_ly, p_lz)) end
+	a:set_actor_direction(pyaw)   -- sign checked at the pre-flight boot
+	m(string.format("P,%d,%s,%d,%.3f", n, utc, now, a:position():distance_to(v)))
+end
+
 local done_logged = false
 local on_quit
 local function on_update()
 	local a = db.actor; if not a then return end
 	local now = time_global()
 	if not t0 then
-		if not load_track() then active = false; return end
+		if not t2 and not load_track() then active = false; return end
 		t0 = now + WAIT_MS
 		get_console():execute("g_god on")   -- retry amendment: engine-level god mode (registered with -dbg)
 		m(string.format("S,%d,actor_id=%d,switch_distance_at_load=%.1f,export=%s,wait_ms=%d,g_god=%s", now, a:id(), alife():switch_distance(), tostring(do_export), WAIT_MS, tostring(get_console():get_bool("g_god"))))
@@ -126,6 +181,11 @@ local function on_update()
 	if a.health < 0.5 then refills = refills + 1; m(string.format("REFILL,%.2f,%d,%.3f", (now - t0) / 1000, now, a.health)) end
 	if a.health < 1.0 then a:set_health_ex(1.0) end
 	local t = (now - t0) / 1000
+	if t2 then   -- B1-T2: no track; the pose drives the actor once the warm-up is over (t >= 0)
+		if t >= 0 then t2_pose(a, now, t) end
+		if do_export and now - last_exp >= 100 then last_exp = now; export(now, t) end
+		return
+	end
 	if t > trk_t[#trk_t] then if not done_logged then done_logged = true; m(string.format("TRACK_END,%.2f,%d", t, now)); on_quit() end; return end
 	if now - last_move >= 50 then
 		last_move = now
@@ -150,6 +210,7 @@ on_quit = function()
 	local p99 = exp_n > 0 and exp_times[math.max(1, math.ceil(exp_n * 0.99))] or 0
 	m(string.format("SUMMARY,hits=%d,cancelled=%d,refills=%d,min_health=%.3f,export_ticks=%d,export_mean_us=%.1f,export_p99_us=%.1f,export_max_us=%.1f",
 		hits, cancels, refills, min_health, exp_n, exp_n > 0 and exp_sum / exp_n or 0, p99, exp_max))
+	if t2 then m(string.format("T2SUM,last_seq=%d,torn=%d,holds=%d,paused=%s", p_last, p_torn, p_holds, tostring(p_paused))) end
 	out:close(); meta:close(); out, meta = nil, nil
 end
 

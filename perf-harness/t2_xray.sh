@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# B1-T2, X-Ray side, with the crash-restart path (perf-harness/PREREG-B1-T2-xray-side-2026-11-23.md, sections 2-4).
+# Runs UNDER the joint EXCLUSIVE claim held by the joint driver: it never claims, wants or releases.
+# Usage: tools/t2_xray.sh <out_dir> [itr2_proc_pattern]
+# - installs the P1 script (run with -p1 -t2_pose: the actor follows pose.txt, no track) into the project's own run/;
+# - BOOTS X-Ray (tb_run.sh) one or more times. Every boot gets a new run_id (UTC ms at launch, -t2_run) that the
+#   snapshot header carries, and its own watcher (t1_watch.py, unchanged from T1) in <out>/boot<k>/watch;
+# - boot 0 only: STALL (SIGSTOP of the engine for T2_STALL_S at snapshot track time T2_STALL_AT) and the PLANNED KILL
+#   (SIGKILL of the engine process only, at track time T2_KILL_AT, after the stall) = check T2i;
+# - RESTART: after the planned kill, an engine exit before the run end, no first snapshot within 120 s of a launch, or
+#   30 s without a new seq (outside the stall), X-Ray is booted again from the SAME save, at most T2_MAXRESTART times.
+#   Every restart is logged in <out>/restarts.csv (utc_ms,boot,reason,planned). Only the planned one is planned=1.
+# - the run ends when a boot reaches its last engine time (tb_run rc 0); a later boot runs the REMAINING time.
+# Exit codes: 0 run ended, no unplanned restart; 6 run ended with unplanned restart(s); 5 restarts used up; 2 refused.
+# Env: T2_EXE (RefDet14.exe), T2_RUN_S (1100 engine s), T2_STALL_AT (600; 99999 off), T2_STALL_S (20),
+#      T2_KILL_AT (700; 99999 off), T2_MAXRESTART (3), T2_PAUSE (0; 1 adds -t2_pause), T2_SAVE (cordon1).
+set -u
+cd "$(dirname "$0")/.."; P=$PWD; RUN=$P/run; O=${1:?out_dir}; ITR=${2:-itr2-shadow}
+EXE=${T2_EXE:-RefDet14.exe}; SHM=${T2_SHM:-/dev/shm/itrz_b1}; SAVE=${T2_SAVE:-cordon1}
+RUN_S=${T2_RUN_S:-1100}; AT=${T2_STALL_AT:-600}; DUR=${T2_STALL_S:-20}; KAT=${T2_KILL_AT:-700}; MAXR=${T2_MAXRESTART:-3}
+PFLAG=""; [ "${T2_PAUSE:-0}" = 1 ] && PFLAG="-t2_pause"
+mkdir -p "$O"; log() { echo "$(date -u '+%F %T.%3N')Z $*" | tee -a "$O/t2_xray.log"; }
+utc() { echo $(( $(date +%s%N) / 1000000 )); }
+"$HOME/.claude/overseer/tools/quiet-required.sh" check 2>/dev/null | grep -q '^HELD:.* EXCLUSIVE\|^HELD:.*B1-T2' || { log "REFUSED: no joint EXCLUSIVE claim held"; exit 2; }
+"$P/tools/run_noguard.sh" "$RUN" >/dev/null || { log "REFUSED: noguard"; exit 2; }
+rm -f "$SHM"/snap.txt "$SHM"/meta_t2.csv "$SHM"/hits_t2.csv; mkdir -p "$SHM"      # pose.txt is ITR2's: never touched here
+cp "$P/harness/zz_p1_puppet.script" "$RUN/gamedata/scripts/zz_p1_puppet.script"
+cleanup() { rm -f "$RUN/gamedata/scripts/zz_p1_puppet.script"; }
+trap cleanup EXIT
+# the engine = the biggest process whose command line names the exe, SKIPPING the watcher (its argv names the exe too;
+# offline test: with a small fake engine the watcher was picked and killed instead)
+engine() { local best="" br=0 r; for p in $(pgrep -f "bin\\\\$EXE"); do grep -qa t1_watch /proc/$p/cmdline 2>/dev/null && continue; r=$(awk '/VmRSS/{print $2}' /proc/$p/status 2>/dev/null); [ "${r:-0}" -gt "$br" ] && { br=$r; best=$p; }; done; echo "$best"; }
+hdr() { head -1 "$SHM/snap.txt" 2>/dev/null | tr -d '\r'; }   # seq,<n>,<t_ms>,<t_track>,<level>,<run_id>
+echo "utc_ms,boot,reason,planned" > "$O/restarts.csv"
+T_START=$(date +%s); k=0; unplanned=0; final=""; done_stall=""; done_kill=""
+while :; do
+  B="$O/boot$k"; mkdir -p "$B"; RID=$(utc)
+  if [ $k = 0 ]; then TIMES=$RUN_S; else TIMES=$(( RUN_S - ($(date +%s) - T_START) + 25 )); [ $TIMES -lt 60 ] && TIMES=60; fi
+  python3 "$P/tools/t1_watch.py" "$SHM/snap.txt" "$B/watch" "bin\\$EXE" "$ITR" > "$B/watch.log" 2>&1 & WP=$!
+  log "boot $k: run_id $RID engine_s $TIMES load $(cut -d' ' -f1-3 /proc/loadavg)"
+  TB_NOCLAIM=1 TB_EXE=$EXE TB_TIMES=$TIMES TB_TIMEOUT=$(( TIMES + 400 )) tools/tb_run.sh t2b$k "$SAVE" -p1 -t2_pose -t2_run $RID $PFLAG -p1_tag t2 > "$B/tb_run.log" 2>&1 &
+  TBP=$!; L0=$(date +%s); first=""; last=""; same=0; why=""
+  while kill -0 $TBP 2>/dev/null; do
+    sleep 1; h=$(hdr); IFS=, read -r _ s _ tt _ rid <<<"$h"
+    [ "${rid:-}" = "$RID" ] || { s=""; tt=""; }                         # a snapshot from an earlier boot does not count
+    if [ -z "$first" ]; then
+      [ -n "$s" ] && { first=1; log "boot $k: first snapshot seq $s after $(( $(date +%s) - L0 )) s"; }
+      [ -z "$first" ] && [ $(( $(date +%s) - L0 )) -ge 120 ] && { why="no snapshot 120 s after launch"; break; }
+      continue; fi
+    if [ $k = 0 ] && [ -z "$done_stall" ] && [ -n "$tt" ] && awk -v t="$tt" -v a="$AT" 'BEGIN{exit !(t>=a)}'; then
+      EP=$(engine); log "STALL start: seq $s track ${tt}s engine $EP"
+      echo "utc_ms,event,seq,track_s" > "$O/stall.csv"; echo "$(utc),STOP,$s,$tt" >> "$O/stall.csv"
+      kill -STOP "$EP"; sleep "$DUR"; kill -CONT "$EP"
+      echo "$(utc),CONT,$s,$tt" >> "$O/stall.csv"; log "STALL end: SIGCONT sent"; done_stall=1; same=0; last=$s; continue
+    fi
+    if [ $k = 0 ] && [ -z "$done_kill" ] && [ -n "$tt" ] && awk -v t="$tt" -v a="$KAT" 'BEGIN{exit !(t>=a)}'; then
+      EP=$(engine); KU=$(utc); kill -KILL "$EP"; done_kill=1
+      echo "$KU,$k,planned kill (T2i) seq $s track ${tt}s pid $EP,1" >> "$O/restarts.csv"; log "PLANNED KILL: seq $s track ${tt}s pid $EP"
+      why="planned"; break
+    fi
+    if [ -n "$s" ] && [ "$s" = "$last" ]; then same=$((same+1)); else same=0; fi; last=$s
+    [ $same -ge 30 ] && { why="no new seq for 30 s"; break; }
+  done
+  [ -n "$why" ] && [ "$why" != planned ] && { EP=$(engine); [ -n "$EP" ] && kill -KILL "$EP"; }
+  wait $TBP; trc=$?
+  kill $WP 2>/dev/null; wait $WP 2>/dev/null
+  cp "$SHM"/meta_t2.csv "$B/" 2>/dev/null; cp "$SHM"/hits_t2.csv "$B/" 2>/dev/null; cp -r "$P/out/tb_t2b$k" "$B/tb" 2>/dev/null
+  [ -z "$why" ] && [ $trc != 0 ] && why0="engine exited (tb_run rc $trc)" || why0="${why:-engine run ended}"
+  log "boot $k end: tb_run rc=$trc reason=$why0"
+  if [ -z "$why" ] && [ $trc = 0 ]; then final="ran to the end"; break; fi
+  if [ "$why" != planned ]; then unplanned=$((unplanned+1)); echo "$(utc),$k,${why:-engine exited (tb_run rc $trc)},0" >> "$O/restarts.csv"; fi
+  [ $k -ge $MAXR ] && { final="restarts used up"; break; }
+  "$HOME/.claude/overseer/tools/protected-title-check.sh" >/dev/null 2>&1 && { final="protected title running"; break; }
+  k=$((k+1)); log "RESTART -> boot $k"
+done
+rc=0; [ $unplanned -gt 0 ] && rc=6; [ "$final" != "ran to the end" ] && rc=5
+log "end: $final; boots $((k+1)); unplanned restarts $unplanned; stall ${done_stall:-no}; planned kill ${done_kill:-no}; rc=$rc"
+exit $rc

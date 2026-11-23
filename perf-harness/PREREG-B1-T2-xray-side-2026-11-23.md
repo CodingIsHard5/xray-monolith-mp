@@ -80,3 +80,17 @@ PREDICTIONS (mine, X-Ray side; scored once after the joint run):
 - ITR2 holds puppets through the gap and through X-Ray's warm-up (t_track < 0), then resyncs.
 - The snapshot keeps the `a,x,y,z,yaw,health` actor line, so tracking error (actor vs pose) is scored from it.
 - Host: this file holds my side; the joint PREREG will be my file with ITRZone's section verbatim, as in T1.
+
+## 8. Built and tested offline (2026-11-23; no engine boot)
+- harness/zz_p1_puppet.script gains -t2_pose (sha 8a4b359fa3ff7afa...): pose reader, run_id header, kill list, pause behind -t2_pause.
+  Stub test (t2-offline/pose_reader_stub.lua, plain lua5.1 with the engine API stubbed): LF and CRLF accepted; a torn
+  file counted ONCE and then goes STALE (first version logged it every frame and never went stale: fixed); RESUME;
+  off-mesh HOLD; k-kill once; PAUSE/UNPAUSE. T1 mode (-p1 -b1_snap) gives byte-identical snap/meta output to the old
+  script in the same stub.
+- tools/t2_xray.sh (sha 339f8122f89fb901...): supervisor with planned stall, planned kill, restart. Fake-engine test
+  (t2-offline/fake_engine.py + fake_tb_run.sh, track time x20): stall, planned kill -> boot 1 (planned=1), a crash in
+  boot 1 -> boot 2 (planned=0, rc 6), a hang -> heartbeat 30 s -> restart (planned=0). Bug found and fixed: the engine
+  lookup picked the WATCHER (its argv names the exe too) when the engine was small; it now skips t1_watch. In real runs
+  the engine's RSS is far bigger, so T1's runs were not affected, but t1_xray.sh has the same lookup (noted, not changed:
+  T1's script is frozen).
+- Still needs the short claimed pre-flight boot (section 5): yaw sign, pause keeps Lua running, a real kill + restart.
