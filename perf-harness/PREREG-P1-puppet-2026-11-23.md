@@ -167,3 +167,22 @@ Data: out/p1_retry/{on,off}/ (export_on.csv has 425,786 lines and 9,569 export t
 - RssAnon, predicted 3-6 GB: 3.26-3.56 GB in "on" and 3.34-3.56 GB in "off": PASS. VmRSS about 17 GB (mapped archives).
 - Switch distance at load was 1250 (auto_switch), and 450 from t = 0 as designed. It was not re-read during the run.
 - P1-switch, P1-track, P1-mesh, P1-chase: ITRZone's scorer (section 6), reported separately.
+
+## RETRY RESULT, ITRZone scorer (scored once by ITRZone, p1_check.py blob 8ea73f79, --switch 450 --actor-id 0)
+- P1-track PASS: 7,526 actor samples, error median 0.29 m, p95 0.60 m.
+- P1-mesh PASS: 411,071 creature samples, distance to the nearest level.ai node median 0.28 m, p95 0.46 m.
+- P1-switch PASS: 36 of 76 creatures appeared after t 5; first-seen distance median 372 m (band 337.5-562.5).
+  ITRZone notes it is low in the band (creatures coming online inside the radius as the actor moves), not a spawn edge.
+- P1-chase PASS: 11 chases (e.g. cat_weak_d 23200 at t 39, 59 -> 7 m; boar_01a_hard 23185 at t 978, 74 -> 53 m).
+- P1-hits: NOT MEASURABLE (the scorer prints FAIL with 0 hits; both sides agree that, under the amendment, it is neither).
+
+## Predictions, each scored
+ITRZone: P1-track 90 % -> PASS. P1-mesh 85 % -> PASS (p95 < 1.5 m alone, 75 % -> PASS). P1-switch 60 % -> PASS.
+P1-chase 60 % -> PASS. P1-hits 50 % -> not measurable. "No test" for chase and hits, 25 % -> did not happen (monsters came
+within 50 m).
+EnginePerf: export 0.05-0.5 ms -> inside (0.45; central 0.2 wrong). "< 0.1 % of main thread" -> WRONG (0.45 %).
+No hang -> right. No death -> right (on the retry; the first run died). Hits near 5_2 / 5_4 -> not measurable.
+P1-switch PASS at 55 % -> PASS. RssAnon 3-6 GB -> right (3.3-3.6).
+What it means (ITRZone's section 6 rule): P1-mesh PASS means X-Ray positions can drive ITR2 puppets on ITR2's ground
+with no correction step. A script-moved actor IS a usable target (chase PASS). Whether it can also be HIT visibly is
+still open (the hit test was not measurable).
