@@ -13,7 +13,8 @@
 # - the run ends when a boot reaches its last engine time (tb_run rc 0); a later boot runs the REMAINING time.
 # Exit codes: 0 run ended, no unplanned restart; 6 run ended with unplanned restart(s); 5 restarts used up; 2 refused.
 # Env: T2_EXE (RefDet14.exe), T2_RUN_S (1100 engine s), T2_STALL_AT (600; 99999 off), T2_STALL_S (20),
-#      T2_KILL_AT (700; 99999 off), T2_MAXRESTART (3), T2_PAUSE (0; 1 adds -t2_pause), T2_SAVE (cordon1).
+#      T2_KILL_AT (700; 99999 off), T2_MAXRESTART (3), T2_PAUSE (0; 1 adds -t2_pause: NOT usable, see pre-flight 1),
+#      T2_FREEZE (sigstop = the bridge freezes X-Ray while the pose is dead/away + freeze), T2_SAVE (cordon1).
 set -u
 cd "$(dirname "$0")/.."; P=$PWD; RUN=$P/run; O=${1:?out_dir}; ITR=${2:-itr2-shadow}
 EXE=${T2_EXE:-RefDet14.exe}; SHM=${T2_SHM:-/dev/shm/itrz_b1}; SAVE=${T2_SAVE:-cordon1}
@@ -65,11 +66,18 @@ while :; do
     # ITRZone review: under freeze X-Ray may legitimately stop exporting while ITR2 is dead/away (Hub ~20 s + reload),
     # so the 30 s rule is skipped while pose.txt says dead/away + freeze; it applies again once the pose says play.
     IFS=, read -r _ _ _ pst _ paw <<<"$(head -1 "$SHM/pose.txt" 2>/dev/null | tr -d '\r')"
+    # T2_FREEZE=sigstop (pre-flight 1: device():pause stops Lua for good, so X-Ray cannot unpause itself): the BRIDGE
+    # freezes X-Ray by SIGSTOP of the engine while the pose says dead/away + freeze, and SIGCONT when it says play
+    # (T1: X-Ray survived two 20 s SIGSTOPs). Logged in freeze.csv (utc_ms,event,pose_state).
     if [ "${paw:-}" = freeze ] && { [ "${pst:-}" = dead ] || [ "${pst:-}" = away ]; }; then
-      [ -z "${fz:-}" ] && { fz=1; log "freeze hold: pose state $pst, heartbeat skipped"; }; same=0
-    elif [ -n "${fz:-}" ]; then fz=""; log "freeze hold end: pose state ${pst:-?}"; fi
+      if [ -z "${fz:-}" ]; then fz=1; log "freeze hold: pose state $pst, heartbeat skipped"
+        if [ "${T2_FREEZE:-}" = sigstop ]; then FZP=$(engine); [ -n "$FZP" ] && kill -STOP "$FZP" && echo "$(utc),STOP,$pst,$FZP" >> "$O/freeze.csv"; fi; fi
+      same=0
+    elif [ -n "${fz:-}" ]; then fz=""; log "freeze hold end: pose state ${pst:-?}"
+      [ -n "${FZP:-}" ] && { kill -CONT "$FZP"; echo "$(utc),CONT,${pst:-?},$FZP" >> "$O/freeze.csv"; FZP=""; }; same=0; fi
     [ $same -ge 30 ] && { why="no new seq for 30 s"; break; }
   done
+  [ -n "${FZP:-}" ] && { kill -CONT "$FZP" 2>/dev/null; FZP=""; fz=""; }
   [ -n "$why" ] && [ "$why" != planned ] && { EP=$(engine); [ -n "$EP" ] && kill -KILL "$EP"; }
   wait $TBP; trc=$?
   kill $WP 2>/dev/null; wait $WP 2>/dev/null

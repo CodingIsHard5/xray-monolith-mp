@@ -14,7 +14,7 @@ until ! "$T/protected-title-check.sh" >/dev/null 2>&1 && ! pgrep -x sober >/dev/
 log "slice granted, load $(cut -d' ' -f1-3 /proc/loadavg)"
 SHM=/dev/shm/itrz_b1; mkdir -p $SHM; rm -f $SHM/pose.txt $SHM/snap.txt
 python3 tools/t2_preflight_pose.py $SHM $O/pose_written.csv ${PF_POSE_ARG:-} > $O/pose_writer.log 2>&1 & PW=$!
-T2_EXE=RefDet14.exe T2_RUN_S=${PF_RUN_S:-240} T2_STALL_AT=99999 T2_KILL_AT=${PF_KILL_AT:-120} T2_PAUSE=${PF_PAUSE:-1} tools/t2_xray.sh $O/run none-itr2 > $O/t2_xray.out 2>&1; rc=$?
+T2_EXE=RefDet14.exe T2_RUN_S=${PF_RUN_S:-240} T2_STALL_AT=99999 T2_KILL_AT=${PF_KILL_AT:-120} T2_PAUSE=${PF_PAUSE:-1} T2_FREEZE=${PF_FREEZE:-} tools/t2_xray.sh $O/run none-itr2 > $O/t2_xray.out 2>&1; rc=$?
 kill $PW 2>/dev/null; wait $PW 2>/dev/null; rm -f $SHM/pose.txt
 log "t2_xray rc=$rc"
 "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1; "$T/quiet-required.sh" release $W >/dev/null 2>&1   # withdraw FIRST

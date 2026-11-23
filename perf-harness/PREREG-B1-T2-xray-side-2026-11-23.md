@@ -136,8 +136,15 @@ Fixes (before any further boot): engine() now picks by /proc/<pid>/exe being Win
 and logs every candidate (pid, exe, RSS) at each boot's first snapshot. t2_xray.sh sha 278b8292293c609c.
 
 ## 11. Pre-flight 2 plan (registered; waits for the Overseer's OK)
-- Same script, PF_OUT=out/t2pre2 PF_POSE_ARG=nofreeze PF_PAUSE=0 PF_KILL_AT=60 PF_RUN_S=200: yaw phases A-C (30 s),
-  then play; planned SIGKILL at track 60; restart; boot 1 runs to the end. About 6 min of engine time.
-- Readings: the candidate list and which pid was killed (must be the engine: comm and RSS in GB); boot 1's first
-  snapshot within 90 s of the kill; yaw sign from the P lines in phases A-C.
-PREDICTIONS: engine() picks the engine 85 %; restart within 90 s 90 %; yaw negated 55 % / same 35 % / neither 10 %.
+- Freeze mechanism, proposed (needs the Overseer's OK; it implements Caden's away_sim=freeze setting): the BRIDGE freezes
+  X-Ray by SIGSTOP of the engine while the pose says dead/away + freeze, and SIGCONT on play (T2_FREEZE=sigstop;
+  freeze.csv). T1 showed X-Ray survives a 20 s SIGSTOP (twice). A-Life is fully frozen, with no engine change. For a
+  Windows player build the same is a process suspend from the bridge. -t2_pause stays off.
+- Run: PF_OUT=out/t2pre2 PF_PAUSE=0 PF_FREEZE=sigstop PF_KILL_AT=120 PF_RUN_S=240, the stand-in writer with phases A-C
+  (yaw), D (dead+freeze 40 s), E (play). Planned SIGKILL at track 120, restart, boot 1 to the end. ~8 min engine time.
+- Readings: (1) the candidate list and the killed pid (must be the engine: Wine exe, RSS in GB); (2) boot 1's first
+  snapshot within 90 s of the kill; (3) yaw sign from the P lines in phases A-C; (4) freeze: STOP and CONT in
+  freeze.csv, no snapshot between them, snapshots and P lines resume within 2 s of CONT, no unplanned restart.
+PREDICTIONS: engine() picks the engine 85 %; restart within 90 s 90 %; yaw negated 55 % / same 35 % / neither 10 %;
+freeze stops and resumes cleanly 80 %.
+t2_xray.sh sha 4c0bf34e2a0eb0a4.
