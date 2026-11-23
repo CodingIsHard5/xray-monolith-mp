@@ -117,3 +117,11 @@ What went wrong, stated plainly:
 - Tier (b) instrument work stops here. Limits on the record: detection limit about 4 % for less work (U);
   C detects about 10 lost registrations (I5/I6 route); stationary player only; C's value on I1-I4 is supported only,
   not shown.
+
+## 9. Open questions (EXPLORATORY, found after the fact; no runs planned)
+
+1. Offline fights occurred in 8 of 30 dosed runs and 2 of 34 stock runs (one-sided Fisher p = 0.025). If the dose
+   causes the fights, P's failure at dose 10 is a real effect of the control, not noise. Then "P passes everywhere" was
+   a wrong prediction about the hook, not a fault in P.
+2. U failed at dose 1 again with the order shuffled, so run position is ruled out. U reacts to tiny perturbations,
+   for reasons not yet known.
