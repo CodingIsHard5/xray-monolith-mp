@@ -4,6 +4,7 @@
 # Output: out/<tag>/ (engine log, wine stderr, perf_sites_<tag>.csv, perf_frames_<tag>.csv)
 # Refuses to start, and kills itself, when a protected title (Caden's game) is running: exit code only.
 set -u
+. "$(cd "$(dirname "$0")" && pwd)/lib_engine_pids.sh"   # engine lookup by Wine binary, never a bare name match
 P="$(cd "$(dirname "$0")/.." && pwd)"; RUN="$P/run"
 EXE="${1:?exe}"; TAG="${2:?tag}"; TAG="${TAG,,}"; WARM="${3:-600}"; FRAMES="${4:-3000}"; shift 4 2>/dev/null || shift $#
 SAVE="${BENCH_SAVE:-bench1}"; DISP="${BENCH_DISPLAY:-:77}"; LIMIT="${BENCH_TIMEOUT:-900}"
@@ -54,10 +55,10 @@ PEAK=0
 START=$(date +%s); RC=1
 while :; do
   sleep 5
-  for EP in $(pgrep -f "bin\\\\$EXE"); do [ -z "${AFF:-}" ] && AFF=$(awk '/Cpus_allowed_list/{print $2}' /proc/$EP/status 2>/dev/null) && [ -n "$AFF" ] && echo "engine pid $EP cpus_allowed=$AFF cgroup=$(tail -1 /proc/$EP/cgroup | cut -c1-120)" >> "$OUT/conditions.txt"; R=$(awk '/VmRSS/{print $2}' /proc/$EP/status 2>/dev/null); [ "${R:-0}" -gt "$PEAK" ] && PEAK=$R; done
+  for EP in $(engine_pids "$EXE"); do [ -z "${AFF:-}" ] && AFF=$(awk '/Cpus_allowed_list/{print $2}' /proc/$EP/status 2>/dev/null) && [ -n "$AFF" ] && echo "engine pid $EP cpus_allowed=$AFF cgroup=$(tail -1 /proc/$EP/cgroup | cut -c1-120)" >> "$OUT/conditions.txt"; R=$(awk '/VmRSS/{print $2}' /proc/$EP/status 2>/dev/null); [ "${R:-0}" -gt "$PEAK" ] && PEAK=$R; done
   if "$T/protected-title-check.sh" >/dev/null 2>&1; then echo "ABORT: protected title started"; RC=3; break; fi
   if [ -s "$RUN/appdata/logs/perf_sites_$TAG.csv" ] && grep -qa "xrprof\] capture '$TAG' finished" "$LOG" 2>/dev/null; then RC=0; sleep 8; break; fi
-  if ! pgrep -f "bin\\\\$EXE" >/dev/null 2>&1 && [ $(( $(date +%s) - START )) -gt 30 ]; then echo "engine exited without a capture"; RC=4; break; fi
+  if [ -z "$(engine_main "$EXE")" ] && [ $(( $(date +%s) - START )) -gt 30 ]; then echo "engine exited without a capture"; RC=4; break; fi
   [ $(( $(date +%s) - START )) -gt "$LIMIT" ] && { echo "TIMEOUT after ${LIMIT}s"; RC=5; break; }
   # nudge past any "press any key" screen (harmless once in game)
   if ! grep -qa "xrprof\] capture '$TAG' started" "$LOG" 2>/dev/null; then

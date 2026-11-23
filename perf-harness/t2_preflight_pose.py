@@ -30,7 +30,9 @@ log = open(out, 'w'); log.write('utc_ms,seq,phase,yaw\n')
 t0 = time.time(); n = 0
 while True:
     t = time.time() - t0
-    if ARG == 'pf3':   # pre-flight 3: A play (3 s hitch at track 20) | D1 freeze 60 s (unarmed control) | E1 play | D2 freeze 60 s (armed) | E
+    if ARG == 'pf4':   # pre-flight 4: A play | D dead+freeze 20-50 s (armed) | E play (planned kill follows)
+        ph, st, aw, yw = ('A', 'play', 'freeze', 0.0) if t < 20 else ('D', 'dead', 'freeze', 0.0) if t < 50 else ('E', 'play', 'freeze', 0.0)
+    elif ARG == 'pf3':   # pre-flight 3: A play (3 s hitch at track 20) | D1 freeze 60 s (unarmed control) | E1 play | D2 freeze 60 s (armed) | E
         ph, st, aw, yw = ('A', 'play', 'freeze', 0.0) if t < 40 else ('D1', 'dead', 'freeze', 0.0) if t < 100 else \
             ('E1', 'play', 'freeze', 0.0) if t < 130 else ('D2', 'dead', 'freeze', 0.0) if t < 190 else ('E', 'play', 'freeze', 0.0)
     else:

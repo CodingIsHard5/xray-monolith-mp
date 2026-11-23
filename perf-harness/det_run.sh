@@ -3,6 +3,7 @@
 # Functional run (not a timing measurement). Usage: tools/det_run.sh <exe> <tag> [interval_s] [checkpoints]
 # Output: out/det_<tag>/alife_dump_<tag>_<k>.txt
 set -u
+. "$(cd "$(dirname "$0")" && pwd)/lib_engine_pids.sh"   # engine lookup by Wine binary, never a bare name match
 P="$(cd "$(dirname "$0")/.." && pwd)"; RUN="$P/run"
 EXE="${1:?exe}"; TAG="${2:?tag}"; TAG="${TAG,,}"; INT="${3:-60}"; N="${4:-3}"
 SAVE="${BENCH_SAVE:-bench1}"; DISP="${BENCH_DISPLAY:-:77}"; LIMIT="${BENCH_TIMEOUT:-1500}"
@@ -37,7 +38,7 @@ while :; do
   if [ -s "$RUN/appdata/logs/alife_dump_${TAG}_$N.txt" ] && grep -qa "^#actor" "$RUN/appdata/logs/alife_dump_${TAG}_$N.txt"; then RC=0; sleep 8
     case "${DET_EXTRA:-}" in *-det_save*) for _ in $(seq 1 30); do [ -s "$RUN/appdata/savedgames/det_${TAG}_$N.scop" ] && break; sleep 3; done; sleep 5;; esac
     break; fi
-  if ! pgrep -f "bin\\\\$EXE" >/dev/null 2>&1 && [ $(( $(date +%s) - START )) -gt 30 ]; then echo "engine exited early"; RC=4; break; fi
+  if [ -z "$(engine_main "$EXE")" ] && [ $(( $(date +%s) - START )) -gt 30 ]; then echo "engine exited early"; RC=4; break; fi
   [ $(( $(date +%s) - START )) -gt "$LIMIT" ] && { echo "TIMEOUT after ${LIMIT}s"; RC=5; break; }
 done
 cp "$LOG" "$OUT/xray.log" 2>/dev/null; mv "$RUN"/appdata/logs/alife_dump_"$TAG"_*.txt "$OUT/" 2>/dev/null; mv "$RUN"/appdata/logs/det_trace_"$TAG".txt "$RUN"/appdata/logs/det_trace_"$TAG".lua.txt "$RUN"/appdata/logs/det_trace_"$TAG".txt.sched "$OUT/" 2>/dev/null

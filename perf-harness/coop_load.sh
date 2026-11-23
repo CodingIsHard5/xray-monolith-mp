@@ -3,6 +3,7 @@
 # ~/Projects/StalkerGameEngine/coopload. Own Wine prefix (a COPY of theirs), own port, server memory cap 6G, cores 0-1 kept free.
 # usage: coop_load.sh setup | server [extra engine flags] | client <n> | svpid | clpid <n> | stop
 set -u
+. "$(cd "$(dirname "$0")" && pwd)/lib_engine_pids.sh"   # engine lookup by Wine binary, never a bare name match
 P="$HOME/Projects/StalkerGameEngine"; S="$P/coopload"; SRC="$HOME/Projects/StalkerMPMod"; PORT=5461
 GD=/media/caden/games/gamma_flat/gamedata; DB="$HOME/Games/STALKER/ANOMALY/db"
 export WINEPREFIX="$S/prefix"
@@ -45,8 +46,8 @@ client)
     > "$S/c$n/appdata/logs/stderr.log" 2>&1 &
   ;;
 # several processes carry the command line (launcher stubs); the engine is the one with the most resident memory
-svpid) big $(pgrep -f '[O]urDedicatedDX8.exe.*-mp_host.*'"$PORT") ;;
-clpid) big $(pgrep -f '[O]urDedicatedDX8.exe.*name=ep'"$2"'\b') ;;
-stop) wineserver -k >/dev/null 2>&1; sleep 2; pgrep -f "[O]urDedicatedDX8.exe.*$PORT" >/dev/null && echo "STILL ALIVE" || echo stopped ;;
+svpid) big $(engine_pids x '[O]urDedicatedDX8.exe.*-mp_host.*'"$PORT") ;;
+clpid) big $(engine_pids x '[O]urDedicatedDX8.exe.*name=ep'"$2"'\b') ;;
+stop) wineserver -k >/dev/null 2>&1; sleep 2; [ -n "$(engine_pids x "[O]urDedicatedDX8.exe.*$PORT")" ] && echo "STILL ALIVE" || echo stopped ;;
 *) echo "usage: setup|server|client n|svpid|clpid n|stop"; exit 2 ;;
 esac

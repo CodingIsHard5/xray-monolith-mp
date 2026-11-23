@@ -8,6 +8,7 @@
 # The claim is EXCLUSIVE (prereg section 8) and held for the whole engine lifetime, released on exit (trap).
 # A run whose 1-minute load at start is >= 2 is marked DISTURBED in conditions.txt (prereg section 8); it still runs.
 set -u
+. "$(cd "$(dirname "$0")" && pwd)/lib_engine_pids.sh"   # engine lookup by Wine binary, never a bare name match
 P="$(cd "$(dirname "$0")/.." && pwd)"; RUN="$P/run"
 TAG="${1:?tag}"; TAG="${TAG,,}"; SAVE="${2:?save}"; shift 2
 EXE="${TB_EXE:?set TB_EXE to the exe in run/bin}"; TIMES="${TB_TIMES:-300,600,900}"
@@ -53,11 +54,11 @@ START=$(date +%s); RC=1; PEAK=0; AFF=""
 DONE="$RUN/appdata/logs/alife_dump_${TAG}_$NLAST.txt"
 while :; do
   sleep 5
-  for EP in $(pgrep -f "bin\\\\$EXE"); do [ -z "$AFF" ] && AFF=$(awk '/Cpus_allowed_list/{print $2}' /proc/$EP/status 2>/dev/null) && [ -n "$AFF" ] && echo "engine pid $EP cpus_allowed=$AFF" >> "$OUT/conditions.txt"; R=$(awk '/VmRSS/{print $2}' /proc/$EP/status 2>/dev/null); [ "${R:-0}" -gt "$PEAK" ] && PEAK=$R
+  for EP in $(engine_pids "$EXE"); do [ -z "$AFF" ] && AFF=$(awk '/Cpus_allowed_list/{print $2}' /proc/$EP/status 2>/dev/null) && [ -n "$AFF" ] && echo "engine pid $EP cpus_allowed=$AFF" >> "$OUT/conditions.txt"; R=$(awk '/VmRSS/{print $2}' /proc/$EP/status 2>/dev/null); [ "${R:-0}" -gt "$PEAK" ] && PEAK=$R
     [ $(( ($(date +%s) - START) % 60 )) -lt 5 ] && echo "$(date +%T) pid $EP comm $(cat /proc/$EP/comm 2>/dev/null | tr ' ' '_') cpu_ticks $(sed 's/.*) //' /proc/$EP/stat 2>/dev/null | awk '{print $12+$13}') state $(sed 's/.*) //' /proc/$EP/stat 2>/dev/null | awk '{print $1}') log_bytes $(stat -c %s "$LOG" 2>/dev/null)" >> "$OUT/cpu_samples.txt"; done   # progress sample about once a minute (read-only)
   if "$T/protected-title-check.sh" >/dev/null 2>&1; then echo "ABORT: protected title started"; RC=3; break; fi
   if [ -s "$DONE" ] && grep -qa "^#actor" "$DONE" && grep -qa "^#end" "$RUN/appdata/logs/tb_extra_${TAG}_$NLAST.txt" 2>/dev/null; then RC=0; sleep 8; break; fi
-  if ! pgrep -f "bin\\\\$EXE" >/dev/null 2>&1 && [ $(( $(date +%s) - START )) -gt 30 ]; then echo "engine exited early"; RC=4; break; fi
+  if [ -z "$(engine_main "$EXE")" ] && [ $(( $(date +%s) - START )) -gt 30 ]; then echo "engine exited early"; RC=4; break; fi
   [ $(( $(date +%s) - START )) -gt "$LIMIT" ] && { echo "TIMEOUT after ${LIMIT}s"; RC=5; break; }
 done
 echo "engine peak resident memory (sampled every 5 s): $((PEAK/1024)) MiB" >> "$OUT/conditions.txt"

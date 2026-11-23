@@ -4,6 +4,7 @@
 # Heartbeat: export (R1) / meta (R2) file under /dev/shm/p1 must grow (30 s R1, 150 s R2); on a stall: screenshot,
 # per-thread CPU, log tail, then kill (stop and report). Stops on any failed run.
 set -u
+. "$(cd "$(dirname "$0")" && pwd)/lib_engine_pids.sh"   # engine lookup by Wine binary, never a bare name match
 cd "$(dirname "$0")/.."; P=$PWD; RUN=$P/run
 T="$HOME/.claude/overseer/tools"; W=engineperf; EXE=RefDet14.exe
 TRK=/home/caden/Projects/ITRZone/out/p1/cordon_full_track.csv; SHM=/dev/shm/p1
@@ -19,7 +20,7 @@ log "slot granted, load $(cut -d' ' -f1-3 /proc/loadavg)"
 cp "$P/harness/zz_p1_puppet.script" "$RUN/gamedata/scripts/zz_p1_puppet.script"
 cp "$TRK" "$RUN/gamedata/configs/p1_track.csv"
 "$P/tools/run_noguard.sh" "$RUN" >/dev/null || { log "REFUSED: noguard"; stop="noguard"; }
-engine() { local best="" br=0 r; for p in $(pgrep -f "bin\\\\$EXE"); do r=$(awk '/VmRSS/{print $2}' /proc/$p/status 2>/dev/null); [ "${r:-0}" -gt "$br" ] && { br=$r; best=$p; }; done; echo "$best"; }
+engine() { engine_big "$EXE"; }
 ticks() { for t in /proc/$1/task/*; do s=$(sed 's/^.*) //' $t/stat 2>/dev/null) || continue; echo "$(basename $t) $(echo "$s" | awk '{print $1, $12+$13}') $(cat $t/wchan 2>/dev/null) $(tr -d '\n' < $t/comm 2>/dev/null | tr ' ' '_')"; done; }
 heavy_ps() { ps -eo pcpu,pid,comm,args --sort=-pcpu | awk 'NR>1 && $1>=100 && $3!~/wineserver|Xvfb/ && $3!="ps" {print $1"%:"$3}' | head -5 | tr '\n' ' '; }
 settle() { local t0=$(date +%s) l1 hv; while :; do l1=$(cut -d' ' -f1 /proc/loadavg); hv=$(heavy_ps); awk -v l="$l1" 'BEGIN{exit !(l<2)}' && [ -z "${hv// /}" ] && { echo "settle ok load=$l1 heavy=[] wait=$(( $(date +%s)-t0 ))s"; return 0; }

@@ -272,3 +272,25 @@ PREDICTIONS: absorb PASS 75 % (risk: the arming command or the 3 s wait misbehav
   with a tb_run that waits like the real one (t2-offline/fake_tb_run.sh, fake engine exe named wine64): kill ->
   tb_run ended within 3 s -> restart; normal end -> rc 0 and no unplanned restart; crash -> unplanned restart, rc 6.
 - No crash in either boot. t2_xray.sh sha fa138a52ec746c67, puppet script sha 966e3a475163c950.
+
+## 17. No bare name matches in the harness (Overseer: second self-match; fix all in one go)
+- Every `pgrep -f` engine lookup in tools/ (tb_run, det_run, bench, p1_run, stall_run, t1_xray, t2_xray, coop_load:
+  12 uses) now goes through tools/lib_engine_pids.sh: a process is the engine only if its BINARY (/proc/<pid>/exe) is
+  a Wine loader and its command line names the exe. Python watchers, shells, grep and tee can never match. "Is the
+  engine still running" checks (tb_run, det_run, bench, t2_xray) use engine_main: the biggest match AND RSS > 500 MB,
+  because the 20-30 MB Wine wrappers can outlive a killed or crashed engine. Remaining pgrep uses are `pgrep -x
+  sober` (exact process name, the Roblox guard), which cannot self-match.
+- Desk test: a Wine-like binary and a python process with the same argv: only the Wine-like one is returned.
+  Fake t2 test (engine_main threshold lowered for the 10 MB fake): planned kill, crash restart, normal end all right.
+- Hash changes: t1_xray.sh (T1's record keeps its frozen hash; the old copy stays in git history), tb_run.sh 1b8d103f2208befc,
+  lib_engine_pids.sh cb183b7b894eab3e, t2_xray.sh 745d975f7e24e3e9.
+
+## 18. Pre-flight 4 (Overseer OK; registered before the run; ~6 min, X-Ray only, WANT, 20-min claim)
+- PF_OUT=out/t2pre4 PF_EXE=Absorb14.exe PF_POSE_ARG=pf4 PF_PAUSE=0 PF_FREEZE=sigstop PF_ABSORB=2000 PF_ABSORB_SKIP=0
+  PF_KILL_AT=80 PF_RUN_S=200. Stand-in writer: play 0-20 s, dead+freeze 20-50 s (armed), play after; planned SIGKILL at
+  track 80; restart; boot 1 to the end.
+PASS: (a) freeze.csv STOP->CONT game_ms <= 1000 with the new STOP definition (last frame before the gap); exactly one
+  [FREEZE] absorbed line; (b) kill -> boot 1's first snapshot <= 90 s; (c) after the kill no process of ours names the
+  exe until boot 1 starts; (d) rc 0, no unplanned restart.
+PREDICTIONS: (a) 90 % (expected ~200 ms: one 33 ms frame x 6); (b) 85 % (expected ~35 s: <= 5 s tb_run poll + 25 s
+  boot); (c) 90 %; (d) 85 %.

@@ -9,6 +9,7 @@
 # - heartbeat: outside the stall, no new seq for 30 s = a stall of X-Ray itself: screenshot, per-thread ticks, kill.
 # Exit codes: 0 track ended; 3 X-Ray heartbeat stall; 4 X-Ray ended early; 2 refused.
 set -u
+. "$(cd "$(dirname "$0")" && pwd)/lib_engine_pids.sh"   # engine lookup by Wine binary, never a bare name match
 cd "$(dirname "$0")/.."; P=$PWD; RUN=$P/run; O=${1:?out_dir}; ITR=${2:-itr2-shadow}   # ITRZone: match its run dir, never the exe name
 EXE=${T1_EXE:-RefDet14.exe}; TRK=/home/caden/Projects/ITRZone/out/p1/cordon_full_track.csv; SHM=/dev/shm/itrz_b1
 AT=${T1_STALL_AT:-600}; DUR=${T1_STALL_S:-20}
@@ -22,7 +23,7 @@ cp "$P/harness/zz_p1_puppet.script" "$RUN/gamedata/scripts/zz_p1_puppet.script"
 cp "$TRK" "$RUN/gamedata/configs/p1_track.csv"
 cleanup() { rm -f "$RUN/gamedata/scripts/zz_p1_puppet.script" "$RUN/gamedata/configs/p1_track.csv"; }
 trap cleanup EXIT
-engine() { local best="" br=0 r; for p in $(pgrep -f "bin\\\\$EXE"); do r=$(awk '/VmRSS/{print $2}' /proc/$p/status 2>/dev/null); [ "${r:-0}" -gt "$br" ] && { br=$r; best=$p; }; done; echo "$best"; }
+engine() { engine_big "$EXE"; }
 ticks() { for t in /proc/$1/task/*; do s=$(sed 's/^.*) //' $t/stat 2>/dev/null) || continue; echo "$(basename $t) $(echo "$s" | awk '{print $1, $12+$13}') $(tr -d '\n' < $t/comm 2>/dev/null | tr ' ' '_')"; done; }
 hdr() { head -1 "$SHM/snap.txt" 2>/dev/null; }          # seq,<seq>,<t_xray_ms>,<t_track_s>
 python3 "$P/tools/t1_watch.py" "$SHM/snap.txt" "$O/watch" "bin\\$EXE" "$ITR" > "$O/watch.log" 2>&1 & WP=$!

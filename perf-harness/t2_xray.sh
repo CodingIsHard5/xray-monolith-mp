@@ -16,6 +16,7 @@
 #      T2_KILL_AT (700; 99999 off), T2_MAXRESTART (3), T2_PAUSE (0; 1 adds -t2_pause: NOT usable, see pre-flight 1),
 #      T2_FREEZE (sigstop = the bridge freezes X-Ray while the pose is dead/away + freeze), T2_SAVE (cordon1).
 set -u
+. "$(cd "$(dirname "$0")" && pwd)/lib_engine_pids.sh"   # engine lookup by Wine binary, never a bare name match
 cd "$(dirname "$0")/.."; P=$PWD; RUN=$P/run; O=${1:?out_dir}; ITR=${2:-itr2-shadow}
 EXE=${T2_EXE:-RefDet14.exe}; SHM=${T2_SHM:-/dev/shm/itrz_b1}; SAVE=${T2_SAVE:-cordon1}
 RUN_S=${T2_RUN_S:-1100}; AT=${T2_STALL_AT:-600}; DUR=${T2_STALL_S:-20}; KAT=${T2_KILL_AT:-700}; MAXR=${T2_MAXRESTART:-3}
@@ -35,7 +36,7 @@ trap cleanup EXIT
 # (a wine preloader/loader binary; the watcher's exe is python), (3) names the exe in its command line. Pre-flight 1
 # showed WINEPREFIX is NOT in the engine's /proc environ under Wine, so that check found nothing and a hang was not
 # killed. engine_all lists every candidate (pid exe rss) for the log.
-engine_all() { for p in $(pgrep -f "bin\\\\$EXE"); do [ "$p" = "${WP:-}" ] && continue; echo "$p $(readlink /proc/$p/exe 2>/dev/null) $(awk '/VmRSS/{print $2}' /proc/$p/status 2>/dev/null)"; done; }
+engine_all() { for p in $(engine_pids "$EXE"); do [ "$p" = "${WP:-}" ] && continue; echo "$p $(readlink /proc/$p/exe 2>/dev/null) $(awk '/VmRSS/{print $2}' /proc/$p/status 2>/dev/null)"; done; }
 engine() { engine_all | awk '$2 ~ /wine/ && $3+0 > br {br = $3+0; best = $1} END {print best}'; }
 hdr() { head -1 "$SHM/snap.txt" 2>/dev/null | tr -d '\r'; }   # seq,<n>,<t_ms>,<t_track>,<level>,<run_id>
 echo "utc_ms,boot,reason,planned" > "$O/restarts.csv"
@@ -93,7 +94,7 @@ while :; do
         # earlier, which at factor 6 read as 3 s of game time that the absorb never had to remove)
         echo "$SU,STOP,$SST,$FZP,${gpre:-}" >> "$O/freeze.csv"; echo "$CU,CONT,$pst,$FZP,${gms:-}" >> "$O/freeze.csv"; FZP=""; fi; same=0; fi
     [ $same -ge 30 ] && { why="no new seq for 30 s"; break; }
-    if [ -z "${FZP:-}" ] && [ -z "$(engine)" ]; then gone=$(( ${gone:-0} + 1 )); [ $gone -ge 3 ] && { kill $WP 2>/dev/null; break; }; else gone=0; fi
+    if [ -z "${FZP:-}" ] && [ -z "$(engine_main "$EXE")" ]; then gone=$(( ${gone:-0} + 1 )); [ $gone -ge 3 ] && { kill $WP 2>/dev/null; break; }; else gone=0; fi
     # (engine gone: stop the watcher so tb_run can finish; tb_run's own rc then decides: 0 = normal end, else a crash)
   done
   [ -n "${FZP:-}" ] && { kill -CONT "$FZP" 2>/dev/null; FZP=""; fz=""; }
