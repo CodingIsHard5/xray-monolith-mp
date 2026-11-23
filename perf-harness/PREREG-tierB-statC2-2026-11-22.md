@@ -106,3 +106,14 @@ What went wrong, stated plainly:
 - EXPLORATORY (not registered, after the fact): the recurring-death event occurred in 8 of 30 dosed runs across both
   controls (3/15, 5/15) and 2 of 34 stock runs (h05, ri03); one-sided Fisher p = 0.025. It may be that cutting or
   dropping links shifts offline combat timing enough to set off that fight more often. Not tested; not chased.
+
+## 8. Overseer ruling on the result (2026-11-22)
+
+- As registered, the control does not count; that is the record. The dose-100 result (P passes, C fails) is
+  SUPPORTING EVIDENCE that C sees something P does not. It is not proof, and no claim rests on it. Dose 10 is not re-run.
+- P FINDING: recurring offline-fight deaths (2-5 creatures, same ids) move P one-for-one. They were absent from all
+  10 R1/R2 runs, so the frozen P band (noise 0) understates P's real stock noise: a stock run with that fight (h05,
+  ri03) would deviate on P. P's false-fail rate is higher than its band assumes.
+- Tier (b) instrument work stops here. Limits on the record: detection limit about 4 % for less work (U);
+  C detects about 10 lost registrations (I5/I6 route); stationary player only; C's value on I1-I4 is supported only,
+  not shown.
