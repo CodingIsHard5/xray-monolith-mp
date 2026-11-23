@@ -64,3 +64,31 @@ PREDICTIONS:
 - run/bin/B1Diag14.exe sha256 f6475af3dc7fd59e…; its pdb is installed as run/bin/B1Diag14.pdb AND run/bin/AnomalyDX11.pdb
   (the crash handler looks for that name, and both exes ask for it, so only one matching pdb can sit there at a time).
   RefDet14's pdb is kept as run/bin/RefDet14.pdb; copy it back over AnomalyDX11.pdb before any later RefDet14 run.
+
+## RESULT (scored once, 2026-11-23; slice 11:53-13:49, 6 of 6 runs, released)
+| run | stall | rc | track end | FATAL | B1DIAG |
+|---|---|---|---|---|---|
+| d1_s | yes | 0 | yes | 0 | 1 |
+| d2_n | no | 0 | yes | 0 | 1 |
+| d3_n | no | 0 | yes | 0 | 1 |
+| d4_s | yes | 0 | yes | 0 | 1 |
+| d5_s | yes | 0 | yes | 0 | 1 |
+| d6_n | no | 0 | yes | 0 | 1 |
+- Every B1DIAG line is the same: `ammo_type 5 >= ammo_class size 3: name [wpn_mosin19070] section [wpn_mosin] id 19070
+  parent 19068`, right after `[LSS] Spawning object [sim_default_stalker_019068]`. Each is followed by the stock
+  guard's line `m_ammoTypes[m_ammoType] is invalid ... m_ammoType 5` (the slot past the end was null, so the index
+  was reset to 0 and the run went on).
+- The T1 retry crash (ITRZone out/runs/20261123-105447-t1-xray, xray.log:9205-9214) came right after the SAME
+  stalker's spawn line, with NO stock guard line: the slot past the end was non-null there, and the garbage name
+  (byte 0x01) gave the fatal.
+- Reading: CAUSE FOUND, by the "B1DIAG lines but no crash" branch plus the match to the crash log: an out-of-range
+  ammo index in the save (deterministic), crashing only when leftover heap memory past the vector is non-null.
+  The stall is not needed (B1DIAG in both arms; the crash itself did not repeat).
+PREDICTIONS scored:
+- at least one crash in 6 (60 %): NO, wrong. 0 of 6.
+- at least one B1DIAG line (55 %): YES. 6 of 6 (I did not expect it to be deterministic).
+- B1DIAG just before a crash (70 %): not scorable (no crash); the T1 crash log fits it.
+- crashes in S only (20 %): not scorable.
+Export cost (reported only): mean 577-598 us, p99 1024-1127 us per run.
+Next (Overseer): the fix (clamp to 0 + log, both weapon paths) is BUGFIXES.md CANDIDATE 3, for Caden. T2 can go ahead
+without a crash-restart path if the fix lands; otherwise T2 keeps a restart path, since this save crashes at random.
