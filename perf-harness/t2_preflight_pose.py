@@ -30,8 +30,12 @@ log = open(out, 'w'); log.write('utc_ms,seq,phase,yaw\n')
 t0 = time.time(); n = 0
 while True:
     t = time.time() - t0
-    ph, st, aw, yw = ('A', 'play', 'keep', 0.0) if t < 10 else ('B', 'play', 'keep', 1.0) if t < 20 else \
-        ('C', 'play', 'keep', -1.0) if t < 30 else ('D', 'dead', 'freeze', -1.0) if t < DEND and not NOFREEZE else ('E', 'play', 'keep', 0.5)
+    if ARG == 'pf3':   # pre-flight 3: A play (3 s hitch at track 20) | D1 freeze 60 s (unarmed control) | E1 play | D2 freeze 60 s (armed) | E
+        ph, st, aw, yw = ('A', 'play', 'freeze', 0.0) if t < 40 else ('D1', 'dead', 'freeze', 0.0) if t < 100 else \
+            ('E1', 'play', 'freeze', 0.0) if t < 130 else ('D2', 'dead', 'freeze', 0.0) if t < 190 else ('E', 'play', 'freeze', 0.0)
+    else:
+     ph, st, aw, yw = ('A', 'play', 'keep', 0.0) if t < 10 else ('B', 'play', 'keep', 1.0) if t < 20 else \
+         ('C', 'play', 'keep', -1.0) if t < 30 else ('D', 'dead', 'freeze', -1.0) if t < DEND and not NOFREEZE else ('E', 'play', 'keep', 0.5)
     n += 1; u = utc()
     body = f"seq,{n},{u},{st},{lvl},{aw}\np,{x:.3f},{y:.3f},{z:.3f},{yw:.4f},1.0\nend,{n}\n"
     with open(os.path.join(shm, 'pose.txt'), 'wb') as f: f.write(body.encode())

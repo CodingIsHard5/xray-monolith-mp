@@ -220,3 +220,31 @@ Readings of (1)-(4) of section 11 are unchanged. t2_xray.sh sha 4c0bf34e2a0eb0a4
 
 - After pre-flight 2: t2_xray.sh ends the rest of OUR prefix (WINEPREFIX=run/prefix wineserver -k) right after any
   SIGKILL of the engine; FREEZE_UNSUPPORTED is logged once. Not yet measured on the box.
+
+## 15. Pre-flight 3 (Overseer OK with conditions; registered before the run; runs AFTER the clamp witness)
+Conditions (Overseer): absorb only while a freeze is active, armed before the STOP and cleared after the CONT; every
+absorbed gap logged; and show that with absorb ON but no freeze, a 2-3 s hitch is NOT absorbed.
+- Engine perf/freeze-absorb 7c8331264 (on perf/fixes e8eb661df, so it includes the ammo clamp): console variables
+  g_freeze_absorb_ms (threshold; 0 = off) and g_freeze_absorb_armed (0/1), both default 0 and NEVER saved to
+  user.ltx (a CCC_Integer subclass with an empty Save: otherwise cfg_save on exit would keep "armed" for the next
+  session). The frame timer absorbs only when both are set and the gap exceeds the threshold; it logs
+  "* [FREEZE] absorbed <drop> ms of a <gap> ms gap" to xray.log and disarms itself (one absorb per arming).
+- Script (sha 1a9afb7cb8ddfc5c): -t2_absorb <ms> sets the threshold at start (ABSORB_ON). When the pose turns dead/away + freeze,
+  it arms (ABSORB_ARM) or, for the first k freezes with -t2_absorb_skip k, does not (ABSORB_SKIP); on play it
+  disarms (ABSORB_DISARM). The resume gap line now fires at >= 2 s (so the 3 s hitch is seen). Game time is printed
+  unsigned (u32 ms). Stub test: SKIP, DISARM, ARM, RESUMED_GAP, DISARM in that order; console commands as intended.
+- Bridge (t2_xray.sh sha 096f53666495cc5d): with T2_ABSORB, waits <= 3 s for the ARM/SKIP line before the SIGSTOP; freeze.csv gets
+  a header and a 5th column game_ms (STOP: game time at arming; CONT: game time of the first frame after resume,
+  from RESUMED_GAP).
+- Run: PF_OUT=out/t2pre3 PF_EXE=Absorb14.exe (CI build of 7c8331264, hash-checked) PF_POSE_ARG=pf3 PF_PAUSE=0
+  PF_FREEZE=sigstop PF_ABSORB=2000 PF_ABSORB_SKIP=1 PF_STALL_AT=20 PF_STALL_S=3 PF_KILL_AT=275 PF_RUN_S=420.
+  Timeline (stand-in writer, wall s from track 0): 3 s hitch at track 20 (pose play: absorb ON, not armed);
+  D1 dead+freeze 40-100 s (first freeze: SKIP = absorb-off control); E1 play; D2 dead+freeze 130-190 s (armed);
+  E play; planned SIGKILL at track 275 (~wall 215 s; track runs ~63 s ahead after the unabsorbed hitch and D1);
+  restart; boot 1 to the end. About 9 min wall; 20-min claim via WANT.
+PASS (absorb): hitch: time_global step >= 2.5 s across it and NO [FREEZE] line before D2; D1: game_ms advances
+  >= 300 s x 1000 (60 s x factor 6, i.e. not absorbed); D2: exactly one [FREEZE] absorbed line, game_ms STOP->CONT
+  <= 1000 and time_global step across it < 1 s; X-Ray continues. PASS (restart): kill to boot 1's first snapshot
+  <= 90 s, and the two Wine wrappers gone after the kill.
+PREDICTIONS: absorb PASS 75 % (risk: the arming command or the 3 s wait misbehaves); hitch not absorbed 95 %;
+  restart <= 90 s 85 % (guess ~35 s).

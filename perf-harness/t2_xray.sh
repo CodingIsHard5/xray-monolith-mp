@@ -20,6 +20,9 @@ cd "$(dirname "$0")/.."; P=$PWD; RUN=$P/run; O=${1:?out_dir}; ITR=${2:-itr2-shad
 EXE=${T2_EXE:-RefDet14.exe}; SHM=${T2_SHM:-/dev/shm/itrz_b1}; SAVE=${T2_SAVE:-cordon1}
 RUN_S=${T2_RUN_S:-1100}; AT=${T2_STALL_AT:-600}; DUR=${T2_STALL_S:-20}; KAT=${T2_KILL_AT:-700}; MAXR=${T2_MAXRESTART:-3}
 PFLAG=""; [ "${T2_PAUSE:-0}" = 1 ] && PFLAG="-t2_pause"
+# T2_ABSORB=<ms> (with T2_FREEZE=sigstop, engine perf/freeze-absorb): the world clock skips the frozen time.
+# T2_ABSORB_SKIP=<k>: the first k freezes stay unarmed (pre-flight 3 control).
+[ "${T2_ABSORB:-0}" -gt 0 ] && PFLAG="$PFLAG -t2_absorb $T2_ABSORB -t2_absorb_skip ${T2_ABSORB_SKIP:-0}"
 mkdir -p "$O"; log() { echo "$(date -u '+%F %T.%3N')Z $*" | tee -a "$O/t2_xray.log"; }
 utc() { echo $(( $(date +%s%N) / 1000000 )); }
 "$HOME/.claude/overseer/tools/quiet-required.sh" check 2>/dev/null | grep -q '^HELD:.* EXCLUSIVE\|^HELD:.*B1-T2' || { log "REFUSED: no joint EXCLUSIVE claim held"; exit 2; }
@@ -36,6 +39,7 @@ engine_all() { for p in $(pgrep -f "bin\\\\$EXE"); do [ "$p" = "${WP:-}" ] && co
 engine() { engine_all | awk '$2 ~ /wine/ && $3+0 > br {br = $3+0; best = $1} END {print best}'; }
 hdr() { head -1 "$SHM/snap.txt" 2>/dev/null | tr -d '\r'; }   # seq,<n>,<t_ms>,<t_track>,<level>,<run_id>
 echo "utc_ms,boot,reason,planned" > "$O/restarts.csv"
+echo "utc_ms,event,state,pid,game_ms" > "$O/freeze.csv"   # game_ms: X-Ray game time (u32 ms) at arming / at the first frame after CONT
 T_START=$(date +%s); k=0; unplanned=0; final=""; done_stall=""; done_kill=""
 while :; do
   B="$O/boot$k"; mkdir -p "$B"; RID=$(utc)
@@ -43,7 +47,7 @@ while :; do
   python3 "$P/tools/t1_watch.py" "$SHM/snap.txt" "$B/watch" "bin\\$EXE" "$ITR" > "$B/watch.log" 2>&1 & WP=$!
   log "boot $k: run_id $RID engine_s $TIMES load $(cut -d' ' -f1-3 /proc/loadavg)"
   TB_NOCLAIM=1 TB_EXE=$EXE TB_TIMES=$TIMES TB_TIMEOUT=$(( TIMES + 400 )) tools/tb_run.sh t2b$k "$SAVE" -p1 -t2_pose -t2_run $RID $PFLAG -p1_tag t2 > "$B/tb_run.log" 2>&1 &
-  TBP=$!; L0=$(date +%s); first=""; last=""; same=0; why=""
+  TBP=$!; L0=$(date +%s); first=""; last=""; same=0; why=""; narm=0   # meta_t2.csv is rewritten by every boot
   while kill -0 $TBP 2>/dev/null; do
     sleep 1; h=$(hdr); IFS=, read -r _ s _ tt _ rid <<<"$h"
     [ "${rid:-}" = "$RID" ] || { s=""; tt=""; }                         # a snapshot from an earlier boot does not count
@@ -72,10 +76,20 @@ while :; do
     # (T1: X-Ray survived two 20 s SIGSTOPs). Logged in freeze.csv (utc_ms,event,pose_state).
     if [ "${paw:-}" = freeze ] && { [ "${pst:-}" = dead ] || [ "${pst:-}" = away ]; }; then
       if [ -z "${fz:-}" ]; then fz=1; log "freeze hold: pose state $pst, heartbeat skipped"
-        if [ "${T2_FREEZE:-}" = sigstop ]; then FZP=$(engine); [ -n "$FZP" ] && kill -STOP "$FZP" && echo "$(utc),STOP,$pst,$FZP" >> "$O/freeze.csv"; fi; fi
+        if [ "${T2_FREEZE:-}" = sigstop ]; then
+          # with T2_ABSORB, wait (<= 3 s) for the script's ABSORB_ARM/ABSORB_SKIP line, so the engine is armed BEFORE the stop
+          gms=""; if [ "${T2_ABSORB:-0}" -gt 0 ]; then for _w in 1 2 3 4 5 6; do
+              aline=$(grep -a '^ABSORB_ARM\|^ABSORB_SKIP' "$SHM/meta_t2.csv" 2>/dev/null | sed -n "$(( ${narm:-0} + 1 ))p")
+              [ -n "$aline" ] && break; sleep 0.5; done
+            [ -n "$aline" ] && { narm=$(( ${narm:-0} + 1 )); gms=$(cut -d, -f4 <<<"$aline"); log "freeze: ${aline%%,*} seen before STOP"; } || log "freeze: NO arm line within 3 s (stopping anyway)"; fi
+          FZP=$(engine); [ -n "$FZP" ] && kill -STOP "$FZP" && echo "$(utc),STOP,$pst,$FZP,${gms:-}" >> "$O/freeze.csv"; fi; fi
       same=0
     elif [ -n "${fz:-}" ] && [ -n "${pst:-}" ] && { [ "${paw:-}" = keep ] || [ "${paw:-}" = freeze ]; }; then fz=""; log "freeze hold end: pose state $pst"   # a torn/empty/truncated pose read (awaysim not exactly keep or freeze) never ends a freeze
-      [ -n "${FZP:-}" ] && { kill -CONT "$FZP"; echo "$(utc),CONT,$pst,$FZP" >> "$O/freeze.csv"; FZP=""; }; same=0; fi
+      if [ -n "${FZP:-}" ]; then nres=$(grep -a -c '^RESUMED_GAP' "$SHM/meta_t2.csv" 2>/dev/null); kill -CONT "$FZP"; CU=$(utc)
+        # game_ms after the resume = the RESUMED_GAP line the script writes on its first frame (wait <= 3 s for it)
+        gms=""; for _w in 1 2 3 4 5 6; do rl=$(grep -a '^RESUMED_GAP' "$SHM/meta_t2.csv" 2>/dev/null | sed -n "$(( ${nres:-0} + 1 ))p"); [ -n "$rl" ] && break; sleep 0.5; done
+        [ -n "$rl" ] && gms=$(cut -d, -f5 <<<"$rl")
+        echo "$CU,CONT,$pst,$FZP,${gms:-}" >> "$O/freeze.csv"; FZP=""; fi; same=0; fi
     [ $same -ge 30 ] && { why="no new seq for 30 s"; break; }
   done
   [ -n "${FZP:-}" ] && { kill -CONT "$FZP" 2>/dev/null; FZP=""; fz=""; }
