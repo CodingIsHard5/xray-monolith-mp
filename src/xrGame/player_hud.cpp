@@ -4472,6 +4472,11 @@ struct vr_mag_vis
 	// magazine (an empty-gun animation may park round bones far away, build check 2: PM ctg8 10.01 m); bit i set = rnd_local[i] good
 	Fmatrix rnd_local[32];
 	u32 rnd_good, rnd_parked_logged;
+	// 8c note 7: the magazine's other bones (follower, springs) relative to the magazine bone, as last seen with the gun loaded
+	// and with it empty (an empty-gun animation raises the PM follower over the top round, build check 3); the hand copy takes
+	// the set that matches its own count
+	Fmatrix mag_loaded[64], mag_empty[64];
+	u64 mag_loaded_good, mag_empty_good, mag_moved_logged;
 };
 static vr_mag_vis s_vr_mv = {nullptr, BI_NONE, 0, false, u32(-1), 0, false, false};
 
@@ -4598,6 +4603,7 @@ void vr_mag_reset()
 	s_vr_mv.rnd_engine = false;
 	s_vr_mv.rnd_good = 0;
 	s_vr_mv.rnd_parked_logged = 0;
+	s_vr_mv.mag_loaded_good = s_vr_mv.mag_empty_good = s_vr_mv.mag_moved_logged = 0;
 }
 
 static void vr_pda_reset(); // milestone 10a, below
@@ -4666,6 +4672,7 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 		V.rnd_engine = false;
 		V.rnd_good = 0;
 		V.rnd_parked_logged = 0;
+		V.mag_loaded_good = V.mag_empty_good = V.mag_moved_logged = 0;
 		CWeapon* rw = item->m_parent_hud_item && item->m_parent_hud_item->has_object() ? smart_cast<CWeapon*>(&item->m_parent_hud_item->object()) : nullptr;
 		if (V.bone != BI_NONE)
 		{
@@ -4751,6 +4758,42 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 						V.rest[rb].mul_43(V.rest[V.bone], V.rnd_local[i]);
 					else if (K->LL_GetData(rb).GetParentID() == V.bone)
 						V.rest[rb].mul_43(V.rest[V.bone], K->LL_GetData(rb).bind_transform);
+				}
+			}
+			// 8c note 7: the other bones under the magazine, relative to it, kept per state (gun loaded / gun empty)
+			{
+				CWeapon* cw = item->m_parent_hud_item && item->m_parent_hud_item->has_object() ? smart_cast<CWeapon*>(&item->m_parent_hud_item->object()) : nullptr;
+				const bool loaded = !cw || cw->GetAmmoElapsed() > 0;
+				u64 rnd_bits = 0;
+				for (int i = 0; i < V.rnd_n; ++i)
+					rnd_bits |= u64(1) << V.rnd[i];
+				for (u16 b = 0, n = K->LL_BoneCount(); b < n; ++b)
+				{
+					const u64 bit = u64(1) << b;
+					if (!(V.mask & bit) || b == V.bone || (rnd_bits & bit))
+						continue;
+					Fmatrix loc;
+					loc.mul_43(mag_inv, V.rest[b]);
+					if (loaded)
+					{
+						V.mag_loaded[b].set(loc);
+						V.mag_loaded_good |= bit;
+					}
+					else
+					{
+						V.mag_empty[b].set(loc);
+						V.mag_empty_good |= bit;
+						if ((V.mag_loaded_good & bit) && !(V.mag_moved_logged & bit))
+						{
+							const float mv = loc.c.distance_to(V.mag_loaded[b].c);
+							if (mv > 0.002f)
+							{
+								V.mag_moved_logged |= bit;
+								Msg("* [vr3rnd] frame %u bone %s moved %.1f mm (relative to the magazine bone) with the gun empty: the hand copy uses its loaded pose while it holds rounds",
+									g_vr_track.frame, K->LL_BoneName_dbg(b), mv * 1000.f);
+							}
+						}
+					}
 				}
 			}
 			V.cache_ok = true;
@@ -4857,6 +4900,16 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 				if (V.mask & (u64(1) << b))
 				{
 					V.copy_bone[b].set(V.rest[b]);
+					if (b != V.bone)
+					{
+						// 8c note 7: follower, springs: the pose of the state the hand magazine is in (loaded or empty)
+						const bool hand_loaded = S.hand_cart.size() > 0;
+						const u64 bit = u64(1) << b;
+						if (hand_loaded && (V.mag_loaded_good & bit))
+							V.copy_bone[b].mul_43(V.rest[V.bone], V.mag_loaded[b]);
+						else if (!hand_loaded && (V.mag_empty_good & bit))
+							V.copy_bone[b].mul_43(V.rest[V.bone], V.mag_empty[b]);
+					}
 					if (rnd_hide & (u64(1) << b))
 						V.copy_bone[b].scale(0.f, 0.f, 0.f);
 				}
