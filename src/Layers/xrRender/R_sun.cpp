@@ -99,12 +99,31 @@ void CRender::render_sun_cascades()
 	// changed while the tasks read it.
 	bool static_done = false;
 #if RENDER == R_R4
-	if (ps_r__mt_sun_static && !ps_r__portal_traverse_stats && !(ps_r_stereo_bench == 2 && g_stereo_bench_eye == 1))
+	const bool selftest = ps_r__mt_sun_selftest && m_sun_cascades.size() <= 8; // measurement only, see below
+	if ((ps_r__mt_sun_static || selftest) && !ps_r__portal_traverse_stats && !(ps_r_stereo_bench == 2 && g_stereo_bench_eye == 1))
 	{
 		for (u32 i = 0; i < m_sun_cascades.size(); ++i)
 			render_sun_cascade_prepass(i); // has its own "Render Cascade: Prepass" zone
 		phase = PHASE_SMAP;
 		CSector* outdoor = pOutdoorSector;
+		// R1b-1 self-test (r__mt_sun_selftest 1; measurement only): first build every cascade's static lists SERIALLY
+		// here, hash them in order, empty them; then build them in parallel as below and compare. Same frame, same eye,
+		// same state. Submission is untouched by R1b-1, so equal lists mean an identical command stream.
+		u64 st_hash[8] = {}; u32 st_items[8] = {}; u32 st_leftover = 0;
+		if (selftest)
+		{
+			PROF_EVENT("r1b_selftest_serial");
+			for (u32 i = 0; i < m_sun_cascades.size(); ++i)
+			{
+				sun::cascade& c = m_sun_cascades[i];
+				u32 pre = 0; c.GMCascade.r1b_static_hash(pre); st_leftover += pre; // lists should be empty here
+				c.GMCascade.r1b_clear_static();
+				c.GMCascade.traverse(outdoor, c.cull_frustum, c.cull_COP, c.cull_xform);
+				c.GMCascade.r_dsgraph_capture_static();
+				st_hash[i] = c.GMCascade.r1b_static_hash(st_items[i]);
+				c.GMCascade.r1b_clear_static();
+			}
+		}
 		for (u32 i = 0; i < m_sun_cascades.size(); ++i)
 		{
 			sun::cascade* c = &m_sun_cascades[i];
@@ -118,6 +137,34 @@ void CRender::render_sun_cascades()
 		{
 			PROF_EVENT("r1b_join");
 			sun_cascades_task.wait();
+		}
+		if (selftest)
+		{
+			// per eye: [0] = eye 0 or mono (eye -1), [1] = eye 1, so a summary shows that eye 1 was really compared (gammavr)
+			static u32 st_calls = 0, st_logged = 0, st_left_total = 0, st_compares[2] = {}, st_mismatch[2][8] = {};
+			const int st_e = g_stereo_bench_eye == 1 ? 1 : 0;
+			for (u32 i = 0; i < m_sun_cascades.size(); ++i)
+			{
+				sun::cascade& c = m_sun_cascades[i];
+				if (ps_r__mt_sun_selftest_witness == int(i + 1) && !c.GMCascade.r1b_witness_drop())
+					Msg("* r1b_selftest: witness: cascade %u lists empty, nothing dropped", i);
+				u32 n = 0;
+				const u64 hp = c.GMCascade.r1b_static_hash(n);
+				++st_compares[st_e];
+				if (hp != st_hash[i] || n != st_items[i])
+				{
+					++st_mismatch[st_e][i];
+					if (st_logged++ < 50)
+						Msg("! r1b_selftest: frame %u eye %d cascade %u UNEQUAL: serial %u items %016llx, parallel %u items %016llx",
+							Device.dwFrame, g_stereo_bench_eye, i, st_items[i], st_hash[i], n, hp);
+				}
+			}
+			st_left_total += st_leftover;
+			if (++st_calls % u32(ps_r__mt_sun_selftest_every) == 0)
+				Msg("* r1b_selftest_summary: renders %u | eye0/mono compares %u mismatches c0 %u c1 %u c2 %u | eye1 compares %u mismatches c0 %u c1 %u c2 %u | leftover_items %u witness %d | last items c0 %u c1 %u c2 %u",
+					st_calls, st_compares[0], st_mismatch[0][0], st_mismatch[0][1], st_mismatch[0][2],
+					st_compares[1], st_mismatch[1][0], st_mismatch[1][1], st_mismatch[1][2], st_left_total,
+					ps_r__mt_sun_selftest_witness, st_items[0], st_items[1], st_items[2]);
 		}
 		static_done = true;
 	}

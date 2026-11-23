@@ -556,6 +556,9 @@ int opt_dynamic = 2;
 int ps_pfx_volumetric_mode = 0;
 int ps_r__portal_traverse_stats = 0;
 int ps_r__mt_sun_static = 0; // R1b-1 (perf/r1b-sun): cascades' traverse + static capture on worker tasks; 0 = as before
+int ps_r__mt_sun_selftest = 0; // R1b-1 measurement only: build cascade static lists serial AND parallel per frame, compare ordered hashes
+int ps_r__mt_sun_selftest_witness = 0; // R1b-1 test only: k = 1..3 drops one item from cascade k-1's PARALLEL lists (must be reported)
+int ps_r__mt_sun_selftest_every = 100; // R1b-1 self-test: summary line every N renders
 
 float r_rain_exp = 1.f;
 float r_rain_k = 99.0f;
@@ -1736,6 +1739,9 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r__optimize_dynamic_geom", &opt_dynamic, 0, 4);
 	CMD4(CCC_Integer, "r__portal_traverse_stats", &ps_r__portal_traverse_stats, 0, 1);
 	CMD4(CCC_Integer, "r__mt_sun_static", &ps_r__mt_sun_static, 0, 1);
+	CMD4(CCC_Integer, "r__mt_sun_selftest", &ps_r__mt_sun_selftest, 0, 1);
+	CMD4(CCC_Integer, "r__mt_sun_selftest_witness", &ps_r__mt_sun_selftest_witness, 0, 3);
+	CMD4(CCC_Integer, "r__mt_sun_selftest_every", &ps_r__mt_sun_selftest_every, 1, 100000);
 	psDeviceFlags2.set(rsOptShadowGeom, TRUE);
 	CMD3(CCC_Mask, "r__optimize_shadow_geom", &psDeviceFlags2, rsOptShadowGeom);
 

@@ -854,3 +854,82 @@ void CDSGraphManager::r_dsgraph_render_ui()
 		object->renderable_RenderUI();
 	renderable_ui.clear();
 }
+
+#include <type_traits>
+// ---------------------------------------------------------------------------------------------------------------------
+// R1b-1 self-test (measurement only, perf/r1b-sun). Hashes, in order, every list r_dsgraph_capture_static() and the
+// traverse can fill: the static pass queues (both priorities, all passes), the static sorted lists, LODs and water.
+// Field by field (no padding bytes). Pointers are stable within a frame; static items never use owned_transforms.
+namespace
+{
+	inline void r1b_mix(u64& h, u64 v)
+	{
+		for (int b = 0; b < 8; ++b) { h ^= (v >> (b * 8)) & 0xffull; h *= 1099511628211ull; }
+	}
+	template<typename T> inline u64 r1b_bits(T v)
+	{
+		if constexpr (std::is_same_v<T, float>) { u32 u; memcpy(&u, &v, sizeof(u)); return u; }
+		else return (u64)v;
+	}
+	template<typename I> inline void r1b_mix_item(u64& h, const I& it)
+	{
+		r1b_mix(h, r1b_bits(it.sortKey)); r1b_mix(h, r1b_bits(it.ssa));
+		r1b_mix(h, (u64)it.pObject); r1b_mix(h, (u64)it.pVisual); r1b_mix(h, (u64)it.pMatrix); r1b_mix(h, (u64)it.pSE);
+		r1b_mix(h, (u64)it.b_hud_mode); r1b_mix(h, r1b_bits(it.fov));
+	}
+	template<typename V> inline void r1b_mix_list(u64& h, u32& items, const V& v)
+	{
+		r1b_mix(h, 0xA5A5000000000000ull | v.size()); // list boundary + length
+		for (const auto& it : v) { r1b_mix_item(h, it); ++items; }
+	}
+}
+
+u64 CDSGraphManager::r1b_static_hash(u32& items)
+{
+	u64 h = 1469598103934665603ull;
+	items = 0;
+	for (u32 pr = 0; pr < 2; ++pr)
+		for (u32 pass = 0; pass < SHADER_PASSES_MAX; ++pass)
+		{
+			const auto& q = RGraph.mapStaticPasses[pr][pass];
+			r1b_mix(h, 0x5A5A000000000000ull | q.size());
+			for (const auto& p : q)
+			{
+				r1b_mix(h, p.sortKey.high); r1b_mix(h, p.sortKey.low);
+				r1b_mix_item(h, p.item);
+				r1b_mix(h, (u64)p.pState); r1b_mix(h, (u64)p.pVS); r1b_mix(h, (u64)p.pPS); r1b_mix(h, (u64)p.pCS); r1b_mix(h, (u64)p.pTextures);
+#if defined(USE_DX10) || defined(USE_DX11)
+				r1b_mix(h, (u64)p.pGS);
+#endif
+#ifdef USE_DX11
+				r1b_mix(h, (u64)p.pHS); r1b_mix(h, (u64)p.pDS);
+#endif
+				++items;
+			}
+		}
+	r1b_mix_list(h, items, RGraph.mapStaticSorted.Sorted);
+	r1b_mix_list(h, items, RGraph.mapStaticSorted.Wmark);
+	r1b_mix_list(h, items, RGraph.mapStaticSorted.Emissive);
+	r1b_mix_list(h, items, RGraph.mapStaticSorted.Distort);
+	r1b_mix_list(h, items, RGraph.mapLOD);
+	r1b_mix_list(h, items, RGraph.mapWater);
+	return h;
+}
+
+// Witness: drop the last item of the first non-empty static list (pass queues first). False if all are empty.
+bool CDSGraphManager::r1b_witness_drop()
+{
+	for (u32 pr = 0; pr < 2; ++pr)
+		for (u32 pass = 0; pass < SHADER_PASSES_MAX; ++pass)
+			if (!RGraph.mapStaticPasses[pr][pass].empty()) { RGraph.mapStaticPasses[pr][pass].pop_back(); return true; }
+	if (!RGraph.mapStaticSorted.Sorted.empty()) { RGraph.mapStaticSorted.Sorted.pop_back(); return true; }
+	if (!RGraph.mapLOD.empty()) { RGraph.mapLOD.pop_back(); return true; }
+	return false;
+}
+
+void CDSGraphManager::r1b_clear_static()
+{
+	RGraph.clear_static<false>();
+	RGraph.mapLOD.clear();
+	RGraph.mapWater.clear();
+}

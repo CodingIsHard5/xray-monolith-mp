@@ -124,6 +124,12 @@ public:
 	void r_dsgraph_capture_static();
 	void r_dsgraph_capture_dynamic(CObject* O = nullptr);
 
+	// R1b-1 self-test (measurement only): ordered hash of everything r_dsgraph_capture_static() can fill, and the
+	// witness that drops one item from those lists; r1b_clear_static() empties them for the second build.
+	u64 r1b_static_hash(u32& items);
+	bool r1b_witness_drop();
+	void r1b_clear_static();
+
 	void clear()
 	{
 		xrSRWLockGuard guard(&S_LC, false);
