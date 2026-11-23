@@ -32,6 +32,10 @@ def find_pid(pat):
         try: cl = open(f'/proc/{p}/cmdline', 'rb').read().replace(b'\0', b' ').decode('utf-8', 'replace')
         except OSError: continue
         if pat.lower() in cl.lower() and 't1_watch' not in cl:
+            if pat == 'itr2-shadow':   # ITRZone: also require its own prefix, so Caden's ITR2 can never match
+                try: env = open(f'/proc/{p}/environ', 'rb').read().decode('utf-8', 'replace')
+                except OSError: continue
+                if 'pfx-itr2' not in env: continue
             try: rss = int(next(l for l in open(f'/proc/{p}/status') if l.startswith('VmRSS')).split()[1])
             except (OSError, StopIteration): continue
             if best is None or rss > best[1]: best = (int(p), rss)   # the biggest match = the engine, not a launcher
