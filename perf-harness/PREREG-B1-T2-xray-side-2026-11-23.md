@@ -106,3 +106,7 @@ PREDICTIONS (mine, X-Ray side; scored once after the joint run):
   (3) restart: kill -> first new-run_id snapshot time (budget 90 s; guess ~30 s).
 PREDICTIONS: yaw negated (camera yaw = -heading) 55 %, same sign 35 %, neither 10 %; Lua keeps running while
 device-paused 35 %; restart within 90 s 90 %.
+
+- Engine lookup changed on the Overseer's ruling (pid/ancestry, not a name match): skip the watcher by PID, and
+  require WINEPREFIX=$RUN/prefix in the process environ. Fake test re-run: stall, planned kill (killed pid = the 9.8 MB
+  fake engine, logged with comm and RSS), crash restart, rc 6. t2_xray.sh sha now d8a391281cb7a344.

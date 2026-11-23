@@ -27,9 +27,12 @@ rm -f "$SHM"/snap.txt "$SHM"/meta_t2.csv "$SHM"/hits_t2.csv; mkdir -p "$SHM"    
 cp "$P/harness/zz_p1_puppet.script" "$RUN/gamedata/scripts/zz_p1_puppet.script"
 cleanup() { rm -f "$RUN/gamedata/scripts/zz_p1_puppet.script"; }
 trap cleanup EXIT
-# the engine = the biggest process whose command line names the exe, SKIPPING the watcher (its argv names the exe too;
-# offline test: with a small fake engine the watcher was picked and killed instead)
-engine() { local best="" br=0 r; for p in $(pgrep -f "bin\\\\$EXE"); do grep -qa t1_watch /proc/$p/cmdline 2>/dev/null && continue; r=$(awk '/VmRSS/{print $2}' /proc/$p/status 2>/dev/null); [ "${r:-0}" -gt "$br" ] && { br=$r; best=$p; }; done; echo "$best"; }
+# the engine = the biggest process that (1) is not the watcher, by PID ($WP), (2) runs in OUR Wine prefix (environ has
+# WINEPREFIX=$RUN/prefix, which tb_run.sh exports), (3) names the exe. A name match alone picked the watcher in the
+# offline test (its argv names the exe too); Overseer: use a pid/ancestry check, not a name match.
+engine() { local best="" br=0 r; for p in $(pgrep -f "bin\\\\$EXE"); do [ "$p" = "${WP:-}" ] && continue
+  tr '\0' '\n' < /proc/$p/environ 2>/dev/null | grep -qx "WINEPREFIX=$RUN/prefix" || continue
+  r=$(awk '/VmRSS/{print $2}' /proc/$p/status 2>/dev/null); [ "${r:-0}" -gt "$br" ] && { br=$r; best=$p; }; done; echo "$best"; }
 hdr() { head -1 "$SHM/snap.txt" 2>/dev/null | tr -d '\r'; }   # seq,<n>,<t_ms>,<t_track>,<level>,<run_id>
 echo "utc_ms,boot,reason,planned" > "$O/restarts.csv"
 T_START=$(date +%s); k=0; unplanned=0; final=""; done_stall=""; done_kill=""
@@ -48,14 +51,14 @@ while :; do
       [ -z "$first" ] && [ $(( $(date +%s) - L0 )) -ge 120 ] && { why="no snapshot 120 s after launch"; break; }
       continue; fi
     if [ $k = 0 ] && [ -z "$done_stall" ] && [ -n "$tt" ] && awk -v t="$tt" -v a="$AT" 'BEGIN{exit !(t>=a)}'; then
-      EP=$(engine); log "STALL start: seq $s track ${tt}s engine $EP"
+      EP=$(engine); [ -n "$EP" ] || { why="no engine pid found (stall)"; break; }; log "STALL start: seq $s track ${tt}s engine $EP"
       echo "utc_ms,event,seq,track_s" > "$O/stall.csv"; echo "$(utc),STOP,$s,$tt" >> "$O/stall.csv"
       kill -STOP "$EP"; sleep "$DUR"; kill -CONT "$EP"
       echo "$(utc),CONT,$s,$tt" >> "$O/stall.csv"; log "STALL end: SIGCONT sent"; done_stall=1; same=0; last=$s; continue
     fi
     if [ $k = 0 ] && [ -z "$done_kill" ] && [ -n "$tt" ] && awk -v t="$tt" -v a="$KAT" 'BEGIN{exit !(t>=a)}'; then
-      EP=$(engine); KU=$(utc); kill -KILL "$EP"; done_kill=1
-      echo "$KU,$k,planned kill (T2i) seq $s track ${tt}s pid $EP,1" >> "$O/restarts.csv"; log "PLANNED KILL: seq $s track ${tt}s pid $EP"
+      EP=$(engine); [ -n "$EP" ] || { why="no engine pid found (kill)"; break; }; KC=$(cat /proc/$EP/comm 2>/dev/null); KR=$(awk '/VmRSS/{print $2}' /proc/$EP/status 2>/dev/null); KU=$(utc); kill -KILL "$EP"; done_kill=1
+      echo "$KU,$k,planned kill (T2i) seq $s track ${tt}s pid $EP,1" >> "$O/restarts.csv"; log "PLANNED KILL: seq $s track ${tt}s pid $EP comm $KC rss_kb $KR"
       why="planned"; break
     fi
     if [ -n "$s" ] && [ "$s" = "$last" ]; then same=$((same+1)); else same=0; fi; last=$s
