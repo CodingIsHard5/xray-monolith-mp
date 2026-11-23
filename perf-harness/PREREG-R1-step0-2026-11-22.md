@@ -81,3 +81,32 @@ before, and anything else at 100 %, psql included, still counts. Re-runs r1_ros_
 fair-share gap. K group per scene = the three clean K runs (k1, k3, and the re-run). No split was computed before this
 note.
 Also corrected: series.log was created; I wrongly reported it missing (my listing filtered it out).
+
+## 10. RESULT (scored once, 2026-11-22 22:10; r1_score.txt)
+
+Checks: all 16 runs rc 0. The 14 scored slots are all "clean" (the 2 originals were flagged by the checker matching its
+own ps, a checker defect, not real load: excluded and UNSCORED, shown in r1_score.txt for the record only). The three
+pooled names are absent from every K run's perf_sites (0), and the same search finds all 3 in F (positive control).
+K probe calls per frame are about 1,444 (Rostok) and 705 (Cordon), below 2,000. F Rostok frame 6.45 ms, within 5 % of the
+baseline's 6.56.
+
+| K means, main thread ms/frame | frame | feed | (a) lists | (b) submission | (c) rest | sun cascades (in b) |
+|---|---|---|---|---|---|---|
+| Rostok bar | 5.75 | 2.76 | 0.54 | 2.13 | 0.08 | 1.13 |
+| Cordon | 4.27 | 1.85 | 0.14 | 1.64 | 0.07 | 0.49 |
+F means: Rostok frame 6.45, (b) 3.03; Cordon frame 4.94, (b) 2.23. Probe overhead (F - K frame): 0.70 / 0.67 ms, i.e.
+about 9 ns per removed call. 4 cores (one run each): K frame 7.03, (b) 2.06; F frame 7.59.
+
+DECISION BY THE RULE: (a) < 1.0 in both scenes -> not list building. (b) >= 1.5 in both (2.13, 1.64) -> STEP 1
+TARGETS SUBMISSION (D3D11 deferred contexts / command lists).
+
+Wrong predictions, stated plainly: I predicted (b) 1.2 / 0.9 and DROP as more likely. Wrong: the probes cost about
+9 ns per call, not 20-40, so far less of (b) was probe overhead. K Rostok frame 5.75 is above my 4.0-5.5 range.
+Right: (a) out in both scenes; Cordon frame inside its range; F within 5 % of the baseline.
+
+Caveats that bind step 1:
+- (b) is an upper bound, and 1.13 / 0.49 ms of it sits under "Render Cascade" (sun shadow maps). That pass is driven
+  from R_sun.cpp, gammavr's file. Without it, (b) is about 1.0 / 1.15. Section 4 says gammavr is asked first.
+- Deferred contexts help only if recording is spread over threads AND the driver gains from it. That is the case
+  under DXVK, as measured here. On old Windows drivers, deferred contexts are often emulated by the runtime, so the
+  gain on goal B's machine is not known (choice 4).

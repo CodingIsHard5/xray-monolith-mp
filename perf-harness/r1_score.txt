@@ -1,0 +1,26 @@
+== Rostok K
+r1_ros_k1      frame=5.805  feed=2.756  render=2.675  a=0.545  b=2.130  c=0.081  sun=1.128  probes=1443
+r1_ros_k3      frame=5.809  feed=2.781  render=2.701  a=0.547  b=2.154  c=0.080  sun=1.145  probes=1443
+r1_ros_k2_rr   frame=5.645  feed=2.736  render=2.657  a=0.537  b=2.119  c=0.080  sun=1.126  probes=1446
+MEAN           frame=5.753  feed=2.758  render=2.677  a=0.543  b=2.134  c=0.080  sun=1.133  probes=1444
+== Cordon K
+r1_cor_k2      frame=4.170  feed=1.839  render=1.774  a=0.141  b=1.632  c=0.065  sun=0.482  probes=712
+r1_cor_k3      frame=4.106  feed=1.856  render=1.790  a=0.146  b=1.644  c=0.065  sun=0.489  probes=699
+r1_cor_k1_rr   frame=4.530  feed=1.845  render=1.780  a=0.143  b=1.637  c=0.064  sun=0.483  probes=704
+MEAN           frame=4.269  feed=1.846  render=1.782  a=0.144  b=1.638  c=0.065  sun=0.485  probes=705
+== Rostok F
+r1_ros_f1      frame=6.542  feed=3.668  render=3.576  a=0.537  b=3.039  c=0.092  sun=1.798  probes=79752
+r1_ros_f2      frame=6.410  feed=3.637  render=3.546  a=0.535  b=3.012  c=0.091  sun=1.783  probes=80016
+r1_ros_f3      frame=6.398  feed=3.686  render=3.594  a=0.543  b=3.052  c=0.091  sun=1.806  probes=80070
+MEAN           frame=6.450  feed=3.664  render=3.572  a=0.538  b=3.034  c=0.092  sun=1.796  probes=79946
+== Cordon F
+r1_cor_f1      frame=4.750  feed=2.441  render=2.366  a=0.143  b=2.222  c=0.075  sun=0.719  probes=44070
+r1_cor_f2      frame=5.048  feed=2.443  render=2.367  a=0.143  b=2.224  c=0.076  sun=0.720  probes=43951
+r1_cor_f3      frame=5.029  feed=2.446  render=2.371  a=0.143  b=2.229  c=0.075  sun=0.721  probes=44076
+MEAN           frame=4.942  feed=2.443  render=2.368  a=0.143  b=2.225  c=0.075  sun=0.720  probes=44032
+== 4 cores (K, F)
+r1_ros_k4c     frame=7.032  feed=2.679  render=2.600  a=0.544  b=2.056  c=0.079  sun=1.102  probes=1443
+r1_ros_f4c     frame=7.586  feed=3.774  render=3.674  a=0.573  b=3.100  c=0.100  sun=1.778  probes=79807
+== UNSCORED (checker-defect flag)
+r1_ros_k2      frame=5.823  feed=2.775  render=2.694  a=0.543  b=2.151  c=0.080  sun=1.141  probes=1445
+r1_cor_k1      frame=4.555  feed=1.828  render=1.764  a=0.141  b=1.623  c=0.064  sun=0.482  probes=706
