@@ -173,3 +173,47 @@ Readings of (1)-(4) of section 11 are unchanged. t2_xray.sh sha 4c0bf34e2a0eb0a4
   (and would have sent SIGCONT early). Now the hold ends only on a pose whose awaysim field is exactly keep or
   freeze and is not dead/away+freeze. Fake test: truncated "...,fre" and an empty file kept the hold; "play,keep"
   ended it. t2_xray.sh sha bfe2a36978b8754d (this is the version pre-flight 2 runs).
+
+## 13. Pre-flight 2 RESULT (19:48-20:07Z, slice released; read once)
+- Engine lookup: WORKS. Candidates per boot: two small /usr/lib/wine/wine wrappers (18-29 MB) and the engine
+  /usr/lib/wine/wine64 (17.2 GB RSS); the engine was picked both boots and the planned kill hit it
+  (comm "X-RAY Primary t", 17.2 GB). Prediction 85 %: held.
+- RESTART: SLOW, prediction "within 90 s" (90 %) WRONG. The kill was at 19:55:11, but tb_run only noticed at its own
+  timeout (20:05:22, rc 5), because the two Wine wrapper processes stay alive with the exe in their command line, and
+  tb_run waits while any matching process lives. Boot 1's first snapshot came 25 s after its launch (20:05:47), so
+  kill to first snapshot was 10 min 36 s. Fix: after any SIGKILL of the engine, end the rest of OUR prefix
+  (WINEPREFIX=run/prefix wineserver -k, as t1_xray.sh's heartbeat path already does). Expected kill to first
+  snapshot then: ~5 s (tb_run's poll) + 25 s boot. Not yet measured.
+- YAW: SAME sign, prediction "negated" (55 %) WRONG; "same" was 35 %. The actor's read-back yaw equals the pose yaw
+  (0 / 1.0 / -1.0 / 0.5) on every pose but the 2 at phase changes (one frame late). Yaw is applied as sent.
+- FREEZE (bridge SIGSTOP, 300 s): STOP and CONT in freeze.csv 300.0 s apart; no unplanned restart; X-Ray resumed
+  and ran to the planned kill. Prediction "stops and resumes cleanly" (80 %): held.
+- LONG STOP, what X-Ray does on resume:
+  - time_global jumped 300.45 s (61215 -> 361666 ms). Prediction 90 %: held.
+  - first frame's f_time_delta 100.0 ms (the clamp), then 29, 21, 20 ms: no physics catch-up burst. 85 %: held.
+  - GAME TIME jumped 1802.7 s = 30 min of game time for 5 min of stop (time factor 6). Prediction 70 %: held. So the
+    freeze is NOT a freeze of the world clock: an hour in the Hub would skip 6 game hours (weather, respawns, needs).
+  - no slow frame: the biggest time_global step in the 30 s after resume was 56 ms, in the first 2 s 29 ms.
+    Prediction "one slow frame" (60 %): WRONG.
+  - ON/OFF switch lines: 0 in the 10 s before the stop, 2 in the 10 s after: no burst. Prediction "burst" (40 %):
+    did not happen.
+  - A-Life object count 26112 before and after.
+- Noise: FREEZE_UNSUPPORTED was logged on every pose during the dead phase (PF_PAUSE=0): to be logged once.
+
+## 14. Proposal: wind the world clock back over a freeze (Overseer: "propose a compensation ... rather than accept")
+- Why the jump: game time = m_game_time + time_factor x (Device.dwTimeGlobal - m_start_time)
+  (alife_time_manager_inline.h:25), and the client clock also runs from dwTimeGlobal. dwTimeGlobal comes from
+  TimerGlobal (QPC wall time). Lua cannot fix it: level.change_game_time only moves forward (u32 args), and Lua
+  timers keyed to time_global would still all come due.
+- Engine change (small, default OFF): CTimerBase gets AbsorbGap(ticks) (adds to the existing qwPauseAccum, the same
+  field the engine's own pause uses). In the frame timer (xrEngine/device.cpp ~805), when a new console variable
+  g_freeze_absorb_ms > 0 and the wall gap since the last frame exceeds it, the gap minus one 33 ms frame is
+  absorbed before dwTimeGlobal is read. Effect: after a SIGSTOP, time_global, game time, the scheduler and every Lua
+  timer see one normal frame, exactly as if the stop never happened. The bridge sets it at start through the puppet
+  script (get_console():execute("g_freeze_absorb_ms 2000")) only in T2/B1 runs. With the variable at 0 (default) the
+  engine is unchanged (Rule One). It is player-visible only through Caden's own freeze setting.
+- Test (pre-flight 3, ~7 min, X-Ray only, registered first): two 60 s freeze stops, the first with absorb off and the
+  second on, then the planned kill to measure the fixed restart. PASS for absorb: game time advances <= 1 s and
+  time_global <= 1 s across the second stop, vs ~360 s / ~60 s across the first; X-Ray continues. PASS for the
+  restart: kill to first new snapshot <= 90 s.
+- For ITRZone (asked): freeze.csv gains game_ms (from the last snapshot before STOP and the first after CONT).
