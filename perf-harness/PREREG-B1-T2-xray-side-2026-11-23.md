@@ -148,3 +148,23 @@ and logs every candidate (pid, exe, RSS) at each boot's first snapshot. t2_xray.
 PREDICTIONS: engine() picks the engine 85 %; restart within 90 s 90 %; yaw negated 55 % / same 35 % / neither 10 %;
 freeze stops and resumes cleanly 80 %.
 t2_xray.sh sha 4c0bf34e2a0eb0a4.
+
+## 12. Pre-flight 2, final plan (Overseer: SIGSTOP freeze approved; add a 5-min stop; registered before the run)
+- The 5-min stop IS the freeze path: the stand-in writer's dead+freeze phase lasts 300 s (PF_POSE_ARG=d300), so the
+  bridge SIGSTOPs X-Ray for about 5 min and SIGCONTs on play. Then the planned SIGKILL (PF_KILL_AT=360) and restart.
+  PF_OUT=out/t2pre2 PF_PAUSE=0 PF_FREEZE=sigstop PF_RUN_S=600. Wall time about 11 min; 20-min claim via WANT.
+- New logging in T2 mode (puppet script sha 89cdf093a8161863): once a second G,<time_global>,<os.time>,<frame>,<game.time ms>,
+  <alife object count>; after a wall gap > 5 s between updates, RESUMED_GAP and F,<time_global>,<f_time_delta ms> for
+  every frame of the next 30 s. There is no exported A-Life tick counter, so the A-Life measures are the game time,
+  the object count, and the ON/OFF switch lines (per 10 s, before vs after). Said plainly: a proxy, not a tick count.
+- Desk (xrEngine/device.cpp:794-809): the frame delta fTimeDelta is smoothed and CLAMPED to 0.1 s, but time_global
+  (dwTimeGlobal, from TimerGlobal) is wall-clock based, so after a stop it jumps by the whole stop.
+PREDICTIONS for the long stop:
+- time_global jumps by about the stop (300 s +/- 5 s): 90 %;
+- the first frame's f_time_delta after resume <= 100 ms (clamp, no physics catch-up burst): 85 %;
+- game time jumps by the stop x GAMMA's time factor (i.e. the world clock skips ahead, it does not catch up in a burst
+  of A-Life ticks): 70 %. Alternative: the game time advances only by the clamped 0.1 s (A-Life time froze): 25 %;
+- one slow frame (> 100 ms wall) within the first 2 s after resume, as timers that came due all fire: 60 %;
+- a burst of ON/OFF switch lines in the first 10 s after resume (more than 3x the 10 s before the stop): 40 %;
+- no crash, X-Ray continues: 90 %.
+Readings of (1)-(4) of section 11 are unchanged. t2_xray.sh sha 4c0bf34e2a0eb0a4.

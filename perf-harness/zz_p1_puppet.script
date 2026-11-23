@@ -123,6 +123,7 @@ end
 -- B1-T2 pose reader: accept only seq,n ... end,n with n newer; strip \r (Wine CRLF); torn reads counted
 local p_last, p_last_t, p_stale, p_torn, p_holds, p_paused, p_lx, p_ly, p_lz = 0, nil, false, 0, 0, false, nil, nil, nil
 local p_killed, p_torn_n = {}, nil
+local g_last_wall, g_f_until, g_last_g = nil, nil, nil
 local function t2_pose(a, now, t)
 	local f = io.open(DIR .. "pose.txt", "rb"); if not f then return end
 	local first = f:read("*l"); first = first and string.gsub(first, "\r", "")
@@ -182,6 +183,16 @@ local function on_update()
 	if a.health < 1.0 then a:set_health_ex(1.0) end
 	local t = (now - t0) / 1000
 	if t2 then   -- B1-T2: no track; the pose drives the actor once the warm-up is over (t >= 0)
+		-- long-stop check (Overseer, pre-flight 2): once a second G,<time_global>,<os.time>,<frame>,<game.time ms>,<alife objects>;
+		-- after a wall-clock gap > 5 s between updates (a SIGSTOP), RESUMED_GAP plus F,<time_global>,<f_time_delta ms> for every
+		-- frame of the next 30 s of wall time
+		local wall = os.time()
+		if g_last_wall and wall - g_last_wall > 5 then
+			m(string.format("RESUMED_GAP,%d,%d,%d,%d", now, wall, wall - g_last_wall, game.time())); g_f_until = wall + 30 end
+		g_last_wall = wall
+		if g_f_until and wall <= g_f_until then m(string.format("F,%d,%.1f", now, device().f_time_delta * 1000)) end
+		if now - (g_last_g or -1e9) >= 1000 then g_last_g = now
+			m(string.format("G,%d,%d,%d,%d,%d", now, wall, device().frame, game.time(), alife():object_count())) end
 		if t >= 0 then t2_pose(a, now, t) end
 		if do_export and now - last_exp >= 100 then last_exp = now; export(now, t) end
 		return
