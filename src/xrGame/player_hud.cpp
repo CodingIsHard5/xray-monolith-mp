@@ -6691,7 +6691,9 @@ void vr_wrist_probe_render()
 {
 	vr_wrist_state& W = s_vr_wrist;
 	vr_wrist_parse();
-	if (W.off || !g_vr_track.active)
+	// CLevel::OnRender runs after the stereo eye loop, where g_vr_track.active is already false again; head0_set stays
+	// set while VR runs (never in the flat game) and g_vr_track.frame keeps this frame's number
+	if (W.off || !g_vr_track.head0_set)
 		return;
 	CUIGameCustom* ui = CurrentGameUI();
 	if (!ui)
