@@ -22,21 +22,21 @@ install; run_noguard.sh is checked before every run).
 - Move, 20 Hz: on actor_on_update, every >= 50 ms of time_global, the actor is placed with set_actor_position at
   the track point for elapsed time t (linear interpolation between samples). Off-mesh section (node_dist = -1, t 407-615):
   the actor HOLDS the last on-mesh point, then resumes. Track time = engine time since the first teleport.
-- INVULNERABLE, with hits still logged (Overseer). A callback on actor_on_before_hit (registered last) logs every hit
-  to the export: time, hitter id and section, hit type, power, bone. Then it sets flags.ret_value = false, which
-  cancels the hit (the same mechanism momo_multihit_fix.script uses). Backup: if health is below 0.5 on any update,
+- INVULNERABLE, with hits still logged (Overseer). A callback on actor_on_before_hit, signature (s_hit, bone_id, flags) as in momo_multihit_fix.script, logs every hit
+  to the export: time, hitter id and section, hit type, power, bone. Then it sets flags.ret_value = false and s_hit.power = 0,
+  which cancels the hit (the same mechanism momo_multihit_fix.script uses). Callback order is NOT guaranteed (the callback
+  registry is a Lua table). Backup: if health is below 0.5 on any update,
   it is set back to 1 and the event is logged. Min health is reported. Death would be the walk-stall artefact again,
   so ANY actor death voids the run.
-  Note: other mods' before-hit handlers run before mine, so the GAMMA "Damage to actor" lines still appear. They
+  Note: other mods' before-hit handlers may run before mine, so the GAMMA "Damage to actor" lines still appear. They
   are the damage the hit would have done, not damage taken.
 - Export, 10 Hz: every >= 100 ms, one line per object in db.storage that is online and is a monster or stalker:
   t, id, section, x, y, z, health, best_enemy id (or -1), distance to the actor. Also one actor line with position
   and health. It appends to Z:\dev\shm\p1\export_<tag>.csv (tmpfs, opened once, flushed each tick).
-  Plus online/offline switch events through the binder-independent callbacks: server_entity_on_register /
-  on_unregister, or the squad online flag compared at each export tick. Which one is used is fixed at build and
-  written here before the run.
-- Export cost: each export tick is timed with the engine's high-resolution timer (profiler zone "p1_export" plus
-  os.clock), and the per-tick mean and p99 are written at the end.
+  Online/offline switch events (fixed at build): an id appearing in db.storage between two export ticks is written as an ON line
+  (with its distance), and an id disappearing as an OFF line. db.storage holds an object only while it is online.
+- Export cost: each export tick is timed with the engine's high-resolution timer (Lua profile_timer, in microseconds;
+  os.clock is not used because it is process CPU time), and the per-tick mean and p99 are written at the end.
 - Heartbeat: the export file grows every 100 ms. A stall = no growth for 30 s while the engine lives. It triggers the
   same captures as tools/stall_run.sh (screenshot, per-thread CPU, log tail, winedbg if idle).
 
@@ -67,3 +67,9 @@ install; run_noguard.sh is checked before every run).
 - RssAnon 3-6 GB (a guess; never measured on this rig).
 
 ## 6. ITRZone (track, scorer, predictions): to be added by ITRZone
+
+## Build note (EnginePerf)
+The script is harness/zz_p1_puppet.script (copy in perf-harness/). It parses with luac. Lua names it uses were checked in source:
+set_actor_position, set_health_ex, best_enemy, is_monster, is_stalker, profile_timer, alife():switch_distance, and the SHit fields
+power, draftsman and type. The driver is planned as tb_run.sh with TB_TIMES=1100 (alife dump at load and at 1,100 s of engine time, then quit),
+plus a heartbeat watcher like stall_run.sh. Both are untested until the box run.

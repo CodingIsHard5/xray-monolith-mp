@@ -1,0 +1,119 @@
+-- P1 puppet probe (engine/perf-harness/PREREG-P1-puppet-2026-11-23.md). INERT unless the command line has -p1.
+--   -p1                 move the actor along gamedata\configs\p1_track.csv at 20 Hz (track time from the first teleport);
+--                       off-mesh points (node_dist < 0) hold the last on-mesh point; every hit on the actor is logged and
+--                       cancelled (invulnerable); health below 0.5 is refilled (backup, logged)
+--   -p1_export          also export online monsters/stalkers at 10 Hz
+--   -p1_tag <t>         file tag; output Z:\dev\shm\p1\export_<t>.csv (move/hit/summary lines are written in both modes)
+local cl = command_line and command_line() or ""
+local active = string.find(cl, "-p1", 1, true) ~= nil
+if not active then return end
+local do_export = string.find(cl, "-p1_export", 1, true) ~= nil
+local tag = string.match(cl, "%-p1_tag%s+(%S+)") or "p1"
+
+local trk_t, trk_x, trk_y, trk_z, trk_ok = {}, {}, {}, {}, {}
+local out, t0, last_move, last_exp, idx, held = nil, nil, -1e9, -1e9, 1, false
+local hits, cancels, refills, min_health = 0, 0, 0, 1
+local exp_n, exp_sum, exp_max, exp_times = 0, 0, 0, {}
+local seen = {}
+
+local function w(s) out:write(s, "\n") end
+
+local function load_track()
+	local f = io.open(getFS():update_path("$game_config$", "p1_track.csv"), "r")
+	if not f then printf("p1: NO TRACK FILE"); return false end
+	f:read("*l")
+	for line in f:lines() do
+		local t, x, y, z, nd = string.match(line, "([^,]+),([^,]+),([^,]+),([^,]+),([^,]+)")
+		if t then local n = #trk_t + 1
+			trk_t[n], trk_x[n], trk_y[n], trk_z[n], trk_ok[n] = tonumber(t), tonumber(x), tonumber(y), tonumber(z), tonumber(nd) >= 0 end
+	end
+	f:close(); printf("p1: track %d points, %.1f s", #trk_t, trk_t[#trk_t]); return #trk_t > 1
+end
+
+-- position at track time t: linear between samples; off-mesh -> last on-mesh point (held)
+local lx, ly, lz
+local function track_pos(t)
+	while idx < #trk_t and trk_t[idx + 1] <= t do idx = idx + 1 end
+	local a, b = idx, math.min(idx + 1, #trk_t)
+	if not (trk_ok[a] and trk_ok[b]) then held = true; return lx, ly, lz end
+	held = false
+	local f = (trk_t[b] > trk_t[a]) and math.max(0, math.min(1, (t - trk_t[a]) / (trk_t[b] - trk_t[a]))) or 0
+	lx, ly, lz = trk_x[a] + (trk_x[b] - trk_x[a]) * f, trk_y[a] + (trk_y[b] - trk_y[a]) * f, trk_z[a] + (trk_z[b] - trk_z[a]) * f
+	return lx, ly, lz
+end
+
+local function export(now, t)
+	local tm = profile_timer(); tm:start()
+	local a = db.actor; local ap = a:position(); local present = {}
+	w(string.format("A,%.2f,%d,0,actor,%.2f,%.2f,%.2f,%.3f,-1,0", t, now, ap.x, ap.y, ap.z, a.health))
+	for id, st in pairs(db.storage) do
+		local o = st.object
+		if o and id ~= 0 and (o:is_monster() or o:is_stalker()) then
+			present[id] = true
+			local p = o:position(); local be = o:best_enemy()
+			w(string.format("O,%.2f,%d,%d,%s,%.2f,%.2f,%.2f,%.3f,%d,%.1f", t, now, id, o:section(), p.x, p.y, p.z, o.health,
+				be and be:id() or -1, p:distance_to(ap)))
+			if not seen[id] then w(string.format("ON,%.2f,%d,%d,%s,%.1f", t, now, id, o:section(), p:distance_to(ap))) end
+		end
+	end
+	for id in pairs(seen) do if not present[id] then w(string.format("OFF,%.2f,%d,%d", t, now, id)) end end
+	seen = present
+	out:flush()
+	tm:stop(); local us = tm:time()
+	exp_n, exp_sum = exp_n + 1, exp_sum + us; if us > exp_max then exp_max = us end; exp_times[exp_n] = us
+end
+
+local function on_update()
+	local a = db.actor; if not a then return end
+	local now = time_global()
+	if not t0 then
+		if not load_track() then active = false; return end
+		t0 = now; local sd = alife():switch_distance()
+		w(string.format("S,0,%d,switch_distance=%.1f,export=%s", now, sd, tostring(do_export)))
+	end
+	if a.health < min_health then min_health = a.health end
+	if a.health < 0.5 then refills = refills + 1; w(string.format("REFILL,%.2f,%d,%.3f", (now - t0) / 1000, now, a.health)); a:set_health_ex(1.0) end
+	local t = (now - t0) / 1000
+	if t > trk_t[#trk_t] then return end
+	if now - last_move >= 50 then
+		last_move = now
+		local x, y, z = track_pos(t)
+		if x then a:set_actor_position(vector():set(x, y, z)) end
+	end
+	if do_export and now - last_exp >= 100 then last_exp = now; export(now, t); else out:flush() end
+end
+
+local function on_before_hit(s_hit, bone_id, flags)
+	hits = hits + 1
+	local d = s_hit and s_hit.draftsman
+	w(string.format("HIT,%.2f,%d,%d,%s,%d,%.4f,%s", t0 and (time_global() - t0) / 1000 or -1, time_global(),
+		d and d:id() or -1, d and d:section() or "nil", s_hit and s_hit.type or -1, s_hit and s_hit.power or -1, tostring(bone_id)))
+	flags.ret_value = false; if s_hit then s_hit.power = 0 end; cancels = cancels + 1   -- as momo_multihit_fix.script
+end
+
+local function on_quit()
+	if not out then return end
+	table.sort(exp_times)
+	local p99 = exp_n > 0 and exp_times[math.max(1, math.ceil(exp_n * 0.99))] or 0
+	w(string.format("SUMMARY,hits=%d,cancelled=%d,refills=%d,min_health=%.3f,export_ticks=%d,export_mean_us=%.1f,export_p99_us=%.1f,export_max_us=%.1f",
+		hits, cancels, refills, min_health, exp_n, exp_n > 0 and exp_sum / exp_n or 0, p99, exp_max))
+	out:close(); out = nil
+end
+
+function on_game_start()
+	if not active then return end
+	out = io.open("Z:\\dev\\shm\\p1\\export_" .. tag .. ".csv", "w")
+	if not out then printf("p1: CANNOT OPEN EXPORT FILE"); active = false; return end
+	w("kind,t_s,time_global_ms,id,section,x,y,z,health,best_enemy,dist")
+	RegisterScriptCallback("actor_on_update", on_update)
+	RegisterScriptCallback("actor_on_before_hit", on_before_hit)
+	RegisterScriptCallback("on_before_level_changing", on_quit)
+	RegisterScriptCallback("on_game_end", on_quit)
+	-- summary also every 60 s of track time so a killed run keeps it
+	local last_sum = 0
+	RegisterScriptCallback("actor_on_update", function()
+		if t0 and time_global() - last_sum >= 60000 then last_sum = time_global()
+			w(string.format("TICK,%.2f,hits=%d,cancelled=%d,refills=%d,min_health=%.3f,export_ticks=%d,export_mean_us=%.1f,export_max_us=%.1f,held=%s",
+				(last_sum - t0) / 1000, hits, cancels, refills, min_health, exp_n, exp_n > 0 and exp_sum / exp_n or 0, exp_max, tostring(held))) end
+	end)
+end
