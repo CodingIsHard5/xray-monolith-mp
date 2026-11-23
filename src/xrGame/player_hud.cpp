@@ -1475,6 +1475,7 @@ struct vr_reload_state
 	int dropped;             // rounds dropped to the ground so far
 	Fvector off_world;       // the off hand in the world (measured with the distances)
 	string64 cfg_bone;       // mag_bone of the VR grip config for the held item ("" = "magazine")
+	string256 cfg_rounds;    // milestone 8c: round_bones of the VR grip config ("" = the game's own bullet_bones, or none)
 };
 static vr_reload_state s_vr_rl = {};
 
@@ -2800,6 +2801,11 @@ static void vr_grip_lookup(attachable_hud_item* item)
 		for (int n = 0; n < 2 && !s_vr_rl.cfg_bone[0]; ++n)
 			if (cand[n] && C.ini->section_exist(cand[n]) && C.ini->line_exist(cand[n], "mag_bone"))
 				xr_strcpy(s_vr_rl.cfg_bone, C.ini->r_string(cand[n], "mag_bone"));
+		// milestone 8c: the round bones of this item's HUD model, in the order rounds disappear
+		s_vr_rl.cfg_rounds[0] = 0;
+		for (int n = 0; n < 2 && !s_vr_rl.cfg_rounds[0]; ++n)
+			if (cand[n] && C.ini->section_exist(cand[n]) && C.ini->line_exist(cand[n], "round_bones"))
+				xr_strcpy(s_vr_rl.cfg_rounds, C.ini->r_string(cand[n], "round_bones"));
 	}
 	if (s_vr_support_on)
 		Msg("* [vr3] support point for %s: %.3f m", obj_sect.c_str(), s_vr_support_dist);
@@ -4458,6 +4464,10 @@ struct vr_mag_vis
 	IKinematics* copy;
 	Fmatrix copy_bone[64];  // what the copy's bone callbacks write
 	Fmatrix copy_xf;        // the copy's world transform of this pass (kept: the HUD pass holds the pointer)
+	// milestone 8c (Amendment 35): the round bones, in the order rounds disappear; with n rounds of N the first N - n are hidden
+	u16 rnd[32];
+	int rnd_n;
+	bool rnd_engine;        // the list is the game's own bullet_bones: the game's HUD_VisualBulletUpdate drives the gun model
 };
 static vr_mag_vis s_vr_mv = {nullptr, BI_NONE, 0, false, u32(-1), 0, false, false};
 
@@ -4474,12 +4484,16 @@ struct vr_rnd_seg
 static vr_rnd_seg s_rnd_seg[8];
 static int s_rnd_n = -1;
 static bool s_rnd_probe = false;
+static bool s_rnd_off = false; // -vr_rounds_off: TEST ONLY (mutation witness), off by default
 static void vr_rnd_parse()
 {
 	if (s_rnd_n >= 0)
 		return;
 	s_rnd_n = 0;
 	s_rnd_probe = !!strstr(Core.Params, "-vr_rounds_probe");
+	s_rnd_off = !!strstr(Core.Params, "-vr_rounds_off");
+	if (s_rnd_off)
+		Msg("! [vr3rnd] -vr_rounds_off: TEST ONLY, the round count is NOT shown on any magazine");
 	if (s_rnd_probe)
 		Msg("! [vr3rnd] -vr_rounds_probe: TEST ONLY");
 	LPCSTR q = strstr(Core.Params, "-vr_rounds_hide ");
@@ -4530,6 +4544,27 @@ static u64 vr_rnd_hide_mask(IKinematics* K, u32 frame, int& seg_out)
 	return m;
 }
 
+// rounds shown with n rounds in a list of N: bit i set = list entry i shown (the first N - n are hidden)
+static u32 vr_rnd_expect(int n, int N)
+{
+	n = n < 0 ? 0 : (n > N ? N : n);
+	u32 m = 0;
+	for (int i = N - n; i < N; ++i)
+		m |= u32(1) << i;
+	return m;
+}
+// the gun's bullet_bones bookkeeping recomputed from its count, then the game's own update (not "show every round")
+static void vr_rnd_engine_refresh(CWeapon* w)
+{
+	if (!w || !w->bHasBulletsToHide)
+		return;
+	const int ae = w->GetAmmoElapsed();
+	w->last_hide_bullet = ae >= w->bullet_cnt ? w->bullet_cnt : w->bullet_cnt - ae - 1;
+	if (ae == 0)
+		w->last_hide_bullet = -1;
+	w->HUD_VisualBulletUpdate(false);
+}
+
 static void _BCL vr_mag_bone_cb(CBoneInstance* P)
 {
 	P->mTransform.set(*(Fmatrix*)P->callback_param());
@@ -4555,6 +4590,8 @@ void vr_mag_reset()
 	s_vr_mv.shown_n = 0;
 	s_vr_mv.hid = false;
 	s_vr_mv.copy_failed = false;
+	s_vr_mv.rnd_n = 0;
+	s_vr_mv.rnd_engine = false;
 }
 
 static void vr_pda_reset(); // milestone 10a, below
@@ -4603,6 +4640,7 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 	if (!item || !item->m_model || S.off || S.simple)
 		return;
 	IKinematics* K = item->m_model;
+	vr_rnd_parse();
 	if (V.gun != K)
 	{
 		vr_mag_reset();
@@ -4617,6 +4655,38 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 		}
 		Msg("* [vr3mag] model %s magazine bone %s: %s", item->m_sect_name.c_str(), S.cfg_bone[0] ? S.cfg_bone : "magazine",
 			V.bone != BI_NONE ? "found" : "none (nothing is hidden or drawn for this item)");
+		// milestone 8c: the round bones (ours from the VR config, else the game's bullet_bones), only those under the magazine bone
+		V.rnd_n = 0;
+		V.rnd_engine = false;
+		CWeapon* rw = item->m_parent_hud_item && item->m_parent_hud_item->has_object() ? smart_cast<CWeapon*>(&item->m_parent_hud_item->object()) : nullptr;
+		if (V.bone != BI_NONE)
+		{
+			string1024 src = "";
+			if (S.cfg_rounds[0])
+				xr_strcpy(src, S.cfg_rounds);
+			else if (rw && rw->bHasBulletsToHide)
+			{
+				for (u32 i = 0; i < rw->bullets_bones.size(); ++i)
+				{
+					if (i)
+						xr_strcat(src, ",");
+					xr_strcat(src, rw->bullets_bones[i].c_str());
+				}
+				V.rnd_engine = true;
+			}
+			for (int i = 0, n = _GetItemCount(src, ','); i < n && V.rnd_n < 32; ++i)
+			{
+				string128 nm;
+				_GetItem(src, i, nm, ',');
+				const u16 rb = K->LL_BoneID(nm);
+				if (rb != BI_NONE && rb < 64 && (V.mask & (u64(1) << rb)))
+					V.rnd[V.rnd_n++] = rb;
+				else
+					Msg("! [vr3rnd] round bone '%s' of %s: not under the magazine bone, left out", nm, item->m_sect_name.c_str());
+			}
+			Msg("* [vr3rnd] model %s round bones %d (%s)%s", item->m_sect_name.c_str(), V.rnd_n, V.rnd_engine ? "the game's bullet_bones" : (S.cfg_rounds[0] ? "VR config round_bones" : "none"),
+				V.rnd_n ? "" : ": no round count is shown for this item");
+		}
 	}
 	const bool log = vr_mag_log_window();
 	const int eye = g_stereo_bench_eye;
@@ -4678,8 +4748,30 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 		item->set_bone_visible(S.cfg_bone[0] ? S.cfg_bone : "magazine", TRUE, TRUE);
 		if (item->m_parent_hud_item && item->m_parent_hud_item->has_object())
 			if (CWeapon* w = smart_cast<CWeapon*>(&item->m_parent_hud_item->object()))
-				w->HUD_VisualBulletUpdate(true); // showing the bone shows every round under it: back to the rounds the gun has
+			{
+				// 8c: showing the bone shows every round under it: back to the rounds the gun has (8b called the forced
+				// update, which shows them all; kept under the -vr_rounds_off witness)
+				if (s_rnd_off)
+					w->HUD_VisualBulletUpdate(true);
+				else
+					vr_rnd_engine_refresh(w);
+			}
 	}
+
+	// milestone 8c: the gun's own magazine shows the rounds the gun has (for guns with our list; the game drives its own
+	// bullet_bones). Only while the magazine bone is shown.
+	CWeapon* gw = item->m_parent_hud_item && item->m_parent_hud_item->has_object() ? smart_cast<CWeapon*>(&item->m_parent_hud_item->object()) : nullptr;
+	const int gun_n = gw ? gw->GetAmmoElapsed() : -1;
+	const u32 gun_exp = vr_rnd_expect(gun_n, V.rnd_n);
+	if (!s_rnd_off && V.rnd_n && !V.rnd_engine && gw && K->LL_GetBoneVisible(V.bone))
+		for (int i = 0; i < V.rnd_n; ++i)
+		{
+			const bool want = !!((gun_exp >> i) & 1);
+			if (!!K->LL_GetBoneVisible(V.rnd[i]) != want)
+				item->set_bone_visible(K->LL_BoneName_dbg(V.rnd[i]), want ? TRUE : FALSE, TRUE);
+		}
+	int hand_n = -1;
+	u32 hand_exp = 0, hand_rb = 0;
 
 	// the magazine in the off hand
 	bool hand = false;
@@ -4731,8 +4823,18 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 					if (rnd_hide & (u64(1) << b))
 						V.copy_bone[b].scale(0.f, 0.f, 0.f);
 				}
+			// milestone 8c: the magazine in the hand shows its own rounds
+			hand_n = int(S.hand_cart.size());
+			hand_exp = vr_rnd_expect(hand_n, V.rnd_n);
+			if (!s_rnd_off)
+				for (int i = 0; i < V.rnd_n; ++i)
+					if (!((hand_exp >> i) & 1))
+						V.copy_bone[V.rnd[i]].scale(0.f, 0.f, 0.f);
 			V.copy->CalculateBones_Invalidate();
 			V.copy->CalculateBones(TRUE);
+			for (int i = 0; i < V.rnd_n; ++i) // read back: what the copy's skeleton will draw each round with
+				if (V.copy->LL_GetBoneInstance(V.rnd[i]).mRenderTransform.i.magnitude() > 0.5f)
+					hand_rb |= u32(1) << i;
 			// the gun as the off hand would hold it, moved so the magazine bone's origin is at that hand
 			Fmatrix gun_track, off_track, grip_w, off_w, inv, rel;
 			vr_pose_matrix(G.gun, gun_track);
@@ -4763,6 +4865,15 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 		Msg("* [vr3magv] frame %u eye %d bone 1 gun_shown %d hand_shown %d cache %d mag_world %.4f %.4f %.4f hand_world %.4f %.4f %.4f bone_scale %.4f mag_px %.2f %.2f gun_mag_px %.2f %.2f size %u %u gun_rscale %.4f",
 			g_vr_track.frame, eye, K->LL_GetBoneVisible(V.bone) ? 1 : 0, hand ? 1 : 0, V.cache_ok ? 1 : 0, mag_w.x, mag_w.y, mag_w.z,
 			hand_w.x, hand_w.y, hand_w.z, scale, mx, my, gx, gy, Device.dwWidth, Device.dwHeight, gun_rscale);
+		// milestone 8c: the round count on the gun model and on the copy; rb = read back from the skeletons (render scale
+		// above 0.5), the gun's as this pass begins (last bone calculation), the copy's after its calculation above
+		u32 gun_rb = 0;
+		for (int i = 0; i < V.rnd_n; ++i)
+			if (K->LL_GetBoneInstance(V.rnd[i]).mRenderTransform.i.magnitude() > 0.5f)
+				gun_rb |= u32(1) << i;
+		Msg("* [vr3rndv] frame %u eye %d N %d engine %d off %d gun_n %d gun_shown %d gun_exp %x gun_rb %x hand %d hand_n %d hand_exp %x hand_rb %x",
+			g_vr_track.frame, eye, V.rnd_n, V.rnd_engine ? 1 : 0, s_rnd_off ? 1 : 0, gun_n, K->LL_GetBoneVisible(V.bone) ? 1 : 0, gun_exp, gun_rb,
+			hand ? 1 : 0, hand_n, hand_exp, hand_rb);
 	}
 }
 
