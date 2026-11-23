@@ -1,0 +1,33 @@
+=== ll1
+P  median(CxR1)=0  P97.5(R1xR2)=0.0000  rule_A=ok  deviating=1/5 rule_B'=ok  -> PASS
+L  median(CxR1)=0  P97.5(R1xR2)=2.4000  rule_A=ok  perm_p=1.0000 rule_B=ok  -> PASS
+V  median(CxR1)=4  P97.5(R1xR2)=6.0000  rule_A=ok  perm_p=1.0000 rule_B=ok  -> PASS
+M  median(CxR1)=5  P97.5(R1xR2)=9.4000  rule_A=ok  perm_p=0.8889 rule_B=ok  -> PASS
+D  median(CxR1)=0  P97.5(R1xR2)=0.0000  rule_A=ok  deviating=1/5 rule_B'=ok  -> PASS
+U  median(CxR1)=0.0016  P97.5(R1xR2)=0.0025  rule_A=ok  perm_p=0.0317 rule_B=FAIL  -> FAIL
+C  C xR1 cand : 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 4 4 4 4 4 2 2 2 2 2
+C  median(CxR1)=2  P97.5(R1xR2)=2.0000  rule_A=ok  deviating=1/5 rule_B'=ok  -> PASS
+OVERALL: FAIL
+=== ll10
+P  median(CxR1)=2  P97.5(R1xR2)=0.0000  rule_A=FAIL  deviating=3/5 rule_B'=FAIL  -> FAIL
+L  median(CxR1)=0  P97.5(R1xR2)=2.4000  rule_A=ok  perm_p=1.0000 rule_B=ok  -> PASS
+V  median(CxR1)=3  P97.5(R1xR2)=6.0000  rule_A=ok  perm_p=1.0000 rule_B=ok  -> PASS
+M  median(CxR1)=12  P97.5(R1xR2)=9.4000  rule_A=FAIL  perm_p=0.1905 rule_B=ok  -> FAIL
+D  median(CxR1)=2  P97.5(R1xR2)=0.0000  rule_A=FAIL  deviating=3/5 rule_B'=FAIL  -> FAIL
+U  median(CxR1)=0.0021  P97.5(R1xR2)=0.0025  rule_A=ok  perm_p=0.1111 rule_B=ok  -> PASS
+C  C xR1 cand : 21 21 21 21 21 17 17 17 17 17 22 22 22 22 22 20 20 20 20 20 17 17 17 17 17
+C  median(CxR1)=20  P97.5(R1xR2)=2.0000  rule_A=FAIL  deviating=5/5 rule_B'=FAIL  -> FAIL
+OVERALL: FAIL
+=== ll100
+P  median(CxR1)=0  P97.5(R1xR2)=0.0000  rule_A=ok  deviating=1/5 rule_B'=ok  -> PASS
+L  median(CxR1)=0  P97.5(R1xR2)=2.4000  rule_A=ok  perm_p=1.0000 rule_B=ok  -> PASS
+V  median(CxR1)=4  P97.5(R1xR2)=6.0000  rule_A=ok  perm_p=1.0000 rule_B=ok  -> PASS
+M  median(CxR1)=7  P97.5(R1xR2)=9.4000  rule_A=ok  perm_p=0.6508 rule_B=ok  -> PASS
+D  median(CxR1)=0  P97.5(R1xR2)=0.0000  rule_A=ok  deviating=1/5 rule_B'=ok  -> PASS
+U  median(CxR1)=0.0005  P97.5(R1xR2)=0.0025  rule_A=ok  perm_p=1.0000 rule_B=ok  -> PASS
+C  C xR1 cand : 165 165 165 165 165 165 165 165 165 165 165 165 165 165 165 169 169 169 169 169 164 164 164 164 164
+C  median(CxR1)=165  P97.5(R1xR2)=2.0000  rule_A=FAIL  deviating=5/5 rule_B'=FAIL  -> FAIL
+OVERALL: FAIL
+ll1 C  median(CxR1)=2  P97.5(R1xR2)=0.0000  rule_A=FAIL  deviating=5/5 rule_B'=FAIL  -> FAIL
+ll10 C  median(CxR1)=20  P97.5(R1xR2)=0.0000  rule_A=FAIL  deviating=5/5 rule_B'=FAIL  -> FAIL
+ll100 C  median(CxR1)=165  P97.5(R1xR2)=0.0000  rule_A=FAIL  deviating=5/5 rule_B'=FAIL  -> FAIL

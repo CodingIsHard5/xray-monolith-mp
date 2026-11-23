@@ -1,0 +1,24 @@
+tier (b) score at k=3 band=97.5  R1=5 R2=5 C=5
+P  R1xR2 noise: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+P  C xR1 cand : 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+P  median(CxR1)=0  P97.5(R1xR2)=0.0000  rule_A=ok  deviating=0/5 rule_B'=ok  -> PASS
+L  R1xR2 noise: 0 0 0 2 0 0 0 0 2 0 0 0 0 2 0 0 0 0 2 0 1 1 1 3 1
+L  C xR1 cand : 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 1 1 1 1 0
+L  median(CxR1)=0  P97.5(R1xR2)=2.4000  rule_A=ok  perm_p=1.0000 rule_B=ok  -> PASS
+V  R1xR2 noise: 4 4 2 1 3 2 1 6 3 4 3 2 6 3 6 5 4 1 1 1 2 1 5 3 5
+V  C xR1 cand : 4 3 3 4 5 3 4 6 1 5 4 1 2 4 1 4 1 2 4 1 5 3 4 5 2
+V  median(CxR1)=4  P97.5(R1xR2)=6.0000  rule_A=ok  perm_p=1.0000 rule_B=ok  -> PASS
+M  R1xR2 noise: 7 6 6 10 7 5 6 6 8 9 4 5 5 5 8 0 3 3 3 6 3 2 4 6 7
+M  C xR1 cand : 10 8 3 3 6 7 5 6 2 3 7 7 8 4 5 4 6 5 3 4 4 6 7 5 4
+M  median(CxR1)=5  P97.5(R1xR2)=9.4000  rule_A=ok  perm_p=0.7857 rule_B=ok  -> PASS
+D  R1xR2 noise: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+D  C xR1 cand : 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+D  median(CxR1)=0  P97.5(R1xR2)=0.0000  rule_A=ok  deviating=0/5 rule_B'=ok  -> PASS
+U  R1xR2 noise: 0.0005 0.0005 0.0005 0.0016 0.0005 0.0005 0.0005 0.0005 0.0016 0.0005 0.0021 0.0021 0.0021 0.0031 0.0021 0.0000 0.0000 0.0000 0.0010 0.0000 0.0010 0.0010 0.0010 0.0021 0.0010
+U  C xR1 cand : 0.0016 0.0016 0.0031 0.0010 0.0021 0.0005 0.0005 0.0021 0.0000 0.0010 0.0000 0.0000 0.0016 0.0005 0.0005 0.0005 0.0005 0.0021 0.0000 0.0010 0.0005 0.0005 0.0010 0.0010 0.0000
+U  median(CxR1)=0.0005  P97.5(R1xR2)=0.0025  rule_A=ok  perm_p=1.0000 rule_B=ok  -> PASS
+C  R1xR2 noise: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+C  C xR1 cand : 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+C  governing threshold 2 (registered override; band threshold was 0.0000)
+C  median(CxR1)=0  P97.5(R1xR2)=2.0000  rule_A=ok  deviating=0/5 rule_B'=ok  -> PASS
+OVERALL: PASS

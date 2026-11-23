@@ -70,3 +70,39 @@ String check "tb_lose_member_link": TestHook14.exe 1 (positive control), PerfDX1
 Overlay harness/zz_eperf_dump.script copied to run/gamedata/scripts (identical by cmp).
 tb_hash.sh TestHook14.exe bench1: exe d7c34cff31f2a095 (RefDet14 bc0426a10810f461); every other line equal to the
 RefDet14 fingerprint (bin_libs c0b49c85c74b7ab9, scripts ea7bb8198cfbcdaf, overlay 2b79a817a08a1e7f, tools 5ec50c2c9ed26ed9).
+
+## 7. RESULTS (scored once, 2026-11-22 evening; 21 runs 14:04-19:37, 2 slices, 0 DISTURBED, 0 re-runs)
+
+Commands: tier_b.py score --r1 r01 r02_rr r03_rr r04_rr r05 --r2 r06..r10 --band 97.5 --ruleb2 P,D,C --thr C=2
+(outputs statC2_inert.txt, statC2_doses.txt; per-run counts statC2_components.txt). smokel passed (I4 101, done n=100).
+Every dosed run delivered its dose (lostlink_done 1/10/100 in all 15); all ti runs: hook ok, n 0.
+
+Stock side (ti read first): ti01-05 equal R1 on I1..I6 (31,0,15,2,1,12), C distance 0 against every R1 run. No
+widening; governing C threshold stays 2.
+Inertness (ti vs R1/R2, all seven statistics): PASS.
+
+| dose | P | L | V | M | D | U | C (thr 2) | C (registered thr 0) | overall |
+|---|---|---|---|---|---|---|---|---|---|
+| 1   | PASS (1/5) | PASS | PASS | PASS | PASS (1/5) | FAIL (Rule B p 0.032; Rule A ok) | PASS (median 2, 1/5) | FAIL | FAIL |
+| 10  | FAIL (A, B' 3/5) | PASS | PASS | FAIL (A: 12 > 9.4) | FAIL (A, B' 3/5) | PASS | FAIL (median 20, 5/5) | FAIL | FAIL |
+| 100 | PASS (1/5) | PASS | PASS | PASS | PASS (1/5) | PASS | FAIL (median 165, 5/5) | FAIL | FAIL |
+
+Must-holds: dose 100 fails C - MET. I4 at dose 100 >= 50 (101) - MET. P passes at every dose - NOT MET (dose 10).
+VERDICT AS REGISTERED: the control does NOT count. Under the registered rule it does not separate C from P.
+
+What went wrong, stated plainly:
+- P failed at dose 10. The cause is deaths, not the cut links: in 5 dosed runs (ll1_04, ll10_01, ll10_03, ll10_04,
+  ll100_04) 2-5 creatures died, P and D moved by exactly that number and I1 rose by the same amount. The dead
+  creatures name squad 65535 and were never in a cut squad; the same ids recur (28170, 28175, 19320, 20530, 20535,
+  28004): one recurring offline fight. Three of five ll10 runs had it, so the Rule B' count reached 3. At dose 100,
+  P passed while C was 165 - the separation the control was built to show - but the registration said every dose.
+- Wrong predictions: I4 at dose 100 = 101 (predicted 102); I6 = 13/19/77 (predicted 13/20/60, range ..45-65: dose 100
+  is OUTSIDE the range); I3 = 16 at dose 100 in all 5 runs (predicted unchanged); C distance 2/17-22/164-169 (predicted
+  2/18/148; dose 100 at the top of the range); U failed at dose 1 (predicted pass); P, D, M failed at dose 10
+  (predicted pass).
+- U at dose 1 failed again, as in the first control. Run order was shuffled this time, so run position is ruled out.
+  Pass counts: stock/ti 1919-1925 (median 1921); ll1 1924-1926; ll10 1921-1927; ll100 1920-1924. The same pattern as
+  the lost-registration control: low doses raise the A-Life pass count by about 3-5, dose 100 does not. Unexplained.
+- EXPLORATORY (not registered, after the fact): the recurring-death event occurred in 8 of 30 dosed runs across both
+  controls (3/15, 5/15) and 2 of 34 stock runs (h05, ri03); one-sided Fisher p = 0.025. It may be that cutting or
+  dropping links shifts offline combat timing enough to set off that fight more often. Not tested; not chased.
