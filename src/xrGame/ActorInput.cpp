@@ -939,3 +939,14 @@ void vr_item_probe_update()
 	if (f == s_frame + 400)
 		Msg("* [vr11p] frame %d end: section '%s' count %d uses %d; health %.4f", f, sect, n, u, A->conditions().GetHealth());
 }
+
+// GammaVR milestone 11a (Amendment 37 note 5): helpers for player_hud.cpp's consumable-in-the-hand code
+bool vr_lam2_skip() // GAMMA's lam2.stop_all_actions (FDDA's own skip); false if the function is not there
+{
+	::luabind::functor<void> fn;
+	if (!ai().script_engine().functor("lam2.stop_all_actions", fn))
+		return false;
+	fn();
+	return true;
+}
+void vr_item_section_count(CActor* A, LPCSTR sect, int& n, int& uses) { vr_item_count(A, sect, n, uses); }

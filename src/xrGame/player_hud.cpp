@@ -3774,6 +3774,318 @@ static void vr_loco_update(const vr_input_info& I, CActor* A, bool allowed, bool
 	}
 }
 
+// GammaVR milestone 11a (SPIKE_PLAN Amendment 37 note 5): a consumable in the off hand, used at the mouth or body.
+// Two chest pouches (off hand only) take one item of a quick slot (the engine's GetAny); the item's world model is shown
+// in the hand while the grip is held. Held in its class zone (mouth / body, gvr_grips.ltx [vr_use_class]), the engine's
+// own quick-use path runs (IR_OnKeyboardPress(kQUICK_USE_n)), so GAMMA / quick_use_prio / FDDA decide everything. The
+// use is done when that section's count or uses drop. Leaving early cancels: the cancel waits for FDDA's running signal
+// (its items_anm_dummy item in the inventory), calls lam2.stop_all_actions ONCE, and is resolved when the dummy is gone;
+// it expires after 4.0 s ([vr11] cancel expired). While a cancel is pending a new use waits (never purged by it).
+// Switches: -vr_pouches A B (slots, default 0 1); -vr_pouch_pos "x y z" (left pouch, head-relative; right = mirrored x);
+// -vr_use_instant (no cancel on leaving); TEST ONLY: -vr_use_off (nothing), -vr_use_nostart (the quick-use call is not made).
+bool vr_lam2_skip();                                                        // ActorInput.cpp
+void vr_item_section_count(CActor* A, LPCSTR sect, int& n, int& uses);      // ActorInput.cpp
+static const float VR_ITEM_CANCEL_CAP = 4.0f;
+struct vr_item_state
+{
+	bool parsed, off, instant, nostart;
+	int slot[2];
+	Fvector pouch;            // left pouch, head-relative (side, down as negative y, forward); right = mirrored side
+	float pouch_r, zone_r;
+	Fvector mouth, body;      // head-relative, same convention
+	int state;                // 0 empty, 1 carrying, 2 using (in its zone)
+	int from;                 // pouch index the item came from
+	shared_str sect, visual;
+	bool body_class;
+	bool prev_grab;
+	bool use_called, use_wait;
+	int base_n, base_u;
+	bool pending, skipped;
+	float age;
+	u32 cancel_frame;
+	bool claims;              // the off hand's grip belongs to this code this frame
+	bool dummy;
+	float d_p[2], d_z;
+};
+static vr_item_state s_vr_item = {};
+bool vr_item_claims() { return s_vr_item.claims; }
+static void vr_item_parse()
+{
+	vr_item_state& S = s_vr_item;
+	if (S.parsed)
+		return;
+	S.parsed = true;
+	S.off = !!strstr(Core.Params, "-vr_use_off");
+	S.instant = !!strstr(Core.Params, "-vr_use_instant");
+	S.nostart = !!strstr(Core.Params, "-vr_use_nostart");
+	S.slot[0] = 0;
+	S.slot[1] = 1;
+	if (LPCSTR q = strstr(Core.Params, "-vr_pouches "))
+	{
+		int a, b;
+		if (sscanf(q + 12, "%d %d", &a, &b) == 2 && a >= 0 && a <= 3 && b >= 0 && b <= 3)
+		{
+			S.slot[0] = a;
+			S.slot[1] = b;
+		}
+	}
+	S.pouch.set(-0.15f, -0.38f, 0.12f);
+	if (LPCSTR q = strstr(Core.Params, "-vr_pouch_pos "))
+	{
+		Fvector p;
+		if (sscanf(q + 14, "%f %f %f", &p.x, &p.y, &p.z) == 3)
+			S.pouch.set(-_abs(p.x), p.y, p.z);
+	}
+	S.pouch_r = 0.06f;
+	S.zone_r = 0.08f;
+	S.mouth.set(0.f, -0.10f, 0.08f);
+	S.body.set(0.f, -0.50f, 0.15f);
+	Msg("* [vr11] consumables in the hand: %s%s%s; pouches slot %d (left) slot %d (right) at side %.3f y %.3f fwd %.3f r %.3f; mouth %.3f %.3f %.3f body %.3f %.3f %.3f r %.3f; cancel cap %.1f s",
+		S.off ? "OFF (-vr_use_off, TEST ONLY)" : "on", S.instant ? "; -vr_use_instant" : "", S.nostart ? "; -vr_use_nostart (TEST ONLY)" : "",
+		S.slot[0], S.slot[1], S.pouch.x, S.pouch.y, S.pouch.z, S.pouch_r, S.mouth.x, S.mouth.y, S.mouth.z, S.body.x, S.body.y, S.body.z,
+		S.zone_r, VR_ITEM_CANCEL_CAP);
+}
+static void vr_item_point(const vr_input_info& I, const Fvector& o, Fvector& out)
+{
+	Fvector hf, hr;
+	vr_quat_rotate(I.head.qx, I.head.qy, I.head.qz, I.head.qw, Fvector().set(0.f, 0.f, 1.f), hf);
+	hf.y = 0.f;
+	if (hf.magnitude() < 0.01f)
+		hf.set(0.f, 0.f, 1.f);
+	hf.normalize();
+	hr.set(hf.z, 0.f, -hf.x);
+	out.set(I.head.pos);
+	out.y += o.y;
+	out.mad(hr, o.x);
+	out.mad(hf, o.z);
+}
+static bool vr_item_use_class_body(LPCSTR sect)
+{
+	const vr_grip_cfg& C = vr_grip_config();
+	if (C.ini && C.ini->section_exist("vr_use_class") && C.ini->line_exist("vr_use_class", sect))
+		return !xr_strcmp(C.ini->r_string("vr_use_class", sect), "body");
+	return false;
+}
+static void vr_item_call_use(CActor* A, u32 frame)
+{
+	vr_item_state& S = s_vr_item;
+	const int slot = S.slot[S.from];
+	vr_item_section_count(A, S.sect.c_str(), S.base_n, S.base_u);
+	S.use_called = true;
+	S.use_wait = false;
+	if (S.nostart)
+		Msg("* [vr11] frame %u use start slot %d '%s' NOT called (-vr_use_nostart, TEST ONLY) count %d uses %d", frame, slot, S.sect.c_str(), S.base_n, S.base_u);
+	else
+	{
+		Msg("* [vr11] frame %u use start slot %d '%s' through IR_OnKeyboardPress(kQUICK_USE_%d) count %d uses %d", frame, slot, S.sect.c_str(), slot + 1, S.base_n, S.base_u);
+		A->IR_OnKeyboardPress(kQUICK_USE_1 + slot);
+	}
+}
+static void vr_item_update(const vr_input_info& I, CActor* A, bool grab, bool off_free)
+{
+	vr_item_state& S = s_vr_item;
+	vr_item_parse();
+	S.claims = false;
+	if (S.off || !A || !A->m_inventory)
+		return;
+	const int gun = I.gun ? 1 : 0, off = 1 - gun;
+	const bool press = grab && !S.prev_grab;
+	S.prev_grab = grab;
+	const bool geo = I.head.valid && I.grip[off].valid;
+	S.d_p[0] = S.d_p[1] = S.d_z = 1000.f;
+	if (geo)
+	{
+		Fvector c;
+		for (int p = 0; p < 2; ++p)
+		{
+			Fvector o = S.pouch;
+			if (p == 1)
+				o.x = -o.x;
+			vr_item_point(I, o, c);
+			S.d_p[p] = I.grip[off].pos.distance_to(c);
+		}
+		if (S.state)
+		{
+			vr_item_point(I, S.body_class ? S.body : S.mouth, c);
+			S.d_z = I.grip[off].pos.distance_to(c);
+		}
+	}
+	// FDDA's running signal: its dummy item in the inventory
+	{
+		int dn, du;
+		vr_item_section_count(A, "items_anm_dummy", dn, du);
+		S.dummy = dn > 0;
+	}
+	// the pending cancel
+	if (S.pending)
+	{
+		S.age += Device.fTimeDelta;
+		const u32 af = I.frame - S.cancel_frame;
+		if (!S.skipped && S.dummy)
+		{
+			S.skipped = true;
+			const bool ok = vr_lam2_skip();
+			Msg("* [vr11] frame %u cancel skip: lam2.stop_all_actions %s (age %.3f s, %u frames)", I.frame, ok ? "called" : "NOT FOUND", S.age, af);
+		}
+		else if (S.skipped && !S.dummy)
+		{
+			S.pending = false;
+			Msg("* [vr11] frame %u cancel resolved (age %.3f s, %u frames)", I.frame, S.age, af);
+		}
+		else if (S.age >= VR_ITEM_CANCEL_CAP - 0.001f)
+		{
+			S.pending = false;
+			Msg("* [vr11] frame %u cancel expired (age %.3f s, %u frames, skip %s)", I.frame, S.age, af, S.skipped ? "made, dummy still present" : "not made");
+		}
+	}
+	if (S.state == 0)
+	{
+		int p = -1;
+		if (geo && off_free)
+			p = S.d_p[0] <= S.pouch_r ? 0 : (S.d_p[1] <= S.pouch_r ? 1 : -1);
+		if (p >= 0)
+			S.claims = true; // a grip press here belongs to the pouch
+		if (press && p >= 0)
+		{
+			LPCSTR sect = g_quick_use_slots[S.slot[p]];
+			PIItem it = sect[0] ? A->inventory().GetAny(sect) : nullptr;
+			if (!it)
+				Msg("* [vr11] frame %u take at pouch %d slot %d '%s': nothing there", I.frame, p, S.slot[p], sect);
+			else
+			{
+				S.state = 1;
+				S.from = p;
+				S.sect = sect;
+				S.visual = it->object().cNameVisual();
+				S.body_class = vr_item_use_class_body(sect);
+				S.use_called = S.use_wait = false;
+				S.claims = true;
+				Msg("* [vr11] frame %u take at pouch %d slot %d '%s' id %d visual '%s' class %s", I.frame, p, S.slot[p], sect, int(it->object().ID()),
+					S.visual.c_str(), S.body_class ? "body" : "mouth");
+			}
+		}
+	}
+	else
+	{
+		S.claims = true;
+		const bool in_zone = geo && S.d_z <= S.zone_r;
+		if (S.state == 1)
+		{
+			if (!grab)
+			{
+				S.state = 0;
+				Msg("* [vr11] frame %u released: '%s' back to pouch %d, nothing used", I.frame, S.sect.c_str(), S.from);
+			}
+			else if (in_zone)
+			{
+				S.state = 2;
+				if (S.pending)
+				{
+					S.use_wait = true;
+					S.use_called = false;
+					Msg("* [vr11] frame %u use waits for cancel ('%s')", I.frame, S.sect.c_str());
+				}
+				else
+					vr_item_call_use(A, I.frame);
+			}
+		}
+		else if (S.state == 2)
+		{
+			if (S.use_wait && !S.pending)
+				vr_item_call_use(A, I.frame);
+			int n = S.base_n, u = S.base_u;
+			if (S.use_called)
+				vr_item_section_count(A, S.sect.c_str(), n, u);
+			if (S.use_called && (n < S.base_n || u < S.base_u))
+			{
+				S.state = 0;
+				Msg("* [vr11] frame %u used: '%s' count %d -> %d uses %d -> %d", I.frame, S.sect.c_str(), S.base_n, n, S.base_u, u);
+			}
+			else if (!in_zone || !grab)
+			{
+				S.state = 0;
+				if (S.instant && S.use_called)
+					Msg("* [vr11] frame %u left the zone: -vr_use_instant, the use goes on ('%s')", I.frame, S.sect.c_str());
+				else if (!S.use_called)
+					Msg("* [vr11] frame %u left the zone before the use was called ('%s'): nothing to cancel, back to pouch %d", I.frame, S.sect.c_str(), S.from);
+				else
+				{
+					S.pending = true;
+					S.skipped = false;
+					S.age = 0.f;
+					S.cancel_frame = I.frame;
+					Msg("* [vr11] frame %u cancel pending ('%s', %s): back to pouch %d", I.frame, S.sect.c_str(), !grab ? "grip released" : "left the zone", S.from);
+				}
+			}
+		}
+	}
+	int cn[4], cu[4];
+	for (int i = 0; i < 4; ++i)
+		vr_item_section_count(A, g_quick_use_slots[i], cn[i], cu[i]);
+	Msg("* [vr11s] frame %u state %d sect '%s' d_pouch %.4f %.4f d_zone %.4f grab %d free %d dummy %d pending %d age %.3f counts %d/%d %d/%d %d/%d %d/%d",
+		I.frame, S.state, S.state ? S.sect.c_str() : "", S.d_p[0], S.d_p[1], S.d_z, grab ? 1 : 0, off_free ? 1 : 0, S.dummy ? 1 : 0,
+		S.pending ? 1 : 0, S.pending ? S.age : 0.f, cn[0], cu[0], cn[1], cu[1], cn[2], cu[2], cn[3], cu[3]);
+}
+// the model in the hand (drawn by player_hud::render_hud with the PDA and the wrist)
+struct vr_item_vis
+{
+	IRenderVisual* vis;
+	IKinematics* K;
+	shared_str name;
+	bool failed;
+	Fmatrix xf;
+	u32 drawn;
+};
+static vr_item_vis s_vr_iv = {};
+static void vr_item_reset()
+{
+	if (s_vr_iv.vis)
+		::Render->model_Delete(s_vr_iv.vis);
+	s_vr_iv.vis = nullptr;
+	s_vr_iv.K = nullptr;
+	s_vr_iv.name = nullptr;
+	s_vr_iv.failed = false;
+	s_vr_item.state = 0;
+	s_vr_item.pending = false;
+}
+static void vr_item_draw(IDSGraphManager* DM)
+{
+	vr_item_state& S = s_vr_item;
+	vr_item_vis& V = s_vr_iv;
+	if (!S.parsed || S.off || !S.state)
+		return;
+	vr_grip_info G;
+	if (!g_vr_get_grip || !g_vr_get_grip(&G) || !G.off.valid)
+		return;
+	if (V.name != S.visual)
+	{
+		if (V.vis)
+			::Render->model_Delete(V.vis);
+		V.vis = nullptr;
+		V.K = nullptr;
+		V.name = S.visual;
+		::Render->hud_loading = true;
+		V.vis = S.visual.size() ? ::Render->model_Create(S.visual.c_str()) : nullptr;
+		::Render->hud_loading = false;
+		V.K = V.vis ? V.vis->dcast_PKinematics() : nullptr;
+		V.failed = !V.vis;
+		Msg("* [vr11] model in the hand '%s' %s", S.visual.c_str(), V.vis ? "made" : "NOT made");
+	}
+	if (!V.vis)
+		return;
+	Fmatrix off_track;
+	vr_pose_matrix(G.off, off_track);
+	V.xf.mul_43(g_vr_track.track_to_world, off_track); // model origin at the grip point (placement is a feel item)
+	if (V.K)
+	{
+		V.K->CalculateBones_Invalidate();
+		V.K->CalculateBones(TRUE);
+	}
+	DM->add_Dynamic(V.vis, &V.xf);
+	if ((V.drawn++ % 20) == 0)
+		Msg("* [vr11d] frame %u drawn '%s' at %.4f %.4f %.4f", g_vr_track.frame, V.name.c_str(), V.xf.c.x, V.xf.c.y, V.xf.c.z);
+}
+
 void vr_input_update()
 {
 	static bool s_trig[2] = { false, false }, s_grab[2] = { false, false };
@@ -3828,6 +4140,14 @@ void vr_input_update()
 		}
 		if (pda_block & (1 << off))
 			s_vr_grab_held = false;
+		// milestone 11a (Amendment 37 note 5): a consumable from a chest pouch in the off hand; while it claims the
+		// off hand's grip, the reload (and the two-handed grab, through vr_item_claims) do not see it
+		{
+			const bool off_free = !s_vr_rl.hand_mag && !(s_vr_pda.shown && !s_vr_pda.placed && s_vr_pda.hand == off) && !(pda_block & (1 << off));
+			vr_item_update(I, g_actor, s_grab[off] && !(pda_block & (1 << off)), off_free);
+			if (vr_item_claims())
+				s_vr_grab_held = false;
+		}
 		// milestone 8a (Amendment 31): manual reload
 		vr_reload_update(I, g_actor, vr_fire_allowed(g_actor), s_vr_grab_held, s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to);
 		// milestone 9a (Amendment 32): holsters (gun hand's grip)
@@ -4188,7 +4508,7 @@ bool player_hud::vr_place_at_grip()
 				inv.transform_tiny(RS.pouch_track, pc);
 				inv.transform_tiny(RS.sup_track, sp2);
 				// a hand holding a magazine, or placed where a grip press belongs to the reload, does not start a two-handed grab
-				rl_claims = RS.active && (RS.hand_mag || (RS.geo && (RS.d_pouch <= 0.15f || (RS.mag_in && RS.d_mag <= 0.10f && RS.d_mag < RS.d_sup))));
+				rl_claims = RS.active && (RS.hand_mag || (RS.geo && (RS.d_pouch <= 0.15f || (RS.mag_in && RS.d_mag <= 0.10f && RS.d_mag < RS.d_sup)))) || vr_item_claims(); // 11a: an item in (or being taken by) the off hand
 				if (RS.active && RS.hand_mag)
 					s_vr_2h_grabbed = false;
 			}
@@ -4615,6 +4935,7 @@ static void vr_wrist_draw(IDSGraphManager* DM); // milestone 10c, at the end of 
 void vr_reload_reset()
 {
 	vr_pda_reset();
+	vr_item_reset(); // milestone 11a
 	vr_reload_state& S = s_vr_rl;
 	if (S.hand_mag && !S.hand_cart.empty())
 		Msg("! [vr3mag] the HUD was destroyed with a magazine of %u rounds in the hand: not saved", u32(S.hand_cart.size()));
@@ -5212,6 +5533,7 @@ void player_hud::render_hud(IDSGraphManager* DM)
 		vr_dbg_base_log(false, g_vr_track.frame); // GammaVR diagnostic, only with -vr_dbg_base
 	if (g_vr_track.active && g_vr_track.head0_set)
 		vr_pda_draw(DM); // GammaVR milestone 10a: the PDA in the free hand (drawn with or without a held item)
+		vr_item_draw(DM); // GammaVR milestone 11a: a consumable in the off hand
 	if (g_vr_track.active && g_vr_track.head0_set)
 		vr_wrist_draw(DM); // GammaVR milestone 10c: the wrist status device
 	bool b_r0 = ((m_attached_items[0] && m_attached_items[0]->need_renderable()) || script_anim_part == 0 || script_anim_part == 2);
