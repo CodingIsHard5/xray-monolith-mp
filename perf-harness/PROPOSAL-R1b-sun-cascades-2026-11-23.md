@@ -88,3 +88,18 @@ DetailManager.cpp, SkeletonCustom.cpp, the rendertarget phase files, the vr file
 ## 6. Proposed next step (needs the Overseer's OK)
 A desk audit of the shared state listed for 1b-1 (section 3), then the 1b-1 prereg (gain, the checks, the code
 size), the diff to gammavr, a build, and then a request for box time.
+
+## Overseer ruling and gammavr's answers (2026-11-23)
+Overseer: approved in this order: desk audit, 1b-1 prereg, diff to gammavr, build, then a box request. 1b-1 waits for
+gammavr's answers. Any objection goes to the Overseer, not worked around. The 1b-2 stop rule (>= 1/2 of 1b-1's
+prediction) goes into 1b-1's prereg.
+gammavr (no objection; constraints):
+1. 8c is CLOSED. R_sun.cpp is free for my diff after the Overseer's ruling on 1b-1, under (a)-(c). Their 7c regression set
+   is running (about 2 h); a diff sent to them does not affect it, but they cherry-pick nothing until it is scored.
+2. The diff is BASED ON mp/vr-spike-mt's R_sun.cpp (bad71b1de, df0180a69: +90/-36 against 1cf2b14a7), not upstream's.
+   Those commits add r_stereo_bench 2: eye 0 renders each cascade and saves its depth map; eye 1 skips the cascade render
+   and its prepass and copies the saved map back. In mode 2, eye 1 must NOT start the early traverse tasks (or must
+   discard them). Mode 2 is a bench mode (the headset uses 0), but it must keep working.
+3. Cascades run per Render() call: in VR, or with r_stereo_bench >= 1, the whole pipeline runs once per eye with that
+   eye's camera. So the early tasks BELONG TO ONE Render() call and are joined inside it. Nothing carries over from
+   eye 0 to eye 1 except mode 2's explicit reuse.
