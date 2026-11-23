@@ -1,0 +1,22 @@
+r1a_ros_1    static0=0.394  dynamic0=0.024  forward=0.167  main=0.585  b=2.132  frame=5.633
+r1a_ros_2    static0=0.395  dynamic0=0.025  forward=0.168  main=0.588  b=2.121  frame=5.743
+r1a_ros_3    static0=0.395  dynamic0=0.025  forward=0.167  main=0.587  b=2.135  frame=5.804
+MEAN         static0=0.395  dynamic0=0.025  forward=0.167  main=0.587  b=2.129  frame=5.727
+r1a_cor_1    static0=0.275  dynamic0=0.011  forward=0.007  main=0.293  b=1.642  frame=4.520
+r1a_cor_2    static0=0.270  dynamic0=0.011  forward=0.007  main=0.288  b=1.674  frame=4.671
+r1a_cor_3    static0=0.273  dynamic0=0.011  forward=0.007  main=0.291  b=1.642  frame=4.636
+MEAN         static0=0.272  dynamic0=0.011  forward=0.007  main=0.291  b=1.653  frame=4.609
+r1a_ros_1      frame=5.633  feed=2.750  render=2.670  a=0.538  b=2.132  c=0.080  sun=1.132  probes=1448
+r1a_ros_2      frame=5.743  feed=2.747  render=2.666  a=0.545  b=2.121  c=0.081  sun=1.119  probes=1448
+r1a_ros_3      frame=5.804  feed=2.757  render=2.676  a=0.541  b=2.135  c=0.081  sun=1.126  probes=1450
+r1a_ros_k0_1   frame=5.757  feed=2.747  render=2.668  a=0.539  b=2.128  c=0.080  sun=1.129  probes=1444
+r1a_ros_k0_2   frame=5.797  feed=2.778  render=2.697  a=0.542  b=2.155  c=0.081  sun=1.136  probes=1443
+r1a_ros_k0_3   frame=5.628  feed=2.748  render=2.668  a=0.537  b=2.131  c=0.080  sun=1.128  probes=1445
+MEAN           frame=5.727  feed=2.755  render=2.674  a=0.540  b=2.134  c=0.080  sun=1.128  probes=1446
+r1a_cor_1      frame=4.520  feed=1.852  render=1.787  a=0.144  b=1.642  c=0.065  sun=0.485  probes=712
+r1a_cor_2      frame=4.671  feed=1.884  render=1.818  a=0.144  b=1.674  c=0.066  sun=0.487  probes=714
+r1a_cor_3      frame=4.636  feed=1.850  render=1.785  a=0.143  b=1.642  c=0.065  sun=0.482  probes=724
+r1a_cor_k0_1   frame=4.520  feed=1.845  render=1.781  a=0.142  b=1.640  c=0.064  sun=0.482  probes=713
+r1a_cor_k0_2   frame=4.200  feed=1.823  render=1.757  a=0.142  b=1.615  c=0.066  sun=0.476  probes=718
+r1a_cor_k0_3   frame=4.096  feed=1.825  render=1.761  a=0.141  b=1.620  c=0.064  sun=0.482  probes=707
+MEAN           frame=4.440  feed=1.847  render=1.782  a=0.143  b=1.639  c=0.065  sun=0.482  probes=715

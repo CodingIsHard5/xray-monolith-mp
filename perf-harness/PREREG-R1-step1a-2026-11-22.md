@@ -77,3 +77,28 @@ Reason: the config changed since step 0 (above), so step 0's K means are not a f
 check. Added: 3 + 3 fresh Coarse14.exe reference runs (K0), interleaved: Rostok K0 K' K' K0 K0 K', Cordon K' K0 K0 K'
 K' K0. The sanity check compares K' frame against the fresh K0 means (within 5 %). main <= (b) is checked per K' run as
 before. The abort rule is UNCHANGED: main < 0.6 ms in Rostok (K' mean) -> R1 stops.
+
+## RESULT (scored once, 2026-11-22 23:10; series 22:51-23:07, all 12 runs VERDICT clean, no re-runs)
+Numbers in r1a_score.txt (r1a_zones.py on the K' runs, r1_split.py on K' and K0). Means, ms per frame:
+
+| | static0 | dynamic0 | forward | main | (b) | K' frame | K0 frame |
+|---|---|---|---|---|---|---|---|
+| Rostok | 0.395 | 0.025 | 0.167 | **0.587** | 2.129 | 5.727 | 5.727 |
+| Cordon | 0.272 | 0.011 | 0.007 | 0.291 | 1.653 | 4.609 | 4.272 |
+
+Sanity checks as registered:
+- main <= (b) in every K' run: PASS (6/6).
+- K' frame within 5 % of the fresh K0 mean: Rostok PASS (0.0 %); Cordon FAIL (+7.9 %).
+Registered consequence: a failed sanity check means "report that instead of a decision". So step 1a gives NO
+registered decision. I do not override that.
+
+Reported only, not a decision:
+- Rostok, where every check passed: main = 0.587 ms, under the 0.6 ms abort bar (by 0.013 ms; per run 0.585-0.588).
+  If the Cordon failure is ruled noise, the registered rule says R1 STOPS.
+- The Cordon gap is not in the render feed: K' vs K0 feed 1.862 vs 1.831, (a) 0.144 vs 0.142, (b) 1.653 vs 1.625.
+  It is in the rest of the frame. The K0 Cordon runs themselves spread 4.10-4.52 (10 %); K'
+  spreads 4.52-4.67. The zones add 3 probe calls per pass, too few to cost 0.34 ms. My guess: run-to-run
+  noise in the non-render part of the Cordon frame. Not shown.
+- My prediction (main 0.5-0.8, central 0.65; static0 biggest, 0.25-0.4; Cordon 0.3-0.6): main landed below my
+  central value; static0 was biggest as predicted (0.395, at the top of the range); Cordon main 0.291 just below
+  my range.
