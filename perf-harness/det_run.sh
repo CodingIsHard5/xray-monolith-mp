@@ -10,6 +10,7 @@ T="$HOME/.claude/overseer/tools"; W=engineperf
 OUT="$P/out/det_$TAG"; mkdir -p "$OUT"
 [ "$(stat -c %s "$RUN/bin/$EXE" 2>/dev/null || echo 0)" -gt 1000000 ] || { echo "no usable exe $EXE"; exit 2; }
 if "$T/protected-title-check.sh" >/dev/null 2>&1; then echo "REFUSED: protected title running"; exit 3; fi
+"$P/tools/run_noguard.sh" "$RUN" || exit 7   # no path from run/ may write into ~/Games (Overseer 2026-11-22)
 # DET_NOCLAIM=1: the caller (tools/det_pair.sh) already holds the claim for a whole series of runs
 if [ "${DET_NOCLAIM:-0}" != 1 ] && ! "$T/quiet-required.sh" claim $W $((LIMIT/60+5)) "headless Xvfb GAMMA A-Life equivalence run $TAG" >"$OUT/claim.txt" 2>&1; then
   echo "REFUSED: no quiet slot ($(tail -1 "$OUT/claim.txt"))"; exit 3; fi

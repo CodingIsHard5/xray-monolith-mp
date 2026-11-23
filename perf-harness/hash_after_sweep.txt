@@ -1,0 +1,12 @@
+exe        7b85fef318ed4729  files=1  (Coarse14b.exe)
+bin_libs   c0b49c85c74b7ab9  files=7
+db         0b8eb442562bb324  files=73  (names+sizes+mtimes)
+scripts    ea7bb8198cfbcdaf  files=1056  (content)
+configs    1d846873421b09e3  files=4362  (content)
+gamedata   476d4482aecb46ec  files=55678  (rest: names+sizes)
+fsgame     5750e35aac2a9ad4  files=1
+user_ltx   3efd38eecbca5040  files=1  (out/user.ltx.orig, swapped in by tb_run.sh)
+save:bench1   d4a4cb0f30c90d39  files=2
+save:cordon1   f67baf139921bbad  files=2
+overlay    2b79a817a08a1e7f  files=1  (run tree copy; harness copy 2b79a817a08a1e7f)
+tools      5ec50c2c9ed26ed9  files=2

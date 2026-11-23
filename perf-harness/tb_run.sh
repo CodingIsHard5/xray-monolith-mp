@@ -19,6 +19,7 @@ NLAST=$(echo "$TIMES" | tr ',' '\n' | grep -c .)
 [ -s "$RUN/appdata/savedgames/$SAVE.scop" ] || { echo "no save $SAVE in $RUN/appdata/savedgames"; exit 2; }
 cmp -s "$RUN/gamedata/scripts/zz_eperf_dump.script" "$P/harness/zz_eperf_dump.script" || { echo "REFUSED: run tree overlay differs from harness/zz_eperf_dump.script (install it first)"; exit 2; }
 if "$T/protected-title-check.sh" >/dev/null 2>&1; then echo "REFUSED: protected title running"; exit 3; fi
+"$P/tools/run_noguard.sh" "$RUN" || exit 7   # no path from run/ may write into ~/Games (Overseer 2026-11-22)
 if [ "${TB_NOCLAIM:-0}" != 1 ] && ! "$T/quiet-required.sh" claim $W $((LIMIT/60+5)) "headless Xvfb GAMMA tier (b) normal-mode run $TAG EXCLUSIVE" >"$OUT/claim.txt" 2>&1; then
   echo "REFUSED: no quiet slot ($(tail -1 "$OUT/claim.txt"))"; exit 3; fi
 # own engine excluded by its command line (this project's run dir), as in bench.sh

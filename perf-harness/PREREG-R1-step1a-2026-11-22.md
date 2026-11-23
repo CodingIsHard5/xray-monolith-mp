@@ -23,3 +23,26 @@ at least half.
 (b) without the sun is about 1.0 ms in Rostok. Inside it are, besides these passes: emissive, wallmarks, lights
 accumulation, HUD, LODs, details, sky. Guess: main = 0.5-0.8 ms in Rostok (central 0.65), so near the 0.6 bar, a
 coin toss. static0 the biggest single pass (0.25-0.4). Cordon main 0.3-0.6.
+
+## Stop before any 1a run (2026-11-22 22:41-23:20): the write-through into Caden's install
+
+- The pre-run fingerprint differed from step 0 on the configs line (01b8f4a02901641d -> 1d846873421b09e3, same file
+  count). The cause: run/gamedata/configs/axr_options.ltx was a SYMLINK into Caden's GAMMA mod "G.A.M.M.A. MCM
+  values". Game scripts save that file on start (itms_manager.script, axr_main.script), so engine runs wrote into his
+  install. It was written at 22:06 and 22:42, with gammavr/itrzone holding the box. Earlier runs, mine included, very
+  likely wrote it too. A read-only search found it was the only file changed in his GAMMA folder since 2026-11-18 23:18.
+  The series was stopped before claiming; nothing ran.
+- Overseer condition (1), "re-baseline if the private copy equals what RefDet14 saw": NOT MET. The configs hash with
+  the current content (= the private copy = the 22:42 snapshot) is 1d846873421b09e3; with the installer's pristine
+  file it is ca95fcc3df01dd58; before step 0 it was 01b8f4a02901641d. So the content step 0 saw at its start is not
+  available, and it changed after step 0 began. I do NOT re-baseline on that reason. Within step 0, F and K ran
+  interleaved under the same conditions, so its F-vs-K comparison stands. Its absolute numbers carry this caveat.
+- Sweep (Overseer order): every link under run/ into ~/Games that is not a read-only binary asset is now a private
+  copy: 10,757 files, 257 MB (manifest run/private_copies_manifest.tsv, copy in perf-harness). The copies were checked
+  byte for byte against their sources, and the fingerprint is unchanged by the sweep (hash_*_sweep.txt). 50,406 asset
+  links remain (dds/ogf/ogg/omf/anm, level geom/cform/spawn, db archives, editor files; list in run_noguard.sh).
+  No file under run/ is hardlinked.
+- Guard tools/run_noguard.sh, called by bench.sh, tb_run.sh and det_run.sh before anything starts. It refuses (exit 7)
+  if any non-asset link resolves into ~/Games, or any file under run/ has a hard-link count above 1. Witness test:
+  clean mock passes; a mock .ltx link and a mock hard link are both refused. Not covered: coopload/*/db (directory
+  links to the read-only Anomaly db; co-op measurement is paused; to be guarded before it resumes).

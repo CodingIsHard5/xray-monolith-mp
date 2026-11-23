@@ -12,6 +12,7 @@ OUT="$P/out/$TAG"; mkdir -p "$OUT"
 [ -s "$RUN/bin/$EXE" ] || { echo "no exe $RUN/bin/$EXE"; exit 2; }
 [ "$(stat -c %s "$RUN/bin/$EXE")" -gt 1000000 ] || { echo "exe is a stub (failed build?)"; exit 2; }
 if "$T/protected-title-check.sh" >/dev/null 2>&1; then echo "REFUSED: protected title running"; exit 3; fi
+"$P/tools/run_noguard.sh" "$RUN" || exit 7   # no path from run/ may write into ~/Games (Overseer 2026-11-22)
 # BENCH_EXCLUSIVE=1: timing run. Needs the whole box (Overseer rule 2026-11-18): EXCLUSIVE claim, load
 # logged at start and end, result marked CONFOUNDED if another heavy process was present.
 # Without it: a functional run (smoke test, state-diff harness); its timings are NOT measurements.
