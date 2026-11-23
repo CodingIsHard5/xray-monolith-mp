@@ -1,0 +1,22 @@
+# R1b-1 order (PREREG-R1b-1 + amendments 1, 2). tag|exe|save|lowend|frames|cfg. One exe: R1b14.exe (4367f4081).
+# Check 1 first (self-test + witness): a failed check stops the series before any timing run.
+r1b_st_ros|R1b14.exe|bench1|0|1200|r__mt_sun_selftest=1
+r1b_st_cor|R1b14.exe|cordon1|0|1200|r__mt_sun_selftest=1
+r1b_st_ster|R1b14.exe|bench1|0|1200|r__mt_sun_selftest=1;r_stereo_bench=1
+r1b_wit_ros|R1b14.exe|bench1|0|1200|r__mt_sun_selftest=1;r__mt_sun_selftest_witness=2
+# Check 3: timing, 3 OFF + 3 ON per scene, interleaved (ABBA as in 1a), same exe, 600 warm + 3000 frames
+r1b_ros_off_1|R1b14.exe|bench1|0|3000|
+r1b_ros_on_1|R1b14.exe|bench1|0|3000|r__mt_sun_static=1
+r1b_ros_on_2|R1b14.exe|bench1|0|3000|r__mt_sun_static=1
+r1b_ros_off_2|R1b14.exe|bench1|0|3000|
+r1b_ros_off_3|R1b14.exe|bench1|0|3000|
+r1b_ros_on_3|R1b14.exe|bench1|0|3000|r__mt_sun_static=1
+r1b_cor_on_1|R1b14.exe|cordon1|0|3000|r__mt_sun_static=1
+r1b_cor_off_1|R1b14.exe|cordon1|0|3000|
+r1b_cor_off_2|R1b14.exe|cordon1|0|3000|
+r1b_cor_on_2|R1b14.exe|cordon1|0|3000|r__mt_sun_static=1
+r1b_cor_on_3|R1b14.exe|cordon1|0|3000|r__mt_sun_static=1
+r1b_cor_off_3|R1b14.exe|cordon1|0|3000|
+# Check 4: 4-core pinned repeat (BENCH_LOWEND=1: cores 0-3, 8 GB, 2 GB VRAM reported; same for both arms), Rostok
+r1b_ros4_off|R1b14.exe|bench1|1|3000|
+r1b_ros4_on|R1b14.exe|bench1|1|3000|r__mt_sun_static=1
