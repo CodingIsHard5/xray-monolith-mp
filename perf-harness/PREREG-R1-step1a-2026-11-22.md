@@ -46,3 +46,34 @@ coin toss. static0 the biggest single pass (0.25-0.4). Cordon main 0.3-0.6.
   if any non-asset link resolves into ~/Games, or any file under run/ has a hard-link count above 1. Witness test:
   clean mock passes; a mock .ltx link and a mock hard link are both refused. Not covered: coopload/*/db (directory
   links to the read-only Anomaly db; co-op measurement is paused; to be guarded before it resumes).
+
+## Desk check: did any OPTION value change under the runs? (Overseer, 2026-11-22)
+
+- The 01b8 content (before step 0) CANNOT be reconstructed: no run saved a copy, and the engine log does not print
+  the file. So this is NOT a byte comparison, and "the option values were constant" is not shown. What is shown,
+  from the scripts in this run tree:
+  - Writers that fire by themselves in a headless run (load a save, no menus, no keys, no fast travel), all in
+    bookkeeping sections: itms_manager.script ([temp] item strings), wpn_sway_enable.script ([temp] base_sway),
+    axr_main.script ([temp] rspec_default, only on first creation), modded_exes_migration.script ([modded_exes]
+    version), lower_weapon_sprint.script ([lower_weapon_sprint] blacklist, rebuilt with Lua pairs(), so the ORDER
+    changes from run to run with the same set; seen in the key diff against the installer copy).
+  - Writers that change OPTION values need a player action: ui_options / ui_mcm (menu apply), ui_main_menu /
+    ui_mm_faction_select (new game), game_fast_travel (a fast travel; it writes an undefined variable, so
+    stay_time becomes empty), zz_ui_debug_inputs (key binds), game_achievements (unlocked_factions). The MCM
+    session counter (ui_mcm) bumps only when a session starts with no level present; no "MCM Session ID" line
+    appears in my run logs.
+- Reading: runs rewrite the file on every start, and the content changes (blacklist order, [temp]), but no
+  automatic writer touches [options] (A-Life, video) or [mcm] values. So the option values were MOST LIKELY
+  constant for all tier (b) runs since 11-18. Not proven.
+- If an option value did change, the runs at risk are: every tier (b) and tier (a) run after the change. For A-Life,
+  [options] alife/general/* (dynamic_relations, excl_dist, heli_spawn) are read at game start, and in the current
+  file they equal Caden's own settings, not the installer defaults. Their earlier values are unknown. Within each
+  tier (b) verdict, candidate and reference runs were interleaved or close in time, so a one-time change would split
+  them only if it fell between groups. R1/R2 (11-20/21) and the C controls (11-22) were run on different days.
+- Key diff (current vs installer pristine) kept in out/axr_options_keydiff.txt.
+
+## AMENDMENT before any 1a run (Overseer OK, 2026-11-22 ~23:40)
+Reason: the config changed since step 0 (above), so step 0's K means are not a fair reference for the frame sanity
+check. Added: 3 + 3 fresh Coarse14.exe reference runs (K0), interleaved: Rostok K0 K' K' K0 K0 K', Cordon K' K0 K0 K'
+K' K0. The sanity check compares K' frame against the fresh K0 means (within 5 %). main <= (b) is checked per K' run as
+before. The abort rule is UNCHANGED: main < 0.6 ms in Rostok (K' mean) -> R1 stops.

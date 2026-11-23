@@ -1,0 +1,76 @@
+current vs installer pristine: added 787 {'character_creation': 1, 'mcm': 780, 'modded_exes': 1, 'options': 4, 'temp': 1}  removed 0 {}  changed 35 {'lower_weapon_sprint': 1, 'mcm': 12, 'options': 22}
+CHANGED ('lower_weapon_sprint', 'blacklist') wpn_toz34_obrez_custom, wpn_spas12, wpn_l96a1, wpn_sr1m, wpn_colt1911_custom, wpn_colt1911_n, wpn_knife2, wpn_usp_tac_45, wpn_pp2000_ac10632, wpn_usp, wpn_sig220_n_u2p2g0r, wpn_korth_custom, wpn_fnp45, wpn_spas12_custom, wpn_fort_snag, wpn_colt1911_new, wpn_svu, wpn_pl15, wpn_mp5sd_custom, wpn_walther_p99, wpn_l96a1m, wpn_val_modern, wpn_sr1m_gurza_up, wpn_knife5, wpn_walther_p99_mod9, wpn_colt1911_modern, wpn_glock17_m1, wpn_beretta_camo, wpn_korth, wpn_pl15_tan, wpn_sig220, wpn_ak12_custom_mono_kit, wpn_pm, wpn_ace52, wpn_mp5sd_new, wpn_sv98, wpn_fnx45_custom, wpn_toz34_bull, wpn_pl15_tan_pl15_scolaz, wpn_sv98_custom, wpn_colt1911_duty, wpn_winchester1873, wpn_glock_modern, wpn_vihr, wpn_toz34_mark4_23, wpn_sig552, wpn_pm_actor, wpn_pl15_pl15_scolaz, wpn_colt1911_camo, wpn_benelli_m1014, wpn_gsh18_custom, wpn_ump45, wpn_aug_modern, wpn_pp2000_acog, wpn_sig220_n_upg220, wpn_vintorez_m2, wpn_toz34_custom, wpn_toz34_mark4, wpn_g36ka4_rwap, wpn_vintorez_m1, wpn_walther, wpn_pb, wpn_eft_rsh12, wpn_ash12, wpn_saiga12s_m1, wpn_walther_mod9, wpn_9a91, wpn_mp5, wpn_knife3, wpn_beretta_modern, wpn_fnx45, wpn_thompson_m1a1, wpn_sig220_n, wpn_akm_alfa, wpn_aug, wpn_colt1911_alt, wpn_axe2, wpn_ak74_pmc, wpn_knife1, wpn_sig550_sniper, wpn_fn2000, wpn_m4_ru556, wpn_kriss_vector, wpn_sig226, wpn_knife7, wpn_tt33, wpn_beretta_alt, wpn_fnp45_custom, wpn_pm_custom, wpn_sig550_custom, wpn_knife6, wpn_ak74_isg, wpn_glock_custom, wpn_sig550_camo, wpn_beretta_m9_upgr_kit, wpn_pmm, wpn_tt33_modern, wpn_svu_nimble, wpn_pp2000, wpn_knife8, wpn_saiga12s_isg, wpn_fn2000_custom, wpn_val, wpn_mp443, wpn_pb_custom, wpn_aug_freedom, wpn_axe, wpn_pkm_siber, wpn_sig550, wpn_mp412, wpn_usp_match, wpn_toz34_obrez, wpn_walther_custom, wpn_pkm_zenit_siber, wpn_sig550_luckygun, wpn_aps, wpn_axe3, wpn_mp5sd, wpn_pkp_siber, wpn_ak12_m1, wpn_oc33, wpn_svu_alt, wpn_rpk74, wpn_hpsa_alt, wpn_mp5_nimble, wpn_p90tac, wpn_spas12_nimble, wpn_g36v_rwap, wpn_saiga12s_m2, wpn_fort17, wpn_sr1m_sr1upgr1, wpn_thompson_1921, wpn_howa20, wpn_sig226_226sig_kit, wpn_toz34_decor, wpn_hpsa_226sig_kit, wpn_mp7, wpn_sig220_u2p2g0r, wpn_colt1911_merc, wpn_glock, wpn_sig220_nimble, wpn_tt33_modern_tt_upgr_kit, wpn_beretta, wpn_udp9, wpn_m45a1, wpn_gsh18, wpn_fn2000_camo, wpn_fort, wpn_usp_tac, wpn_ak74m_beard, wpn_sig220_upg220, wpn_aug_merc, wpn_usp_nimble, wpn_usp_custom, wpn_pp2000_eot, wpn_raptr, wpn_mp9, wpn_knife9, wpn_sig220_custom, wpn_colt1911, wpn_hpsa, wpn_fnx45_alt, wpn_toz34, wpn_rpk, wpn_kiparis, wpn_colt_kimber, wpn_aug_custom, wpn_mp5_custom, wpn_mp5_alt, wpn_abakan_n, wpn_toz34_obrez_decor, wpn_knife4, wpn_vityaz, wpn_glock17, wpn_fn57, -> wpn_toz34_obrez_custom, wpn_spas12, wpn_l96a1, wpn_sr1m, wpn_colt1911_custom, wpn_colt1911_n, wpn_knife2, wpn_usp_tac_45, wpn_pp2000_ac10632, wpn_usp, wpn_g36v_rwap, wpn_korth_custom, wpn_fnp45, wpn_spas12_custom, wpn_fort_snag, wpn_colt1911_new, wpn_p90tac, wpn_pl15, wpn_mp5sd_custom, wpn_walther_p99, wpn_l96a1m, wpn_val_modern, wpn_sr1m_gurza_up, wpn_knife5, wpn_walther_p99_mod9, wpn_colt1911_modern, wpn_glock17_m1, wpn_beretta_camo, wpn_korth, wpn_pl15_tan, wpn_sig220, wpn_ak12_custom_mono_kit, wpn_pm, wpn_ace52, wpn_pb_custom, wpn_sv98, wpn_fnx45_custom, wpn_toz34_bull, wpn_pl15_tan_pl15_scolaz, wpn_sv98_custom, wpn_beretta_m9_upgr_kit, wpn_winchester1873, wpn_glock_modern, wpn_vihr, wpn_toz34_mark4_23, wpn_mp5sd, wpn_pm_actor, wpn_pl15_pl15_scolaz, wpn_colt1911_camo, wpn_benelli_m1014, wpn_gsh18_custom, wpn_sig550, wpn_aug_modern, wpn_mp412, wpn_sig220_n_upg220, wpn_vintorez_m2, wpn_toz34_custom, wpn_axe3, wpn_g36ka4_rwap, wpn_vintorez_m1, wpn_walther, wpn_pb, wpn_svu_alt, wpn_ash12, wpn_saiga12s_m1, wpn_walther_mod9, wpn_9a91, wpn_knife3, wpn_beretta_modern, wpn_fnx45, wpn_thompson_m1a1, wpn_sig220_n, wpn_saiga12s_isg, wpn_aug, wpn_colt1911_alt, wpn_axe2, wpn_ak74_pmc, wpn_knife1, wpn_fn57, wpn_glock17, wpn_vityaz, wpn_knife4, wpn_sig226, wpn_knife7, wpn_tt33, wpn_fn2000, wpn_fnp45_custom, wpn_pkm_siber, wpn_mp5_alt, wpn_knife6, wpn_mp5_custom, wpn_aug_custom, wpn_sig550_camo, wpn_colt_kimber, wpn_pmm, wpn_spas12_nimble, wpn_svu_nimble, wpn_pp2000, wpn_knife8, wpn_mp5sd_new, wpn_fn2000_custom, wpn_rpk, wpn_toz34, wpn_fnx45_alt, wpn_hpsa, wpn_axe, wpn_pkm_zenit_siber, wpn_kriss_vector, wpn_sig220_custom, wpn_usp_match, wpn_toz34_obrez, wpn_walther_custom, wpn_pp2000_acog, wpn_toz34_mark4, wpn_raptr, wpn_sig550_sniper, wpn_usp_custom, wpn_pkp_siber, wpn_ak12_m1, wpn_usp_nimble, wpn_aug_merc, wpn_rpk74, wpn_hpsa_alt, wpn_mp5_nimble, wpn_oc33, wpn_ak74m_beard, wpn_usp_tac, wpn_saiga12s_m2, wpn_fort17, wpn_sr1m_sr1upgr1, wpn_fort, wpn_fn2000_camo, wpn_gsh18, wpn_sig226_226sig_kit, wpn_hpsa_226sig_kit, wpn_m45a1, wpn_sig220_u2p2g0r, wpn_glock, wpn_colt1911_merc, wpn_sig220_nimble, wpn_tt33_modern_tt_upgr_kit, wpn_beretta, wpn_udp9, wpn_mp7, wpn_toz34_decor, wpn_howa20, wpn_thompson_1921, wpn_tt33_modern, wpn_eft_rsh12, wpn_sig220_upg220, wpn_colt1911_duty, wpn_akm_alfa, wpn_aps, wpn_pp2000_eot, wpn_beretta_alt, wpn_mp9, wpn_knife9, wpn_ump45, wpn_colt1911, wpn_mp443, wpn_val, wpn_pm_custom, wpn_sig552, wpn_kiparis, wpn_glock_custom, wpn_ak74_isg, wpn_sig550_custom, wpn_aug_freedom, wpn_abakan_n, wpn_toz34_obrez_decor, wpn_m4_ru556, wpn_svu, wpn_sig550_luckygun, wpn_sig220_n_u2p2g0r,
+CHANGED ('mcm', 'dotmarks/dmarkadv/near_scan_interval') 104 -> 154
+CHANGED ('mcm', 'dotmarks/dmarkadv/ui_scale') 1 -> 1.05
+CHANGED ('mcm', 'dotmarks/dmarkmain/last_release') 20250711 -> 20260525
+CHANGED ('mcm', 'dotmarks/dmarkmain/last_version') 1.0-RC17 -> 1.7.4
+CHANGED ('mcm', 'pawsys/pawgen/mcm_ver') 1.8 -> 2.4.3
+CHANGED ('mcm', 'pawsys/pawmenu/hud_vis_off')  -> 4
+CHANGED ('mcm', 'pawsys/pawmenu/hud_vis_on')  -> 2
+CHANGED ('mcm', 'pawsys/pawpins/poi_icon_pins') redpush32 -> redround32
+CHANGED ('mcm', 'scop/keybind_add') 78 -> 55
+CHANGED ('mcm', 'scop/keybind_subtract') 74 -> 73
+CHANGED ('mcm', 'session_id') 126 -> 154
+CHANGED ('mcm', 'session_start') 1649950110000 -> 1788763352000
+CHANGED ('options', 'alife/dynamic_news/generic_death_news') false -> true
+CHANGED ('options', 'alife/general/dynamic_relations') false -> true
+CHANGED ('options', 'alife/general/excl_dist') 75 -> 100
+CHANGED ('options', 'alife/general/heli_spawn') false -> true
+CHANGED ('options', 'control/general/mouse_sens') 0.071 -> 0.142
+CHANGED ('options', 'gameplay/disguise/stay_time') true -> 
+CHANGED ('options', 'gameplay/general/npc_loot_distance') 12 -> 19
+CHANGED ('options', 'video/advanced/detail_density') 0.25 -> 0.2
+CHANGED ('options', 'video/advanced/detail_height') 0.5 -> 0.7
+CHANGED ('options', 'video/advanced/detail_radius') 110 -> 250
+CHANGED ('options', 'video/advanced/grass_shadow') false -> true
+CHANGED ('options', 'video/advanced/slight_fade') 0.2 -> 1
+CHANGED ('options', 'video/advanced/soft_particles') false -> true
+CHANGED ('options', 'video/advanced/sun_quality') st_opt_medium -> st_opt_extreme
+CHANGED ('options', 'video/advanced/sunshafts_min') 0.05 -> 0.1
+CHANGED ('options', 'video/advanced/sunshafts_value') 0.6 -> 0.8
+CHANGED ('options', 'video/basic/fov') 80 -> 95
+CHANGED ('options', 'video/basic/resolution') 1920x1080 -> 2560x1440
+CHANGED ('options', 'video/night/brightness') slight -> dark
+CHANGED ('options', 'video/player/animations') false -> true
+CHANGED ('options', 'video/player/blood_splash') false -> true
+CHANGED ('options', 'video/player/breathing_fog') false -> true
+ADDED ('character_creation', 'new_game_soulslike_mode') 
+ADDED ('mcm', '3d_scopes/chromatism') true
+ADDED ('mcm', '3d_scopes/nvg_blur') false
+ADDED ('mcm', '3d_scopes/parallax_shadow') true
+ADDED ('mcm', '3d_scopes/see_through') true
+ADDED ('mcm', '3d_scopes/thermal_pixelation') true
+ADDED ('mcm', 'EFT_ADS/Speed_Mulitplier_in_power_lmg') 1
+ADDED ('mcm', 'EFT_ADS/Speed_Mulitplier_in_speed_lmg') 1
+ADDED ('mcm', 'EFT_ADS/aim_anim') false
+ADDED ('mcm', 'EFT_ADS/aim_anim_out') false
+ADDED ('mcm', 'EFT_ADS/aim_anim_speed') 2
+ADDED ('mcm', 'EFT_ADS/alt_aim_allowed') false
+ADDED ('mcm', 'EFT_ADS/alt_aim_cheese_delay') 0.5
+ADDED ('mcm', 'EFT_ADS/anim_variants') 0
+ADDED ('mcm', 'EFT_ADS/lmg_separation') true
+ADDED ('mcm', 'EFT_ADS/max_power') 4
+ADDED ('mcm', 'EFT_ADS/max_speed') 4
+ADDED ('mcm', 'EFT_ADS/min_power') 0
+ADDED ('mcm', 'EFT_ADS/min_speed') 0.9
+ADDED ('mcm', 'auto_looter/always_treat_recipe_part_as_usable') true
+ADDED ('mcm', 'auto_looter/loot_grenades') true
+ADDED ('mcm', 'auto_looter/usable_armor_part_condition_treshold') 50
+ADDED ('mcm', 'auto_looter/usable_weapon_part_condition_treshold') 60
+ADDED ('mcm', 'body_health_system/chance_damage_on_footstep') 13
+ADDED ('mcm', 'body_health_system/hud_toggle_key_bind') 35
+ADDED ('mcm', 'craft_from_stashes/range') 10
+ADDED ('mcm', 'demonized_ledge_grabbing/BHSMode') true
+ADDED ('mcm', 'demonized_ledge_grabbing/alternativeClimbDetection') true
+ADDED ('mcm', 'demonized_ledge_grabbing/animationRandomization') 1
+ADDED ('mcm', 'demonized_ledge_grabbing/hardcoreMode') false
+ADDED ('mcm', 'demonized_ledge_grabbing/inputMethod') jumpHold
+ADDED ('mcm', 'demonized_ledge_grabbing/keybind') 57
+ADDED ('mcm', 'demonized_ledge_grabbing/modifier') 0
+ADDED ('mcm', 'demonized_ledge_grabbing/playerWidthCheck') true
+ADDED ('mcm', 'demonized_ledge_grabbing/second_key') 0
+ADDED ('mcm', 'demonized_ledge_grabbing/throttleCheck') 0
+ADDED ('mcm', 'demonized_ledge_grabbing/unstuckCheck') true
+ADDED ('mcm', 'dii/dii_custom_layers/dii_custom_layers_3dssg/show_3dssg_scopes') true
+ADDED ('mcm', 'dii/dii_custom_layers/dii_custom_layers_3dssg/show_3dssg_scopes_small') true
+ADDED ('mcm', 'dit/consume_warning') true

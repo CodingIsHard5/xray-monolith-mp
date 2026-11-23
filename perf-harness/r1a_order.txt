@@ -1,7 +1,13 @@
-# R1 step 1a order (PREREG-R1-step1a-2026-11-22.md). K' = Coarse14b.exe (Coarse14 + 4 zone sites in r4_R_render.cpp).
+# R1 step 1a order, AMENDED before any run (PREREG-R1-step1a section "AMENDMENT"). K' = Coarse14b.exe (zones), K0 = Coarse14.exe (fresh reference).
+r1a_ros_k0_1|Coarse14.exe|bench1|0
 r1a_ros_1|Coarse14b.exe|bench1|0
 r1a_ros_2|Coarse14b.exe|bench1|0
+r1a_ros_k0_2|Coarse14.exe|bench1|0
+r1a_ros_k0_3|Coarse14.exe|bench1|0
 r1a_ros_3|Coarse14b.exe|bench1|0
 r1a_cor_1|Coarse14b.exe|cordon1|0
+r1a_cor_k0_1|Coarse14.exe|cordon1|0
+r1a_cor_k0_2|Coarse14.exe|cordon1|0
 r1a_cor_2|Coarse14b.exe|cordon1|0
 r1a_cor_3|Coarse14b.exe|cordon1|0
+r1a_cor_k0_3|Coarse14.exe|cordon1|0
