@@ -248,3 +248,5 @@ PASS (absorb): hitch: time_global step >= 2.5 s across it and NO [FREEZE] line b
   <= 90 s, and the two Wine wrappers gone after the kill.
 PREDICTIONS: absorb PASS 75 % (risk: the arming command or the 3 s wait misbehaves); hitch not absorbed 95 %;
   restart <= 90 s 85 % (guess ~35 s).
+
+- Absorb build: CI 45256626066 (7c8331264) success, 0 errors; run/bin/Absorb14.exe sha e35a289b31534f0d (+ Absorb14.pdb).
