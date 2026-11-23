@@ -7,12 +7,20 @@
 --                         a,t,x,y,z,health | o,t,id,section,kind,x,y,z,health,best_enemy,distance | h,t,hitter_id,hitter_section,hitter_kind,type,power,bone
 --                       (kind m = is_monster, s = is_stalker; hitter_kind also a = actor, x = other/none). Everything else
 --                       (start, ON/OFF, refills, ticks, summary) goes to Z:\dev\shm\p1\meta_<t>.csv.
+--   -b1_snap            B1-T1 (perf-harness/PREREG-B1-T1-2026-11-23.md): the 10 Hz export REWRITES
+--                       Z:\dev\shm\itrz_b1\snap.txt in place each tick (open "w", write, close; os.rename is removed):
+--                         seq,<seq>,<t_xray_ms>,<t_track_s> | a,x,y,z,yaw,health | o,id,section,kind,x,y,z,yaw,health,alive,best_enemy,dist | end,<seq>
+--                       instead of P1's CSV. Meta goes to Z:\dev\shm\itrz_b1\meta_<t>.csv (plus W,<seq>,<us> per tick) and
+--                       hit lines to hits_<t>.csv there. Implies -p1_export. Without -b1_snap, P1 behaves exactly as before.
 --   Track time t starts WAIT_MS after the first update (the actor holds the t=0 point meanwhile, t < 0), so GAMMA's
 --   auto_switch (1250 m for 10 s after load, then 450 m; configs\alife.ltx) has settled before the track starts.
 local cl = command_line and command_line() or ""
 local active = string.find(cl, "-p1", 1, true) ~= nil
 if not active then return end
-local do_export = string.find(cl, "-p1_export", 1, true) ~= nil
+local b1 = string.find(cl, "-b1_snap", 1, true) ~= nil
+local do_export = b1 or string.find(cl, "-p1_export", 1, true) ~= nil
+local DIR = b1 and "Z:\\dev\\shm\\itrz_b1\\" or "Z:\\dev\\shm\\p1\\"
+local seq = 0
 local tag = string.match(cl, "%-p1_tag%s+(%S+)") or "p1"
 
 local trk_t, trk_x, trk_y, trk_z, trk_ok = {}, {}, {}, {}, {}
@@ -51,8 +59,37 @@ local function track_pos(t)
 	return lx, ly, lz
 end
 
+local function yaw(o) local d = o:direction(); return math.atan2(d.x, d.z) end
+
+-- B1-T1: build the whole snapshot, then rewrite snap.txt in place (the reader keeps it only if seq == end seq)
+local function export_b1(now, t, tm)
+	seq = seq + 1
+	local a = db.actor; local ap = a:position(); local present = {}
+	local L = { string.format("seq,%d,%d,%.2f", seq, now, t), string.format("a,%.3f,%.3f,%.3f,%.4f,%.4f", ap.x, ap.y, ap.z, yaw(a), a.health) }
+	for id, st in pairs(db.storage) do
+		local o = st.object
+		if o and id ~= 0 and (o:is_monster() or o:is_stalker()) then
+			present[id] = true
+			local p = o:position(); local be = o:best_enemy()
+			L[#L + 1] = string.format("o,%d,%s,%s,%.3f,%.3f,%.3f,%.4f,%.4f,%d,%d,%.2f", id, o:section(), kind(o), p.x, p.y, p.z, yaw(o),
+				o.health, o:alive() and 1 or 0, be and be:id() or -1, p:distance_to(ap))
+			if not seen[id] then m(string.format("ON,%.2f,%d,%d,%s,%.1f", t, now, id, o:section(), p:distance_to(ap))) end
+		end
+	end
+	for id in pairs(seen) do if not present[id] then m(string.format("OFF,%.2f,%d,%d", t, now, id)) end end
+	seen = present
+	L[#L + 1] = string.format("end,%d", seq)
+	local f = io.open(DIR .. "snap.txt", "w")
+	if f then f:write(table.concat(L, "\n"), "\n"); f:close() else m(string.format("WFAIL,%d", seq)) end
+	tm:stop(); local us = tm:time()
+	m(string.format("W,%d,%.0f", seq, us))
+	if out then out:flush() end; if meta then meta:flush() end
+	exp_n, exp_sum = exp_n + 1, exp_sum + us; if us > exp_max then exp_max = us end; exp_times[exp_n] = us
+end
+
 local function export(now, t)
 	local tm = profile_timer(); tm:start()
+	if b1 then return export_b1(now, t, tm) end
 	local a = db.actor; local ap = a:position(); local present = {}
 	w(string.format("a,%.2f,%.3f,%.3f,%.3f,%.4f", t, ap.x, ap.y, ap.z, a.health))
 	for id, st in pairs(db.storage) do
@@ -118,9 +155,9 @@ end
 
 function on_game_start()
 	if not active then return end
-	out = io.open("Z:\\dev\\shm\\p1\\export_" .. tag .. ".csv", "w")
+	out = io.open(DIR .. (b1 and "hits_" or "export_") .. tag .. ".csv", "w")
 	if not out then printf("p1: CANNOT OPEN EXPORT FILE"); active = false; return end
-	meta = io.open("Z:\\dev\\shm\\p1\\meta_" .. tag .. ".csv", "w")
+	meta = io.open(DIR .. "meta_" .. tag .. ".csv", "w")
 	if not meta then printf("p1: CANNOT OPEN META FILE"); active = false; return end
 	RegisterScriptCallback("actor_on_update", on_update)
 	RegisterScriptCallback("actor_on_before_hit", on_before_hit)
