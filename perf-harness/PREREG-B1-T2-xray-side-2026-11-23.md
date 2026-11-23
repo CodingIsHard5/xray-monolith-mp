@@ -294,3 +294,22 @@ PASS: (a) freeze.csv STOP->CONT game_ms <= 1000 with the new STOP definition (la
   exe until boot 1 starts; (d) rc 0, no unplanned restart.
 PREDICTIONS: (a) 90 % (expected ~200 ms: one 33 ms frame x 6); (b) 85 % (expected ~35 s: <= 5 s tb_run poll + 25 s
   boot); (c) 90 %; (d) 85 %.
+
+## 19. Pre-flight 4 RESULT (21:29-21:34Z; slice released; read once) and FROZEN hashes
+- (a) freeze.csv STOP game_ms 3165214900 -> CONT 3165215098: +198 ms of game time across a 30.1 s stop (one 33 ms
+  frame x 6). Engine: "* [FREEZE] absorbed 30093 ms of a 30126 ms gap", exactly one. PASS (prediction 90 %: held).
+- (b) planned kill 21:32:22.716 -> boot 1's first snapshot 21:32:50.595 = 27.9 s (tb_run ended 2.8 s after the kill,
+  boot 25 s). PASS (85 %: held; I expected ~35 s).
+- (c) tb_run ended 2.8 s after the kill, so no process of ours kept it waiting. PASS (inferred from that, not a
+  process listing).
+- (d) rc 0, no unplanned restart, no fatal. PASS.
+FROZEN for the joint B1-T2 runs (sha256):
+- tools/t2_xray.sh            745d975f7e24e3e9abc2407c6625d4bea767524174a361ded4a359f42eda7a14
+- harness/zz_p1_puppet.script 966e3a475163c95034308ef6431b2d754756a1f6f8854f0cd0b6bae0db13f4e5
+- tools/lib_engine_pids.sh    cb183b7b894eab3edb200e2c03a3a96f2e935cd2d1e1f402f48be7aad238ed6e
+- tools/tb_run.sh             1b8d103f2208befc554c48cf0b628830e67e0223cbe5c99ab1fcc34205363953
+- tools/t1_watch.py           7bb3d29aa3e933a8104f06ce426e30326f8c20221a68c02a17e36e17a73bfe16
+- run/bin/Absorb14.exe        e35a289b31534f0df840f7b28b6283cf702a46199f6d5edc2091a5151ab6ad37 (perf/freeze-absorb 7c8331264 = perf/fixes e8eb661df + absorb; its pdb is
+  installed as run/bin/AnomalyDX11.pdb)
+- X-Ray env from ITRZone's driver: both runs T2_EXE=Absorb14.exe T2_FREEZE=sigstop T2_ABSORB=2000; r2 also
+  T2_ABSORB_SKIP=0 T2_STALL_AT=99999 T2_KILL_AT=99999 T2_RUN_S=1500.
