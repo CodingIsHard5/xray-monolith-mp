@@ -466,6 +466,9 @@ public:
 	virtual void RenderToTarget(RRT target) = 0;
 	// GammaVR 10c probe (TEST ONLY use): write a target to $logs$/<name> in the GVRIMG1 raw format; R4 only, others no-op
 	virtual void DumpTarget(RRT target, LPCSTR name) {}
+	// GammaVR 10c: on model V (and its children), give every surface whose pass samples texture from_tex the shader
+	// to_shader instead (with that surface's own first other texture as base); returns how many surfaces changed. R4 only.
+	virtual int model_RetargetScreen(IRenderVisual* V, LPCSTR from_tex, LPCSTR to_shader) { return 0; }
 	// Constructor/destructor
 	virtual ~IRender_interface();
 protected:

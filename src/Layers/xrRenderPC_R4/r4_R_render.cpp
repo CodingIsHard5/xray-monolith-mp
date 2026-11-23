@@ -557,3 +557,61 @@ void CRender::DumpTarget(RRT target, LPCSTR name)
 		Msg("! [vr3wst] dump: Map failed");
 	st->Release();
 }
+
+// GammaVR 10c: shader swap on one model instance (the wrist's copy of the PDA model): the screen surface (its pass samples
+// from_tex, e.g. "$user$ui") gets to_shader; only this instance's visuals change (the model pool gives each instance its own)
+static int vr_retarget_visual(dxRender_Visual* v, LPCSTR from_tex, LPCSTR to_shader)
+{
+	if (!v)
+		return 0;
+	int n = 0;
+	if (xr_vector<IRenderVisual*>* ch = v->get_children())
+		for (IRenderVisual* c : *ch)
+			n += vr_retarget_visual((dxRender_Visual*)c, from_tex, to_shader);
+	Shader* S = v->shader._get();
+	if (!S)
+		return n;
+	for (u32 e = 0; e < SHADER_ELEMENTS_MAX; ++e)
+	{
+		ShaderElement* E = S->E[e]._get();
+		if (!E)
+			continue;
+		for (u32 p = 0; p < E->passes.size(); ++p)
+		{
+			SPass* P = E->passes[p]._get();
+			if (!P || !P->T._get())
+				continue;
+			bool hit = false;
+			string_path base = "";
+			for (const auto& t : *P->T)
+			{
+				CTexture* tx = t.second._get();
+				LPCSTR nm = tx ? tx->cName.c_str() : nullptr;
+				if (!nm)
+					continue;
+				if (!xr_strcmp(nm, from_tex))
+					hit = true;
+				else if (!base[0])
+					xr_strcpy(base, nm);
+			}
+			if (hit)
+			{
+				ref_shader ns;
+				ns.create(to_shader, base);
+				if (ns._get())
+				{
+					v->shader = ns;
+					Msg("* [vr3wst] screen surface retargeted: shader %s, base texture %s", to_shader, base);
+					return n + 1;
+				}
+				Msg("! [vr3wst] shader %s could not be made", to_shader);
+				return n;
+			}
+		}
+	}
+	return n;
+}
+int CRender::model_RetargetScreen(IRenderVisual* V, LPCSTR from_tex, LPCSTR to_shader)
+{
+	return vr_retarget_visual((dxRender_Visual*)V, from_tex, to_shader);
+}

@@ -4609,6 +4609,7 @@ void vr_mag_reset()
 }
 
 static void vr_pda_reset(); // milestone 10a, below
+static void vr_wrist_draw(IDSGraphManager* DM); // milestone 10c, at the end of this file
 
 // called when the HUD is destroyed (level unload): nothing of the reload state is carried into another game
 void vr_reload_reset()
@@ -5211,6 +5212,8 @@ void player_hud::render_hud(IDSGraphManager* DM)
 		vr_dbg_base_log(false, g_vr_track.frame); // GammaVR diagnostic, only with -vr_dbg_base
 	if (g_vr_track.active && g_vr_track.head0_set)
 		vr_pda_draw(DM); // GammaVR milestone 10a: the PDA in the free hand (drawn with or without a held item)
+	if (g_vr_track.active && g_vr_track.head0_set)
+		vr_wrist_draw(DM); // GammaVR milestone 10c: the wrist status device
 	bool b_r0 = ((m_attached_items[0] && m_attached_items[0]->need_renderable()) || script_anim_part == 0 || script_anim_part == 2);
 	bool b_r1 = ((m_attached_items[1] && m_attached_items[1]->need_renderable()) || script_anim_part == 1 || script_anim_part == 2);
 
@@ -6601,69 +6604,248 @@ void player_hud::net_Relcase(CObject* obj)
 		m_attached_items[SCOPE_ATTACH_IDX]->m_parent_hud_item->net_Relcase(obj);
 }
 
-// GammaVR milestone 10c probe (SPIKE_PLAN Amendment 36 note 3; no verdict). TEST ONLY switch, no launcher passes it:
-//   -vr_wrist_probe F   on the first render at or after VR frame F, CLevel::OnRender (before the scene, after the PDA's own
-//                       copy) clears the backbuffer, draws ONLY the engine's HUD states window and every enabled HUD dialog,
-//                       copies that into the rtWRIST target and writes it to $logs$/vr_wrist_<frame>.raw (read back from the
-//                       target). Each window it met is logged ([vr3wst] window ...). Off: nothing here runs.
-static int s_vr_wrist_probe = -2; // -2 not parsed, -1 off, else the VR frame
-static bool s_vr_wrist_done = false;
-static void vr_wrist_log(LPCSTR kind, CUIWindow* w, u32 frame, int& n)
+// GammaVR milestone 10c: the wrist status device (SPIKE_PLAN Amendment 36 part 2).
+// Content: each VR frame CLevel::OnRender (before the scene, after the PDA's own copy) clears the backbuffer, draws only the
+// engine's HUD states window and every enabled HUD dialog, and copies that into the rtWRIST target ($user$ui_wrist).
+// Screen: a copy of the PDA's HUD model whose screen surface gets the wrist_overlay shader (it shows the status corner,
+// UI x 0-300, y 620-768, of $user$ui_wrist), scaled to 80 x 30 mm, worn on the back of a wrist.
+// Switches:
+//   -vr_wrist_hand left|right   (feel; default left) which wrist
+//   -vr_wrist_glance            (feel; default off) drawn only while the screen faces the eye within 45 degrees
+//   -vr_wrist_scale S           (feel; default 1.0) size
+//   -vr_wrist_off               TEST ONLY control: nothing of 10c runs
+//   -vr_wrist_noattach          TEST ONLY witness (W2): the screen stays where it was first drawn
+//   -vr_wrist_blank             TEST ONLY witness (W3): the target is cleared each frame but nothing is drawn into it
+//   -vr_wrist_probe F           TEST ONLY: at VR frame F also log every window met and dump the target to vr_wrist_<F>.raw
+// Log (inside the -vr_dbg_grip window): [vr3wst] frame ... per VR frame and eye, format defined in tools/xr_m10c_check.py.
+// Placement in hand-local engine axes (x right, y up, z forward; left hand: +x out of the palm): screen centre at
+// (-0.035, 0, -0.080) = 3.5 cm out from the back of the hand, 8 cm toward the elbow; model x -> hand -y, model y (the
+// screen normal) -> hand -x, model z -> hand -z. Right hand: hand x mirrored and model z mirrored about the screen centre.
+static const Fvector VR_WRIST_POS = { -0.035f, 0.f, -0.080f };
+static const Fvector VR_WRIST_SCREEN_C = { 0.00001f, 0.01641f, 0.00826f };       // PDA model: the screen quad's centre (10a note 24)
+static const float VR_WRIST_SX = 30.f / 68.f, VR_WRIST_SY = 0.5f, VR_WRIST_SZ = 80.f / 102.f; // model x, y, z scale (screen 102 x 68 mm)
+static const float VR_WRIST_GLANCE_DEG = 45.f;
+// the PDA model's screen map (10a note 24): UI (x, y) of the 1024x768 target -> model point; the quad's UVs cover UI
+// (114.0, 36.3)-(909.9, 739.8), which wrist_overlay maps onto the status corner UI (0, 620)-(300, 768)
+static Fvector vr_wrist_corner_to_model(float ux, float uy)
+{
+	const float tx = (ux - 0.f) / 300.f, ty = (uy - 620.f) / 148.f;    // position inside the status corner, 0..1
+	const float px = 114.0f + tx * (909.9f - 114.0f), py = 36.3f + ty * (739.8f - 36.3f); // the PDA UI point the quad shows there
+	return Fvector().set(0.03744f - 0.00009648f * py, 0.01641f, 0.07398f - 0.00012835f * px);
+}
+struct vr_wrist_state
+{
+	bool parsed, off, noattach, blank, glance, right;
+	float scale;
+	int probe;
+	bool probe_done;
+	shared_str sect;
+	IRenderVisual* vis;
+	IKinematics* K;
+	bool failed, frozen;
+	int retargeted;
+	Fmatrix xf, off_w;
+	u32 content_frame;
+};
+static vr_wrist_state s_vr_wrist = {};
+static void vr_wrist_parse()
+{
+	vr_wrist_state& W = s_vr_wrist;
+	if (W.parsed)
+		return;
+	W.parsed = true;
+	W.off = !!strstr(Core.Params, "-vr_wrist_off");
+	W.noattach = !!strstr(Core.Params, "-vr_wrist_noattach");
+	W.blank = !!strstr(Core.Params, "-vr_wrist_blank");
+	W.glance = !!strstr(Core.Params, "-vr_wrist_glance");
+	W.right = !!strstr(Core.Params, "-vr_wrist_hand right");
+	W.scale = 1.f;
+	if (LPCSTR q = strstr(Core.Params, "-vr_wrist_scale "))
+		if (sscanf(q + 16, "%f", &W.scale) != 1 || W.scale < 0.2f || W.scale > 5.f)
+			W.scale = 1.f;
+	W.probe = -1;
+	if (LPCSTR q = strstr(Core.Params, "-vr_wrist_probe "))
+		if (sscanf(q + 16, "%d", &W.probe) != 1 || W.probe < 0)
+			W.probe = -1;
+	W.content_frame = u32(-1);
+	Msg("* [vr3wst] wrist device: %s; hand %s; glance %s; scale %.2f; pos %.3f %.3f %.3f; screen %.0f x %.0f mm%s%s%s", W.off ? "OFF (-vr_wrist_off, TEST ONLY)" : "on",
+		W.right ? "right" : "left", W.glance ? "on" : "off", W.scale, VR_WRIST_POS.x, VR_WRIST_POS.y, VR_WRIST_POS.z, 80.f * W.scale, 30.f * W.scale,
+		W.noattach ? "; -vr_wrist_noattach (TEST ONLY)" : "", W.blank ? "; -vr_wrist_blank (TEST ONLY)" : "",
+		W.probe >= 0 ? "; -vr_wrist_probe (TEST ONLY)" : "");
+}
+static void vr_wrist_log_window(LPCSTR kind, CUIWindow* w, u32 frame, int& n)
 {
 	Frect r;
 	w->GetAbsoluteRect(r);
-	Msg("* [vr3wst] frame %u window %d %s name '%s' rect %.1f %.1f %.1f %.1f shown %d children %u", frame, n++, kind,
-		w->WindowName().size() ? w->WindowName().c_str() : "", r.left, r.top, r.right, r.bottom, w->IsShown() ? 1 : 0,
-		(u32)w->GetChildWndList().size());
+	Msg("* [vr3wstw] frame %u window %d %s rect %.1f %.1f %.1f %.1f shown %d children %u", frame, n++, kind, r.left, r.top, r.right, r.bottom,
+		w->IsShown() ? 1 : 0, (u32)w->GetChildWndList().size());
 	for (CUIWindow* c : w->GetChildWndList())
 	{
 		Frect q;
 		c->GetAbsoluteRect(q);
-		Msg("* [vr3wst] frame %u   child of %d name '%s' rect %.1f %.1f %.1f %.1f shown %d", frame, n - 1,
-			c->WindowName().size() ? c->WindowName().c_str() : "", q.left, q.top, q.right, q.bottom, c->IsShown() ? 1 : 0);
+		Msg("* [vr3wstw] frame %u   child of %d rect %.1f %.1f %.1f %.1f shown %d", frame, n - 1, q.left, q.top, q.right, q.bottom, c->IsShown() ? 1 : 0);
 	}
 }
+// CLevel::OnRender, every render (both eyes): the target's content
 void vr_wrist_probe_render()
 {
-	if (s_vr_wrist_probe == -2)
-	{
-		s_vr_wrist_probe = -1;
-		if (LPCSTR q = strstr(Core.Params, "-vr_wrist_probe "))
-			if (sscanf(q + 16, "%d", &s_vr_wrist_probe) != 1 || s_vr_wrist_probe < 0)
-				s_vr_wrist_probe = -1;
-		if (s_vr_wrist_probe >= 0)
-			Msg("* [vr3wst] wrist probe on VR frame %d (TEST ONLY -vr_wrist_probe)", s_vr_wrist_probe);
-	}
-	if (s_vr_wrist_probe < 0 || s_vr_wrist_done)
-		return;
-	vr_input_info I;
-	if (!g_vr_get_input || !g_vr_get_input(&I) || int(I.frame) < s_vr_wrist_probe)
+	vr_wrist_state& W = s_vr_wrist;
+	vr_wrist_parse();
+	if (W.off || !g_vr_track.active)
 		return;
 	CUIGameCustom* ui = CurrentGameUI();
 	if (!ui)
 		return;
-	s_vr_wrist_done = true;
+	const u32 frame = g_vr_track.frame;
+	const bool probe_now = W.probe >= 0 && !W.probe_done && int(frame) >= W.probe;
 	Device.m_pRender->ClearTarget();
 	int n = 0, drawn = 0;
-	if (ui->UIMainIngameWnd)
-		if (CUIHudStatesWnd* h = ui->UIMainIngameWnd->get_hud_states())
-		{
-			vr_wrist_log("hud_states", h, I.frame, n);
-			if (h->IsShown())
-				h->Draw(), ++drawn;
-		}
-	CUIWindow* pda = (&ui->GetPdaMenu() != nullptr) ? (CUIWindow*)&ui->GetPdaMenu() : nullptr;
-	for (const dlgItem& d : ui->DialogsToRender())
+	if (!W.blank)
 	{
-		if (!d.wnd || d.wnd == pda)
-			continue;
-		vr_wrist_log(d.enabled ? "dialog" : "dialog(disabled)", d.wnd, I.frame, n);
-		if (d.enabled && d.wnd->IsShown())
-			d.wnd->Draw(), ++drawn;
+		if (ui->UIMainIngameWnd)
+			if (CUIHudStatesWnd* h = ui->UIMainIngameWnd->get_hud_states())
+			{
+				if (probe_now)
+					vr_wrist_log_window("hud_states", h, frame, n);
+				if (h->IsShown())
+					h->Draw(), ++drawn;
+			}
+		CUIWindow* pda = (&ui->GetPdaMenu() != nullptr) ? (CUIWindow*)&ui->GetPdaMenu() : nullptr;
+		for (const dlgItem& d : ui->DialogsToRender())
+		{
+			if (!d.wnd || d.wnd == pda)
+				continue;
+			if (probe_now)
+				vr_wrist_log_window(d.enabled ? "dialog" : "dialog(disabled)", d.wnd, frame, n);
+			if (d.enabled && d.wnd->IsShown())
+				d.wnd->Draw(), ++drawn;
+		}
 	}
 	Render->RenderToTarget(Render->rtWRIST);
-	string64 name;
-	xr_sprintf(name, "vr_wrist_%u.raw", I.frame);
-	Render->DumpTarget(Render->rtWRIST, name);
-	Msg("* [vr3wst] frame %u windows %d drawn %d", I.frame, n, drawn);
+	if (W.content_frame != frame)
+	{
+		W.content_frame = frame;
+		if (vr_mag_log_window())
+			Msg("* [vr3wstc] frame %u content windows drawn %d%s", frame, drawn, W.blank ? " (blank)" : "");
+	}
+	if (probe_now)
+	{
+		W.probe_done = true;
+		string64 name;
+		xr_sprintf(name, "vr_wrist_%u.raw", frame);
+		Render->DumpTarget(Render->rtWRIST, name);
+		Msg("* [vr3wst] probe frame %u windows %d drawn %d", frame, n, drawn);
+	}
+}
+// player_hud::render_hud, every eye: the screen on the wrist
+static void vr_wrist_draw(IDSGraphManager* DM)
+{
+	vr_wrist_state& W = s_vr_wrist;
+	vr_wrist_parse();
+	if (W.off)
+		return;
+	vr_grip_info G;
+	if (!g_vr_get_grip || !g_vr_get_grip(&G))
+		return;
+	// the controller on that wrist: the gun hand's raw grip pose (runtime) or the other hand's (off)
+	const bool gun_right = G.hand == 'R';
+	const vr_pose& HP = (W.right == gun_right) ? G.runtime : G.off;
+	if (!HP.valid && !(W.noattach && W.frozen))
+		return;
+	if (!W.vis && !W.failed)
+	{
+		CActor* A = g_actor;
+		PIItem pi = (A && A->m_inventory) ? A->inventory().ItemFromSlot(PDA_SLOT) : nullptr;
+		W.sect = pi ? pi->m_section_id : shared_str("device_pda_1");
+		LPCSTR hud = pSettings->line_exist(W.sect, "hud") ? pSettings->r_string(W.sect, "hud") : nullptr;
+		LPCSTR iv = (hud && pSettings->line_exist(hud, "item_visual")) ? pSettings->r_string(hud, "item_visual") : nullptr;
+		if (iv)
+		{
+			::Render->hud_loading = true;
+			W.vis = ::Render->model_Create(iv);
+			::Render->hud_loading = false;
+			W.K = W.vis ? W.vis->dcast_PKinematics() : nullptr;
+		}
+		W.retargeted = W.vis ? ::Render->model_RetargetScreen(W.vis, "$user$ui", "wrist_overlay") : 0;
+		W.failed = !W.vis || W.retargeted < 1;
+		Msg("* [vr3wst] device model from %s: %s %s; screen surfaces retargeted %d%s", W.sect.c_str(), iv ? iv : "(none)", W.vis ? "made" : "NOT made",
+			W.retargeted, W.failed ? " -> NO WRIST DEVICE" : "");
+		if (W.failed && W.vis)
+		{
+			::Render->model_Delete(W.vis);
+			W.vis = nullptr;
+			W.K = nullptr;
+		}
+	}
+	if (!W.vis)
+		return;
+	// model -> hand: translate the screen centre to the origin, scale, rotate, translate to the wrist point
+	Fmatrix A, Sm, R, MW;
+	A.translate(Fvector().set(VR_WRIST_SCREEN_C).invert());
+	Sm.scale(VR_WRIST_SX * W.scale, VR_WRIST_SY * W.scale, VR_WRIST_SZ * W.scale);
+	Fvector pos = VR_WRIST_POS;
+	if (W.right)
+	{
+		// mirror: hand x, and model z (the screen's UI x) so the screen is not seen mirrored
+		pos.x = -pos.x;
+		R.set(Fvector().set(0.f, -1.f, 0.f), Fvector().set(1.f, 0.f, 0.f), Fvector().set(0.f, 0.f, 1.f), pos);
+	}
+	else
+		R.set(Fvector().set(0.f, -1.f, 0.f), Fvector().set(-1.f, 0.f, 0.f), Fvector().set(0.f, 0.f, -1.f), pos);
+	Fmatrix SA;
+	SA.mul_43(Sm, A);
+	MW.mul_43(R, SA);
+	if (HP.valid)
+	{
+		Fmatrix hand_track;
+		vr_pose_matrix(HP, hand_track);
+		W.off_w.mul_43(g_vr_track.track_to_world, hand_track);
+	}
+	if (!(W.noattach && W.frozen))
+		W.xf.mul_43(W.off_w, MW);
+	W.frozen = true;
+	// facing: the screen normal against the direction to this eye
+	Fvector sc, nrm, toeye;
+	W.xf.transform_tiny(sc, VR_WRIST_SCREEN_C);
+	W.xf.transform_dir(nrm, Fvector().set(0.f, 1.f, 0.f));
+	nrm.normalize_safe();
+	toeye.sub(Device.vCameraPosition, sc);
+	toeye.normalize_safe();
+	const float facing = rad2deg(acosf(_max(-1.f, _min(1.f, nrm.dotproduct(toeye)))));
+	const bool show = !W.glance || facing <= VR_WRIST_GLANCE_DEG;
+	if (show)
+	{
+		if (W.K)
+		{
+			W.K->CalculateBones_Invalidate();
+			W.K->CalculateBones(TRUE);
+		}
+		DM->add_Dynamic(W.vis, &W.xf);
+	}
+	if (vr_mag_log_window())
+	{
+		// read back from the transform passed to the draw: screen centre; the off-hand pose it was built from; the projected
+		// screen quad and the radiation icon's rect (UI 101-145 x 727-757) in this eye's picture
+		auto px = [&](const Fvector& m, float& x, float& y) {
+			Fvector w;
+			W.xf.transform_tiny(w, m);
+			if (!vr_hud_pixel(w, x, y))
+				x = y = -1.f;
+		};
+		const Fvector q[4] = {
+			Fvector().set(0.03744f - 0.00009648f * 36.3f, 0.01641f, 0.07398f - 0.00012835f * 114.0f),
+			Fvector().set(0.03744f - 0.00009648f * 36.3f, 0.01641f, 0.07398f - 0.00012835f * 909.9f),
+			Fvector().set(0.03744f - 0.00009648f * 739.8f, 0.01641f, 0.07398f - 0.00012835f * 909.9f),
+			Fvector().set(0.03744f - 0.00009648f * 739.8f, 0.01641f, 0.07398f - 0.00012835f * 114.0f) };
+		const Fvector ic[4] = { vr_wrist_corner_to_model(101.f, 727.f), vr_wrist_corner_to_model(145.f, 727.f),
+			vr_wrist_corner_to_model(145.f, 757.f), vr_wrist_corner_to_model(101.f, 757.f) };
+		float qx[4], qy[4], ix[4], iy[4];
+		for (int k = 0; k < 4; ++k)
+			px(q[k], qx[k], qy[k]), px(ic[k], ix[k], iy[k]);
+		const Fmatrix& O = W.off_w;
+		Msg("* [vr3wst] frame %u eye %d drawn %d facing %.2f c %.5f %.5f %.5f hand_i %.5f %.5f %.5f hand_j %.5f %.5f %.5f hand_k %.5f %.5f %.5f hand_c %.5f %.5f %.5f "
+			"quad %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f icon %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f",
+			g_vr_track.frame, g_stereo_bench_eye, show ? 1 : 0, facing, sc.x, sc.y, sc.z, O.i.x, O.i.y, O.i.z, O.j.x, O.j.y, O.j.z, O.k.x, O.k.y, O.k.z,
+			O.c.x, O.c.y, O.c.z, qx[0], qy[0], qx[1], qy[1], qx[2], qy[2], qx[3], qy[3], ix[0], iy[0], ix[1], iy[1], ix[2], iy[2], ix[3], iy[3]);
+	}
 }
