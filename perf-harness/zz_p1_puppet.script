@@ -161,7 +161,7 @@ local function t2_pose(a, now, t)
 	else p_holds = p_holds + 1; m(string.format("HOLD,%d,%d", now, n)) end
 	if p_lx then a:set_actor_position(vector():set(p_lx, p_ly, p_lz)) end
 	a:set_actor_direction(pyaw)   -- sign checked at the pre-flight boot
-	m(string.format("P,%d,%s,%d,%.3f", n, utc, now, a:position():distance_to(v)))
+	m(string.format("P,%d,%s,%d,%.3f,%.4f,%.4f", n, utc, now, a:position():distance_to(v), pyaw, yaw(a)))   -- pose yaw, actor yaw read back
 end
 
 local done_logged = false

@@ -116,3 +116,28 @@ device-paused 35 %; restart within 90 s 90 %.
   so the skip is exercised. t2_xray.sh sha fd7d72bb79d20061.
 - Pre-flight attempt 1 (14:11): t2_xray.sh was not executable (rc 126); no engine boot; slice released at once.
   Fixed (chmod +x) and re-queued.
+
+## 10. Pre-flight 1 RESULT (attempt 2, 19:13-19:25Z, slice released; read once)
+- Boot to first snapshot: 25 s (boot 0 and boot 1).
+- Pose following WORKS headless: 599 poses applied in boot 0 and 900 in boot 1; actor-to-pose distance after apply
+  median 0.11-0.13 m, p95 0.58 m, max 0.60 m; 0 off-mesh holds (the stand-in held a fixed on-mesh point).
+- PAUSE: device():pause(true) STOPS Lua. The PAUSE line was logged at seq 400; no snapshot after it, so UNPAUSE can
+  never run, and X-Ray stays frozen for good. (Prediction "Lua keeps running while paused" 35 %: it did not.) So
+  device pause is NOT a usable freeze mechanism. The freeze skip in the supervisor worked (hold logged for the 40 s
+  dead phase).
+- ENGINE LOOKUP FAILED under real Wine: after the pose went back to play, the 30 s heartbeat fired, but engine()
+  returned nothing (the WINEPREFIX-in-environ check matched no process), so nothing was killed, and the boot only
+  ended at tb_run's own timeout (640 s, rc 5). The supervisor then restarted X-Ray (boot 1, first snapshot 25 s
+  later, ran to the end): the restart itself works. The fake test could not show this (its engine is python).
+- Yaw sign: NOT measured. The run logged no actor yaw per pose (only the last snapshot survives). The P line now also
+  logs the pose yaw and the actor's yaw read back.
+- The planned kill at track 120 never happened (the pause froze the game at about track 30).
+Fixes (before any further boot): engine() now picks by /proc/<pid>/exe being Wine (and skips the watcher by PID),
+and logs every candidate (pid, exe, RSS) at each boot's first snapshot. t2_xray.sh sha 278b8292293c609c.
+
+## 11. Pre-flight 2 plan (registered; waits for the Overseer's OK)
+- Same script, PF_OUT=out/t2pre2 PF_POSE_ARG=nofreeze PF_PAUSE=0 PF_KILL_AT=60 PF_RUN_S=200: yaw phases A-C (30 s),
+  then play; planned SIGKILL at track 60; restart; boot 1 runs to the end. About 6 min of engine time.
+- Readings: the candidate list and which pid was killed (must be the engine: comm and RSS in GB); boot 1's first
+  snapshot within 90 s of the kill; yaw sign from the P lines in phases A-C.
+PREDICTIONS: engine() picks the engine 85 %; restart within 90 s 90 %; yaw negated 55 % / same 35 % / neither 10 %.

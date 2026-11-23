@@ -12,6 +12,7 @@ Each write is logged: utc_ms,seq,phase,yaw. The zone tag is the snapshot's level
 """
 import sys, time, os
 shm, out = sys.argv[1], sys.argv[2]
+NOFREEZE = len(sys.argv) > 3 and sys.argv[3] == 'nofreeze'   # pre-flight 2: no phase D (device pause stops Lua for good)
 utc = lambda: time.time_ns() // 1_000_000
 def snap():
     try: L = open(os.path.join(shm, 'snap.txt'), 'rb').read().decode().replace('\r', '').split('\n')
@@ -28,7 +29,7 @@ t0 = time.time(); n = 0
 while True:
     t = time.time() - t0
     ph, st, aw, yw = ('A', 'play', 'keep', 0.0) if t < 10 else ('B', 'play', 'keep', 1.0) if t < 20 else \
-        ('C', 'play', 'keep', -1.0) if t < 30 else ('D', 'dead', 'freeze', -1.0) if t < 70 else ('E', 'play', 'keep', 0.5)
+        ('C', 'play', 'keep', -1.0) if t < 30 else ('D', 'dead', 'freeze', -1.0) if t < 70 and not NOFREEZE else ('E', 'play', 'keep', 0.5)
     n += 1; u = utc()
     body = f"seq,{n},{u},{st},{lvl},{aw}\np,{x:.3f},{y:.3f},{z:.3f},{yw:.4f},1.0\nend,{n}\n"
     with open(os.path.join(shm, 'pose.txt'), 'wb') as f: f.write(body.encode())

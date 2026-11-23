@@ -27,12 +27,12 @@ rm -f "$SHM"/snap.txt "$SHM"/meta_t2.csv "$SHM"/hits_t2.csv; mkdir -p "$SHM"    
 cp "$P/harness/zz_p1_puppet.script" "$RUN/gamedata/scripts/zz_p1_puppet.script"
 cleanup() { rm -f "$RUN/gamedata/scripts/zz_p1_puppet.script"; }
 trap cleanup EXIT
-# the engine = the biggest process that (1) is not the watcher, by PID ($WP), (2) runs in OUR Wine prefix (environ has
-# WINEPREFIX=$RUN/prefix, which tb_run.sh exports), (3) names the exe. A name match alone picked the watcher in the
-# offline test (its argv names the exe too); Overseer: use a pid/ancestry check, not a name match.
-engine() { local best="" br=0 r; for p in $(pgrep -f "bin\\\\$EXE"); do [ "$p" = "${WP:-}" ] && continue
-  tr '\0' '\n' < /proc/$p/environ 2>/dev/null | grep -qx "WINEPREFIX=$RUN/prefix" || continue
-  r=$(awk '/VmRSS/{print $2}' /proc/$p/status 2>/dev/null); [ "${r:-0}" -gt "$br" ] && { br=$r; best=$p; }; done; echo "$best"; }
+# the engine = the biggest process that (1) is not the watcher, by PID ($WP), (2) is a Wine process by its /proc/<pid>/exe
+# (a wine preloader/loader binary; the watcher's exe is python), (3) names the exe in its command line. Pre-flight 1
+# showed WINEPREFIX is NOT in the engine's /proc environ under Wine, so that check found nothing and a hang was not
+# killed. engine_all lists every candidate (pid exe rss) for the log.
+engine_all() { for p in $(pgrep -f "bin\\\\$EXE"); do [ "$p" = "${WP:-}" ] && continue; echo "$p $(readlink /proc/$p/exe 2>/dev/null) $(awk '/VmRSS/{print $2}' /proc/$p/status 2>/dev/null)"; done; }
+engine() { engine_all | awk '$2 ~ /wine/ && $3+0 > br {br = $3+0; best = $1} END {print best}'; }
 hdr() { head -1 "$SHM/snap.txt" 2>/dev/null | tr -d '\r'; }   # seq,<n>,<t_ms>,<t_track>,<level>,<run_id>
 echo "utc_ms,boot,reason,planned" > "$O/restarts.csv"
 T_START=$(date +%s); k=0; unplanned=0; final=""; done_stall=""; done_kill=""
@@ -47,7 +47,7 @@ while :; do
     sleep 1; h=$(hdr); IFS=, read -r _ s _ tt _ rid <<<"$h"
     [ "${rid:-}" = "$RID" ] || { s=""; tt=""; }                         # a snapshot from an earlier boot does not count
     if [ -z "$first" ]; then
-      [ -n "$s" ] && { first=1; log "boot $k: first snapshot seq $s after $(( $(date +%s) - L0 )) s"; }
+      [ -n "$s" ] && { first=1; log "boot $k: first snapshot seq $s after $(( $(date +%s) - L0 )) s; engine $(engine); candidates: $(engine_all | tr '\n' ';')"; }
       [ -z "$first" ] && [ $(( $(date +%s) - L0 )) -ge 120 ] && { why="no snapshot 120 s after launch"; break; }
       continue; fi
     if [ $k = 0 ] && [ -z "$done_stall" ] && [ -n "$tt" ] && awk -v t="$tt" -v a="$AT" 'BEGIN{exit !(t>=a)}'; then
