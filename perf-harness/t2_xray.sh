@@ -73,8 +73,8 @@ while :; do
       if [ -z "${fz:-}" ]; then fz=1; log "freeze hold: pose state $pst, heartbeat skipped"
         if [ "${T2_FREEZE:-}" = sigstop ]; then FZP=$(engine); [ -n "$FZP" ] && kill -STOP "$FZP" && echo "$(utc),STOP,$pst,$FZP" >> "$O/freeze.csv"; fi; fi
       same=0
-    elif [ -n "${fz:-}" ]; then fz=""; log "freeze hold end: pose state ${pst:-?}"
-      [ -n "${FZP:-}" ] && { kill -CONT "$FZP"; echo "$(utc),CONT,${pst:-?},$FZP" >> "$O/freeze.csv"; FZP=""; }; same=0; fi
+    elif [ -n "${fz:-}" ] && [ -n "${pst:-}" ] && { [ "${paw:-}" = keep ] || [ "${paw:-}" = freeze ]; }; then fz=""; log "freeze hold end: pose state $pst"   # a torn/empty/truncated pose read (awaysim not exactly keep or freeze) never ends a freeze
+      [ -n "${FZP:-}" ] && { kill -CONT "$FZP"; echo "$(utc),CONT,$pst,$FZP" >> "$O/freeze.csv"; FZP=""; }; same=0; fi
     [ $same -ge 30 ] && { why="no new seq for 30 s"; break; }
   done
   [ -n "${FZP:-}" ] && { kill -CONT "$FZP" 2>/dev/null; FZP=""; fz=""; }

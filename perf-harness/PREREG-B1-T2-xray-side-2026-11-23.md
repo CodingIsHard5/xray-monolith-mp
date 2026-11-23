@@ -168,3 +168,8 @@ PREDICTIONS for the long stop:
 - a burst of ON/OFF switch lines in the first 10 s after resume (more than 3x the 10 s before the stop): 40 %;
 - no crash, X-Ray continues: 90 %.
 Readings of (1)-(4) of section 11 are unchanged. t2_xray.sh sha 4c0bf34e2a0eb0a4.
+
+- Before pre-flight 2 (found while answering ITRZone): a torn or empty pose read during a freeze ended the hold
+  (and would have sent SIGCONT early). Now the hold ends only on a pose whose awaysim field is exactly keep or
+  freeze and is not dead/away+freeze. Fake test: truncated "...,fre" and an empty file kept the hold; "play,keep"
+  ended it. t2_xray.sh sha bfe2a36978b8754d (this is the version pre-flight 2 runs).
