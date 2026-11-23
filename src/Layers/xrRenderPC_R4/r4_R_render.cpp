@@ -597,12 +597,16 @@ static int vr_retarget_visual(dxRender_Visual* v, LPCSTR from_tex, LPCSTR to_sha
 			}
 			if (hit)
 			{
-				// made as a HUD model's shaders are (the visual was loaded with hud_loading set)
-				const bool prev_hud = ::Render->hud_loading;
-				::Render->hud_loading = true;
-				ref_shader ns;
-				ns.create(to_shader, base);
-				::Render->hud_loading = prev_hud;
+				// made the way the visual's own shader was made at load: its skinning mode (the vertex shader is compiled per
+				// SKIN_n; a shader made later with the global mode gets the unskinned variant, which does not match the skinned
+				// vertex layout, and the draw is dropped) and its hud flag. The global skinning mode is put back after.
+				const s32 prev_skin = Engine.External.GetSkinningMode();
+				ref_shader old = v->shader;
+				Msg("* [vr3wst] screen surface skinning mode %d, hud %d", (int)v->skinning, v->hud ? 1 : 0);
+				v->SetShaderTexture(to_shader, base);
+				Engine.External.SetSkinningMode(prev_skin);
+				ref_shader ns = v->shader;
+				v->shader = old;
 				// 10c build check: the old and new shader's elements (present, priority, strict, distort, emissive, passes)
 				auto dump = [](LPCSTR tag, Shader* X) {
 					for (u32 k = 0; X && k < SHADER_ELEMENTS_MAX; ++k)
