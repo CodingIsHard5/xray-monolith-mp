@@ -39,6 +39,9 @@ class PROTECT_API CDialogHolder : public pureFrame
 
 	void StartMenu(CUIDialogWnd* pDialog, bool bDoHideIndicators);
 	void StopMenu(CUIDialogWnd* pDialog);
+public:
+	// GammaVR 10c probe: read-only view of the HUD dialogs drawn each frame
+	const xr_vector<dlgItem>& DialogsToRender() const { return m_dialogsToRender; }
 protected:
 	void DoRenderDialogs(CUIWindow* skip = NULL);
 	void CleanInternals();

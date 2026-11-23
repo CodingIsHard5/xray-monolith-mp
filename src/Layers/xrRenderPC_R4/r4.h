@@ -451,6 +451,7 @@ public:
 	virtual void rmNormal();
 	virtual u32 active_phase() { return phase; }; //Swartz: actor shadow
 	void RenderToTarget(RRT target) override;
+	void DumpTarget(RRT target, LPCSTR name) override;
 	// Constructor/destructor/loader
 	CRender();
 	virtual ~CRender();

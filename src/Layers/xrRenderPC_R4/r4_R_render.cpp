@@ -498,6 +498,9 @@ void CRender::RenderToTarget(RRT target)
 	case rtSVP:
 		RT = &Target->rt_secondVP;
 		break;
+	case rtWRIST:
+		RT = &Target->rt_ui_wrist;
+		break;
 	default:
 		Debug.fatal(DEBUG_INFO, "None or wrong Target specified: %i", target);
 		break;
@@ -507,4 +510,50 @@ void CRender::RenderToTarget(RRT target)
 	HW.m_pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBuffer);
 	HW.pContext->CopyResource((*RT)->pSurface, pBuffer);
 	pBuffer->Release();
+}
+
+// GammaVR 10c probe: read a target back and write it as GVRIMG1 (header "GVRIMG1 w h dxgi_format", then rows of 4-byte texels)
+void CRender::DumpTarget(RRT target, LPCSTR name)
+{
+	ref_rt* RT = target == rtWRIST ? &Target->rt_ui_wrist : target == rtPDA ? &Target->rt_ui_pda : nullptr;
+	if (!RT || !*RT || !(*RT)->pSurface)
+	{
+		Msg("! [vr3wst] dump: no target %d", (int)target);
+		return;
+	}
+	ID3D11Texture2D* src = (ID3D11Texture2D*)(*RT)->pSurface;
+	D3D11_TEXTURE2D_DESC d;
+	src->GetDesc(&d);
+	d.Usage = D3D11_USAGE_STAGING;
+	d.BindFlags = 0;
+	d.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+	d.MiscFlags = 0;
+	d.SampleDesc.Count = 1, d.SampleDesc.Quality = 0;
+	ID3D11Texture2D* st = nullptr;
+	if (FAILED(HW.pDevice->CreateTexture2D(&d, nullptr, &st)) || !st)
+	{
+		Msg("! [vr3wst] dump: staging texture failed");
+		return;
+	}
+	HW.pContext->CopyResource(st, src);
+	D3D11_MAPPED_SUBRESOURCE m;
+	if (SUCCEEDED(HW.pContext->Map(st, 0, D3D11_MAP_READ, 0, &m)))
+	{
+		string_path path;
+		FS.update_path(path, "$logs$", name);
+		if (FILE* f = fopen(path, "wb"))
+		{
+			fprintf(f, "GVRIMG1 %u %u %d\n", d.Width, d.Height, (int)d.Format);
+			for (u32 y = 0; y < d.Height; ++y)
+				fwrite((const u8*)m.pData + (size_t)y * m.RowPitch, 4, d.Width, f);
+			fclose(f);
+			Msg("* [vr3wst] dump: wrote %s (%ux%u, format %d, read back from the target)", name, d.Width, d.Height, (int)d.Format);
+		}
+		else
+			Msg("! [vr3wst] dump: cannot open %s", path);
+		HW.pContext->Unmap(st, 0);
+	}
+	else
+		Msg("! [vr3wst] dump: Map failed");
+	st->Release();
 }

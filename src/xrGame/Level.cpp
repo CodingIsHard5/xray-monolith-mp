@@ -1291,6 +1291,7 @@ extern bool use_reshade;
 extern void render_reshade_effects();
 
 extern int ps_r4_hdr10_pda;
+extern void vr_wrist_probe_render(); // GammaVR milestone 10c probe (player_hud.cpp), TEST ONLY -vr_wrist_probe
 extern bool vr_pda_touch_marker(); // GammaVR milestone 10a step 3 (player_hud.cpp) // NOTE: this is a hack to avoid double HDR tonemapping the PDA
 
 void CLevel::OnRender()
@@ -1349,6 +1350,7 @@ void CLevel::OnRender()
 
 			ps_r4_hdr10_pda = 0;
 		}
+		vr_wrist_probe_render();
 
 		if (Actor() && Actor()->m_bDelayDrawPickupItems)
 		{

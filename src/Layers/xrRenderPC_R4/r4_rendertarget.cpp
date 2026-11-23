@@ -555,9 +555,11 @@ CRenderTarget::CRenderTarget()
 		if (RImplementation.o.dx11_hdr10) {
 			rt_secondVP.create(r2_RT_secondVP, w, h, D3DFMT_A2R10G10B10, 1); //--#SM+#-- +SecondVP+ // NOTE: this is a hack to use DXGI R10G10B10A2_UNORM
 			rt_ui_pda.create(r2_RT_ui, w, h, D3DFMT_A2R10G10B10); // NOTE: this is a hack to use DXGI R10G10B10A2_UNORM
+			rt_ui_wrist.create("$user$ui_wrist", w, h, D3DFMT_A2R10G10B10); // GammaVR 10c
 		} else {
 			rt_secondVP.create(r2_RT_secondVP, w, h, D3DFMT_A8R8G8B8, 1); //--#SM+#-- +SecondVP+
 			rt_ui_pda.create(r2_RT_ui, w, h, D3DFMT_A8R8G8B8);
+			rt_ui_wrist.create("$user$ui_wrist", w, h, D3DFMT_A8R8G8B8); // GammaVR 10c
 		}
 
 		if (ps_r4_atlas)

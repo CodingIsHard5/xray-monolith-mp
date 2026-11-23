@@ -131,6 +131,7 @@ public:
 
 	ref_rt rt_dof;
 	ref_rt rt_ui_pda;
+	ref_rt rt_ui_wrist; // GammaVR 10c
 	ref_rt rt_ui_3d_icons;
 	ref_rt rt_ui_3d_icons_raw;
 	ref_rt rt_ui_3d_icons_raw_msaa;

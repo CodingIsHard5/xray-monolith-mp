@@ -295,6 +295,7 @@ public:
 	{
 		rtPDA = 1,
 		rtSVP,
+		rtWRIST, // GammaVR 10c: the wrist status screen (R4 only)
 	};
 
 	enum DxEncoding
@@ -463,6 +464,8 @@ public:
 	virtual u32 memory_usage() { return 0; }
 	virtual u32 active_phase() = 0; //Swartz: actor shadow
 	virtual void RenderToTarget(RRT target) = 0;
+	// GammaVR 10c probe (TEST ONLY use): write a target to $logs$/<name> in the GVRIMG1 raw format; R4 only, others no-op
+	virtual void DumpTarget(RRT target, LPCSTR name) {}
 	// Constructor/destructor
 	virtual ~IRender_interface();
 protected:

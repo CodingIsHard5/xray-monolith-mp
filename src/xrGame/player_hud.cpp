@@ -35,6 +35,8 @@
 #include "ui/UIPdaWnd.h"
 #include "ui/UITabControl.h" // GammaVR milestone 10a step 3: tab rects for the log
 #include "ui/UITabButton.h"
+#include "ui/UIMainIngameWnd.h" // GammaVR milestone 10c probe
+#include "ui/UIHudStatesWnd.h"
 #include "map_spot.h"     // GammaVR milestone 10a step 3: map spot rects for the log (note 28)
 #include "map_location.h"
 #include <typeinfo>
@@ -6597,4 +6599,71 @@ void player_hud::net_Relcase(CObject* obj)
 
 	if (m_attached_items[SCOPE_ATTACH_IDX])
 		m_attached_items[SCOPE_ATTACH_IDX]->m_parent_hud_item->net_Relcase(obj);
+}
+
+// GammaVR milestone 10c probe (SPIKE_PLAN Amendment 36 note 3; no verdict). TEST ONLY switch, no launcher passes it:
+//   -vr_wrist_probe F   on the first render at or after VR frame F, CLevel::OnRender (before the scene, after the PDA's own
+//                       copy) clears the backbuffer, draws ONLY the engine's HUD states window and every enabled HUD dialog,
+//                       copies that into the rtWRIST target and writes it to $logs$/vr_wrist_<frame>.raw (read back from the
+//                       target). Each window it met is logged ([vr3wst] window ...). Off: nothing here runs.
+static int s_vr_wrist_probe = -2; // -2 not parsed, -1 off, else the VR frame
+static bool s_vr_wrist_done = false;
+static void vr_wrist_log(LPCSTR kind, CUIWindow* w, u32 frame, int& n)
+{
+	Frect r;
+	w->GetAbsoluteRect(r);
+	Msg("* [vr3wst] frame %u window %d %s name '%s' rect %.1f %.1f %.1f %.1f shown %d children %u", frame, n++, kind,
+		w->WindowName().size() ? w->WindowName().c_str() : "", r.left, r.top, r.right, r.bottom, w->IsShown() ? 1 : 0,
+		(u32)w->GetChildWndList().size());
+	for (CUIWindow* c : w->GetChildWndList())
+	{
+		Frect q;
+		c->GetAbsoluteRect(q);
+		Msg("* [vr3wst] frame %u   child of %d name '%s' rect %.1f %.1f %.1f %.1f shown %d", frame, n - 1,
+			c->WindowName().size() ? c->WindowName().c_str() : "", q.left, q.top, q.right, q.bottom, c->IsShown() ? 1 : 0);
+	}
+}
+void vr_wrist_probe_render()
+{
+	if (s_vr_wrist_probe == -2)
+	{
+		s_vr_wrist_probe = -1;
+		if (LPCSTR q = strstr(Core.Params, "-vr_wrist_probe "))
+			if (sscanf(q + 16, "%d", &s_vr_wrist_probe) != 1 || s_vr_wrist_probe < 0)
+				s_vr_wrist_probe = -1;
+		if (s_vr_wrist_probe >= 0)
+			Msg("* [vr3wst] wrist probe on VR frame %d (TEST ONLY -vr_wrist_probe)", s_vr_wrist_probe);
+	}
+	if (s_vr_wrist_probe < 0 || s_vr_wrist_done)
+		return;
+	vr_input_info I;
+	if (!g_vr_get_input || !g_vr_get_input(&I) || int(I.frame) < s_vr_wrist_probe)
+		return;
+	CUIGameCustom* ui = CurrentGameUI();
+	if (!ui)
+		return;
+	s_vr_wrist_done = true;
+	Device.m_pRender->ClearTarget();
+	int n = 0, drawn = 0;
+	if (ui->UIMainIngameWnd)
+		if (CUIHudStatesWnd* h = ui->UIMainIngameWnd->get_hud_states())
+		{
+			vr_wrist_log("hud_states", h, I.frame, n);
+			if (h->IsShown())
+				h->Draw(), ++drawn;
+		}
+	CUIWindow* pda = (&ui->GetPdaMenu() != nullptr) ? (CUIWindow*)&ui->GetPdaMenu() : nullptr;
+	for (const dlgItem& d : ui->DialogsToRender())
+	{
+		if (!d.wnd || d.wnd == pda)
+			continue;
+		vr_wrist_log(d.enabled ? "dialog" : "dialog(disabled)", d.wnd, I.frame, n);
+		if (d.enabled && d.wnd->IsShown())
+			d.wnd->Draw(), ++drawn;
+	}
+	Render->RenderToTarget(Render->rtWRIST);
+	string64 name;
+	xr_sprintf(name, "vr_wrist_%u.raw", I.frame);
+	Render->DumpTarget(Render->rtWRIST, name);
+	Msg("* [vr3wst] frame %u windows %d drawn %d", I.frame, n, drawn);
 }
