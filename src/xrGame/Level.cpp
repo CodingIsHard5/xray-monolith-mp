@@ -1012,6 +1012,7 @@ void CLevel::SkipMusicTrack()
 BOOL mt_ph_commander = FALSE;
 BOOL mt_TaskManager = FALSE;
 void vr_input_update(); // GammaVR milestone 6, player_hud.cpp
+void vr_item_probe_update(); // GammaVR item 5 probe (TEST ONLY), ActorInput.cpp
 
 void CLevel::OnFrame()
 {
@@ -1038,6 +1039,7 @@ void CLevel::OnFrame()
 	// GammaVR milestone 6 (Amendment 19): controller buttons read in the previous render -> kWPN_FIRE on the actor and the
 	// two-handed grab input (no-op without -vr_openxr; main thread, before the objects update)
 	vr_input_update();
+	vr_item_probe_update(); // inert without -vr_item_probe
 	// commit events from bullet manager from prev-frame
 	Device.Statistic->TEST0.Begin();
 	BulletManager().CommitEvents();

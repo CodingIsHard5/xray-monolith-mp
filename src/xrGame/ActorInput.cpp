@@ -853,3 +853,89 @@ void CActor::NoClipFly(int cmd)
 	character_physics_support()->movement()->SetPosition(Position());
 }
 #endif //DEBUG
+
+// GammaVR diegetic item 5 (items in the hand), PROBE, TEST ONLY, no verdict: "-vr_item_probe <frame> <slot 0-3> <skip>".
+// On VR frame <frame> it logs the four quick slots (section, the item GetAny finds, its world visual, the count and
+// uses of that section in the inventory), then runs the engine's own quick-use path for <slot> (IR_OnKeyboardPress of
+// kQUICK_USE_1 + slot, the same code as the key). If <skip> >= 0, <skip> frames later it calls GAMMA's lam2
+// stop_all_actions (FDDA's own skip). From <frame> to <frame> + 400 it logs every change in that section's count and
+// uses, and the actor's health. Inert without the switch; no launcher passes it.
+#include "eatable_item.h"
+#include "../xrEngine/vr_hooks.h"
+static void vr_item_count(CActor* A, LPCSTR sect, int& n, int& uses)
+{
+	n = 0;
+	uses = 0;
+	for (PIItem it : A->inventory().m_all)
+	{
+		if (!it || xr_strcmp(it->object().cNameSect(), sect))
+			continue;
+		++n;
+		CEatableItem* e = smart_cast<CEatableItem*>(it);
+		uses += e ? int(e->GetRemainingUses()) : 1;
+	}
+}
+void vr_item_probe_update()
+{
+	static bool s_parsed = false;
+	static int s_frame = -1, s_slot = 0, s_skip = -1;
+	static int s_last_n = -1, s_last_uses = -1;
+	if (!s_parsed)
+	{
+		s_parsed = true;
+		if (LPCSTR p = strstr(Core.Params, "-vr_item_probe "))
+		{
+			if (sscanf(p + 15, "%d %d %d", &s_frame, &s_slot, &s_skip) != 3 || s_frame < 0 || s_slot < 0 || s_slot > 3)
+				s_frame = -1;
+			Msg("* [vr11p] item probe (TEST ONLY): frame %d slot %d skip %d", s_frame, s_slot, s_skip);
+		}
+	}
+	if (s_frame < 0 || !g_vr_track.head0_set)
+		return;
+	CActor* A = smart_cast<CActor*>(Level().CurrentEntity());
+	if (!A)
+		return;
+	const int f = int(g_vr_track.frame);
+	if (f < s_frame || f > s_frame + 400)
+		return;
+	static int s_done_at = -1, s_skip_done = 0;
+	LPCSTR sect = g_quick_use_slots[s_slot];
+	if (s_done_at < 0)
+	{
+		s_done_at = f;
+		for (int i = 0; i < 4; ++i)
+		{
+			LPCSTR s = g_quick_use_slots[i];
+			PIItem it = s[0] ? A->inventory().GetAny(s) : nullptr;
+			int n, u;
+			vr_item_count(A, s, n, u);
+			Msg("* [vr11p] frame %d slot %d section '%s' found %d id %d visual '%s' count %d uses %d", f, i, s, it ? 1 : 0,
+				it ? int(it->object().ID()) : -1, it ? it->object().cNameVisual().c_str() : "", n, u);
+		}
+		vr_item_count(A, sect, s_last_n, s_last_uses);
+		Msg("* [vr11p] frame %d quick use slot %d ('%s') through IR_OnKeyboardPress(kQUICK_USE_%d); health %.4f", f, s_slot, sect,
+			s_slot + 1, A->conditions().GetHealth());
+		A->IR_OnKeyboardPress(kQUICK_USE_1 + s_slot);
+		return;
+	}
+	if (s_skip >= 0 && !s_skip_done && f >= s_done_at + s_skip)
+	{
+		s_skip_done = 1;
+		::luabind::functor<void> fn;
+		const bool ok = ai().script_engine().functor("lam2.stop_all_actions", fn);
+		if (ok)
+			fn();
+		Msg("* [vr11p] frame %d skip: lam2.stop_all_actions %s", f, ok ? "called" : "NOT FOUND");
+	}
+	int n, u;
+	vr_item_count(A, sect, n, u);
+	if (n != s_last_n || u != s_last_uses)
+	{
+		Msg("* [vr11p] frame %d section '%s' count %d -> %d uses %d -> %d; health %.4f", f, sect, s_last_n, n, s_last_uses, u,
+			A->conditions().GetHealth());
+		s_last_n = n;
+		s_last_uses = u;
+	}
+	if (f == s_frame + 400)
+		Msg("* [vr11p] frame %d end: section '%s' count %d uses %d; health %.4f", f, sect, n, u, A->conditions().GetHealth());
+}
