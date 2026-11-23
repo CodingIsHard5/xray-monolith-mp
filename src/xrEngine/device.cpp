@@ -204,6 +204,9 @@ static HMONITOR g_StartupMonitor = NULL;
 
 #include "MonitorList.h"
 
+ENGINE_API int g_freeze_absorb_ms = 0;    // B1-T2 freeze: 0 = off (default)
+ENGINE_API int g_freeze_absorb_armed = 0; // B1-T2 freeze: armed by script for one absorb
+
 static void InitMonitor()
 {
 	if (g_StartupMonitor)
@@ -803,6 +806,23 @@ void CRenderDevice::FrameMove()
 		if (Paused())
 			fTimeDelta = 0.0f;
 		// u64 qTime = TimerGlobal.GetElapsed_clk();
+		// B1-T2 freeze (Caden: "make a setting to freeze it"): while the bridge has ARMED a freeze
+		// (g_freeze_absorb_armed, set by script just before the bridge suspends the process) and absorbing is on
+		// (g_freeze_absorb_ms > 0), a wall gap longer than g_freeze_absorb_ms since the last frame is removed from
+		// TimerGlobal, minus one 33 ms frame, so time_global, game time and every timer see one normal frame. Each
+		// absorb is logged and disarms itself, so a later hitch is never swallowed. Both default 0: engine unchanged.
+		if (g_freeze_absorb_ms > 0 && g_freeze_absorb_armed)
+		{
+			const u32 now_ms = TimerGlobal.GetElapsed_ms();
+			const u32 gap_ms = now_ms - dwTimeGlobal;
+			if (gap_ms > (u32)g_freeze_absorb_ms)
+			{
+				const u32 drop_ms = gap_ms - 33;
+				TimerGlobal.AbsorbGap(u64(drop_ms) * CPU::qpc_freq / 1000);
+				g_freeze_absorb_armed = 0;
+				Msg("* [FREEZE] absorbed %u ms of a %u ms gap (time_global %u)", drop_ms, gap_ms, dwTimeGlobal);
+			}
+		}
 		fTimeGlobal = TimerGlobal.GetElapsed_sec(); //float(qTime)*CPU::cycles2seconds;
 		u32 _old_global = dwTimeGlobal;
 		dwTimeGlobal = TimerGlobal.GetElapsed_ms();

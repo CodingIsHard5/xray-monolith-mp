@@ -36,6 +36,10 @@ public:
 		qwStartTime = CPU::QPC() - qwPauseAccum;
 	}
 
+	// B1-T2 freeze (g_freeze_absorb_ms): remove a wall-clock gap from this timer, through the same accumulator the
+	// engine's own pause uses. Only called by CRenderDevice for TimerGlobal while a freeze is armed.
+	ICF void AbsorbGap(u64 ticks) { qwPauseAccum += ticks; }
+
 	ICF u64 GetElapsed_ticks() const
 	{
 		if (bPause) return qwPausedTime;

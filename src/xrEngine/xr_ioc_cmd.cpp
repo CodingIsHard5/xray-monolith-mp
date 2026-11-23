@@ -1097,6 +1097,16 @@ extern Flags32 psEnvFlags;
 
 extern int g_ErrorLineCount;
 
+extern ENGINE_API int g_freeze_absorb_ms;
+extern ENGINE_API int g_freeze_absorb_armed;
+// B1-T2 freeze settings are NEVER written to user.ltx (cfg_save on exit would otherwise keep "armed" or the
+// threshold on for the next session, where a loading hitch could be swallowed). Set per run by script only.
+class CCC_IntegerNoSave : public CCC_Integer
+{
+public:
+	CCC_IntegerNoSave(LPCSTR N, int* V, int _min, int _max) : CCC_Integer(N, V, _min, _max) {}
+	virtual void Save(IWriter* F) {}
+};
 ENGINE_API int ps_r__Supersample = 1;
 ENGINE_API float ps_r2_sun_shafts_min = 0.f;
 ENGINE_API float ps_r2_sun_shafts_value = 1.f;
@@ -1194,6 +1204,8 @@ void CCC_Register()
 	CMD4(CCC_Float, "g_dispersion_base", &g_dispersion_base, 0.0f, 5.0f);
 	CMD4(CCC_Float, "g_dispersion_factor", &g_dispersion_factor, 0.1f, 10.0f);
 	CMD4(CCC_Integer, "g_ai_unlimited_ammo", &g_ai_unlimited_ammo, 0, 1);
+	CMD4(CCC_IntegerNoSave, "g_freeze_absorb_ms", &g_freeze_absorb_ms, 0, 3600000);     // B1-T2 freeze, default 0 (off)
+	CMD4(CCC_IntegerNoSave, "g_freeze_absorb_armed", &g_freeze_absorb_armed, 0, 1);
 
 	// Render device states
 	CMD4(CCC_Integer, "r__supersample", &ps_r__Supersample, 1, 4);
