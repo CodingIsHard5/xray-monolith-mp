@@ -59,7 +59,7 @@ void CSkeletonX::_Copy(CSkeletonX* B)
 void CSkeletonX::_Render(ref_geom& hGeom, u32 vCount, u32 iOffset, u32 pCount)
 {
 	xrCriticalSectionGuard guard(&Parent->UCalc_Mutex);
-	PROF_EVENT("CSkeletonX::_Render");
+	PROF_EVENT_HOT("CSkeletonX::_Render");
 	Fmatrix p_WV, p_WVP;
 
 #ifdef USE_DX11 //
@@ -112,7 +112,7 @@ void CSkeletonX::_Render(ref_geom& hGeom, u32 vCount, u32 iOffset, u32 pCount)
 		break;
 	case RM_SINGLE:
 		{
-			PROF_EVENT("RM_SINGLE");
+			PROF_EVENT_HOT("RM_SINGLE");
 			Fmatrix W;
 			W.mul_43(RCache.xforms.m_w, Parent->LL_GetTransform_R(u16(RMS_boneid)));
 			RCache.set_xform_world(W);
@@ -127,13 +127,13 @@ void CSkeletonX::_Render(ref_geom& hGeom, u32 vCount, u32 iOffset, u32 pCount)
 	case RM_SKINNING_3B:
 	case RM_SKINNING_4B:
 		{
-			PROF_EVENT("RM_SKINNING");
+			PROF_EVENT_HOT("RM_SKINNING");
 			// Transfer matrices ( current and previous )
 			R_constant* array = RCache.get_c(s_bones_array_const);
 			R_constant* array_prev = RImplementation.phase == RImplementation.PHASE_NORMAL ? RCache.get_c(s_bones_array_prev_const) : array;
 
 			{
-				PROF_EVENT("SEND_MATRICES");
+				PROF_EVENT_HOT("SEND_MATRICES");
 				u32 count = RMS_bonecount;
 				for (u32 mid = 0; mid < count; mid++)
 				{

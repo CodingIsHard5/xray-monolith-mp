@@ -98,25 +98,25 @@ xrSRWLock::xrSRWLock()
 
 void xrSRWLock::AcquireExclusive()
 {
-	PROF_EVENT("xrSRWLock::AcquireExclusive");
+	PROF_EVENT_HOT("xrSRWLock::AcquireExclusive");
     AcquireSRWLockExclusive(&smutex);
 }
 
 void xrSRWLock::ReleaseExclusive()
 {
-	PROF_EVENT("xrSRWLock::ReleaseExclusive");
+	PROF_EVENT_HOT("xrSRWLock::ReleaseExclusive");
     ReleaseSRWLockExclusive(&smutex);
 }
 
 void xrSRWLock::AcquireShared()
 {
-	PROF_EVENT("xrSRWLock::AcquireShared");
+	PROF_EVENT_HOT("xrSRWLock::AcquireShared");
     AcquireSRWLockShared(&smutex);
 }
 
 void xrSRWLock::ReleaseShared()
 {
-	PROF_EVENT("xrSRWLock::ReleaseShared");
+	PROF_EVENT_HOT("xrSRWLock::ReleaseShared");
     ReleaseSRWLockShared(&smutex);
 }
 

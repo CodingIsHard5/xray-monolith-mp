@@ -1,0 +1,8 @@
+base1          frame=6.631  feed=3.692  render=3.598  a=0.544  b=3.054  c=0.093  sun=1.814  probes=80015
+base2          frame=6.600  feed=3.693  render=3.599  a=0.541  b=3.057  c=0.094  sun=1.807  probes=80041
+base3          frame=6.446  feed=3.656  render=3.564  a=0.536  b=3.028  c=0.092  sun=1.788  probes=79834
+MEAN           frame=6.559  feed=3.680  render=3.587  a=0.540  b=3.047  c=0.093  sun=1.803  probes=79963
+cord1          frame=5.212  feed=2.452  render=2.376  a=0.142  b=2.234  c=0.076  sun=0.715  probes=43879
+cord2          frame=5.030  feed=2.432  render=2.357  a=0.141  b=2.216  c=0.075  sun=0.718  probes=44053
+cord3          frame=4.935  feed=2.469  render=2.394  a=0.141  b=2.253  c=0.075  sun=0.724  probes=44007
+MEAN           frame=5.059  feed=2.451  render=2.376  a=0.142  b=2.234  c=0.075  sun=0.719  probes=43980

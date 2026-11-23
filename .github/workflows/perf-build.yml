@@ -42,10 +42,11 @@ jobs:
         msbuild-architecture: "x64"
 
     # XRCORE_PROFILER_AGG selects the CSV profiler backend (src/xrCore/profiler.h).
+    # perf/render-split only: XRCORE_PROFILER_COARSE compiles out PROF_EVENT_HOT sites (R1 step 0 measurement).
     # It costs one predictable branch per PROF_EVENT while no capture is running.
     - name: Build DX11 with the CSV profiler backend
       env:
-        CL: /DXRCORE_PROFILER_AGG
+        CL: /DXRCORE_PROFILER_AGG /DXRCORE_PROFILER_COARSE
       run: msbuild /m /p:Configuration=DX11 /flp:"logfile=perf_build.log;verbosity=normal" ${{ env.SOLUTION_FILE_PATH }}
 
     - name: Upload build log

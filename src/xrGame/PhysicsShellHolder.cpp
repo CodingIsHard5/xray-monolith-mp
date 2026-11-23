@@ -414,7 +414,7 @@ void CPhysicsShellHolder::OnChangeVisual()
 
 void CPhysicsShellHolder::UpdateCL()
 {
-	PROF_EVENT();
+	PROF_EVENT_HOT();
 	inherited::UpdateCL();
 	//обновить присоединенные партиклы
 	UpdateParticles();

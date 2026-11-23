@@ -1,0 +1,15 @@
+# R1 step 0 order (PREREG-R1-step0-2026-11-22.md). F = RefDet14.exe (all probes), K = Coarse14.exe (hot probes compiled out).
+r1_ros_f1|RefDet14.exe|bench1|0
+r1_ros_k1|Coarse14.exe|bench1|0
+r1_ros_k2|Coarse14.exe|bench1|0
+r1_ros_f2|RefDet14.exe|bench1|0
+r1_ros_f3|RefDet14.exe|bench1|0
+r1_ros_k3|Coarse14.exe|bench1|0
+r1_cor_k1|Coarse14.exe|cordon1|0
+r1_cor_f1|RefDet14.exe|cordon1|0
+r1_cor_f2|RefDet14.exe|cordon1|0
+r1_cor_k2|Coarse14.exe|cordon1|0
+r1_cor_k3|Coarse14.exe|cordon1|0
+r1_cor_f3|RefDet14.exe|cordon1|0
+r1_ros_k4c|Coarse14.exe|bench1|1
+r1_ros_f4c|RefDet14.exe|bench1|1

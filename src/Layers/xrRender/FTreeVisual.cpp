@@ -150,7 +150,7 @@ struct FTreeVisual_setup
 
 void FTreeVisual::Render(float LOD)
 {
-	PROF_EVENT("FTreeVisual::Render");
+	PROF_EVENT_HOT("FTreeVisual::Render");
 	static FTreeVisual_setup tvs, prev_tvs;
 	if (tvs.dwFrame != Device.dwFrame)
 	{

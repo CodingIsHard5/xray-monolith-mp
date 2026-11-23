@@ -16,7 +16,8 @@ if "$T/protected-title-check.sh" >/dev/null 2>&1; then echo "REFUSED: protected 
 # logged at start and end, result marked CONFOUNDED if another heavy process was present.
 # Without it: a functional run (smoke test, state-diff harness); its timings are NOT measurements.
 X="${BENCH_EXCLUSIVE:-0}"; KIND="functional"; [ "$X" = 1 ] && KIND="EXCLUSIVE timing"
-if ! "$T/quiet-required.sh" claim $W $((LIMIT/60+5)) "headless Xvfb GAMMA engine benchmark $TAG ($KIND)" >"$OUT/claim.txt" 2>&1; then
+# BENCH_NOCLAIM=1: a series driver (tools/r1_series.sh) already holds the EXCLUSIVE claim for the slice; no claim or release here.
+if [ "${BENCH_NOCLAIM:-0}" != 1 ] && ! "$T/quiet-required.sh" claim $W $((LIMIT/60+5)) "headless Xvfb GAMMA engine benchmark $TAG ($KIND)" >"$OUT/claim.txt" 2>&1; then
   echo "REFUSED: no quiet slot ($(tail -1 "$OUT/claim.txt"))"; exit 3; fi
 # Own engine shows up as comm "X-RAY Primary t": excluded by its command line (this project's run dir), not by name,
 # so another worker's X-Ray engine still counts as a heavy other.
@@ -28,7 +29,7 @@ cleanup() {
   wineserver -k >/dev/null 2>&1
   [ -n "$WM_PID" ] && kill "$WM_PID" 2>/dev/null
   [ -n "$XVFB_PID" ] && kill "$XVFB_PID" 2>/dev/null
-  "$T/quiet-required.sh" release $W >/dev/null 2>&1
+  [ "${BENCH_NOCLAIM:-0}" = 1 ] || "$T/quiet-required.sh" release $W >/dev/null 2>&1
 }
 trap cleanup EXIT
 if [ ! -e "/tmp/.X11-unix/X${DISP#:}" ]; then Xvfb "$DISP" -screen 0 1280x720x24 -nolisten tcp >/dev/null 2>&1 & XVFB_PID=$!; sleep 2; fi
