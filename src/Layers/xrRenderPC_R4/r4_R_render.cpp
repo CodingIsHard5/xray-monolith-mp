@@ -636,3 +636,36 @@ int CRender::model_RetargetScreen(IRenderVisual* V, LPCSTR from_tex, LPCSTR to_s
 {
 	return vr_retarget_visual((dxRender_Visual*)V, from_tex, to_shader);
 }
+extern float r_ssaLOD_A;
+// 10c build check: the drawn child list of a model (a skeleton keeps hidden-bone children out of it), each child's type,
+// sphere and whether its shader samples the named texture; the skeleton's LOD and the SSA test add_Dynamic makes against it
+void CRender::model_DebugTree(IRenderVisual* V, const Fmatrix& xf, LPCSTR tex, LPCSTR tag)
+{
+	dxRender_Visual* v = (dxRender_Visual*)V;
+	if (!v)
+		return;
+	xr_vector<IRenderVisual*>* ch = v->get_children();
+	if (CKinematics* K = smart_cast<CKinematics*>(v))
+	{
+		Fvector T;
+		xf.transform_tiny(T, K->vis.sphere.P);
+		float D = Device.vCameraPosition.distance_to(T);
+		Msg("* [vr3wstt] %s type %u skeleton lod %s sphere R %.4f dist %.4f (LOD used when ssa < r_ssaLOD_A %.6f)", tag, (u32)v->Type,
+			K->m_lod ? "yes" : "no", K->vis.sphere.R, D, r_ssaLOD_A);
+	}
+	Msg("* [vr3wstt] %s drawn children %u", tag, ch ? (u32)ch->size() : 0u);
+	for (u32 i = 0; ch && i < ch->size(); ++i)
+	{
+		dxRender_Visual* c = (dxRender_Visual*)(*ch)[i];
+		bool has = false;
+		if (Shader* S = c->shader._get())
+			if (ShaderElement* E = S->E[0]._get())
+				for (u32 p = 0; p < E->passes.size(); ++p)
+					if (E->passes[p]->T._get())
+						for (const auto& t : *E->passes[p]->T)
+							if (t.second._get() && !xr_strcmp(t.second->cName.c_str(), tex))
+								has = true;
+		Msg("* [vr3wstt] %s child %u type %u sphere %.4f %.4f %.4f R %.4f samples %s %d", tag, i, (u32)c->Type, c->vis.sphere.P.x,
+			c->vis.sphere.P.y, c->vis.sphere.P.z, c->vis.sphere.R, tex, has ? 1 : 0);
+	}
+}

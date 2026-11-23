@@ -453,6 +453,7 @@ public:
 	void RenderToTarget(RRT target) override;
 	void DumpTarget(RRT target, LPCSTR name) override;
 	int model_RetargetScreen(IRenderVisual* V, LPCSTR from_tex, LPCSTR to_shader) override;
+	void model_DebugTree(IRenderVisual* V, const Fmatrix& xf, LPCSTR tex, LPCSTR tag) override;
 	// Constructor/destructor/loader
 	CRender();
 	virtual ~CRender();

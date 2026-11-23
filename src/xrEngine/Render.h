@@ -469,6 +469,7 @@ public:
 	// GammaVR 10c: on model V (and its children), give every surface whose pass samples texture from_tex the shader
 	// to_shader instead (with that surface's own first other texture as base); returns how many surfaces changed. R4 only.
 	virtual int model_RetargetScreen(IRenderVisual* V, LPCSTR from_tex, LPCSTR to_shader) { return 0; }
+	virtual void model_DebugTree(IRenderVisual* V, const Fmatrix& xf, LPCSTR tex, LPCSTR tag) {} // GammaVR 10c build check
 	// Constructor/destructor
 	virtual ~IRender_interface();
 protected:

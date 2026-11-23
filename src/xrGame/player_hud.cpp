@@ -6823,6 +6823,13 @@ static void vr_wrist_draw(IDSGraphManager* DM)
 			W.K->CalculateBones(TRUE);
 		}
 		DM->add_Dynamic(W.vis, &W.xf);
+		// 10c build check: what add_Dynamic gets, once, on the probe frame
+		static bool s_tree_done = false;
+		if (!s_tree_done && W.probe >= 0 && int(g_vr_track.frame) >= W.probe)
+		{
+			s_tree_done = true;
+			::Render->model_DebugTree(W.vis, W.xf, "$user$ui_wrist", "wrist");
+		}
 	}
 	if (vr_mag_log_window())
 	{
