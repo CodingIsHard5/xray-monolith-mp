@@ -1,0 +1,29 @@
+r1b_ros_off_1    seqRender 2.7500  S_static 0.2424  cap_dyn 0.0982  join 0.0000  frame mean 5.5559 p99 12.1548
+r1b_ros_off_2    seqRender 2.7733  S_static 0.2444  cap_dyn 0.0997  join 0.0000  frame mean 5.7900 p99 13.2977
+r1b_ros_off_3    seqRender 2.7470  S_static 0.2432  cap_dyn 0.0986  join 0.0000  frame mean 5.5718 p99 12.2333
+r1b_ros_on_1     seqRender 2.6971  S_static 0.0001  cap_dyn 0.1015  join 0.1337  frame mean 5.6600 p99 12.0685
+r1b_ros_on_2     seqRender 2.7090  S_static 0.0001  cap_dyn 0.1019  join 0.1325  frame mean 5.7112 p99 13.0821
+r1b_ros_on_3     seqRender 2.6949  S_static 0.0001  cap_dyn 0.1013  join 0.1338  frame mean 5.7747 p99 13.0804
+r1b_cor_off_1    seqRender 1.8720  S_static 0.0559  cap_dyn 0.0190  join 0.0000  frame mean 4.5307 p99 11.7103
+r1b_cor_off_2    seqRender 1.8605  S_static 0.0551  cap_dyn 0.0182  join 0.0000  frame mean 4.5424 p99 11.6497
+r1b_cor_off_3    seqRender 1.8158  S_static 0.0544  cap_dyn 0.0182  join 0.0000  frame mean 4.1488 p99 10.4212
+r1b_cor_on_1     seqRender 1.8577  S_static 0.0001  cap_dyn 0.0193  join 0.0306  frame mean 4.5472 p99 12.3694
+r1b_cor_on_2     seqRender 1.8676  S_static 0.0001  cap_dyn 0.0185  join 0.0310  frame mean 4.1968 p99 10.4837
+r1b_cor_on_3     seqRender 1.8561  S_static 0.0001  cap_dyn 0.0184  join 0.0305  frame mean 4.6423 p99 12.3577
+
+BAR A (Rostok OFF S_static mean) = 0.2433 ms, bar 0.15 -> PASS
+[ros] seqRender OFF 2.7568 (spread 0.0262)  ON 2.7003 (spread 0.0141)  GAIN +0.0564 ms
+[ros] frame mean: OFF 5.6392 (spread 0.2342)  ON 5.7153  limit 5.8734 -> no worse
+[ros] frame p99: OFF 12.5619 (spread 1.1429)  ON 12.7437  limit 13.7048 -> no worse
+[ros] slice rule (G >= 0.03): continue; 1b-2 rule (G >= 0.06): no 1b-2, Overseer decides
+[ros] check 3(iii): error/warning sets equal True (183 distinct); LSS spawn sets equal True (182 distinct)
+[cor] seqRender OFF 1.8494 (spread 0.0562)  ON 1.8605 (spread 0.0116)  GAIN -0.0110 ms
+[cor] frame mean: OFF 4.4073 (spread 0.3936)  ON 4.4621  limit 4.8009 -> no worse
+[cor] frame p99: OFF 11.2604 (spread 1.2891)  ON 11.7369  limit 12.5495 -> no worse
+[cor] check 3(iii): error/warning sets equal False (216 distinct); LSS spawn sets equal False (263 distinct)
+    r1b_cor_off_2: +['! Fallback to default bump map: wpn\\eft_powder\\powder_green_bump#'] -[]
+    r1b_cor_off_3: +['! Fallback to default bump map: wpn\\eft_powder\\powder_green_bump#'] -['! Fallback to default bump map: wpn\\eft_powder\\powder_blue_bump#', '!ERROR set_save_marker:actor_binder: INCORRECT LOAD dif=N c_dif=N']
+    r1b_cor_on_1: +[] -['! Fallback to default bump map: wpn\\eft_powder\\powder_blue_bump#']
+    r1b_cor_on_2: +['! Fallback to default bump map: wpn\\eft_powder\\powder_green_bump#', '! Fallback to default bump map: wpn\\eft_powder\\powder_red_bump#'] -['! Fallback to default bump map: wpn\\eft_powder\\powder_blue_bump#', '!ERROR set_save_marker:actor_binder: INCORRECT LOAD dif=N c_dif=N']
+    r1b_cor_on_3: +['! Fallback to default bump map: wpn\\eft_powder\\powder_green_bump#'] -['! Invalid ogg-comment version, file:  z:/home/caden/projects/stalkergameengine/run\\gamedata\\sounds\\drx_da\\drx_da_anomaly_gravy_hitN.ogg', '!ERROR set_save_marker:actor_binder: INCORRECT LOAD dif=N c_dif=N']
+[4-core] seqRender OFF 2.7103 ON 2.8291 -> WORSE; frame mean OFF 6.9383 ON 7.1019; p99 OFF 13.3862 ON 13.9120
