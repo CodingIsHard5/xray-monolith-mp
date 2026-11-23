@@ -58,3 +58,9 @@ PREDICTIONS:
 - at least one B1DIAG line in 6: 55 %;
 - if there is a crash, a B1DIAG line just before it: 70 %;
 - crashes in S runs only, given at least 2 crashes: 20 %.
+
+## 5. Build and install (before any run)
+- CI run 45217411166 (perf/diag-ammo d6991f73e): success, 0 errors; the exe holds the B1DIAG strings.
+- run/bin/B1Diag14.exe sha256 f6475af3dc7fd59e…; its pdb is installed as run/bin/B1Diag14.pdb AND run/bin/AnomalyDX11.pdb
+  (the crash handler looks for that name, and both exes ask for it, so only one matching pdb can sit there at a time).
+  RefDet14's pdb is kept as run/bin/RefDet14.pdb; copy it back over AnomalyDX11.pdb before any later RefDet14 run.
