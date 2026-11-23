@@ -10,7 +10,7 @@
 # Exit codes: 0 track ended; 3 X-Ray heartbeat stall; 4 X-Ray ended early; 2 refused.
 set -u
 cd "$(dirname "$0")/.."; P=$PWD; RUN=$P/run; O=${1:?out_dir}; ITR=${2:-itr2-shadow}   # ITRZone: match its run dir, never the exe name
-EXE=RefDet14.exe; TRK=/home/caden/Projects/ITRZone/out/p1/cordon_full_track.csv; SHM=/dev/shm/itrz_b1
+EXE=${T1_EXE:-RefDet14.exe}; TRK=/home/caden/Projects/ITRZone/out/p1/cordon_full_track.csv; SHM=/dev/shm/itrz_b1
 AT=${T1_STALL_AT:-600}; DUR=${T1_STALL_S:-20}
 mkdir -p "$O"; log() { echo "$(date -u '+%F %T.%3N')Z $*" | tee -a "$O/t1_xray.log"; }
 utc() { echo $(( $(date +%s%N) / 1000000 )); }
