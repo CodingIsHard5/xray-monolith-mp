@@ -217,3 +217,6 @@ Readings of (1)-(4) of section 11 are unchanged. t2_xray.sh sha 4c0bf34e2a0eb0a4
   time_global <= 1 s across the second stop, vs ~360 s / ~60 s across the first; X-Ray continues. PASS for the
   restart: kill to first new snapshot <= 90 s.
 - For ITRZone (asked): freeze.csv gains game_ms (from the last snapshot before STOP and the first after CONT).
+
+- After pre-flight 2: t2_xray.sh ends the rest of OUR prefix (WINEPREFIX=run/prefix wineserver -k) right after any
+  SIGKILL of the engine; FREEZE_UNSUPPORTED is logged once. Not yet measured on the box.

@@ -60,6 +60,7 @@ while :; do
     if [ $k = 0 ] && [ -z "$done_kill" ] && [ -n "$tt" ] && awk -v t="$tt" -v a="$KAT" 'BEGIN{exit !(t>=a)}'; then
       EP=$(engine); [ -n "$EP" ] || { why="no engine pid found (kill)"; break; }; KC=$(cat /proc/$EP/comm 2>/dev/null); KR=$(awk '/VmRSS/{print $2}' /proc/$EP/status 2>/dev/null); KU=$(utc); kill -KILL "$EP"; done_kill=1
       echo "$KU,$k,planned kill (T2i) seq $s track ${tt}s pid $EP,1" >> "$O/restarts.csv"; log "PLANNED KILL: seq $s track ${tt}s pid $EP comm $KC rss_kb $KR"
+      sleep 1; WINEPREFIX=$RUN/prefix wineserver -k >/dev/null 2>&1   # pre-flight 2: the Wine wrappers kept tb_run waiting 10 min
       why="planned"; break
     fi
     if [ -n "$s" ] && [ "$s" = "$last" ]; then same=$((same+1)); else same=0; fi; last=$s
@@ -78,7 +79,7 @@ while :; do
     [ $same -ge 30 ] && { why="no new seq for 30 s"; break; }
   done
   [ -n "${FZP:-}" ] && { kill -CONT "$FZP" 2>/dev/null; FZP=""; fz=""; }
-  [ -n "$why" ] && [ "$why" != planned ] && { EP=$(engine); [ -n "$EP" ] && kill -KILL "$EP"; }
+  [ -n "$why" ] && [ "$why" != planned ] && { EP=$(engine); [ -n "$EP" ] && kill -KILL "$EP"; sleep 1; WINEPREFIX=$RUN/prefix wineserver -k >/dev/null 2>&1; }
   wait $TBP; trc=$?
   kill $WP 2>/dev/null; wait $WP 2>/dev/null
   cp "$SHM"/meta_t2.csv "$B/" 2>/dev/null; cp "$SHM"/hits_t2.csv "$B/" 2>/dev/null; cp -r "$P/out/tb_t2b$k" "$B/tb" 2>/dev/null

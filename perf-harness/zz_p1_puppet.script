@@ -123,7 +123,7 @@ end
 -- B1-T2 pose reader: accept only seq,n ... end,n with n newer; strip \r (Wine CRLF); torn reads counted
 local p_last, p_last_t, p_stale, p_torn, p_holds, p_paused, p_lx, p_ly, p_lz = 0, nil, false, 0, 0, false, nil, nil, nil
 local p_killed, p_torn_n = {}, nil
-local g_last_wall, g_f_until, g_last_g = nil, nil, nil
+local g_last_wall, g_f_until, g_last_g, p_fz_logged = nil, nil, nil, false
 local function t2_pose(a, now, t)
 	local f = io.open(DIR .. "pose.txt", "rb"); if not f then return end
 	local first = f:read("*l"); first = first and string.gsub(first, "\r", "")
@@ -154,7 +154,7 @@ local function t2_pose(a, now, t)
 	local hold_state = state ~= "play"
 	if hold_state and aw == "freeze" and not p_paused then
 		if t2_pause_ok then device():pause(true); p_paused = true; m(string.format("PAUSE,%d,%d,%s", now, n, state))
-		else m(string.format("FREEZE_UNSUPPORTED,%d,%d,%s", now, n, state)) end
+		elseif not p_fz_logged then p_fz_logged = true; m(string.format("FREEZE_UNSUPPORTED,%d,%d,%s", now, n, state)) end   -- once
 	elseif not hold_state and p_paused then device():pause(false); p_paused = false; m(string.format("UNPAUSE,%d,%d", now, n)) end
 	if hold_state then return end
 	local v = vector():set(px, py, pz); local vid = level.vertex_id(v)
