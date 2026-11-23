@@ -104,3 +104,7 @@ Z:\dev\shm\p1\export_<tag>.csv holds only these lines, with no header:
 t = track time in s (negative during the 15 s wait). Everything else (S start line with actor_id, ON/OFF switch events,
 REFILL, TICK every 60 s, TRACK_END, SUMMARY with export cost) goes to Z:\dev\shm\p1\meta_<tag>.csv. The actor id
 is written in the run report from the S line (expected 0 in single player).
+
+## Scorer addendum (pre-run, ITRZone f8e8273, blob 8ea73f79)
+p1_check.py skips export lines with t < 0 (the 15 s settle wait after load). Nothing else changed. Scored with --switch 450 --actor-id <from meta's S line>.
+Driver: tools/p1_run.sh (copy in perf-harness/), Overseer GO 2026-11-23.
