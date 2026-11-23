@@ -58,3 +58,14 @@ on in both builds (K still has about 1,400 coarse calls per frame). It ranks; it
 Caden: "Go for it", to the question of whether R1's optimisation may go ahead before the rest of the plan is ruled on.
 Scope as relayed: step 1 is approved ONLY if section 4's rule picks a target; DROP stays DROP; covers R1 only.
 Nothing in sections 1-6 changes.
+
+## 8. Pre-run checks (CI 45090787686 green, 98a444975; installed as run/bin/Coarse14.exe; before any run)
+
+- String check: 27 of the 30 hot site names are absent from Coarse14.exe and present in RefDet14.exe.
+  R_constants::GetCBuffer, CSkeletonX::_Render and CUIWindow::Draw remain, but they are the function's own name.
+  The compiler keeps one copy of that text for the probe and for __FUNCTION__ uses (asserts, _Render_soft, UI
+  messages), so RefDet14 also shows a single copy, and the string check cannot decide for these three.
+  AMENDMENT (before any run): for those three, the check is that they do not appear in any K run's perf_sites CSV;
+  if one does, the K runs are void.
+- Fingerprint (tb_hash.sh, bench1 + cordon1): equal to RefDet14 on every line except exe (65edcf401faeb125 vs
+  bc0426a10810f461). Files out/coarse14/hash*.txt.
