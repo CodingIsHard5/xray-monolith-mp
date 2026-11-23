@@ -228,7 +228,8 @@ public:
 	void render_menu();
 	void render_rain();
 
-	void render_sun_cascade(u32 cascade_ind);
+	void render_sun_cascade(u32 cascade_ind, bool static_done = false);
+	void render_sun_cascade_prepass(u32 cascade_ind);
 	void init_cacades();
 	void render_sun_cascades();
 

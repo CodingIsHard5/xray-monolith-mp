@@ -92,30 +92,55 @@ void CRender::render_sun_cascades()
 	if (b_need_to_render_sunshafts)
 		m_sun_cascades[m_sun_cascades.size() - 1].reset_chain = true;
 
+	// R1b-1 (r__mt_sun_static 1, R4 only): prepass all cascades in order on this thread, then each cascade's traverse +
+	// static capture on its own worker task, joined here inside this Render() call. Not in the second eye of
+	// r_stereo_bench 2 (it reuses the first eye's maps), not while portal-traverse stats (shared counters) are on.
+	// Submission below stays serial and in cascade order. This thread only waits meanwhile, so `phase` is not
+	// changed while the tasks read it.
+	bool static_done = false;
+#if RENDER == R_R4
+	if (ps_r__mt_sun_static && !ps_r__portal_traverse_stats && !(ps_r_stereo_bench == 2 && g_stereo_bench_eye == 1))
+	{
+		for (u32 i = 0; i < m_sun_cascades.size(); ++i)
+			render_sun_cascade_prepass(i); // has its own "Render Cascade: Prepass" zone
+		phase = PHASE_SMAP;
+		CSector* outdoor = pOutdoorSector;
+		for (u32 i = 0; i < m_sun_cascades.size(); ++i)
+		{
+			sun::cascade* c = &m_sun_cascades[i];
+			sun_cascades_task.run([c, outdoor]()
+			{
+				PROF_EVENT("r1b_task_static");
+				c->GMCascade.traverse(outdoor, c->cull_frustum, c->cull_COP, c->cull_xform);
+				c->GMCascade.r_dsgraph_capture_static();
+			});
+		}
+		{
+			PROF_EVENT("r1b_join");
+			sun_cascades_task.wait();
+		}
+		static_done = true;
+	}
+#endif
 	for (u32 i = 0; i < m_sun_cascades.size(); ++i)
-		render_sun_cascade(i);
+		render_sun_cascade(i, static_done);
 
 	if (b_need_to_render_sunshafts)
 		m_sun_cascades[m_sun_cascades.size() - 1].reset_chain = last_cascade_chain_mode;
 }
 
-void CRender::render_sun_cascade(u32 cascade_ind)
+// R1b-1: the per-cascade prepass, moved out of render_sun_cascade() unchanged so render_sun_cascades() can run it for
+// all cascades before the traverse tasks. Cascade i+1 takes its rays from cascade i, so it always runs in cascade order.
+// It must NEVER run inside the worker tasks: it uses function statics (light_cuboid, sign_test) and writes the next
+// cascade's rays, so it stays on the calling thread, serial (gammavr review, 2026-11-23).
+void CRender::render_sun_cascade_prepass(u32 cascade_ind)
 {
-	PROF_EVENT("Render Cascade");
 	light* fuckingsun = (light*)Lights.sun_adapted._get();
 	sun::cascade& cascade = m_sun_cascades[cascade_ind];
-	// VR spike, r_stereo_bench 2: first eye renders and saves each cascade's shadow map, second eye reuses it
-	// (same cascade matrices, so the prepass that derives them from the camera is skipped as well).
-	const bool stereo_shared = ps_r_stereo_bench == 2 && cascade_ind < 8;
-	const bool stereo_save = stereo_shared && g_stereo_bench_eye == 0;
-	const bool stereo_reuse = stereo_shared && g_stereo_bench_eye == 1;
-
 	CFrustum& cull_frustum = cascade.cull_frustum;
 	xr_vector<Fplane> cull_planes;
 	Fvector3& cull_COP = cascade.cull_COP;
 	Fmatrix& cull_xform = cascade.cull_xform;
-
-	if (!stereo_reuse)
 	{
 		PROF_EVENT("Render Cascade: Prepass");
 
@@ -309,6 +334,23 @@ void CRender::render_sun_cascade(u32 cascade_ind)
 			FPU::m24r();
 		}
 	}
+}
+
+void CRender::render_sun_cascade(u32 cascade_ind, bool static_done)
+{
+	PROF_EVENT("Render Cascade");
+	light* fuckingsun = (light*)Lights.sun_adapted._get();
+	sun::cascade& cascade = m_sun_cascades[cascade_ind];
+	// VR spike, r_stereo_bench 2: first eye renders and saves each cascade's shadow map, second eye reuses it
+	// (same cascade matrices, so the prepass that derives them from the camera is skipped as well).
+	const bool stereo_shared = ps_r_stereo_bench == 2 && cascade_ind < 8;
+	const bool stereo_save = stereo_shared && g_stereo_bench_eye == 0;
+	const bool stereo_reuse = stereo_shared && g_stereo_bench_eye == 1;
+
+	Fmatrix& cull_xform = cascade.cull_xform;
+
+	if (!stereo_reuse && !static_done)
+		render_sun_cascade_prepass(cascade_ind); // R1b-1: body moved unchanged into its own function
 
 	if (!stereo_reuse)
 	{
@@ -316,8 +358,14 @@ void CRender::render_sun_cascade(u32 cascade_ind)
     {
         PROF_EVENT("Render Cascade: SMAP traverse");
         phase = PHASE_SMAP;
-        cascade.GMCascade.traverse(pOutdoorSector, cascade.cull_frustum, cascade.cull_COP, cascade.cull_xform);
-        cascade.GMCascade.r_dsgraph_capture(false, true);
+        if (!static_done)
+        {
+            cascade.GMCascade.traverse(pOutdoorSector, cascade.cull_frustum, cascade.cull_COP, cascade.cull_xform);
+            // = r_dsgraph_capture(false, true), split only to time the two halves (R1b-1 zones)
+            { PROF_EVENT("r1b_cap_static"); cascade.GMCascade.r_dsgraph_capture_static(); }
+        }
+        // the dynamic half calls game objects' renderable_Render: always here, on the main thread, in cascade order
+        { PROF_EVENT("r1b_cap_dynamic"); cascade.GMCascade.r_dsgraph_capture_dynamic(); }
     }
 
     // Finalize & Cleanup

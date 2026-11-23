@@ -295,6 +295,7 @@ extern ECORE_API int opt_static;
 extern ECORE_API int opt_dynamic;
 extern ECORE_API int ps_pfx_volumetric_mode;
 extern ECORE_API int ps_r__portal_traverse_stats;
+extern ECORE_API int ps_r__mt_sun_static;
 
 enum : u64
 {

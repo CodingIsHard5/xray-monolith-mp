@@ -555,6 +555,7 @@ int opt_dynamic = 2;
 
 int ps_pfx_volumetric_mode = 0;
 int ps_r__portal_traverse_stats = 0;
+int ps_r__mt_sun_static = 0; // R1b-1 (perf/r1b-sun): cascades' traverse + static capture on worker tasks; 0 = as before
 
 float r_rain_exp = 1.f;
 float r_rain_k = 99.0f;
@@ -1734,6 +1735,7 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r__optimize_static_geom", &opt_static, 0, 4);
 	CMD4(CCC_Integer, "r__optimize_dynamic_geom", &opt_dynamic, 0, 4);
 	CMD4(CCC_Integer, "r__portal_traverse_stats", &ps_r__portal_traverse_stats, 0, 1);
+	CMD4(CCC_Integer, "r__mt_sun_static", &ps_r__mt_sun_static, 0, 1);
 	psDeviceFlags2.set(rsOptShadowGeom, TRUE);
 	CMD3(CCC_Mask, "r__optimize_shadow_geom", &psDeviceFlags2, rsOptShadowGeom);
 
