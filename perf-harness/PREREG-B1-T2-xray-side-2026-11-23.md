@@ -313,3 +313,17 @@ FROZEN for the joint B1-T2 runs (sha256):
   installed as run/bin/AnomalyDX11.pdb)
 - X-Ray env from ITRZone's driver: both runs T2_EXE=Absorb14.exe T2_FREEZE=sigstop T2_ABSORB=2000; r2 also
   T2_ABSORB_SKIP=0 T2_STALL_AT=99999 T2_KILL_AT=99999 T2_RUN_S=1500.
+
+## 20. Defect found AFTER the freeze, before any joint run (r1 held by ITRZone; nothing booted)
+- While testing my X-check scorer on pre-flight 4's real data: after a restart, the killed boot's last snapshot
+  stays in snap.txt (seq 878); the new boot's watcher stamps it first and then ignores every new snapshot (seq 1, 2,
+  ...) as "not newer". boot1/watch/written.csv held 1 stale row although X-Ray ran (1179 poses applied). It would
+  have broken X-kill timing and ITRZone's merged watch data after the kill.
+- Fix: t2_xray.sh deletes snap.txt before every restart boot (k > 0) starts its watcher. Fake test: boot 1's watcher
+  stamps 572 snapshots from seq 1; X-kill reads 2.7 s on the fake.
+- My own slip, said plainly: the first attempt at this edit did not apply (a failed grep earlier in the same command
+  chain skipped it) and I only saw it because the fake test still showed the stale row. Re-applied and re-tested.
+- Scorer tools/t2_xray_check.py (committed BEFORE the joint runs, sha 16e89cb796614a6634cab262f3d69fef6f7abd60d536712cc98dde8515a2cedc): X-kill, X-noplan, X-freeze, X-track as in
+  the joint file. On pre-flight data it gives: pre-flight 4 as r2 PASS (game_ms +198); pre-flight 3 FAIL as expected
+  (365106 unarmed, 3096 old STOP definition).
+- NEW FROZEN t2_xray.sh sha256: 6ae8d27fd8a8f6ad4409b5618bbf60b4e9bb94b32fc5d7228bf135c0ed66142d (other frozen files unchanged).

@@ -44,6 +44,9 @@ echo "utc_ms,event,state,pid,game_ms" > "$O/freeze.csv"   # game_ms: X-Ray game 
 T_START=$(date +%s); k=0; unplanned=0; final=""; done_stall=""; done_kill=""
 while :; do
   B="$O/boot$k"; mkdir -p "$B"; RID=$(utc)
+  # a restart must not inherit the killed boot's last snapshot: the new watcher would stamp it first and then ignore
+  # every new snapshot as "not newer" (seq restarts at 1). Found on pre-flight 4's data (boot1/watch: 1 stale row).
+  [ $k -gt 0 ] && rm -f "$SHM/snap.txt"
   if [ $k = 0 ]; then TIMES=$RUN_S; else TIMES=$(( RUN_S - ($(date +%s) - T_START) + 25 )); [ $TIMES -lt 60 ] && TIMES=60; fi
   python3 "$P/tools/t1_watch.py" "$SHM/snap.txt" "$B/watch" "bin\\$EXE" "$ITR" > "$B/watch.log" 2>&1 & WP=$!
   log "boot $k: run_id $RID engine_s $TIMES load $(cut -d' ' -f1-3 /proc/loadavg)"
