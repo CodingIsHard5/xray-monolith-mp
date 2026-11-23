@@ -4461,6 +4461,75 @@ struct vr_mag_vis
 };
 static vr_mag_vis s_vr_mv = {nullptr, BI_NONE, 0, false, u32(-1), 0, false, false};
 
+// milestone 8c probe (Amendment 35), TEST ONLY, off by default:
+//   -vr_rounds_probe: once per gun model, when its magazine's bones are first remembered, each bone under the magazine
+//     bone: parent, position in the gun's model space, shown on the gun or not ([vr3rnd] bone);
+//   -vr_rounds_hide "f:b1,b2;f:b3": from VR frame f on (until the next f), the hand copy draws the listed bones scaled to
+//     nothing, so pictures show which bone is which ([vr3rnd] frame .. copy_hides ..).
+struct vr_rnd_seg
+{
+	u32 from;
+	string256 names;
+};
+static vr_rnd_seg s_rnd_seg[8];
+static int s_rnd_n = -1;
+static bool s_rnd_probe = false;
+static void vr_rnd_parse()
+{
+	if (s_rnd_n >= 0)
+		return;
+	s_rnd_n = 0;
+	s_rnd_probe = !!strstr(Core.Params, "-vr_rounds_probe");
+	if (s_rnd_probe)
+		Msg("! [vr3rnd] -vr_rounds_probe: TEST ONLY");
+	LPCSTR q = strstr(Core.Params, "-vr_rounds_hide ");
+	if (!q)
+		return;
+	string512 buf;
+	q += xr_strlen("-vr_rounds_hide ");
+	int k = 0;
+	while (q[k] && q[k] != ' ' && k < 511)
+	{
+		buf[k] = q[k];
+		++k;
+	}
+	buf[k] = 0;
+	for (int i = 0, n = _GetItemCount(buf, ';'); i < n && s_rnd_n < 8; ++i)
+	{
+		string512 seg;
+		_GetItem(buf, i, seg, ';');
+		char* c = strchr(seg, ':');
+		if (!c)
+			continue;
+		*c = 0;
+		s_rnd_seg[s_rnd_n].from = u32(atoi(seg));
+		xr_strcpy(s_rnd_seg[s_rnd_n].names, c + 1);
+		Msg("! [vr3rnd] -vr_rounds_hide: TEST ONLY, from frame %u the hand copy hides '%s'", s_rnd_seg[s_rnd_n].from, s_rnd_seg[s_rnd_n].names);
+		++s_rnd_n;
+	}
+}
+// the bones the hand copy hides on this frame (seg_out: the segment in force, -1 none)
+static u64 vr_rnd_hide_mask(IKinematics* K, u32 frame, int& seg_out)
+{
+	seg_out = -1;
+	for (int i = 0; i < s_rnd_n; ++i)
+		if (s_rnd_seg[i].from <= frame)
+			seg_out = i;
+	if (seg_out < 0)
+		return 0;
+	u64 m = 0;
+	LPCSTR names = s_rnd_seg[seg_out].names;
+	for (int i = 0, n = _GetItemCount(names, ','); i < n; ++i)
+	{
+		string128 nm;
+		_GetItem(names, i, nm, ',');
+		const u16 b = K->LL_BoneID(nm);
+		if (b != BI_NONE && b < 64)
+			m |= u64(1) << b;
+	}
+	return m;
+}
+
 static void _BCL vr_mag_bone_cb(CBoneInstance* P)
 {
 	P->mTransform.set(*(Fmatrix*)P->callback_param());
@@ -4581,6 +4650,22 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 			V.cache_ok = true;
 		}
 	}
+	vr_rnd_parse();
+	static IKinematics* s_rnd_logged = nullptr;
+	if (s_rnd_probe && V.cache_ok && s_rnd_logged != K)
+	{
+		s_rnd_logged = K;
+		const Fvector& mc = V.rest[V.bone].c;
+		Msg("* [vr3rnd] model %s magazine bone %u at %.5f %.5f %.5f", item->m_sect_name.c_str(), u32(V.bone), mc.x, mc.y, mc.z);
+		for (u16 b = 0, n = K->LL_BoneCount(); b < n; ++b)
+			if (V.mask & (u64(1) << b))
+			{
+				const u16 par = K->LL_GetData(b).GetParentID();
+				const Fvector& c = V.rest[b].c;
+				Msg("* [vr3rnd] bone %u name %s parent %s pos %.5f %.5f %.5f rel %.5f %.5f %.5f shown %d", u32(b), K->LL_BoneName_dbg(b),
+					par == BI_NONE ? "none" : K->LL_BoneName_dbg(par), c.x, c.y, c.z, c.x - mc.x, c.y - mc.y, c.z - mc.z, K->LL_GetBoneVisible(b) ? 1 : 0);
+			}
+	}
 	const bool hide = S.active && !S.mag_in && V.cache_ok && !s_nohide; // not remembered yet: shown until it is
 	if (hide)
 	{
@@ -4631,9 +4716,21 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 		}
 		if (V.copy)
 		{
+			int seg = -1;
+			const u64 rnd_hide = vr_rnd_hide_mask(V.copy, g_vr_track.frame, seg);
+			static int s_rnd_seg_logged = -2;
+			if (seg != s_rnd_seg_logged)
+			{
+				s_rnd_seg_logged = seg;
+				Msg("* [vr3rnd] frame %u copy_hides %s mask %llx", g_vr_track.frame, seg >= 0 ? s_rnd_seg[seg].names : "-", rnd_hide);
+			}
 			for (u16 b = 0, n = V.copy->LL_BoneCount(); b < n; ++b)
 				if (V.mask & (u64(1) << b))
+				{
 					V.copy_bone[b].set(V.rest[b]);
+					if (rnd_hide & (u64(1) << b))
+						V.copy_bone[b].scale(0.f, 0.f, 0.f);
+				}
 			V.copy->CalculateBones_Invalidate();
 			V.copy->CalculateBones(TRUE);
 			// the gun as the off hand would hold it, moved so the magazine bone's origin is at that hand
