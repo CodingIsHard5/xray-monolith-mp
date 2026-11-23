@@ -39,7 +39,7 @@ engine_all() { for p in $(pgrep -f "bin\\\\$EXE"); do [ "$p" = "${WP:-}" ] && co
 engine() { engine_all | awk '$2 ~ /wine/ && $3+0 > br {br = $3+0; best = $1} END {print best}'; }
 hdr() { head -1 "$SHM/snap.txt" 2>/dev/null | tr -d '\r'; }   # seq,<n>,<t_ms>,<t_track>,<level>,<run_id>
 echo "utc_ms,boot,reason,planned" > "$O/restarts.csv"
-echo "utc_ms,event,state,pid,game_ms" > "$O/freeze.csv"   # game_ms: X-Ray game time (u32 ms) at arming / at the first frame after CONT
+echo "utc_ms,event,state,pid,game_ms" > "$O/freeze.csv"   # game_ms: X-Ray game time (u32 ms) of the last frame before the stop / the first frame after CONT; both rows written at CONT
 T_START=$(date +%s); k=0; unplanned=0; final=""; done_stall=""; done_kill=""
 while :; do
   B="$O/boot$k"; mkdir -p "$B"; RID=$(utc)
@@ -47,7 +47,7 @@ while :; do
   python3 "$P/tools/t1_watch.py" "$SHM/snap.txt" "$B/watch" "bin\\$EXE" "$ITR" > "$B/watch.log" 2>&1 & WP=$!
   log "boot $k: run_id $RID engine_s $TIMES load $(cut -d' ' -f1-3 /proc/loadavg)"
   TB_NOCLAIM=1 TB_EXE=$EXE TB_TIMES=$TIMES TB_TIMEOUT=$(( TIMES + 400 )) tools/tb_run.sh t2b$k "$SAVE" -p1 -t2_pose -t2_run $RID $PFLAG -p1_tag t2 > "$B/tb_run.log" 2>&1 &
-  TBP=$!; L0=$(date +%s); first=""; last=""; same=0; why=""; narm=0   # meta_t2.csv is rewritten by every boot
+  TBP=$!; L0=$(date +%s); first=""; last=""; same=0; why=""; narm=0; gone=0   # meta_t2.csv is rewritten by every boot
   while kill -0 $TBP 2>/dev/null; do
     sleep 1; h=$(hdr); IFS=, read -r _ s _ tt _ rid <<<"$h"
     [ "${rid:-}" = "$RID" ] || { s=""; tt=""; }                         # a snapshot from an earlier boot does not count
@@ -82,18 +82,25 @@ while :; do
               aline=$(grep -a '^ABSORB_ARM\|^ABSORB_SKIP' "$SHM/meta_t2.csv" 2>/dev/null | sed -n "$(( ${narm:-0} + 1 ))p")
               [ -n "$aline" ] && break; sleep 0.5; done
             [ -n "$aline" ] && { narm=$(( ${narm:-0} + 1 )); gms=$(cut -d, -f4 <<<"$aline"); log "freeze: ${aline%%,*} seen before STOP"; } || log "freeze: NO arm line within 3 s (stopping anyway)"; fi
-          FZP=$(engine); [ -n "$FZP" ] && kill -STOP "$FZP" && echo "$(utc),STOP,$pst,$FZP,${gms:-}" >> "$O/freeze.csv"; fi; fi
+          FZP=$(engine); [ -n "$FZP" ] && kill -STOP "$FZP" && { SU=$(utc); SST=$pst; log "freeze: STOP pid $FZP"; }; fi; fi
       same=0
     elif [ -n "${fz:-}" ] && [ -n "${pst:-}" ] && { [ "${paw:-}" = keep ] || [ "${paw:-}" = freeze ]; }; then fz=""; log "freeze hold end: pose state $pst"   # a torn/empty/truncated pose read (awaysim not exactly keep or freeze) never ends a freeze
       if [ -n "${FZP:-}" ]; then nres=$(grep -a -c '^RESUMED_GAP' "$SHM/meta_t2.csv" 2>/dev/null); kill -CONT "$FZP"; CU=$(utc)
         # game_ms after the resume = the RESUMED_GAP line the script writes on its first frame (wait <= 3 s for it)
         gms=""; for _w in 1 2 3 4 5 6; do rl=$(grep -a '^RESUMED_GAP' "$SHM/meta_t2.csv" 2>/dev/null | sed -n "$(( ${nres:-0} + 1 ))p"); [ -n "$rl" ] && break; sleep 0.5; done
-        [ -n "$rl" ] && gms=$(cut -d, -f5 <<<"$rl")
-        echo "$CU,CONT,$pst,$FZP,${gms:-}" >> "$O/freeze.csv"; FZP=""; fi; same=0; fi
+        gpre=""; [ -n "$rl" ] && { gms=$(cut -d, -f5 <<<"$rl"); gpre=$(cut -d, -f7 <<<"$rl"); }
+        # STOP row: game time of X-Ray's LAST frame before the gap (pre-flight 3: the arming time was up to ~1 s
+        # earlier, which at factor 6 read as 3 s of game time that the absorb never had to remove)
+        echo "$SU,STOP,$SST,$FZP,${gpre:-}" >> "$O/freeze.csv"; echo "$CU,CONT,$pst,$FZP,${gms:-}" >> "$O/freeze.csv"; FZP=""; fi; same=0; fi
     [ $same -ge 30 ] && { why="no new seq for 30 s"; break; }
+    if [ -z "${FZP:-}" ] && [ -z "$(engine)" ]; then gone=$(( ${gone:-0} + 1 )); [ $gone -ge 3 ] && { kill $WP 2>/dev/null; break; }; else gone=0; fi
+    # (engine gone: stop the watcher so tb_run can finish; tb_run's own rc then decides: 0 = normal end, else a crash)
   done
   [ -n "${FZP:-}" ] && { kill -CONT "$FZP" 2>/dev/null; FZP=""; fz=""; }
   [ -n "$why" ] && [ "$why" != planned ] && { EP=$(engine); [ -n "$EP" ] && kill -KILL "$EP"; sleep 1; WINEPREFIX=$RUN/prefix wineserver -k >/dev/null 2>&1; }
+  # pre-flight 3: after the planned kill tb_run still waited 7.5 min, because its own pgrep -f "bin\\<exe>" matched the
+  # WATCHER (its argv names the exe). Stop the watcher first whenever the boot is ending early.
+  [ -n "$why" ] && { kill $WP 2>/dev/null; wait $WP 2>/dev/null; }
   wait $TBP; trc=$?
   kill $WP 2>/dev/null; wait $WP 2>/dev/null
   cp "$SHM"/meta_t2.csv "$B/" 2>/dev/null; cp "$SHM"/hits_t2.csv "$B/" 2>/dev/null; cp -r "$P/out/tb_t2b$k" "$B/tb" 2>/dev/null

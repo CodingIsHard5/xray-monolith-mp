@@ -250,3 +250,25 @@ PREDICTIONS: absorb PASS 75 % (risk: the arming command or the 3 s wait misbehav
   restart <= 90 s 85 % (guess ~35 s).
 
 - Absorb build: CI 45256626066 (7c8331264) success, 0 errors; run/bin/Absorb14.exe sha e35a289b31534f0d (+ Absorb14.pdb).
+
+## 16. Pre-flight 3 RESULT (20:53-21:09Z, Absorb14 e35a289b, slice released; read once)
+- HITCH NOT ABSORBED (absorb ON, unarmed): the 3 s SIGSTOP at track 20.8 s gave a time_global step of 3991 ms
+  (G lines 50686 -> 54677) and no [FREEZE] line. PASS. Prediction 95 %: held.
+- D1, unarmed control (ABSORB_SKIP seen before STOP): 60.2 s stop; time_global +61073 ms, game time +366438 ms
+  (6.1 game min). Not absorbed, as intended.
+- D2, armed (ABSORB_ARM seen before STOP): engine log "* [FREEZE] absorbed 60144 ms of a 60177 ms gap" (exactly one
+  absorb in the run); time_global from the arming frame to the first frame after resume +516 ms, game time +3096 ms.
+  The 516 ms is X-Ray running between the arming (on the first dead pose) and the bridge's STOP (its 1 s poll), plus
+  one 33 ms frame. The absorb itself removed all but 33 ms of the stop.
+  As REGISTERED, "game_ms STOP->CONT <= 1000" is FAIL (3096): the STOP row's game_ms was the arming time, not the
+  stop time. That was my measurement definition, not the absorb. Fixed for the joint run: the STOP row now carries
+  the game time of X-Ray's LAST frame before the gap (RESUMED_GAP fields 6-7), so the check measures the stop only.
+  Prediction "absorb PASS" (75 %): FAIL as registered, for that reason; the absorb itself worked.
+- RESTART: SLOW AGAIN, prediction "<= 90 s" (85 %) WRONG. The kill was at 21:00:10; tb_run ended only at its timeout
+  (21:07:44, rc 5). Its own  kept matching the WATCHER (t1_watch.py; cpu_samples show pid
+  929231 python3), the same self-match class as before, now inside tb_run. Boot 1's first snapshot came 25 s after
+  launch. Fix: t2_xray.sh stops the boot's watcher BEFORE waiting for tb_run whenever a boot ends early, and ends a
+  boot when the engine process has been gone for 3 s, with tb_run's rc deciding normal end (0) vs crash. Fake test
+  with a tb_run that waits like the real one (t2-offline/fake_tb_run.sh, fake engine exe named wine64): kill ->
+  tb_run ended within 3 s -> restart; normal end -> rc 0 and no unplanned restart; crash -> unplanned restart, rc 6.
+- No crash in either boot. t2_xray.sh sha fa138a52ec746c67, puppet script sha 966e3a475163c950.

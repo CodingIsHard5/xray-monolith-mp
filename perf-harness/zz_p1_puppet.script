@@ -131,7 +131,7 @@ end
 -- B1-T2 pose reader: accept only seq,n ... end,n with n newer; strip \r (Wine CRLF); torn reads counted
 local p_last, p_last_t, p_stale, p_torn, p_holds, p_paused, p_lx, p_ly, p_lz = 0, nil, false, 0, 0, false, nil, nil, nil
 local p_killed, p_torn_n = {}, nil
-local g_last_wall, g_f_until, g_last_g, p_fz_logged = nil, nil, nil, false
+local g_last_wall, g_f_until, g_last_g, p_fz_logged, g_prev_tg, g_prev_game = nil, nil, nil, false, nil, nil
 local function t2_pose(a, now, t)
 	local f = io.open(DIR .. "pose.txt", "rb"); if not f then return end
 	local first = f:read("*l"); first = first and string.gsub(first, "\r", "")
@@ -205,8 +205,8 @@ local function on_update()
 		-- frame of the next 30 s of wall time
 		local wall = os.time()
 		if g_last_wall and wall - g_last_wall >= 2 then   -- >= 2 s so the 3 s hitch check (pre-flight 3) is seen too
-			m(string.format("RESUMED_GAP,%d,%d,%d,%.0f", now, wall, wall - g_last_wall, gtime())); if meta then meta:flush() end; g_f_until = wall + 30 end
-		g_last_wall = wall
+			m(string.format("RESUMED_GAP,%d,%d,%d,%.0f,%d,%.0f", now, wall, wall - g_last_wall, gtime(), g_prev_tg or -1, g_prev_game or -1)); if meta then meta:flush() end; g_f_until = wall + 30 end
+		g_last_wall = wall; g_prev_tg = now; g_prev_game = gtime()   -- this frame, for the next gap
 		if g_f_until and wall <= g_f_until then m(string.format("F,%d,%.1f", now, device().f_time_delta * 1000)) end
 		if now - (g_last_g or -1e9) >= 1000 then g_last_g = now
 			m(string.format("G,%d,%d,%d,%.0f,%d", now, wall, device().frame, gtime(), alife():object_count())) end
