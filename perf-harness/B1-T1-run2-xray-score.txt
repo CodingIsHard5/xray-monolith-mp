@@ -1,0 +1,6 @@
+X1 FAIL: 7191 stamped outside the stall of 7896 expected (91.1 %)
+X2 PASS: 7209 ticks, mean 733 us, p99 1259 us, max 10387 us
+X3 PASS: min MemAvailable 27850 MB; swap 2047 -> max 2047 MB (growth 0)
+X4 FAIL: STOP/CONT yes; first seq 7 ms after CONT; TRACK_END False; rc=0 False
+X5: torn polls 0; X-Ray RSS max 16657 MB, CPU mean 251 %; ITR2 RSS max 6127 MB, CPU mean 232 %
+X-RAY SIDE: FAIL
