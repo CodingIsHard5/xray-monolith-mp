@@ -3,7 +3,12 @@
 --                       off-mesh points (node_dist < 0) hold the last on-mesh point; every hit on the actor is logged and
 --                       cancelled (invulnerable); health below 0.5 is refilled (backup, logged)
 --   -p1_export          also export online monsters/stalkers at 10 Hz
---   -p1_tag <t>         file tag; output Z:\dev\shm\p1\export_<t>.csv (move/hit/summary lines are written in both modes)
+--   -p1_tag <t>         file tag. Z:\dev\shm\p1\export_<t>.csv holds ONLY ITRZone's formats (no header):
+--                         a,t,x,y,z,health | o,t,id,section,kind,x,y,z,health,best_enemy,distance | h,t,hitter_id,hitter_section,hitter_kind,type,power,bone
+--                       (kind m = is_monster, s = is_stalker; hitter_kind also a = actor, x = other/none). Everything else
+--                       (start, ON/OFF, refills, ticks, summary) goes to Z:\dev\shm\p1\meta_<t>.csv.
+--   Track time t starts WAIT_MS after the first update (the actor holds the t=0 point meanwhile, t < 0), so GAMMA's
+--   auto_switch (1250 m for 10 s after load, then 450 m; configs\alife.ltx) has settled before the track starts.
 local cl = command_line and command_line() or ""
 local active = string.find(cl, "-p1", 1, true) ~= nil
 if not active then return end
@@ -11,12 +16,16 @@ local do_export = string.find(cl, "-p1_export", 1, true) ~= nil
 local tag = string.match(cl, "%-p1_tag%s+(%S+)") or "p1"
 
 local trk_t, trk_x, trk_y, trk_z, trk_ok = {}, {}, {}, {}, {}
-local out, t0, last_move, last_exp, idx, held = nil, nil, -1e9, -1e9, 1, false
+local out, meta, t0 = nil, nil, nil
+local last_move, last_exp, idx, held = -1e9, -1e9, 1, false
 local hits, cancels, refills, min_health = 0, 0, 0, 1
 local exp_n, exp_sum, exp_max, exp_times = 0, 0, 0, {}
 local seen = {}
 
-local function w(s) out:write(s, "\n") end
+local WAIT_MS = 15000
+local function w(s) if out then out:write(s, "\n") end end
+local function m(s) if meta then meta:write(s, "\n") end end
+local function kind(o) if not o then return "x" end; if o:id() == 0 then return "a" end; if o:is_monster() then return "m" end; if o:is_stalker() then return "s" end; return "x" end
 
 local function load_track()
 	local f = io.open(getFS():update_path("$game_config$", "p1_track.csv"), "r")
@@ -45,66 +54,70 @@ end
 local function export(now, t)
 	local tm = profile_timer(); tm:start()
 	local a = db.actor; local ap = a:position(); local present = {}
-	w(string.format("A,%.2f,%d,0,actor,%.2f,%.2f,%.2f,%.3f,-1,0", t, now, ap.x, ap.y, ap.z, a.health))
+	w(string.format("a,%.2f,%.3f,%.3f,%.3f,%.4f", t, ap.x, ap.y, ap.z, a.health))
 	for id, st in pairs(db.storage) do
 		local o = st.object
 		if o and id ~= 0 and (o:is_monster() or o:is_stalker()) then
 			present[id] = true
 			local p = o:position(); local be = o:best_enemy()
-			w(string.format("O,%.2f,%d,%d,%s,%.2f,%.2f,%.2f,%.3f,%d,%.1f", t, now, id, o:section(), p.x, p.y, p.z, o.health,
+			w(string.format("o,%.2f,%d,%s,%s,%.3f,%.3f,%.3f,%.4f,%d,%.2f", t, id, o:section(), kind(o), p.x, p.y, p.z, o.health,
 				be and be:id() or -1, p:distance_to(ap)))
-			if not seen[id] then w(string.format("ON,%.2f,%d,%d,%s,%.1f", t, now, id, o:section(), p:distance_to(ap))) end
+			if not seen[id] then m(string.format("ON,%.2f,%d,%d,%s,%.1f", t, now, id, o:section(), p:distance_to(ap))) end
 		end
 	end
-	for id in pairs(seen) do if not present[id] then w(string.format("OFF,%.2f,%d,%d", t, now, id)) end end
+	for id in pairs(seen) do if not present[id] then m(string.format("OFF,%.2f,%d,%d", t, now, id)) end end
 	seen = present
-	out:flush()
+	if out then out:flush(); meta:flush() end
 	tm:stop(); local us = tm:time()
 	exp_n, exp_sum = exp_n + 1, exp_sum + us; if us > exp_max then exp_max = us end; exp_times[exp_n] = us
 end
 
+local done_logged = false
+local on_quit
 local function on_update()
 	local a = db.actor; if not a then return end
 	local now = time_global()
 	if not t0 then
 		if not load_track() then active = false; return end
-		t0 = now; local sd = alife():switch_distance()
-		w(string.format("S,0,%d,switch_distance=%.1f,export=%s", now, sd, tostring(do_export)))
+		t0 = now + WAIT_MS
+		m(string.format("S,%d,actor_id=%d,switch_distance_at_load=%.1f,export=%s,wait_ms=%d", now, a:id(), alife():switch_distance(), tostring(do_export), WAIT_MS))
 	end
 	if a.health < min_health then min_health = a.health end
-	if a.health < 0.5 then refills = refills + 1; w(string.format("REFILL,%.2f,%d,%.3f", (now - t0) / 1000, now, a.health)); a:set_health_ex(1.0) end
+	if a.health < 0.5 then refills = refills + 1; m(string.format("REFILL,%.2f,%d,%.3f", (now - t0) / 1000, now, a.health)); a:set_health_ex(1.0) end
 	local t = (now - t0) / 1000
-	if t > trk_t[#trk_t] then return end
+	if t > trk_t[#trk_t] then if not done_logged then done_logged = true; m(string.format("TRACK_END,%.2f,%d", t, now)); on_quit() end; return end
 	if now - last_move >= 50 then
 		last_move = now
-		local x, y, z = track_pos(t)
+		local x, y, z = track_pos(math.max(0, t))
 		if x then a:set_actor_position(vector():set(x, y, z)) end
 	end
-	if do_export and now - last_exp >= 100 then last_exp = now; export(now, t); else out:flush() end
+	if do_export and now - last_exp >= 100 then last_exp = now; export(now, t) end
 end
 
 local function on_before_hit(s_hit, bone_id, flags)
 	hits = hits + 1
 	local d = s_hit and s_hit.draftsman
-	w(string.format("HIT,%.2f,%d,%d,%s,%d,%.4f,%s", t0 and (time_global() - t0) / 1000 or -1, time_global(),
-		d and d:id() or -1, d and d:section() or "nil", s_hit and s_hit.type or -1, s_hit and s_hit.power or -1, tostring(bone_id)))
+	w(string.format("h,%.2f,%d,%s,%s,%d,%.4f,%s", t0 and (time_global() - t0) / 1000 or -1e9,
+		d and d:id() or -1, d and d:section() or "none", kind(d), s_hit and s_hit.type or -1, s_hit and s_hit.power or -1, tostring(bone_id)))
+	if out then out:flush() end
 	flags.ret_value = false; if s_hit then s_hit.power = 0 end; cancels = cancels + 1   -- as momo_multihit_fix.script
 end
 
-local function on_quit()
+on_quit = function()
 	if not out then return end
 	table.sort(exp_times)
 	local p99 = exp_n > 0 and exp_times[math.max(1, math.ceil(exp_n * 0.99))] or 0
-	w(string.format("SUMMARY,hits=%d,cancelled=%d,refills=%d,min_health=%.3f,export_ticks=%d,export_mean_us=%.1f,export_p99_us=%.1f,export_max_us=%.1f",
+	m(string.format("SUMMARY,hits=%d,cancelled=%d,refills=%d,min_health=%.3f,export_ticks=%d,export_mean_us=%.1f,export_p99_us=%.1f,export_max_us=%.1f",
 		hits, cancels, refills, min_health, exp_n, exp_n > 0 and exp_sum / exp_n or 0, p99, exp_max))
-	out:close(); out = nil
+	out:close(); meta:close(); out, meta = nil, nil
 end
 
 function on_game_start()
 	if not active then return end
 	out = io.open("Z:\\dev\\shm\\p1\\export_" .. tag .. ".csv", "w")
 	if not out then printf("p1: CANNOT OPEN EXPORT FILE"); active = false; return end
-	w("kind,t_s,time_global_ms,id,section,x,y,z,health,best_enemy,dist")
+	meta = io.open("Z:\\dev\\shm\\p1\\meta_" .. tag .. ".csv", "w")
+	if not meta then printf("p1: CANNOT OPEN META FILE"); active = false; return end
 	RegisterScriptCallback("actor_on_update", on_update)
 	RegisterScriptCallback("actor_on_before_hit", on_before_hit)
 	RegisterScriptCallback("on_before_level_changing", on_quit)
@@ -113,7 +126,7 @@ function on_game_start()
 	local last_sum = 0
 	RegisterScriptCallback("actor_on_update", function()
 		if t0 and time_global() - last_sum >= 60000 then last_sum = time_global()
-			w(string.format("TICK,%.2f,hits=%d,cancelled=%d,refills=%d,min_health=%.3f,export_ticks=%d,export_mean_us=%.1f,export_max_us=%.1f,held=%s",
-				(last_sum - t0) / 1000, hits, cancels, refills, min_health, exp_n, exp_n > 0 and exp_sum / exp_n or 0, exp_max, tostring(held))) end
+			m(string.format("TICK,%.2f,hits=%d,cancelled=%d,refills=%d,min_health=%.3f,export_ticks=%d,export_mean_us=%.1f,export_max_us=%.1f,held=%s",
+				(last_sum - t0) / 1000, hits, cancels, refills, min_health, exp_n, exp_n > 0 and exp_sum / exp_n or 0, exp_max, tostring(held))); if meta then meta:flush() end end
 	end)
 end

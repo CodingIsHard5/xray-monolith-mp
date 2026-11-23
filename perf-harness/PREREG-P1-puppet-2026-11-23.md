@@ -1,4 +1,4 @@
-# P1: headless X-Ray puppet probe (JOINT prereg, EnginePerf + ITRZone; DRAFT, not yet registered)
+# P1: headless X-Ray puppet probe (JOINT prereg, EnginePerf + ITRZone; REGISTERED 2026-11-23, before any run)
 
 Status: draft. EnginePerf wrote the X-Ray side (sections 1-5). ITRZone adds the track, the scorer and its predictions
 (section 6) and agrees. It counts as registered once it is committed with both parts. Then the Overseer is asked for
@@ -62,14 +62,45 @@ install; run_noguard.sh is checked before every run).
 - Export cost: 0.05-0.5 ms per tick (central 0.2); at 10 Hz, under 0.1 % of main-thread time.
 - No hang over the full track in either run; no actor death (hit cancel works).
 - Hits on the actor: yes, at least one mutant hit near 5_2 or 5_4, IF a squad sits there at load (a coin toss).
-- Online switch: creatures appear in the export at about the A-Life switch distance. I don't know GAMMA's value; it is
-  read from the save at load and written here before the run.
+- Online switch: SWITCH DISTANCE FOR THE SCORER = 450 m (--switch 450), from run/gamedata/configs/alife.ltx
+  (switch_distance 450; auto_switch on: 1250 m for 10 s after load, then 450). The script starts track time 15 s after
+  the first update, so the 450 m value is in force from t = 0. The value seen at load is written to the meta file. If
+  GAMMA scripts change it during the run, I say so; the scorer still uses 450. My guess: P1-switch PASS at 55 %
+  (squad-based switching and hysteresis may pull the first-seen distance under 450 by more than 25 %).
 - RssAnon 3-6 GB (a guess; never measured on this rig).
 
-## 6. ITRZone (track, scorer, predictions): to be added by ITRZone
+## 6. ITRZone (track, scorer, predictions)
+- Track: out/p1/cordon_full_track.csv (sha256 prefix 213ff8f125723f01), made by tools/p1_track.py (ITRZone 1c68868) from ITR's M3 route.
+- Scorer: ITRZone tools/p1_check.py (commit 63195d7, blob 56edce4c). It reads R1's export only and is scored once:
+  `p1_check.py export_on.csv cordon_full_track.csv l01_escape/level.ai --switch <m> --actor-id <id>`, where --switch is A-Life's switch distance as written in section 5 before the run.
+  - P1-track: the actor follows the track. The x,z error against track(t), off-mesh hold t 407-615 excluded, median < 0.5 m. This checks the mover; a FAIL voids P1-switch and P1-chase.
+  - P1-mesh: creatures stand on X-Ray's AI mesh, so on ITR2's ground (level.ai matches our ground to a 2 cm median). The 3-D distance to the nearest level.ai node within 2 cells, over all o lines: median < 0.5 m and p95 < 1.5 m. This is the puppet question for ITR2.
+  - P1-switch: the first-seen distance of each creature that appears after t 5 (those online at load are excluded): median within +-25 % of --switch.
+  - P1-chase: at least one creature has best_enemy = the actor for >= 10 s while its distance falls by >= 10 m.
+  - P1-hits: at least one h line with hitter_kind m.
+  - P1-chase and P1-hits are "no test", never FAIL, if no monster comes within 50 m of the actor (empty lairs).
+- ITRZone predictions:
+  - P1-track 90 %; P1-mesh 85 % (p95 < 1.5 m on its own 75 %);
+  - P1-switch 60 % (X-Ray may switch by squad, with hysteresis, so the first-seen distance can sit below the nominal value);
+  - P1-chase 60 % and P1-hits 50 %, both given a mutant squad within 50 m;
+  - "no test" for chase and hits 25 %.
+- What follows for ITR2:
+  - P1-mesh PASS means X-Ray positions can drive ITR2 puppets on our ground with no correction step.
+  - P1-chase or P1-hits FAIL with a mutant near means a script-moved actor is not a usable target. The hybrid then needs another way to give X-Ray the player, and is reported before any ITR2 bridge boot (P2).
 
 ## Build note (EnginePerf)
 The script is harness/zz_p1_puppet.script (copy in perf-harness/). It parses with luac. Lua names it uses were checked in source:
 set_actor_position, set_health_ex, best_enemy, is_monster, is_stalker, profile_timer, alife():switch_distance, and the SHit fields
 power, draftsman and type. The driver is planned as tb_run.sh with TB_TIMES=1100 (alife dump at load and at 1,100 s of engine time, then quit),
 plus a heartbeat watcher like stall_run.sh. Both are untested until the box run.
+
+## Export formats (fixed to ITRZone's scorer, 2026-11-23)
+Z:\dev\shm\p1\export_<tag>.csv holds only these lines, with no header:
+  a,t,x,y,z,health
+  o,t,id,section,kind,x,y,z,health,best_enemy,distance      (kind m = is_monster, s = is_stalker; position = object
+                                                             position, which in X-Ray is at the feet)
+  h,t,hitter_id,hitter_section,hitter_kind,type,power,bone  (hitter_kind m/s, a = actor, x = other or none; power is
+                                                             the hit's power before it is cancelled)
+t = track time in s (negative during the 15 s wait). Everything else (S start line with actor_id, ON/OFF switch events,
+REFILL, TICK every 60 s, TRACK_END, SUMMARY with export cost) goes to Z:\dev\shm\p1\meta_<tag>.csv. The actor id
+is written in the run report from the S line (expected 0 in single player).
