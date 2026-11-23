@@ -1,0 +1,8 @@
+3020 2348086 R 58429 0 alsoft-mixer
+3014 2348110 R 48264 0 dxvk-submit
+441 2345788 S 17515 0 X-RAY_Primary_t
+274 2348223 S 4016 anon_pipe_read RefDet14.exe
+255 2348112 S 5969 futex_do_wait dxvk-cs
+243 2348225 S 3881 anon_pipe_read RefDet14.exe
+228 2348220 S 4661 anon_pipe_read RefDet14.exe
+208 2348221 S 5001 anon_pipe_read RefDet14.exe

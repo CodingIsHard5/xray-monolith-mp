@@ -38,3 +38,20 @@ After the captures the engine is killed (wineserver -k), and tb_run.sh records r
 ## Guess (registered, may be wrong)
 DEADLOCK/idle hang, at about 60 %. The old 07:20 run's samples, though from unreliable pids, showed almost no CPU,
 and the log stops right after hit and pain-sound lines. My second guess is a hidden dialog.
+
+## RESULT (scored once, 2026-11-22 23:50; run 23:32:48-23:42:44, start load 1.13, no retry)
+REPRODUCED at the same spot. The log stopped at 427,697 bytes after the same pattern: dog_normal_red hits, a pain sound,
+"Damage to actor". Stall detected 23:42:09.
+Classification, first match in the registered order: **DIALOG**. The screenshot (walkstall_screen.png) shows the
+"GAME OVER / PRESS SPACE TO CONTINUE" screen: THE ACTOR DIED to the dogs. The game sits on its death screen waiting for
+a key, which a headless run never sends. No FATAL or assert lines in the log. No winedbg dump (it is only for the
+deadlock and unclassified cases).
+CPU in the 30 s window: 2.68 cores, so the SPIN bar would also have matched. But the main thread (X-RAY_Primary)
+was sleeping (state S, 0.15 core). The CPU was the OpenAL mixer (1.0 core) and dxvk-submit (1.0 core) on the
+death screen. That is reported only and not chased.
+Meaning: this is NOT an engine hang. My -tb_walk harness teleported a stationary, unarmed actor into
+bar_zastava_dogs_lair_2, and the dogs killed it. The defect candidate "hang after mutant damage while walking" is
+CLOSED as a harness artefact. Both earlier stalls fit this (same lair, same hit pattern before the log stopped).
+My guess was wrong: I said deadlock at about 60 %.
+Consequence for later work: any headless run that walks the actor near mutants (P1) must keep the actor alive
+(god mode or a health refill each tick) or treat death as an end state. Otherwise a run "hangs" on the death screen.
