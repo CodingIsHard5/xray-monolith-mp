@@ -69,3 +69,15 @@ Nothing in sections 1-6 changes.
   if one does, the K runs are void.
 - Fingerprint (tb_hash.sh, bench1 + cordon1): equal to RefDet14 on every line except exe (65edcf401faeb125 vs
   bc0426a10810f461). Files out/coarse14/hash*.txt.
+
+## 9. Series 20:55-21:13 and two re-runs (written before any result was read)
+
+14 runs done, all rc 0. Two runs were marked "CONFOUNDED": r1_ros_k2 and r1_cor_k1 (both K). In both, the only
+"heavy other" at the end was 100%:ps, i.e. the checker's own ps command seen by itself (start load 1.87 / 1.64, no
+other process). Per section 2 they are EXCLUDED and re-run once. My series script had not implemented that re-run
+(a defect: it marked them done). Fixed: r1_series.sh now queues "<tag>_rr" for any non-clean run (never a re-run of a
+re-run). bench.sh's heavy-process check now ignores a process named exactly "ps". wineserver and Xvfb are matched as
+before, and anything else at 100 %, psql included, still counts. Re-runs r1_ros_k2_rr and r1_cor_k1_rr run after the
+fair-share gap. K group per scene = the three clean K runs (k1, k3, and the re-run). No split was computed before this
+note.
+Also corrected: series.log was created; I wrongly reported it missing (my listing filtered it out).

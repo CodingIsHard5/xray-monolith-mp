@@ -10,7 +10,8 @@ T="$HOME/.claude/overseer/tools"; W=engineperf; ORDER=${R1_ORDER:-tools/r1_order
 touch $ST/done.txt
 WHAT="EXCLUSIVE: headless R1 render-split timing runs (one engine at a time)"
 log() { echo "$(date '+%F %T') $*" | tee -a $ST/series.log; }
-pending() { grep -v '^#' "$ORDER" | grep . | while IFS='|' read -r tag rest; do grep -qx "$tag" $ST/done.txt || echo "$tag|$rest"; done; }
+touch $ST/rerun.txt
+pending() { cat <(grep -v '^#' "$ORDER") $ST/rerun.txt | grep . | while IFS='|' read -r tag rest; do grep -qx "$tag" $ST/done.txt || echo "$tag|$rest"; done; }
 heavy_ps() { ps -eo pcpu,pid,comm,args --sort=-pcpu | awk 'NR>1 && $1>=100 && $3!~/wineserver|Xvfb/ {print $1"%:"$3}' | head -5 | tr '\n' ' '; }
 settle() { local t0 l1 hv; t0=$(date +%s)
   while :; do l1=$(cut -d' ' -f1 /proc/loadavg); hv=$(heavy_ps)
@@ -38,6 +39,8 @@ while :; do
   log "run $tag rc=$rc $v"
   [ $rc = 0 ] || { stop="run $tag ended rc=$rc"; break; }
   echo "$tag" >> $ST/done.txt
+  # prereg section 2: a run whose VERDICT is not "clean" is excluded and re-run ONCE at the end (never a re-run of a re-run)
+  if [ "$v" != "VERDICT: clean" ] && [[ "$tag" != *_rr ]]; then echo "${tag}_rr|$exe|$save|$low" >> $ST/rerun.txt; log "run $tag not clean: excluded, re-run queued as ${tag}_rr"; fi
 done
 "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1; "$T/quiet-required.sh" release $W >/dev/null 2>&1   # withdraw FIRST
 log "slice end: $(grep -c . $ST/done.txt) done, $(pending | wc -l) left. ${stop:-list finished}"
