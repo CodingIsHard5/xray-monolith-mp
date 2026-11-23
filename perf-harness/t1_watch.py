@@ -62,7 +62,7 @@ while not stop:
     except OSError:
         data = b''
     if data:
-        lines = data.decode('utf-8', 'replace').rstrip('\n').split('\n')
+        lines = data.decode('utf-8', 'replace').replace('\r', '').rstrip('\n').split('\n')   # tolerate CRLF (T1 run 1: X-Ray text mode wrote CRLF)
         h = lines[0].split(','); e = lines[-1].split(',')
         hs = int(h[1]) if h[0] == 'seq' and len(h) > 1 and h[1].isdigit() else -1
         es = int(e[1]) if e[0] == 'end' and len(e) > 1 and e[1].isdigit() else -1

@@ -39,6 +39,8 @@ while kill -0 $TBP 2>/dev/null; do
     echo "$(utc),CONT,$s,$tt" >> "$O/stall.csv"; log "STALL end: SIGCONT sent"; done_stall=1; same=0; last=$s; continue
   fi
   if [ -n "$s" ] && [ "$s" = "$last" ]; then same=$((same+1)); else same=0; fi; last=$s
+  # the export stops BY DESIGN at TRACK_END (on_update returns); P1's driver had this exclusion and T1 run 1 lacked it
+  grep -q '^TRACK_END' "$SHM/meta_t1.csv" 2>/dev/null && same=0
   if [ $same -ge 30 ]; then
     stalled=1; EP=$(engine); log "X-RAY HEARTBEAT STALL: seq $s unchanged 30 s"
     DISPLAY=:77 xwd -root -silent > "$O/screen.xwd" 2>/dev/null && convert "$O/screen.xwd" "$O/screen.png" 2>/dev/null

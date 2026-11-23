@@ -19,9 +19,12 @@ stall = {r['event']: int(r['utc_ms']) for r in rows('stall.csv')} if os.path.exi
 s0, s1 = stall.get('STOP'), (stall['CONT'] + 2000 if 'CONT' in stall else None)
 inwin = lambda t: s0 is not None and s1 is not None and s0 <= t <= s1
 out = [t for t, _ in wr if not inwin(t)]
-span = (wr[-1][0] - wr[0][0]) - ((s1 - s0) if s0 and s1 else 0)
-exp = span / 100 + 1
-res['X1'] = (len(out) >= 0.95 * exp, f'{len(out)} stamped outside the stall of {exp:.0f} expected ({100 * len(out) / exp:.1f} %)')
+if len(wr) < 2:   # T1 run 1: an empty written.csv crashed the scorer; it is a FAIL, not a crash
+    res['X1'] = (False, f'{len(wr)} snapshots stamped by the watcher')
+else:
+    span = (wr[-1][0] - wr[0][0]) - ((s1 - s0) if s0 and s1 else 0)
+    exp = span / 100 + 1
+    res['X1'] = (len(out) >= 0.95 * exp, f'{len(out)} stamped outside the stall of {exp:.0f} expected ({100 * len(out) / exp:.1f} %)')
 W = [float(l.split(',')[2]) for l in open(os.path.join(O, 'meta_t1.csv')) if l.startswith('W,')]
 Ws = sorted(W); p99 = Ws[min(len(Ws) - 1, int(0.99 * len(Ws)))] if Ws else 1e9
 res['X2'] = (bool(W) and st.mean(W) < 1000 and p99 < 2000, f'{len(W)} ticks, mean {st.mean(W) if W else 0:.0f} us, p99 {p99:.0f} us, max {max(W) if W else 0:.0f} us')

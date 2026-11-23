@@ -1,0 +1,6 @@
+X1 FAIL: 0 snapshots stamped by the watcher
+X2 PASS: 9247 ticks, mean 741 us, p99 1440 us, max 8529 us
+X3 PASS: min MemAvailable 28431 MB; swap 2047 -> max 2047 MB (growth 0)
+X4 FAIL: STOP/CONT yes; first seq None ms after CONT; TRACK_END True; rc=0 False
+X5: torn polls 710168; X-Ray RSS max 16665 MB, CPU mean 259 %; ITR2 RSS max 5265 MB, CPU mean 223 %
+X-RAY SIDE: FAIL

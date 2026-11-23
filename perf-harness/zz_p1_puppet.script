@@ -79,7 +79,7 @@ local function export_b1(now, t, tm)
 	for id in pairs(seen) do if not present[id] then m(string.format("OFF,%.2f,%d,%d", t, now, id)) end end
 	seen = present
 	L[#L + 1] = string.format("end,%d", seq)
-	local f = io.open(DIR .. "snap.txt", "w")
+	local f = io.open(DIR .. "snap.txt", "wb")   -- binary: Windows text mode would write CRLF (T1 run 1 failure)
 	if f then f:write(table.concat(L, "\n"), "\n"); f:close() else m(string.format("WFAIL,%d", seq)) end
 	tm:stop(); local us = tm:time()
 	m(string.format("W,%d,%.0f", seq, us))
