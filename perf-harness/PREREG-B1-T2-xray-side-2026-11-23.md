@@ -94,3 +94,15 @@ PREDICTIONS (mine, X-Ray side; scored once after the joint run):
   the engine's RSS is far bigger, so T1's runs were not affected, but t1_xray.sh has the same lookup (noted, not changed:
   T1's script is frozen).
 - Still needs the short claimed pre-flight boot (section 5): yaw sign, pause keeps Lua running, a real kill + restart.
+
+## 9. Pre-flight boot plan (registered before it runs; not scored; waits for the Overseer's OK)
+- tools/t2_preflight.sh: WANT, one EXCLUSIVE X-Ray-only slice (claim 20 min), RefDet14, cordon1. A stand-in pose
+  writer (tools/t2_preflight_pose.py, not ITR2's code) holds the actor at its own on-mesh position and steps the yaw:
+  0 / +1.0 / -1.0 rad (10 s each), then dead+freeze 15 s, then play yaw 0.5. t2_xray.sh with T2_RUN_S=240,
+  T2_KILL_AT=120 (planned SIGKILL), no stall, T2_PAUSE=1.
+- Readings: (1) yaw sign = snapshot actor yaw vs pose yaw in phases A-C (same sign, or negated, or neither);
+  (2) pause: whether snapshots and PAUSE/UNPAUSE lines continue through phase D. If Lua stops while paused, the
+  heartbeat restarts X-Ray (an expected outcome here, not a failure), and freeze needs another mechanism;
+  (3) restart: kill -> first new-run_id snapshot time (budget 90 s; guess ~30 s).
+PREDICTIONS: yaw negated (camera yaw = -heading) 55 %, same sign 35 %, neither 10 %; Lua keeps running while
+device-paused 35 %; restart within 90 s 90 %.
