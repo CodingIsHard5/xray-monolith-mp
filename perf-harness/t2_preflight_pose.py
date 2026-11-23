@@ -6,8 +6,8 @@ pose.txt at 20 Hz in ITRZone's format (binary, LF) with the actor held at that p
   phase A  0-10 s   play, yaw 0.0
   phase B 10-20 s   play, yaw 1.0
   phase C 20-30 s   play, yaw -1.0
-  phase D 30-45 s   dead, freeze          (pause check: do snapshots keep coming, does UNPAUSE follow phase E?)
-  phase E 45 s-     play, yaw 0.5, until killed
+  phase D 30-70 s   dead, freeze (40 s: longer than the 30 s heartbeat, so the freeze skip is exercised)         (pause check: do snapshots keep coming, does UNPAUSE follow phase E?)
+  phase E 70 s-     play, yaw 0.5, until killed
 Each write is logged: utc_ms,seq,phase,yaw. The zone tag is the snapshot's level field.
 """
 import sys, time, os
@@ -28,7 +28,7 @@ t0 = time.time(); n = 0
 while True:
     t = time.time() - t0
     ph, st, aw, yw = ('A', 'play', 'keep', 0.0) if t < 10 else ('B', 'play', 'keep', 1.0) if t < 20 else \
-        ('C', 'play', 'keep', -1.0) if t < 30 else ('D', 'dead', 'freeze', -1.0) if t < 45 else ('E', 'play', 'keep', 0.5)
+        ('C', 'play', 'keep', -1.0) if t < 30 else ('D', 'dead', 'freeze', -1.0) if t < 70 else ('E', 'play', 'keep', 0.5)
     n += 1; u = utc()
     body = f"seq,{n},{u},{st},{lvl},{aw}\np,{x:.3f},{y:.3f},{z:.3f},{yw:.4f},1.0\nend,{n}\n"
     with open(os.path.join(shm, 'pose.txt'), 'wb') as f: f.write(body.encode())

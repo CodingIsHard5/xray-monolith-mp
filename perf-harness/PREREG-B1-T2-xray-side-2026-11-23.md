@@ -110,3 +110,9 @@ device-paused 35 %; restart within 90 s 90 %.
 - Engine lookup changed on the Overseer's ruling (pid/ancestry, not a name match): skip the watcher by PID, and
   require WINEPREFIX=$RUN/prefix in the process environ. Fake test re-run: stall, planned kill (killed pid = the 9.8 MB
   fake engine, logged with comm and RSS), crash restart, rc 6. t2_xray.sh sha now d8a391281cb7a344.
+
+- ITRZone review: under freeze the 30 s heartbeat is skipped while pose.txt says dead/away + freeze (fake test: hung
+  engine, pose dead+freeze 60 s -> no restart; pose play -> restart 30 s later). Pre-flight phase D lengthened to 40 s
+  so the skip is exercised. t2_xray.sh sha fd7d72bb79d20061.
+- Pre-flight attempt 1 (14:11): t2_xray.sh was not executable (rc 126); no engine boot; slice released at once.
+  Fixed (chmod +x) and re-queued.

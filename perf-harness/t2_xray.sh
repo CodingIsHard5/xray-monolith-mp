@@ -62,6 +62,12 @@ while :; do
       why="planned"; break
     fi
     if [ -n "$s" ] && [ "$s" = "$last" ]; then same=$((same+1)); else same=0; fi; last=$s
+    # ITRZone review: under freeze X-Ray may legitimately stop exporting while ITR2 is dead/away (Hub ~20 s + reload),
+    # so the 30 s rule is skipped while pose.txt says dead/away + freeze; it applies again once the pose says play.
+    IFS=, read -r _ _ _ pst _ paw <<<"$(head -1 "$SHM/pose.txt" 2>/dev/null | tr -d '\r')"
+    if [ "${paw:-}" = freeze ] && { [ "${pst:-}" = dead ] || [ "${pst:-}" = away ]; }; then
+      [ -z "${fz:-}" ] && { fz=1; log "freeze hold: pose state $pst, heartbeat skipped"; }; same=0
+    elif [ -n "${fz:-}" ]; then fz=""; log "freeze hold end: pose state ${pst:-?}"; fi
     [ $same -ge 30 ] && { why="no new seq for 30 s"; break; }
   done
   [ -n "$why" ] && [ "$why" != planned ] && { EP=$(engine); [ -n "$EP" ] && kill -KILL "$EP"; }
