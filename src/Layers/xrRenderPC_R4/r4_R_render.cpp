@@ -167,8 +167,8 @@ void CRender::Render()
 		PIX_EVENT_C(DEFER_PART0_SPLIT, dx10_marker_gbuffer);
 		// level, SPLIT
 		Target->phase_scene_begin();
-		GMBase.r_dsgraph_render_static(0);
-		GMBase.r_dsgraph_render_dynamic(0);
+		{ PROF_EVENT("r1a_static0"); GMBase.r_dsgraph_render_static(0); }   // R1 step 1a zone (measurement)
+		{ PROF_EVENT("r1a_dynamic0"); GMBase.r_dsgraph_render_dynamic(0); } // R1 step 1a zone (measurement)
 		Target->disable_aniso();
 	}
 
@@ -440,11 +440,13 @@ void CRender::render_forward()
 		// level
 		phase = PHASE_NORMAL;
 		//	Igor: we don't want to render old lods on next frame.
-		GMBase.r_dsgraph_render_static(1); // normal level, secondary priority
+		{ PROF_EVENT("r1a_forward_a"); GMBase.r_dsgraph_render_static(1); } // normal level, secondary priority (R1 1a zone)
 		CParticlesAsync::Wait();
+		{ PROF_EVENT("r1a_forward_b"); // R1 step 1a zone (measurement): forward pass minus the particle wait
 		GMBase.r_dsgraph_render_dynamic(1);
 		GMBase.fade_render(); // faded-portals
 		GMBase.r_dsgraph_render_sorted(false); // strict-sorted geoms
+		}
 		g_pGamePersistent->Environment().RenderLast(); // rain/thunder-bolts
 
 		// Item and camera attachment UI draws before the sorted HUD so nearer glass and the post chain cover it

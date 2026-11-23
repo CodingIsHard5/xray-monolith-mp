@@ -1,0 +1,7 @@
+# R1 step 1a order (PREREG-R1-step1a-2026-11-22.md). K' = Coarse14b.exe (Coarse14 + 4 zone sites in r4_R_render.cpp).
+r1a_ros_1|Coarse14b.exe|bench1|0
+r1a_ros_2|Coarse14b.exe|bench1|0
+r1a_ros_3|Coarse14b.exe|bench1|0
+r1a_cor_1|Coarse14b.exe|cordon1|0
+r1a_cor_2|Coarse14b.exe|cordon1|0
+r1a_cor_3|Coarse14b.exe|cordon1|0
