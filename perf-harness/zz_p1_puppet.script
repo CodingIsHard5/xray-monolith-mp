@@ -80,10 +80,14 @@ local function on_update()
 	if not t0 then
 		if not load_track() then active = false; return end
 		t0 = now + WAIT_MS
-		m(string.format("S,%d,actor_id=%d,switch_distance_at_load=%.1f,export=%s,wait_ms=%d", now, a:id(), alife():switch_distance(), tostring(do_export), WAIT_MS))
+		get_console():execute("g_god on")   -- retry amendment: engine-level god mode (registered with -dbg)
+		m(string.format("S,%d,actor_id=%d,switch_distance_at_load=%.1f,export=%s,wait_ms=%d,g_god=%s", now, a:id(), alife():switch_distance(), tostring(do_export), WAIT_MS, tostring(get_console():get_bool("g_god"))))
 	end
 	if a.health < min_health then min_health = a.health end
-	if a.health < 0.5 then refills = refills + 1; m(string.format("REFILL,%.2f,%d,%.3f", (now - t0) / 1000, now, a.health)); a:set_health_ex(1.0) end
+	-- retry amendment: refill to 1.0 on EVERY update (god mode does not block set_health_ex, which GAMMA's balancer uses);
+	-- REFILL lines only for drops below 0.5
+	if a.health < 0.5 then refills = refills + 1; m(string.format("REFILL,%.2f,%d,%.3f", (now - t0) / 1000, now, a.health)) end
+	if a.health < 1.0 then a:set_health_ex(1.0) end
 	local t = (now - t0) / 1000
 	if t > trk_t[#trk_t] then if not done_logged then done_logged = true; m(string.format("TRACK_END,%.2f,%d", t, now)); on_quit() end; return end
 	if now - last_move >= 50 then
@@ -120,6 +124,7 @@ function on_game_start()
 	if not meta then printf("p1: CANNOT OPEN META FILE"); active = false; return end
 	RegisterScriptCallback("actor_on_update", on_update)
 	RegisterScriptCallback("actor_on_before_hit", on_before_hit)
+	RegisterScriptCallback("actor_on_hit_callback", function() if db.actor and db.actor.health < 1.0 then db.actor:set_health_ex(1.0) end end)  -- second refill point, after each hit
 	RegisterScriptCallback("on_before_level_changing", on_quit)
 	RegisterScriptCallback("on_game_end", on_quit)
 	-- summary also every 60 s of track time so a killed run keeps it

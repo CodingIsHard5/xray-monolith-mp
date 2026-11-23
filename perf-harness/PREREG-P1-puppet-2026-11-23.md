@@ -129,3 +129,21 @@ Proposed for the ONE retry (needs Overseer OK, as an amendment before any run): 
 PLUS a refill to 1.0 on EVERY actor update instead of below 0.5, so that one balancer hit (capped by its own line 733) cannot
 reach 0. The hit log is unchanged. (b) The driver refuses to start a run while any other process uses 100 % or more
 of a core (as r1_series), with the 5-minute settle cap.
+
+## RETRY AMENDMENT (Overseer OK, 2026-11-23; registered before the retry; this is the ONE retry)
+Desk check (source): god mode does NOT block set_health_ex. CScriptGameObject::SetHealthEx (script_game_object4.cpp:451)
+-> CEntity::SetfHealth (Entity.h:39) -> condition SetHealth, which writes health directly with no GodMode check.
+GodMode only zeroes the engine's own hit power (Actor.cpp:671) and stops condition updates (ActorCondition.cpp:219).
+GAMMA's balancer damages through set_health_ex, so god mode alone would NOT have saved the actor.
+Changes:
+(a) Engine-level god mode: `g_god on` at the first actor update (registered under -dbg, which the run passes); its
+    state is written in meta's S line. The health refill stays as the backup and is raised to 1.0 on EVERY actor update,
+    plus a second refill after each hit (actor_on_hit_callback). From 1.0, one balancer hit cannot kill: its own
+    "avoided one shot" rule (line 733) leaves 0.25. Two big hits in one frame still could. A death still voids the run.
+(b) The driver refuses a run (5-min settle cap) while any other process is at >= 100 % CPU, as r1_series.sh does.
+    Output goes to out/p1_retry/.
+Added check, same run: HIT LOGGING UNDER GOD MODE. If any monster comes within 3 m of the actor (o lines) and there
+is not a single h line with hitter_kind m in R1, then hit logging failed under god mode. I report it as FAILED, and P1-hits
+becomes "not measurable", not a PASS or FAIL.
+Not changed: everything else, including itrzone's scorer, predictions and the formats. Note: REFILL lines now mean
+health fell below 0.5 between two updates.

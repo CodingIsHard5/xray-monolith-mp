@@ -7,7 +7,7 @@ set -u
 cd "$(dirname "$0")/.."; P=$PWD; RUN=$P/run
 T="$HOME/.claude/overseer/tools"; W=engineperf; EXE=RefDet14.exe
 TRK=/home/caden/Projects/ITRZone/out/p1/cordon_full_track.csv; SHM=/dev/shm/p1
-OUTB=$P/out/p1; mkdir -p "$OUTB"; LOG=$RUN/appdata/logs/xray_$(whoami).log
+OUTB=$P/out/p1${P1_SUFFIX:-}; mkdir -p "$OUTB"; LOG=$RUN/appdata/logs/xray_$(whoami).log
 WHAT="EXCLUSIVE: headless P1 puppet probe (one engine)"
 log() { echo "$(date '+%F %T') $*" | tee -a "$OUTB/p1.log"; }
 [ "$(sha256sum "$TRK" | cut -c1-16)" = 213ff8f125723f01 ] || { log "REFUSED: track hash differs"; exit 2; }
@@ -21,13 +21,14 @@ cp "$TRK" "$RUN/gamedata/configs/p1_track.csv"
 "$P/tools/run_noguard.sh" "$RUN" >/dev/null || { log "REFUSED: noguard"; stop="noguard"; }
 engine() { local best="" br=0 r; for p in $(pgrep -f "bin\\\\$EXE"); do r=$(awk '/VmRSS/{print $2}' /proc/$p/status 2>/dev/null); [ "${r:-0}" -gt "$br" ] && { br=$r; best=$p; }; done; echo "$best"; }
 ticks() { for t in /proc/$1/task/*; do s=$(sed 's/^.*) //' $t/stat 2>/dev/null) || continue; echo "$(basename $t) $(echo "$s" | awk '{print $1, $12+$13}') $(cat $t/wchan 2>/dev/null) $(tr -d '\n' < $t/comm 2>/dev/null | tr ' ' '_')"; done; }
-settle() { local t0=$(date +%s) l1; while :; do l1=$(cut -d' ' -f1 /proc/loadavg); awk -v l="$l1" 'BEGIN{exit !(l<2)}' && { echo "settle ok load=$l1 wait=$(( $(date +%s)-t0 ))s"; return 0; }
-  [ $(( $(date +%s)-t0 )) -ge 300 ] && { echo "settle cap load=$l1"; return 1; }; sleep 15; done; }
+heavy_ps() { ps -eo pcpu,pid,comm,args --sort=-pcpu | awk 'NR>1 && $1>=100 && $3!~/wineserver|Xvfb/ && $3!="ps" {print $1"%:"$3}' | head -5 | tr '\n' ' '; }
+settle() { local t0=$(date +%s) l1 hv; while :; do l1=$(cut -d' ' -f1 /proc/loadavg); hv=$(heavy_ps); awk -v l="$l1" 'BEGIN{exit !(l<2)}' && [ -z "${hv// /}" ] && { echo "settle ok load=$l1 heavy=[] wait=$(( $(date +%s)-t0 ))s"; return 0; }
+  [ $(( $(date +%s)-t0 )) -ge 300 ] && { echo "settle cap load=$l1 heavy=[$hv]"; return 1; }; sleep 15; done; }
 stop=${stop:-}
 for spec in "on|-p1_export|30" "off||150"; do
   [ -n "$stop" ] && break
   IFS='|' read -r tag xf hb <<<"$spec"; O=$OUTB/$tag; mkdir -p "$O"; rm -rf "$SHM"; mkdir -p "$SHM"
-  log "$(settle) before $tag"
+  sr=$(settle); log "$sr before $tag"; case "$sr" in *cap*) stop="not quiet before $tag (amendment b)"; break;; esac
   "$T/protected-title-check.sh" >/dev/null 2>&1 && { stop="protected title"; break; }
   "$T/quiet-required.sh" claim $W 60 "$WHAT" >/dev/null 2>&1
   log "run $tag load $(cut -d' ' -f1-3 /proc/loadavg)"
