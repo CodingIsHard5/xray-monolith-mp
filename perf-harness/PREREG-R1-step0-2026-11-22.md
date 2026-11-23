@@ -52,3 +52,9 @@ Any step 1 still waits for Caden's ruling (17:36 rule). If a step 1 target lies 
 
 One scene each, player standing still, headless 1280x720, no present, under Wine/DXVK (not native D3D11). Profiler
 on in both builds (K still has about 1,400 coarse calls per frame). It ranks; it gives no verdict on old hardware.
+
+## 7. Ruling received after registration, before any run (Overseer relaying Caden, Discord 00:48 UTC)
+
+Caden: "Go for it", to the question of whether R1's optimisation may go ahead before the rest of the plan is ruled on.
+Scope as relayed: step 1 is approved ONLY if section 4's rule picks a target; DROP stays DROP; covers R1 only.
+Nothing in sections 1-6 changes.
