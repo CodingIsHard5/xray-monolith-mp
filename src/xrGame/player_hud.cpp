@@ -4750,7 +4750,7 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 					if (V.rnd_good & (u32(1) << i))
 						V.rest[rb].mul_43(V.rest[V.bone], V.rnd_local[i]);
 					else if (K->LL_GetData(rb).GetParentID() == V.bone)
-						V.rest[rb].mul_43(V.rest[V.bone], K->LL_GetData(rb).get_bind_transform());
+						V.rest[rb].mul_43(V.rest[V.bone], K->LL_GetData(rb).bind_transform);
 				}
 			}
 			V.cache_ok = true;
