@@ -147,3 +147,23 @@ is not a single h line with hitter_kind m in R1, then hit logging failed under g
 becomes "not measurable", not a PASS or FAIL.
 Not changed: everything else, including itrzone's scorer, predictions and the formats. Note: REFILL lines now mean
 health fell below 0.5 between two updates.
+
+## RETRY RESULT, EnginePerf part (scored once, 2026-11-23 01:20; runs 00:33-00:52 "on" and 00:52-01:11 "off")
+Both runs are CLEAN: start load 0.81 / 1.66, heavy_others=[] at start and end, the full track walked in both
+(TRACK_END 1021.4 s), rc=0, no stall, and no death (min health 1.000, 0 refills). g_god=true in both S lines.
+Data: out/p1_retry/{on,off}/ (export_on.csv has 425,786 lines and 9,569 export ticks).
+- HIT LOGGING UNDER GOD MODE (amendment check): FAILED. Monsters (cats) were within 3 m of the actor in 981 o lines
+  and had best_enemy = actor (id 0) in 33,855 o lines, yet there are 0 h lines. GAMMA's "Damage to actor" prints are
+  also absent. With g_god on, the actor before-hit callback does not fire, so P1-hits is NOT MEASURABLE (per the amendment).
+  Lesson for the hybrid: engine god mode hides hits from scripts. To see hits on an invulnerable actor, keep god mode
+  off and neutralise damage another way (for example, hook GAMMA's balancer).
+- Export cost, predicted 0.05-0.5 ms per tick (central 0.2): mean 0.452 ms, p99 0.754, max 6.48. Inside the range,
+  at its top; my central guess was too low. "Under 0.1 % of main-thread time" was WRONG: 10 Hz x 0.45 ms = 0.45 %.
+- Frame-time difference R1 against R2: NOT DELIVERED. The driver did not capture frame times (tb_run has no frame
+  CSV). That is my gap. A stand-in, reported only: the engine process's CPU ticks at about 18 min were 290,198 (on)
+  against 292,789 (off), so the export cost is not visible at process level (well inside run-to-run noise).
+- No hang over the full track in either run: PASS. No death: PASS.
+- Hits on the actor: NOT MEASURABLE (above).
+- RssAnon, predicted 3-6 GB: 3.26-3.56 GB in "on" and 3.34-3.56 GB in "off": PASS. VmRSS about 17 GB (mapped archives).
+- Switch distance at load was 1250 (auto_switch), and 450 from t = 0 as designed. It was not re-read during the run.
+- P1-switch, P1-track, P1-mesh, P1-chase: ITRZone's scorer (section 6), reported separately.
