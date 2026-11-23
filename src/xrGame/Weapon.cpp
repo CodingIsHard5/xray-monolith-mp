@@ -1118,6 +1118,15 @@ BOOL CWeapon::net_Spawn(CSE_Abstract* DC)
 	}
 
 	m_ammoType = E->ammo_type;
+	// BUGFIXES.md CANDIDATE 3: a saved ammo index past the end of ammo_class (e.g. after a config change shortened the
+	// list) used to read past the vector; a non-null garbage name crashed in CInifile::r_section. Clamp to the first
+	// ammo type, as the null guard below already does.
+	if (m_ammoType >= m_ammoTypes.size() && !m_ammoTypes.empty())
+	{
+		Msg("! [FIX] CWeapon::net_Spawn: [%s] section [%s] ammo_type %u >= ammo_class size %u, using 0",
+			*cName(), *cNameSect(), (u32)m_ammoType, (u32)m_ammoTypes.size());
+		m_ammoType = 0;
+	}
 	SetState(E->wpn_state);
 	SetNextState(E->wpn_state);
 

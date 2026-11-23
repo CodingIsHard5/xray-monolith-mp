@@ -85,6 +85,13 @@ BOOL CWeaponMagazinedWGrenade::net_Spawn(CSE_Abstract* DC)
 
 	iAmmoElapsed2 = weapon->a_elapsed_grenades.grenades_count;
 	m_ammoType2 = weapon->a_elapsed_grenades.grenades_type;
+	// BUGFIXES.md CANDIDATE 3: same out-of-range read as CWeapon::net_Spawn, with no guard at all. Clamp to 0.
+	if (m_ammoType2 >= m_ammoTypes2.size() && !m_ammoTypes2.empty())
+	{
+		Msg("! [FIX] CWeaponMagazinedWGrenade::net_Spawn: [%s] section [%s] grenades_type %u >= grenade_class size %u, using 0",
+			*cName(), *cNameSect(), (u32)m_ammoType2, (u32)m_ammoTypes2.size());
+		m_ammoType2 = 0;
+	}
 
 	m_DefaultCartridge2.Load(m_ammoTypes2[m_ammoType2].c_str(), m_ammoType2);
 
