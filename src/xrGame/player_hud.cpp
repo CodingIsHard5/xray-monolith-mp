@@ -4468,6 +4468,10 @@ struct vr_mag_vis
 	u16 rnd[32];
 	int rnd_n;
 	bool rnd_engine;        // the list is the game's own bullet_bones: the game's HUD_VisualBulletUpdate drives the gun model
+	// 8c note 6: each round's pose relative to the magazine bone, from the last time the gun's own pose of it was near the
+	// magazine (an empty-gun animation may park round bones far away, build check 2: PM ctg8 10.01 m); bit i set = rnd_local[i] good
+	Fmatrix rnd_local[32];
+	u32 rnd_good, rnd_parked_logged;
 };
 static vr_mag_vis s_vr_mv = {nullptr, BI_NONE, 0, false, u32(-1), 0, false, false};
 
@@ -4592,6 +4596,8 @@ void vr_mag_reset()
 	s_vr_mv.copy_failed = false;
 	s_vr_mv.rnd_n = 0;
 	s_vr_mv.rnd_engine = false;
+	s_vr_mv.rnd_good = 0;
+	s_vr_mv.rnd_parked_logged = 0;
 }
 
 static void vr_pda_reset(); // milestone 10a, below
@@ -4658,6 +4664,8 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 		// milestone 8c: the round bones (ours from the VR config, else the game's bullet_bones), only those under the magazine bone
 		V.rnd_n = 0;
 		V.rnd_engine = false;
+		V.rnd_good = 0;
+		V.rnd_parked_logged = 0;
 		CWeapon* rw = item->m_parent_hud_item && item->m_parent_hud_item->has_object() ? smart_cast<CWeapon*>(&item->m_parent_hud_item->object()) : nullptr;
 		if (V.bone != BI_NONE)
 		{
@@ -4718,6 +4726,33 @@ void player_hud::vr_mag_draw(IDSGraphManager* DM)
 				if (V.mask & (u64(1) << b))
 					V.rest[b].set(K->LL_GetBoneInstance(b).mTransformHidden); // 8c: the bone's own pose even while it is hidden
 					// (a hidden bone's mTransform sits at its parent's origin, SkeletonRigid.cpp BuildBoneMatrix)
+			// 8c note 6: a round's pose counts only when it is near the magazine bone (within 0.25 m); otherwise the last
+			// good one, kept relative to the magazine bone, is used; never a good one: the model's bind pose under its parent
+			Fmatrix mag_inv;
+			mag_inv.invert(V.rest[V.bone]);
+			for (int i = 0; i < V.rnd_n; ++i)
+			{
+				const u16 rb = V.rnd[i];
+				const float d = V.rest[rb].c.distance_to(V.rest[V.bone].c);
+				if (d <= 0.25f)
+				{
+					V.rnd_local[i].mul_43(mag_inv, V.rest[rb]);
+					V.rnd_good |= u32(1) << i;
+				}
+				else
+				{
+					if (!(V.rnd_parked_logged & (u32(1) << i)))
+					{
+						V.rnd_parked_logged |= u32(1) << i;
+						Msg("* [vr3rnd] frame %u round bone %s posed %.3f m from the magazine bone: not used, %s", g_vr_track.frame,
+							K->LL_BoneName_dbg(rb), d, (V.rnd_good & (u32(1) << i)) ? "last good pose kept" : "bind pose used");
+					}
+					if (V.rnd_good & (u32(1) << i))
+						V.rest[rb].mul_43(V.rest[V.bone], V.rnd_local[i]);
+					else if (K->LL_GetData(rb).GetParentID() == V.bone)
+						V.rest[rb].mul_43(V.rest[V.bone], K->LL_GetData(rb).get_bind_transform());
+				}
+			}
 			V.cache_ok = true;
 		}
 	}
