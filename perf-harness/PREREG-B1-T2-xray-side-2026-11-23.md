@@ -473,3 +473,27 @@ X SIDE (r2): FAIL
 - The old held spots (track 25-26 s, 29 s, 70-72 s, 91-94 s, 109-110 s) were all played without a hold.
 - Limits: the stand-in writer played ~150 s of track forward only, yaw 0, no deaths, no ITR2.
 - **zz_p1_puppet.script stays frozen at 887f4488... for r2b.** No file changed after the pre-flight.
+
+## 27. Joint r2b X-side RESULT: PASS (ITRZone run 20261123-222755; r2's one retry; scored ONCE, scorer 16e89cb7..., r2)
+Out dir ~/Projects/ITRZone/out/runs/20261123-222755-t2r2b-xray. Verbatim:
+```
+X-noplan PASS: 0 unplanned restarts (); last line rc=0: True
+X-freeze PASS: 1 STOP, 1 CONT; game_ms deltas [198]; bad []; [FREEZE] absorbed lines 1
+X-track PASS: 21365 poses applied; dist p50 0.291 p95 0.608 max 2.228 m; off-mesh holds 22; torn 0
+X SIDE (r2): PASS
+```
+- Freeze (death 2, `freeze`): STOP 03:40:48.47Z, CONT 03:42:05.76Z, 77.3 s frozen. Engine line:
+  `[FREEZE] absorbed 77277 ms of a 77310 ms gap`. Game time moved +198 ms across it (limit 1000 ms).
+  Death 1 (`keep`) made no STOP, as designed.
+- Tracking: 22 HOLDs of 21,365 poses (0.1 %), all `nonear`, at seq 3292-3298 (the run the offline model predicted),
+  3821, 14945-14951 and 21533-21539 (the same track spot on later ping-pong passes). 1,373 poses were accepted through
+  a neighbour cell. 125 poses were over 1 m. Both predictions of section 24 were right.
+- Observed, not scored (follow-up): at ITR2's end (03:52:07Z) the script logged a second ABSORB_ARM (seq 24671), but
+  the bridge sent no STOP, and the pose went stale 3 s later. So the absorb stayed armed for X-Ray's last ~6 min with
+  no freeze. No gap was absorbed in that time (only 1 absorbed line in the log), but an armed absorb without a STOP
+  breaks the Overseer's condition "armed only during a freeze". Cause not yet read. To fix before T3: disarm on STALE,
+  and find why the script and the bridge disagreed on that last pose.
+- ITR2 side (ITRZone, scored once): FAIL, 5 of 7.
+  - T2d: its checker counts snapshots X-Ray wrote after ITR2 had ended. X-Ray ran its full T2_RUN_S = 1500 s.
+  - T2e: 7 spawn failures in its mod.
+  - The Overseer decides what follows.
