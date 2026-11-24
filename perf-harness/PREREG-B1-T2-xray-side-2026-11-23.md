@@ -724,3 +724,41 @@ fields stays v1 and takes the T2 path, unchanged.
 - **Stop rule:** FAIL means find the cause before anything else; at most one retry.
 - **Stance build:** perf/t3-stance 8a835585a, CI 45331173775 success, installed as run/bin/Stance14.exe
   (sha256 b4ce9c772ae5fa4b...). Not run yet.
+
+## 36. Pre-flight A2 RESULT: PASS. Pre-flight B (stance export, with the bridge) registered BEFORE its boot
+- **A2 run:** out/t3pfA2, Absorb14.exe, script e90c1555..., slice 2026-11-24 02:19-02:23, rc 0. Scored ONCE with
+  t3_pfA2_check.py (a89de5eb...).
+- **A2 result: PASS, 6 of 6.** 3,672 poses applied; 0 GUARD, largest step 0.99 m; 7 HOLD; actor height = node + 0.05
+  on every pose; no RAY_ERROR.
+- **Reported:** actor minus track height p50 +0.05, |.| p95 0.18, max 0.61 m (A: 0.578 / 1.06). Ray hit on 3,672 of
+  3,672 poses; ray ground minus node height p05 -0.11, p50 -0.02, p95 +0.11, min -0.51, max +1.20 m; |.| p95 0.18.
+  Height drift between sets: nonzero on 2,429 of 3,672 poses, p05 -0.10, p50 -0.02, max +0.99 m.
+- **My guesses:** PASS (75 %): right. Ray hits >= 90 %: right (100 %). |ray - node| p95 <= 0.3 m: right (0.18).
+  Drift nonzero on < 1 % of poses: WRONG (66 %).
+- **What the drift means (exploratory):** set just above the ground, the actor does sink a few centimetres toward the
+  real ground between sets (2,260 of the nonzero drifts are downward). So physics acts when the actor is set near
+  the ground; in A it was set under or far above it and did not move. The node height is within about 0.2 m of the
+  collision ground on 95 % of this route. A ray is usable as a ground source (for the no-node spots): not applied yet.
+- **Script for B (sha256 751022ac...):** adds only logging. `MOVESUM,frames=,crouch=,low=,unread=,stance_api=` at
+  the end (frames in real crouch / low crouch, read with GAMMA's own `IsMoveState`, the function its vision script
+  uses), and two P2 fields: the real movement state (0/1/2, -1 unread) and `get_actor_stance` (-9 = no export).
+  Offline: all earlier cases unchanged; A2's checker still passes on the stub output.
+- **Pre-flight B (X-Ray only, one WANT slice, 20-min claim, one boot):**
+  `PF_OUT=out/t3pfB PF_EXE=Stance14.exe PF_FREEZE=sigstop PF_ABSORB=2000 PF_PAUSE=0 PF_KILL_AT=99999 PF_RUN_S=200
+   PF_POSE_ARG=track3:<cordon_full_track.csv> tools/t2_preflight.sh`
+  Stance14.exe = perf/t3-stance 8a835585a, sha256 b4ce9c772ae5fa4b... The writer (fbe74ebe...) plays the track as
+  pose v2 with the stance cycling 0, 1, 2 every 10 s.
+- **Scored ONCE with t3_pfB_check.py (c2c59a55...). PASS needs all of:** conditions 1-6 as in A2; (7) at least 15
+  STANCE lines and no STANCE_UNSUPPORTED; (8) `get_actor_stance` equals the pose stance on every P2 line; (9) the
+  real movement state equals the pose stance on at least 80 % of P2 lines, and after every stance change it matches
+  within 2 s (changes in the last 2 s of data are not judged); (10) the movement state is readable on every P2 line.
+- **Witnesses:** the checker FAILS A2's data (no export: conditions 7-10). Offline, a stub whose movement state
+  follows the export one tick late PASSES; a stub that never crouches FAILS condition 9.
+- **Report-only:** MOVESUM, heights, ray, drift as in A2. The "NPC notices a crouched actor later" witness is NOT
+  attempted here: this pre-flight has no measure of it. It moves to the joint T3 as report-only.
+- **Guesses, written before the boot:** PASS 55 %. Risks: `IsMoveState` not readable from my script (20 %); the
+  actor does not really crouch while it is being set 20 times a second (20 %); low crouch (2) reads as 1 (10 %).
+- **Order changed, with the reason:** section 34 listed the no-bridge boot (check 2) before B. B goes first because
+  it costs 7 minutes and shows whether the movement state can be read at all; the no-bridge check needs that reading
+  and costs about 40 minutes (two full T1 tracks, Stance14 and Absorb14). Both are still done before any joint run.
+- **Stop rule:** FAIL means find the cause first; at most one retry.

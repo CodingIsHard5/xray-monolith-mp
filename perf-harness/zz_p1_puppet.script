@@ -140,6 +140,14 @@ local T2_NEAR_CELLS, T2_NEAR_H, p_near = 2, 2.0, 0   -- on-mesh test: +-2 cells 
 -- that only picks the floor. X-Ray finds its own AI node: the highest node at or below yfloor + T3_PROBE_UP (else the
 -- lowest above), in the pose's cell or within +-T2_NEAR_CELLS cells, accepted if within T3_BAND m of the ITR2 feet.
 -- Returns ring, node id, node height; or nil.
+-- real movement state of the actor, as GAMMA's vision script reads it: 0 stand, 1 crouch, 2 low crouch, -1 = cannot read
+local mv_frames, mv_crouch, mv_low, mv_na = 0, 0, 0, 0
+local function mvstate()
+	if not IsMoveState then return -1 end
+	local ok, cr = pcall(IsMoveState, 'mcCrouch'); if not ok then return -1 end
+	if not cr then return 0 end
+	local ok2, ac = pcall(IsMoveState, 'mcAccel'); return (ok2 and ac) and 2 or 1
+end
 local T3_PROBE_UP, T3_BAND, T3_LIFT, T3_YTOL, T3_GUARD = 0.7, 3.0, 0.05, 0.7, 5.0
 local t3_ray, t3_ray_warned, t3_ly
 local t3_gx, t3_gy, t3_gz, t3_guards, t3_stance_last, t3_stance_warned = nil, nil, nil, 0, nil, false
@@ -278,8 +286,8 @@ local function t2_pose(a, now, t)
 			m(string.format("GUARD,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f", now, n, d3, px, ty, pz, got.x, got.y, got.z))
 			if t3_gx then a:set_actor_position(vector():set(t3_gx, t3_gy, t3_gz), true) end
 		else t3_gx, t3_gy, t3_gz = got.x, got.y, got.z end
-		-- P2: seq, utc, tg, horizontal distance, pose yaw, actor yaw, target x,y,z, node id, node y, ring, snap, actor y after set, stance, ray ground y (-9999 = no hit; measured only), height drift since the last set
-		m(string.format("P2,%d,%s,%d,%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%d,%.3f,%d,%d,%.3f,%d,%.3f,%.3f", n, utc, now, dxz, pyaw, yaw(a), px, ty, pz, vid, ny, ring, snap, got.y, pstance, ry, drift))
+		-- P2: seq, utc, tg, horizontal distance, pose yaw, actor yaw, target x,y,z, node id, node y, ring, snap, actor y after set, stance, ray ground y (-9999 = no hit; measured only), height drift since the last set, real movement state (0/1/2, -1 unread), get_actor_stance (-9 = no export)
+		m(string.format("P2,%d,%s,%d,%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%d,%.3f,%d,%d,%.3f,%d,%.3f,%.3f,%d,%d", n, utc, now, dxz, pyaw, yaw(a), px, ty, pz, vid, ny, ring, snap, got.y, pstance, ry, drift, mvstate(), a.get_actor_stance and a:get_actor_stance() or -9))
 		return
 	end
 	local v = vector():set(px, py, pz)
@@ -298,6 +306,8 @@ local on_quit
 local function on_update()
 	local a = db.actor; if not a then return end
 	local now = time_global()
+	do local k = mvstate(); mv_frames = mv_frames + 1
+		if k == 1 then mv_crouch = mv_crouch + 1 elseif k == 2 then mv_low = mv_low + 1 elseif k < 0 then mv_na = mv_na + 1 end end
 	if not t0 then
 		if not t2 and not load_track() then active = false; return end
 		t0 = now + WAIT_MS
@@ -352,6 +362,9 @@ on_quit = function()
 		hits, cancels, refills, min_health, exp_n, exp_n > 0 and exp_sum / exp_n or 0, p99, exp_max))
 	if t2 then t2_disarm(time_global(), p_last, "end") end
 	if t2 then m(string.format("T2SUM,last_seq=%d,torn=%d,holds=%d,paused=%s,near=%d,guards=%d", p_last, p_torn, p_holds, tostring(p_paused), p_near, t3_guards)) end
+	do local a = db.actor; local api = "na"
+		if a and a.get_actor_stance then local ok, v = pcall(a.get_actor_stance, a); api = ok and tostring(v) or "err" end
+		m(string.format("MOVESUM,frames=%d,crouch=%d,low=%d,unread=%d,stance_api=%s", mv_frames, mv_crouch, mv_low, mv_na, api)) end
 	out:close(); meta:close(); out, meta = nil, nil
 end
 
