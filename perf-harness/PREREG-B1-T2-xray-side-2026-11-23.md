@@ -1322,3 +1322,27 @@ fields stays v1 and takes the T2 path, unchanged.
   rechecked on disk at this note: 473dec25, 6597a067, b4ce9c77, cb183b7b. Control file absent.
 - ITR2's changes are inside its mod (it drops its references to the old level's actors at a level change); pose
   format, crossing code and timing are unchanged by ITRZone's statement.
+
+## 53. R3 x2 (the one retry of section 52): X side PASS 9 of 9 (scored once, 2026-11-24)
+
+- **Run:** X out dir ~/Projects/ITRZone/out/runs/20261124-181844-t2x2-xray, 18:18-18:32, files as frozen in section
+  51 (hashes rechecked after the run), runner rc 0, one boot, no restart. Test save unchanged; control file absent.
+- **Each check:**
+  1. PASS: rc 0, no Lua error, no FATAL, no DMG line.
+  2. PASS: two CROSS_REQ, out by esc_level_changer_to_garbage_2 (-152.625, 2.255, -297.913; 55976, 762), back by
+     gar_level_changer_to_escape_2 (-162.193, -2.852, 329.859; 88513, 367); no CROSS_NOCHANGER or CROSS_ERROR.
+  3. PASS: two CROSS_RESUME, Garbage then Cordon, each after its request.
+  4. PASS: first applied play pose 48.3 s and 49.0 s after the cross pose (limit 90 s).
+  5. PASS: P2 954 before, 1,200 on Garbage, 1,199 back on Cordon; 0 GUARD, 0 HOLD.
+  6. PASS: first pose after each resume 0.001 m from the changer's destination.
+  7. PASS: two runner cross holds, no restart row.
+  8. PASS: 0 of 3,353 P2 off in stance, movement state or height.
+  9. PASS: three VITALS lines, each health 1.000, radiation 0, bleeding 0, 0 unread; no REFILL; 0 hits.
+- **Guess:** 55 % PASS; it passed. None of the named risks happened.
+- **The crouch carry-over (section 52):** in this run ITR2's first pose after each arrival set the stance (low
+  crouch on Garbage, crouch back on Cordon) and the actor followed on every pose. So with poses arriving the
+  carry-over has no effect. What the actor does between arrival and the first pose is still not looked at.
+- **ITR2 side (ITRZone's own score, its to report):** FAIL 10 of 12 (T2c and R3c). So the joint x2 is not a PASS;
+  per the stop rule nothing more runs on x1/x2 before the Overseer decides.
+- **Not covered:** a death during a crossing; spots with no AI node; a lost pose writer (design note of
+  2026-11-24).
