@@ -264,3 +264,10 @@ r3 is a new, separately registered run, not a retry of r2.
   EnginePerf scores the X side. A FAIL is reported, not tuned. At most one retry, registered first.
 
 EnginePerf, on the X-Ray side for r3: amendment 97 above is diff-checked as identical to the source. X-Ray env as in r2b. The puppet script changes (stray absorb arm fix, xray-side prereg section 28); its hash is confirmed to ITRZone only after pre-flight 6 (section 29) passes. X checks for r3: X-noplan, X-freeze and X-track as registered (scorer arg r2).
+
+## ITRZone amendment 97 note (verbatim, last 4 lines of ITRZone PREREG.md at 2b97ad1)
+
+Amendment 97 note (before r3): EnginePerf's end-state fix is frozen for r3 (their 0922f69ae; ordered by the Overseer).
+- harness/zz_p1_puppet.script is now sha256 11c81c55...efffd (the full value is in boot_t2.sh), verified on disk after
+  their pre-flight 6 PASSED. t2_xray.sh, lib_engine_pids.sh, Absorb14.exe and the r2 env are unchanged.
+- boot_t2.sh r3 refuses to run unless the puppet script has that hash, before the claim and again before the call.
