@@ -4296,7 +4296,8 @@ static void vr_bp_draw(IDSGraphManager* DM)
 // inventory is only read. A model whose file is not there is NEVER asked of the model pool (that stops the game): a
 // plain box model stands in. Switches (feel, Caden's sheet): -vr_bp_scale <f> (default 0.25; 1 = real size),
 // -vr_bp_each (every item its own model, no stacks), -vr_bp_face <1|-1> (which face of the bag). TEST ONLY, passed by
-// no launcher: -vr_bp_items_off (the control: nothing is shown, the same per-frame line), -vr_bp_fake_missing <section>.
+// no launcher: -vr_bp_items_off (the control: nothing is shown, the same per-frame line), -vr_bp_fake_missing <section>,
+// -vr_bp_quiet (frame-time measurement: the per-frame draw lines are not written).
 struct vr_bpi_entry
 {
 	shared_str sect, kind, visname;
@@ -4310,7 +4311,7 @@ struct vr_bpi_entry
 };
 struct vr_bpi_state
 {
-	bool parsed, off, each, placed;
+	bool parsed, off, each, placed, quiet;
 	float scale, cell;
 	int face, cols, rows;
 	string128 fake;
@@ -4338,6 +4339,7 @@ static void vr_bpi_parse()
 	B.parsed = true;
 	B.off = !!strstr(Core.Params, "-vr_bp_items_off");
 	B.each = !!strstr(Core.Params, "-vr_bp_each");
+	B.quiet = !!strstr(Core.Params, "-vr_bp_quiet"); // measurement only: no per-frame draw lines (the checks need them)
 	B.scale = 0.25f;
 	B.face = 1;
 	B.fake[0] = 0;
@@ -4357,6 +4359,8 @@ static void vr_bpi_parse()
 		sscanf(q + 20, "%127s", B.fake);
 	Msg("* [vr13] backpack contents: %s; %s; scale %.3f; face %d; fake missing '%s'%s", B.off ? "OFF (-vr_bp_items_off, TEST ONLY)" : "on",
 		B.each ? "every item its own model (-vr_bp_each)" : "one model per kind", B.scale, B.face, B.fake, B.fake[0] ? " (TEST ONLY)" : "");
+	if (B.quiet)
+		Msg("! [vr13] -vr_bp_quiet: per-frame draw lines off (measurement only, no checked run uses it)");
 }
 static void vr_bpi_reset()
 {
@@ -4510,7 +4514,8 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 				e.kind.c_str(), e.count, e.visname.size() ? e.visname.c_str() : "", e.box ? 1 : 0, e.vis ? 1 : 0, e.longest, e.scale, e.spot.x, e.spot.y, e.spot.z);
 		}
 	}
-	Msg("* [vr13x] frame %u bag %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f", f, bag_xf.i.x, bag_xf.i.y, bag_xf.i.z, bag_xf.j.x, bag_xf.j.y, bag_xf.j.z,
+	if (!B.quiet)
+		Msg("* [vr13x] frame %u bag %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f", f, bag_xf.i.x, bag_xf.i.y, bag_xf.i.z, bag_xf.j.x, bag_xf.j.y, bag_xf.j.z,
 		bag_xf.k.x, bag_xf.k.y, bag_xf.k.z, bag_xf.c.x, bag_xf.c.y, bag_xf.c.z);
 	u32 drawn = 0;
 	for (u32 i = 0; i < B.list.size(); ++i)
@@ -4530,10 +4535,12 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 		DM->add_Dynamic(e.vis, &e.xf);
 		Fvector w;
 		e.xf.transform_tiny(w, e.bc);
-		Msg("* [vr13d] frame %u model %u at %.4f %.4f %.4f", f, i, w.x, w.y, w.z);
+		if (!B.quiet)
+			Msg("* [vr13d] frame %u model %u at %.4f %.4f %.4f", f, i, w.x, w.y, w.z);
 		++drawn;
 	}
-	Msg("* [vr13d] frame %u drawn %u", f, drawn);
+	if (!B.quiet || f % 50 == 0)
+		Msg("* [vr13d] frame %u drawn %u%s", f, drawn, B.quiet ? " (-vr_bp_quiet: one line in 50 frames)" : "");
 }
 
 void vr_input_update()
