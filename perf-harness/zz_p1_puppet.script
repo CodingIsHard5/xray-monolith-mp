@@ -136,6 +136,29 @@ local T2_NEAR_CELLS, T2_NEAR_H, p_near = 2, 2.0, 0   -- on-mesh test: +-2 cells 
 -- at y + H and requiring node y >= y - H means "any node in [y - H, y + H]". The pose's own cell is ring 0 and is
 -- tried first. Returns the ring found (0..T2_NEAR_CELLS) or nil. r1/r1b/r2: the old own-cell-only test held 9 % of
 -- an on-mesh track.
+-- T3 grounding (DESIGN-T3-xray-side-2026-11-24.md; prereg section 33). Pose v2 carries yfloor = ITR2 feet + 0.3 m, a hint
+-- that only picks the floor. X-Ray finds its own AI node: the highest node at or below yfloor + T3_PROBE_UP (else the
+-- lowest above), in the pose's cell or within +-T2_NEAR_CELLS cells, accepted if within T3_BAND m of the ITR2 feet.
+-- Returns ring, node id, node height; or nil.
+local T3_PROBE_UP, T3_BAND, T3_LIFT, T3_YTOL, T3_GUARD = 0.7, 3.0, 0.2, 0.7, 5.0
+local t3_gx, t3_gy, t3_gz, t3_guards, t3_stance_last, t3_stance_warned = nil, nil, nil, 0, nil, false
+local function t3_ground(x, yfloor, z)
+	local feet = yfloor - 0.3
+	for ring = 0, T2_NEAR_CELLS do
+		for dx = -ring, ring do
+			for dz = -ring, ring do
+				if math.max(math.abs(dx), math.abs(dz)) == ring then
+					local vid = level.vertex_id(vector():set(x + dx * 0.7, yfloor + T3_PROBE_UP, z + dz * 0.7))
+					if vid ~= 4294967295 then
+						local ny = level.vertex_position(vid).y
+						if math.abs(ny - feet) <= T3_BAND then return ring, vid, ny end
+					end
+				end
+			end
+		end
+	end
+	return nil
+end
 local function t2_near_ring(x, y, z)
 	for ring = 0, T2_NEAR_CELLS do
 		for dx = -ring, ring do
@@ -181,10 +204,12 @@ local function t2_pose(a, now, t)
 		return end
 	local rest = f:read("*a") or ""; f:close()
 	local _, utc, state, zone, aw = string.match(first, "^seq,(%d+),(%d+),([^,]+),([^,]+),([^,]+)$")
-	local px, py, pz, pyaw; local kills = {}; local endn
+	local px, py, pz, pyaw, pstance; local kills = {}; local endn
 	for line in string.gmatch(rest, "[^\r\n]+") do
 		local x, y, z, yw = string.match(line, "^p,([^,]+),([^,]+),([^,]+),([^,]+),")
-		if x then px, py, pz, pyaw = tonumber(x), tonumber(y), tonumber(z), tonumber(yw) end
+		if x then px, py, pz, pyaw = tonumber(x), tonumber(y), tonumber(z), tonumber(yw)
+			-- pose v2 (T3): p,x,yfloor,z,yaw,hp,stance  (6 fields after p; v1 has 5 and no stance)
+			pstance = tonumber(string.match(line, "^p,[^,]+,[^,]+,[^,]+,[^,]+,[^,]+,(%d+)$")) end
 		local k = string.match(line, "^k,(%d+)$"); if k then kills[#kills + 1] = tonumber(k) end
 		local e = string.match(line, "^end,(%d+)$"); if e then endn = tonumber(e) end
 	end
@@ -218,6 +243,31 @@ local function t2_pose(a, now, t)
 		elseif not p_fz_logged then p_fz_logged = true; m(string.format("FREEZE_UNSUPPORTED,%d,%d,%s", now, n, state)) end   -- once
 	elseif not hold_state and p_paused then device():pause(false); p_paused = false; m(string.format("UNPAUSE,%d,%d", now, n)) end
 	if hold_state then return end
+	if pstance then   -- pose v2: X-Ray grounds its own actor
+		local ring, vid, ny = t3_ground(px, py, pz)
+		if not ring then p_holds = p_holds + 1; m(string.format("HOLD,%d,%d,nonode", now, n))
+			a:set_actor_direction(pyaw); return end
+		if ring > 0 then p_near = p_near + 1 end
+		-- height: physics owns it while the actor is within T3_YTOL of the node height (no bobbing, slopes follow
+		-- the real collision ground); otherwise the node height plus a small lift.
+		local cur = a:position(); local ty = cur.y; local snap = 0
+		if math.abs(cur.y - ny) > T3_YTOL + (ring > 0 and 0.7 or 0) then ty = ny + T3_LIFT; snap = 1 end
+		a:set_actor_position(vector():set(px, ty, pz), true, snap == 0)   -- skip the collision corrector (r3: 90 m throws); keep fall speed unless snapping
+		a:set_actor_direction(pyaw)
+		if a.set_actor_stance then
+			if pstance ~= t3_stance_last then m(string.format("STANCE,%d,%d,%d", now, n, pstance)); t3_stance_last = pstance end
+			a:set_actor_stance(pstance)
+		elseif not t3_stance_warned then t3_stance_warned = true; m(string.format("STANCE_UNSUPPORTED,%d,%d", now, n)) end
+		local got = a:position(); local dxz = math.sqrt((got.x - px) ^ 2 + (got.z - pz) ^ 2); local d3 = got:distance_to(vector():set(px, ty, pz))
+		if d3 > T3_GUARD then   -- guard (Overseer): put the actor back to the last good position and log it
+			t3_guards = t3_guards + 1
+			m(string.format("GUARD,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f", now, n, d3, px, ty, pz, got.x, got.y, got.z))
+			if t3_gx then a:set_actor_position(vector():set(t3_gx, t3_gy, t3_gz), true) end
+		else t3_gx, t3_gy, t3_gz = got.x, got.y, got.z end
+		-- P2: seq, utc, tg, horizontal distance, pose yaw, actor yaw, target x,y,z, node id, node y, ring, snap, actor y after set, stance
+		m(string.format("P2,%d,%s,%d,%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%d,%.3f,%d,%d,%.3f,%d", n, utc, now, dxz, pyaw, yaw(a), px, ty, pz, vid, ny, ring, snap, got.y, pstance))
+		return
+	end
 	local v = vector():set(px, py, pz)
 	local how = t2_near_ring(px, py, pz)   -- on-mesh test, prereg section 24
 	if how then
@@ -287,7 +337,7 @@ on_quit = function()
 	m(string.format("SUMMARY,hits=%d,cancelled=%d,refills=%d,min_health=%.3f,export_ticks=%d,export_mean_us=%.1f,export_p99_us=%.1f,export_max_us=%.1f",
 		hits, cancels, refills, min_health, exp_n, exp_n > 0 and exp_sum / exp_n or 0, p99, exp_max))
 	if t2 then t2_disarm(time_global(), p_last, "end") end
-	if t2 then m(string.format("T2SUM,last_seq=%d,torn=%d,holds=%d,paused=%s,near=%d", p_last, p_torn, p_holds, tostring(p_paused), p_near)) end
+	if t2 then m(string.format("T2SUM,last_seq=%d,torn=%d,holds=%d,paused=%s,near=%d,guards=%d", p_last, p_torn, p_holds, tostring(p_paused), p_near, t3_guards)) end
 	out:close(); meta:close(); out, meta = nil, nil
 end
 
@@ -301,7 +351,7 @@ function on_game_start()
 	RegisterScriptCallback("actor_on_before_hit", on_before_hit)
 	RegisterScriptCallback("actor_on_hit_callback", function() if db.actor and db.actor.health < 1.0 then db.actor:set_health_ex(1.0) end end)  -- second refill point, after each hit
 	RegisterScriptCallback("on_before_level_changing", on_quit)
-	RegisterScriptCallback("on_game_end", on_quit)
+	RegisterScriptCallback("actor_on_net_destroy", on_quit)   -- "on_game_end" is not a callback in this GAMMA build (prereg section 30)
 	-- summary also every 60 s of track time so a killed run keeps it
 	local last_sum = 0
 	RegisterScriptCallback("actor_on_update", function()

@@ -614,3 +614,48 @@ X SIDE (r2): PASS
     physics settle it;
   - or check the result and re-place the actor when it lands more than a few metres from the target.
 - For T3 I asked ITRZone to log x/y/z per pose write, and X-Ray should log the pose position it applied.
+
+## 33. T3 step 1: script revision (pose v2 grounding, guard, logging) and pre-flight A, registered BEFORE any boot
+Design: DESIGN-T3-xray-side-2026-11-24.md (Overseer approved a51b261cf). Pose v2, agreed with ITRZone:
+`p,x,yfloor,z,yaw,hp,stance` (X-Ray axes, y up; yfloor = ITR2 feet + 0.3 m, a hint; stance 0|1|2). A `p` line with 5
+fields stays v1 and takes the T2 path, unchanged.
+- **Script (zz_p1_puppet.script sha256 1f923b67b334390688feb0b9b02654c683871190936213fbf1f1e1b900af0c90):**
+  - Floor: `level.vertex_id` at yfloor + 0.7 m, in the pose's cell, then within +-2 cells. A node is accepted if it is
+    within 3.0 m of the ITR2 feet height. No node: `HOLD,<tg>,<seq>,nonode`.
+  - Height: physics owns it. The actor keeps its current height while that is within 0.7 m of the node height (1.4 m
+    when the node came from a neighbour cell). Otherwise it is snapped to node height + 0.2 m. This is the note's
+    "alternative" form, chosen now because a node's stored height is its cell-centre height and is off on slopes.
+  - Setter: `set_actor_position(pos, true, keep_speed)`, the skip-collision form. keep_speed is true except on a snap,
+    so gravity keeps acting between poses.
+  - Guard: after the set, if the actor is more than 5.0 m from the target, a `GUARD` line with both positions is
+    logged and the actor is put back to the last good position.
+  - Log: `P2,seq,utc,tg,horizontal dist,pose yaw,actor yaw,target x,y,z,node id,node y,ring,snap,actor y,stance`.
+  - Stance: calls `actor:set_actor_stance(k)` if the engine has it, else logs STANCE_UNSUPPORTED once. (The export
+    is not built yet; it gets its own registration.)
+  - The quit handler now registers on `actor_on_net_destroy`; `on_game_end` does not exist (section 30).
+- **Offline tests, REAL script + REAL Cordon mesh + REAL track (t2-offline/t3_stub.lua; no physics in the stub):**
+  - v2, track 0-380 s: 7,593 of 7,600 poses applied, 7 HOLD (the known spot), 0 GUARD, 0 collision-correcting sets.
+    Node height against track height: p50 0.01 m, p95 0.13 m, max 1.67 m.
+  - Hint moved by +2.4 m and by -0.6 m (ITR2's measured ground differences): the same result.
+  - The two-floor spot (track 84-87 s): hint on the upper floor gives nodes at -3.7..-3.8; hint -9.7 gives the lower
+    floor (-10.0; three neighbour picks at -8.9).
+  - Off-mesh leg 410-600 s: 3,800 of 3,800 HOLD.
+  - Guard: a setter stub that throws the actor 90 m on two sets gives exactly 2 GUARD lines, and the actor is put back.
+  - Without the export: STANCE_UNSUPPORTED once, poses applied.
+  - v1 poses: the T2 result unchanged (7 HOLD, 467 near, all sets collision-correcting). The seven arm cases still
+    end disarmed.
+- **Pre-flight A (X-Ray only, one WANT slice, 20-min claim, one boot, ~7 min):**
+  `PF_OUT=out/t3pfA PF_EXE=Absorb14.exe PF_FREEZE=sigstop PF_ABSORB=2000 PF_PAUSE=0 PF_KILL_AT=99999 PF_RUN_S=200
+   PF_POSE_ARG=track2:<cordon_full_track.csv> tools/t2_preflight.sh`
+  The stand-in writer plays the real track from t = 0 as pose v2: x and z from the track, yfloor = track height + 0.3 m
+  (the height is only a hint now), stance 0/1 alternating every 10 s. About 180 s of track: three old hold spots, the
+  two-floor spot (84.6-86.2 s) and slopes.
+- **Scored once by tools/t3_pfA_check.py (sha256 056eb474...). PASS needs all of:**
+  1. no Lua error from zz_p1_puppet, and t2_xray rc 0;
+  2. at least 2,000 P2 lines;
+  3. no GUARD line, and no two consecutive applied targets more than 5.0 m apart;
+  4. at most 10 HOLD lines.
+- Reported, not pass conditions: horizontal distance after the set; actor height minus track height (p05/p50/p95);
+  snaps; rings. Predictions: PASS at 70 %; |actor height - track height| p95 <= 0.5 m at 55 % (the open risk is how the
+  physics settles the actor with the skip-collision setter: it may sink, bob or lag on slopes).
+- A FAIL is reported and the cause found before pre-flight B or C.

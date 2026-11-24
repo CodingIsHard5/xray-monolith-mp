@@ -43,7 +43,7 @@ elseif CASE == "armed_at_game_end" then run("dead", "freeze", 1)
 elseif CASE == "real_freeze" then pose("dead", "freeze"); NOW = NOW + 33; run("play", "freeze", 1)  -- STOP 77 s, absorbed: time_global +33 ms
 end
 local mid = ARMED
-for _, f in ipairs(CB.on_game_end or {}) do f() end
+for _, f in ipairs(CB.actor_on_net_destroy or {}) do f() end
 local MF = io.popen("ls "..SHM.."/meta*.csv"):read("*l")
 for l in io.lines(MF) do l = l:gsub("\r", ""); if l:match("^ABSORB_[AD]") or l:match("^STALE") then print("  "..l) end end
 print("  ENGINE_ARMED_BEFORE_GAME_END="..mid.."  AFTER="..ARMED)
