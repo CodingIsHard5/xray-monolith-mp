@@ -4560,6 +4560,11 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 				}
 				const float fit = e.longest > 0.001f ? 0.9f * B.cell / e.longest : 1.f;
 				e.scale = e.box ? fit : _min(B.scale, fit);
+				// Caden, 2026-11-24: in the open bag items are REAL SIZE and may clip through its walls and each other
+				// ("kind of like itr"). -vr_bp_shrink (feel switch, off) brings the shrink-to-cell rule back. The stand-in
+				// box stays cell-sized: it is a placeholder, not an item.
+				if (vr_bpo_on() && !e.box && !strstr(Core.Params, "-vr_bp_shrink"))
+					e.scale = 1.f;
 			}
 			Msg("* [vr13b] frame %u model %d section '%s' kind '%s' count %d visual '%s' box %d made %d longest %.4f scale %.4f spot %.4f %.4f %.4f", f, i, e.sect.c_str(),
 				e.kind.c_str(), e.count, e.visname.size() ? e.visname.c_str() : "", e.box ? 1 : 0, e.vis ? 1 : 0, e.longest, e.scale, e.spot.x, e.spot.y, e.spot.z);
