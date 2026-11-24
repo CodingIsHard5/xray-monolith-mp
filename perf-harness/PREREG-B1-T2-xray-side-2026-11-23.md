@@ -1313,3 +1313,12 @@ fields stays v1 and takes the T2 path, unchanged.
   command with the new out dir. **Guess, written before the boot: X PASS 55 %.** Risks: ITR2 fails again at or
   after arrival, so my data is short (25 %); with the first real play poses on Garbage, a stance or height
   read-back differs or a HOLD/guard trips (15 %); other (5 %). A second FAIL stops R3 x1 and goes to the Overseer.
+
+### 52a. Naming note, written before the boot (no change to the registration)
+
+- The one retry registered in section 52 is ITRZone's arm **x2** (its amendment 111, commit 709bf8f, copied verbatim
+  into the joint prereg). Its out dirs are `<stamp>-stream-t2x2` and `<stamp>-t2x2-xray`.
+- Nothing else changes: my four files, env, checker c19740e8, the nine conditions and the 55 % guess stand. Hashes
+  rechecked on disk at this note: 473dec25, 6597a067, b4ce9c77, cb183b7b. Control file absent.
+- ITR2's changes are inside its mod (it drops its references to the old level's actors at a level change); pose
+  format, crossing code and timing are unchanged by ITRZone's statement.

@@ -425,3 +425,41 @@ the X side's frozen hashes and conditions.
 
 
 EnginePerf note on the copied text (not part of it): "pre-flight E2 (no-damage rule shown, 6/6)" means the protected boot, which passed 6/6. E2 as a whole is a FAIL by its rule (section 50); the Overseer ruled the substance shown and no E3.
+
+
+---
+
+ITRZone amendment 111, copied verbatim from /home/caden/Projects/ITRZone/PREREG.md at ITRZone commit 709bf8f (2964 bytes). X side: PREREG-B1-T2-xray-side sections 51, 52 and 52a.
+
+## Amendment 111 (REGISTERED 2026-11-24, Overseer's three conditions after x1): the R3 pre-flight as a new run, arm x2
+
+This replaces amendment 110's plan to run x1 again. Amendment 110's mod block is superseded by the routine below.
+1. The dump was read (RESULTS): a dead engine object read from the mod's Lua on the game thread; the puppet table by
+   code order. Not provable further without symbols.
+2. The sweep (RESULTS) and its fixes, all in main.lua:
+   - `STR.worldGone(why)`: one routine for both level-change paths (wcTeardown and the transit's zone switch). Plain
+     Lua. Drops the puppet table with its counts, a nav-floor build in progress, the nav-floor reference, the light
+     snapshot (light=2), the god flag and the watchdog timers. Logs
+     `WORLD gone (<why>) world=<n>: puppets before=<N> after=<M>; nav build dropped=<b> floor ref dropped=<b>`.
+   - `STR.t0Stale()`: every puppet remembers the world it was spawned in; before any puppet is touched, those of
+     another world are dropped untouched with `T0 FAIL stale puppets: ...` (a FAIL line: T2e fails on it).
+   - The health watch and the light poll do not run while our transit waits for the new level.
+   - Lever `t0keep=1` (test only, off by default): the puppet clear is skipped. Not used in any box run.
+3. The witness:
+   - In the run: new check R3p in tools/r3_check.py. One `WORLD gone (transit)` line within 1 s after each
+     `TRANSIT zone now` line, two in all, each with after=0, the first with before > 0; no `T0 FAIL stale puppets`
+     line; no t0keep line.
+   - Offline mutation: `tools/t0_world_selftest.sh`. The real main.lua with stub actors that count every read
+     (tools/t0_world_test.lua): with the clear, 3 dead puppets and the twins are dropped with 0 reads and R3p PASSES;
+     with the clear skipped (t0keep=1) the line shows after=3, the guard drops them with 0 reads, and R3p FAILS.
+     The stub does see a read when the old path (t0Kill on a dead puppet) is taken. The committed mod of x1 fails
+     the test. Limit: the stub shows the logic, not the engine's behaviour.
+- Run: `scripts/boot_t2.sh x2` = x1's levers, files and env exactly (amendment 107: EnginePerf's four hashes, their
+  nine conditions, their one retry registered in their section 52). Our side: the eleven checks of amendment 107 plus
+  R3p, twelve in all, scored once, each separately. The driver stops ITR2 if a crash dump appears (amendment 110).
+- If ITR2 crashes again at an arrival: the cause was wrong or incomplete; the dump is read first, no third run is
+  asked for before that.
+- Offline at registration: luac, dup_names, t2_preflight, span, pose, crossing tests and the new self-test PASS. The
+  checker run on x1's data gives the same eleven results as scored, and R3p FAIL (no line).
+- Guess: ITR2 side PASS 45 %. Still unseen: puppets spawning in the Garbage, the first crossing's end against X-Ray,
+  the way back, 60 s per crossing with X-Ray's part included.
