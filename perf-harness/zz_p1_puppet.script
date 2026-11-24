@@ -140,7 +140,8 @@ local T2_NEAR_CELLS, T2_NEAR_H, p_near = 2, 2.0, 0   -- on-mesh test: +-2 cells 
 -- that only picks the floor. X-Ray finds its own AI node: the highest node at or below yfloor + T3_PROBE_UP (else the
 -- lowest above), in the pose's cell or within +-T2_NEAR_CELLS cells, accepted if within T3_BAND m of the ITR2 feet.
 -- Returns ring, node id, node height; or nil.
-local T3_PROBE_UP, T3_BAND, T3_LIFT, T3_YTOL, T3_GUARD = 0.7, 3.0, 0.2, 0.7, 5.0
+local T3_PROBE_UP, T3_BAND, T3_LIFT, T3_YTOL, T3_GUARD = 0.7, 3.0, 0.05, 0.7, 5.0
+local t3_ray, t3_ray_warned, t3_ly
 local t3_gx, t3_gy, t3_gz, t3_guards, t3_stance_last, t3_stance_warned = nil, nil, nil, 0, nil, false
 local function t3_ground(x, yfloor, z)
 	local feet = yfloor - 0.3
@@ -248,10 +249,23 @@ local function t2_pose(a, now, t)
 		if not ring then p_holds = p_holds + 1; m(string.format("HOLD,%d,%d,nonode", now, n))
 			a:set_actor_direction(pyaw); return end
 		if ring > 0 then p_near = p_near + 1 end
-		-- height: physics owns it while the actor is within T3_YTOL of the node height (no bobbing, slopes follow
-		-- the real collision ground); otherwise the node height plus a small lift.
-		local cur = a:position(); local ty = cur.y; local snap = 0
-		if math.abs(cur.y - ny) > T3_YTOL + (ring > 0 and 0.7 or 0) then ty = ny + T3_LIFT; snap = 1 end
+		-- height: the node height plus a small lift, on EVERY set. Pre-flight A (2026-11-24) showed the actor's height
+		-- never changes between sets (physics does not settle it), so "keep the current height" left it up to 0.78 m
+		-- under the node. snap = 1 only marks a height step larger than T3_YTOL (report).
+		local cur = a:position(); local ty = ny + T3_LIFT; local snap = 0
+		local drift = t3_ly and (cur.y - t3_ly) or 0; t3_ly = ty   -- how far the engine moved the height since the last set (report)
+		if math.abs(cur.y - ty) > T3_YTOL then snap = 1 end
+		-- measured only, never applied: a ray straight down onto static geometry from 1.2 m above the node
+		local ry = -9999
+		if ray_pick then
+			local ok, hit, dist = pcall(function()
+				t3_ray = t3_ray or ray_pick()
+				t3_ray:set_position(vector():set(px, ny + 1.2, pz)); t3_ray:set_direction(vector():set(0, -1, 0))
+				t3_ray:set_flags(2); t3_ray:set_range(3.0)
+				return t3_ray:query(), t3_ray:get_distance()
+			end)
+			if ok and hit and dist then ry = ny + 1.2 - dist elseif not ok and not t3_ray_warned then t3_ray_warned = true; m(string.format("RAY_ERROR,%d,%d,%s", now, n, tostring(hit))) end
+		end
 		a:set_actor_position(vector():set(px, ty, pz), true, snap == 0)   -- skip the collision corrector (r3: 90 m throws); keep fall speed unless snapping
 		a:set_actor_direction(pyaw)
 		if a.set_actor_stance then
@@ -264,8 +278,8 @@ local function t2_pose(a, now, t)
 			m(string.format("GUARD,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f", now, n, d3, px, ty, pz, got.x, got.y, got.z))
 			if t3_gx then a:set_actor_position(vector():set(t3_gx, t3_gy, t3_gz), true) end
 		else t3_gx, t3_gy, t3_gz = got.x, got.y, got.z end
-		-- P2: seq, utc, tg, horizontal distance, pose yaw, actor yaw, target x,y,z, node id, node y, ring, snap, actor y after set, stance
-		m(string.format("P2,%d,%s,%d,%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%d,%.3f,%d,%d,%.3f,%d", n, utc, now, dxz, pyaw, yaw(a), px, ty, pz, vid, ny, ring, snap, got.y, pstance))
+		-- P2: seq, utc, tg, horizontal distance, pose yaw, actor yaw, target x,y,z, node id, node y, ring, snap, actor y after set, stance, ray ground y (-9999 = no hit; measured only), height drift since the last set
+		m(string.format("P2,%d,%s,%d,%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%d,%.3f,%d,%d,%.3f,%d,%.3f,%.3f", n, utc, now, dxz, pyaw, yaw(a), px, ty, pz, vid, ny, ring, snap, got.y, pstance, ry, drift))
 		return
 	end
 	local v = vector():set(px, py, pz)

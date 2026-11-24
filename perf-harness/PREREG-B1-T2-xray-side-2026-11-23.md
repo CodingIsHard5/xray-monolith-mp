@@ -683,3 +683,44 @@ fields stays v1 and takes the T2 path, unchanged.
      real crouch state (`IsMoveState('mcCrouch')`) follows within a few frames; stance 0 stands it up again.
      The NPC "noticed later when crouched" witness is tried there, report-only.
 - The puppet script already calls the export when present (section 33); no script change is needed for this.
+
+## 35. Pre-flight A RESULT: PASS on its four conditions, but the grounding assumption was wrong; script revised; pre-flight A2 registered BEFORE its boot
+- **Run:** out/t3pfA, Absorb14.exe, script 1f923b67..., slice 2026-11-24 01:43-01:47, rc 0. Scored ONCE with
+  t3_pfA_check.py (056eb474...).
+- **Result:** (1) no Lua error, rc 0: PASS. (2) 3,673 P2 lines: PASS. (3) 0 GUARD, largest step 1.499 m: PASS.
+  (4) 7 HOLD (the known no-node spot): PASS. STANCE_UNSUPPORTED once, as expected on Absorb14.
+- **Reported:** horizontal distance after the set 0.0 m throughout. Actor height minus track height: p50 -0.10,
+  p05 -0.55, p95 +0.22; |.| p95 0.578, max 1.06 m. 27 snaps.
+- **My guesses:** PASS (70 %): right. |height difference| p95 <= 0.5 m (55 %): WRONG (0.578).
+- **What the data shows (looked at after scoring, exploratory):** the actor's height never changes between sets.
+  Between two snaps it stays at exactly the last snap height (for example -20.21 for 400+ poses while the node height
+  climbs from -19.89 to -19.62), then steps up at the next snap. So with the skip-collision setter at 20 Hz, X-Ray's
+  physics does NOT settle the actor on the ground. The design assumption in section 33 ("physics owns the height
+  while within tolerance") was wrong: the actor was up to 0.78 m under its node and up to 0.68 m over it; in 899 of
+  3,673 poses it was more than 0.3 m under.
+- **Script revision (sha256 e90c1555...):**
+  - Height is the node height + 0.05 m on EVERY set (T3_LIFT 0.2 -> 0.05). `snap` now only marks a height step
+    larger than 0.7 m (report).
+  - Measured only, never applied: a ray straight down onto static geometry (the `ray_pick` class, flags 2, as GAMMA's
+    own scripts use it) from 1.2 m above the node, range 3 m, inside pcall. Its ground height is a new P2 field
+    (-9999 = no hit); a failure logs `RAY_ERROR` once. Purpose: learn how far the node height is from the collision
+    ground, and whether a ray can serve the no-node spots.
+  - New P2 field `drift`: the actor's height now minus the height set on the previous pose (does the engine move it
+    at all between sets).
+  - Nothing else changed; the v1 path is untouched.
+- **Offline (REAL script, REAL mesh, REAL track; t3_stub.lua):** v2 0-380 s: 7,593 applied, 7 HOLD, 0 GUARD, actor
+  minus node 0.05 on every pose; with a fake ray class the ray field is right on 1,200 of 1,200; thrown setter:
+  2 GUARD; off-mesh leg: 3,800 of 3,800 HOLD; v1: 7,600 P, 7 HOLD, 467 near (unchanged). The arm cases were not
+  re-run (that code is untouched).
+- **Pre-flight A2 (same command as A, new output dir; one WANT slice, 20-min claim, one boot):**
+  `PF_OUT=out/t3pfA2 PF_EXE=Absorb14.exe PF_FREEZE=sigstop PF_ABSORB=2000 PF_PAUSE=0 PF_KILL_AT=99999 PF_RUN_S=200
+   PF_POSE_ARG=track2:<cordon_full_track.csv> tools/t2_preflight.sh`
+- **Scored ONCE with t3_pfA2_check.py (a89de5eb...). PASS needs all of:** conditions 1-4 as in A; (5) actor height
+  = node height + 0.05 m (+-0.01) on every P2 line; (6) no RAY_ERROR line. Witness for (5): the same checker on
+  pre-flight A's data FAILS it (worst 0.826 m).
+- **Report-only:** ray hits, ray ground minus node height (p05/p50/p95/min/max), drift, actor minus track height.
+- **Guesses, written before the boot:** PASS 75 %. Ray hits on >= 90 % of poses: 60 %. |ray ground - node height|
+  p95 <= 0.3 m: 55 %. Drift nonzero on < 1 % of poses: 70 %.
+- **Stop rule:** FAIL means find the cause before anything else; at most one retry.
+- **Stance build:** perf/t3-stance 8a835585a, CI 45331173775 success, installed as run/bin/Stance14.exe
+  (sha256 b4ce9c772ae5fa4b...). Not run yet.
