@@ -362,3 +362,66 @@ own actor and taking no damage. j1 (amendment 100) passed on both sides first; E
 - Not covered: a real player's stance (the rig steps it by a lever), a level crossing (R3).
 
 EnginePerf, on the X-Ray side for T3 proper: amendment 103 above is diff-checked as identical to the source (ITRZone 2d23e5e). The five hashes and the X env are mine and match the files on disk. X side: xray-side prereg section 43 (14 conditions, scorer tools/t3_xray_check.py fda8c5f8...97ff5), final as drafted; script frozen by section 44 after pre-flight D. Guess, written before the boot: X side PASS 50 %. Expected and report-only: the actor about 3 m below ITR2's feet height at x 62.6, z 167 on each pass (ITR2 sends the top of an object there; X-Ray grounds the actor on the AI mesh below it).
+
+
+---
+
+ITRZone amendment 107, copied verbatim from /home/caden/Projects/ITRZone/PREREG.md at ITRZone commit 98d3e24 (5107 bytes). X side: PREREG-B1-T2-xray-side section 51.
+
+## Amendment 107 (REGISTERED 2026-11-24, joint with EnginePerf's section 51, f2e82c71f): the R3 pre-flight, arm x1
+
+Registered before any boot; the box run needs the Overseer's go. The update notes at the end of this amendment carry
+the X side's frozen hashes and conditions.
+- Run: `scripts/boot_t2.sh x1`, two zones (out/zones/zones_t2.txt). Levers `hcheal=2 t2span=380 t2gap=0 t2v=2
+  t2st=30 transit=1 txa=60 txn=esc_level_changer_to_garbage_2 txb=60 txm=gar_level_changer_to_escape_2 txe=60`.
+  60 s of the Cordon track; the pawn is put into the changer; 60 s standing at the Garbage arrival; back by the
+  paired changer; 60 s standing; end. No death, no freeze. X-Ray env as T3 with T2_RUN_S=480.
+- ITR2 side, `tools/r3_check.py`, PASS = all eleven: T2a rate, T2b cost, T2c frames (p95), T2d link outside the
+  crossing windows, T2e clean (also no TRANSIT FAIL or WC FAIL line), T3w writer, and:
+  - R3a: two crossings by the two named changers in order, both ended; the rig arrived twice; pose states play,
+    cross, play, cross, play, end; no dropped, recovered or still-open crossing.
+  - R3b: each crossing at most 60 s from start to play (our part and X-Ray's reported).
+  - R3c: no creature spawned between a crossing's start and its end; creatures present within 60 s after each.
+  - R3h ends un-held: no `FREE HELD` line, no rig hold release, no hold rebase during play.
+  - R3g ground: at most 10 track points without ground (r3 and T3 had 175 with the ring frozen; j1 had 8).
+- The checker was run on j1's log (the six shared checks PASS as in j1, R3a-c FAIL as they must), on T3's log (R3h
+  and R3g FAIL: 588 rebases, 175 points), on a synthetic good crossing log (all PASS) and with a 75 s crossing
+  (R3b FAIL).
+- Reported: the miss-reason lines (the seven fixed spots), level-mismatch snapshot count, life lines.
+- Update 2026-11-24 after the watchdog witness (PASS 7/7, mod 2e37167, RESULTS): the mod for x1 is 2e37167 or later
+  with no change to main.lua; the watchdog is live in this run, so R3h also proves it stays silent over two real
+  transits. The hole sampler (the free follow) runs throughout; R3g is its check. In the witness the first 60 s of
+  the track had one miss (t 25.9, trace hit an object 2.8 m above the track), so R3g's limit of 10 stands.
+- S3 (foreign travel) is not in x1. It needs a route into one of ITR2's own levels and back, which is a different
+  rig leg and a second kind of failure in a run meant to prove the crossing; it stays a separate short ITR2-alone
+  arm, to be registered if the Overseer wants it.
+- X side: EnginePerf's conditions as sent (pre-flight D's seven, the stance read-back, the vitals gate on each of
+  the three VITALS lines), with their script frozen after pre-flight E2 (no-damage rule shown, 6/6).
+- Registration 2026-11-24 (this replaces "Hash: pending" and the mod line above):
+  - Mod: the commit that carries amendment 109 (main.lua gains only the test lever wtest=7, off here; blob printed
+    in the driver's claim line). Pose format and crossing code unchanged since T3 and amendment 104.
+  - X-side files, all verified on disk by sha256 today and checked again by the driver before X-Ray starts:
+    zz_p1_puppet.script 473dec259dc3048924b262640ee8132e84963c33fa05bc6abd56a2156e643537;
+    t2_xray.sh 6597a067a1797e051e874bd4a5feee2764277860e0c9795a254719db7042a3d7 (new: removes a stale test-mode
+    control file at start); Stance14.exe b4ce9c772ae5fa4bf5ddb955f2dfcb943627d6c2b2e4ce66e21eac1168646cbe;
+    lib_engine_pids.sh cb183b7b894eab3edb200e2c03a3a96f2e935cd2d1e1f402f48be7aad238ed6e.
+  - X env: T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999 T2_KILL_AT=99999 T2_RUN_S=480.
+  - X conditions (EnginePerf's, scored once by them with tools/t3_x1_xray_check.py c19740e8...2518c), PASS = all nine:
+    1. rc 0, no Lua error naming the script, no FATAL ERROR, no DMG line.
+    2. Exactly two CROSS_REQ, in order, each through the named changer with pre-flight D's destination and vertices;
+       no CROSS_NOCHANGER or CROSS_ERROR.
+    3. Exactly two CROSS_RESUME, on Garbage then on Cordon, each after its request.
+    4. For each crossing, the first applied play pose was written by ITR2 at most 90 s after the cross pose.
+    5. P2 lines: at least 400 before the first request, at least 600 after each resume; no GUARD; at most 15 HOLD.
+    6. The first P2 after each resume is within 5 m (x, z) of that changer's destination.
+    7. The runner logged exactly two cross holds; restarts.csv has no row.
+    8. On every P2: stance read back = pose stance, movement state readable, actor height = node height + 0.05 m
+       (within 0.01).
+    9. Exactly three VITALS lines, each with lowest health >= 0.999, highest radiation and bleeding <= 0.0001,
+       0 unread; no REFILL line.
+  - Scored once, each check separately, both sides. A FAIL is reported, not tuned. No retry without a new registration.
+  - Guesses: ITR2 side PASS 55 % (first real transit under the bridge started from the rig's placement; first real
+    crossing end against a live X-Ray); EnginePerf wrote X PASS 65 %.
+
+
+EnginePerf note on the copied text (not part of it): "pre-flight E2 (no-damage rule shown, 6/6)" means the protected boot, which passed 6/6. E2 as a whole is a FAIL by its rule (section 50); the Overseer ruled the substance shown and no E3.
