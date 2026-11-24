@@ -28,6 +28,8 @@ mkdir -p "$O"; log() { echo "$(date -u '+%F %T.%3N')Z $*" | tee -a "$O/t2_xray.l
 utc() { echo $(( $(date +%s%N) / 1000000 )); }
 "$HOME/.claude/overseer/tools/quiet-required.sh" check 2>/dev/null | grep -q '^HELD:.* EXCLUSIVE\|^HELD:.*B1-T2' || { log "REFUSED: no joint EXCLUSIVE claim held"; exit 2; }
 "$P/tools/run_noguard.sh" "$RUN" >/dev/null || { log "REFUSED: noguard"; exit 2; }
+# pre-flight E test mode (section 46): its control file may exist only when the pre-flight runner says so (T2_DMG_OK=1)
+[ "${T2_DMG_OK:-0}" = 1 ] || { [ -e "$SHM/dmgtest.txt" ] && { rm -f "$SHM/dmgtest.txt"; log "REMOVED a stale test-mode control file (dmgtest.txt)"; }; }
 rm -f "$SHM"/snap.txt "$SHM"/meta_t2.csv "$SHM"/hits_t2.csv; mkdir -p "$SHM"      # pose.txt is ITR2's: never touched here
 cp "$P/harness/zz_p1_puppet.script" "$RUN/gamedata/scripts/zz_p1_puppet.script"
 cleanup() { rm -f "$RUN/gamedata/scripts/zz_p1_puppet.script"; }

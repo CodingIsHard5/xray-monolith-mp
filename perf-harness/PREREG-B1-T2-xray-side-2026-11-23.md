@@ -1099,3 +1099,12 @@ fields stays v1 and takes the T2 path, unchanged.
   retry, registered first.
 - **Rule One:** the spawns and placements happen only in these test boots, on the project's own test save, which is
   not written (hash checked before and after).
+
+### 46a. Amendment before the first boot of E (Overseer's condition with the go, 2026-11-24)
+- The test-mode control file must not be left behind and must be absent before any T or R run.
+- tools/t2_preflight.sh (773ac813..., was bdd67a5b...): removes the file on ANY exit of the runner (trap), and passes T2_DMG_OK=1
+  to the runner only when PF_DMG is set.
+- tools/t2_xray.sh (6597a067..., was 96160265...): at every start, unless T2_DMG_OK=1, a control file found on the tmpfs is
+  removed and the removal is logged. ITRZone's driver never sets T2_DMG_OK, so no joint run can start in test mode.
+  Nothing else in the runner changes. This new runner hash is the one R3 will freeze.
+- Checked in isolation: the file is removed without the flag and kept with it.
