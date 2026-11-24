@@ -544,3 +544,25 @@ X SIDE (r2): PASS
   3. exactly one ABSORB_ARM line, followed by one `ABSORB_DISARM,...,play`;
   4. NO ABSORB_ARM after the `end` pose (the old script armed there).
 - A FAIL is reported and fixed before the hash goes to ITRZone for r3.
+
+## 30. Pre-flight 6 RESULT: PASS (slice 23:19:20-23:22:35 local, released; read once; out/t2pre6)
+- 1. PASS: no Lua error from zz_p1_puppet; t2_xray rc 0.
+- 2. PASS: one STOP (04:20:19.38Z) and one CONT (04:20:49.48Z); game_ms 3165217612 -> 3165217810, +198 ms;
+  one engine line `[FREEZE] absorbed 30071 ms of a 30104 ms gap`.
+- 3. PASS: exactly one `ABSORB_ARM` (seq 401), then `ABSORB_DISARM,52205,1003,3165217810,play`.
+- 4. PASS: the final `end` + `freeze` pose (seq 1398) was read (the STALE line names seq 1398) and NO ABSORB_ARM
+  followed. X-Ray ran 105 s more with the flag clear.
+- **Correction to section 26.** I wrote there that all 5 STACK TRACEBACK blocks come from GAMMA mods. One of the 5 is from
+  my own script, and it is in every run since r1: `[axr_main callback_set] callback on_game_end doesn't exist!`, at
+  zz_p1_puppet.script's `RegisterScriptCallback("on_game_end", on_quit)`.
+  - It is a warning, not a Lua error: the script loads and runs.
+  - It means my quit handler is registered only for `on_before_level_changing`, never for the game's end. So the new
+    `end` disarm and the final T2SUM line do not run when X-Ray simply exits.
+  - Harmless for the flag: it is a NoSave console variable and dies with the process. The 60 s T2SUM lines still appear.
+  - The fake test's armed_at_game_end case passes only because the stub accepts that callback name. In the engine that
+    path is NOT covered.
+  - Left as is for r3 (the hash stays). To fix later with a real callback name.
+- **zz_p1_puppet.script is frozen for r3 at 11c81c5538133c2efb8daf613af6328eb682a9fc65cf3914c86c496cda9efffd.**
+  Unchanged: t2_xray.sh 6ae8d27f..., lib_engine_pids.sh cb183b7b..., Absorb14.exe e35a289b..., scorer 16e89cb7...
+- **Expectation for r3 (before it runs):** X side PASS on all three, at 80 %. The X side is the same as r2b except the
+  arm rules; the risk is run-to-run variation in X-track (r2b p95 0.608 m).
