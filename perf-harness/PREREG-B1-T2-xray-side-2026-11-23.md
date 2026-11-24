@@ -762,3 +762,27 @@ fields stays v1 and takes the T2 path, unchanged.
   it costs 7 minutes and shows whether the movement state can be read at all; the no-bridge check needs that reading
   and costs about 40 minutes (two full T1 tracks, Stance14 and Absorb14). Both are still done before any joint run.
 - **Stop rule:** FAIL means find the cause first; at most one retry.
+
+## 37. Pre-flight B RESULT: PASS. The no-bridge check (section 34, check 2) registered BEFORE its boots
+- **B run:** out/t3pfB, Stance14.exe (b4ce9c77...), script 751022ac..., slice 2026-11-24 02:45-02:49, rc 0. Scored
+  ONCE with t3_pfB_check.py (c2c59a55...).
+- **B result: PASS, 10 of 10.** Conditions 1-6 as A2 (3,671 poses, 0 GUARD, 7 HOLD, largest step 0.99 m). (7) 19
+  STANCE lines, 0 unsupported. (8) `get_actor_stance` equals the pose stance on 3,671 of 3,671. (9) the real
+  movement state equals the pose stance on 3,369 of 3,671 (92 %); all 18 judged changes followed within 2 s.
+  (10) 0 unread.
+- **Reported:** the mismatches are the transition after each change, about 17 poses (0.85 s) on average.
+  MOVESUM frames=12983, crouch=3030, low=4784, unread=0. Heights and ray as in A2 (|actor - track| p95 0.18 m).
+- **My guess:** PASS (55 %): right. None of the three named risks happened.
+- **No-bridge check ("the exe without the bridge behaves as before"):** one WANT slice, 55-min claim,
+  `tools/t3_nobridge.sh` (966953f1...): two full T1 track boots (`-p1 -b1_snap`, no `-t2_pose`, no pose file, stall
+  off, tools/t1_xray.sh unchanged), Stance14.exe then Absorb14.exe, same script 751022ac... If the first boot does not
+  end cleanly the second is not started.
+- **Scored ONCE with t3_nobridge_check.py (1fb36539...). PASS needs, for BOTH boots:** (1) track ended, rc 0, no FATAL
+  ERROR; (2) no STANCE line in the meta file and no `set_actor_stance` in the engine log; (3) MOVESUM with
+  crouch=0, low=0, unread=0 and at least 10,000 frames; (4) stance_api = -1 on Stance14 and `na` on Absorb14.
+- **Witness:** the checker FAILS the old clamp-fix witness run (no MOVESUM line) and passes it once the expected
+  MOVESUM lines are added by hand. Pre-flight B shows the counters do count crouch frames when there are any.
+- **Report-only:** each boot's SUMMARY line.
+- **Guess, written before the boots:** PASS 85 %. Risk: a boot ends early for an unrelated reason (the T1 retry
+  crash class).
+- **Stop rule:** FAIL means find the cause first; at most one retry.
