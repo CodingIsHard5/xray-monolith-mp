@@ -383,3 +383,6 @@ X SIDE (r1): FAIL
   - The pose sent exactly those points. X-Ray correctly HELD the actor, as its rule says. ITR2's ground traces missed there too.
   - The r1b FAIL stands.
 - **Overseer ruling:** X-track stays as registered for r2. h1 and r2 play only the on-mesh parts of the track. Option A is not used.
+- **Overseer ruling, final:** r2 and h1 replay the track's first 380 s ping-ponged. X-track stays exactly as registered
+  (p95 <= 1.0 m). The gap (full track 410-600 s) is named, and the HOLD count is reported. Option A is not used.
+  ITRZone aligns amendment 95 with this ruling. On the X-Ray side, r2's env and frozen hashes are unchanged.
