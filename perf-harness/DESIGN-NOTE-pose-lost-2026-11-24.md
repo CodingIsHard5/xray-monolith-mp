@@ -32,6 +32,10 @@ files are not touched; this lands in the next registration.
     T3 proper (21,343 poses; median 50 ms, 99th percentile 66 ms) and 95 ms in x1's first run (952 poses). So 5 s
     is 12 times the largest real gap. T3's two 80 s gaps are its two deaths, where ITR2 kept writing poses and
     the script applied none; they are not gaps in the file.
+    ITRZone's own measure of the file (2026-11-24): it writes in every state from its frame loop; its longest
+    gap between two writes was 1,188 ms in T3 proper (state dead, during its load to the Hub) and 350 ms in x1
+    (in cross). So 5 s is about 4 times the longest real gap in the file. Not measured: a menu load or a
+    first-boot stall under the bridge.
   - 120 s when the last pose said `cross`. A crossing took 48 to 52 s so far; ITRZone's own limit is 60 s.
   - Never after a pose that said `end`.
 - **Who measures:** both, each with its own clock.
@@ -75,7 +79,11 @@ Three boots, each about 4 minutes:
 
 ## Counter reset after an ITR2 restart (gap 2; Overseer: same registration)
 
-- Proposed, pending ITRZone's answer: ITR2 adds a session number to the pose's first line that changes on every
+- ITRZone's answers (2026-11-24): its seq starts again at 1 on every ITR2 start (it lives in the mod's memory
+  only), so today a restarted ITR2 would be rejected for good. It agrees to the session number below, with
+  session = the mod's start time in UTC ms, fixed for the life of the process. It is a pose format change (v3),
+  so it goes into a joint registration; not before the x1 retry is done.
+- Proposed and agreed in principle: ITR2 adds a session number to the pose's first line that changes on every
   ITR2 start (for example its start time in ms). A pose whose session number differs from the last one is
   accepted whatever its seq, the script's seq counter restarts from it, and it logs
   `EPOCH,<track s>,<game ms>,<old session>,<new session>,<seq>`. Within one session the rule stays "seq must be
@@ -111,4 +119,7 @@ Three boots, each about 4 minutes:
 
 ## Not covered by this note
 
-- What ITR2 does when X-Ray is the one that stops writing snapshots; that is ITRZone's side.
+- What ITR2 does when X-Ray is the one that stops writing snapshots; that is ITRZone's side. Its answer: the mod
+  logs the stale snapshot after 1 s and keeps the puppets as they were; it resumes at the next accepted snapshot
+  (my header's run id or a level change resets its seq check). It has no "X-Ray is gone" behaviour yet; open on
+  ITRZone's side.
