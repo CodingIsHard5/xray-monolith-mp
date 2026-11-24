@@ -983,3 +983,27 @@ fields stays v1 and takes the T2 path, unchanged.
   near (20 %); HOLD over 45 or a guard trip around the deaths (10 %); a stance change not followed within 2 s
   around a death (10 %); the freeze check (5 %); anything else (5 %).
 - **Stop rule:** a FAIL is reported, not tuned; at most one retry, registered first.
+
+## 44. Pre-flight D RESULT: PASS. Script frozen for T3 proper
+
+- **Run:** out/t3pfD, Stance14.exe, script 1d7143cf...30f45, writer 2cb582bc..., runner 96160265..., slice
+  2026-11-24 06:33:00-06:42:42 local (Overseer's go), rc 0. Scored ONCE with t3_pfD_check.py (461b8e53...).
+- **Result: PASS, 7 of 7.**
+  1. rc 0, no Lua error, no FATAL: PASS.
+  2. Two CROSS_REQ through the named changers with the table's values: PASS. Out by
+     `esc_level_changer_to_garbage_2` (-152.625, 2.255, -297.913; level vertex 55976, game vertex 762); back by
+     `gar_level_changer_to_escape_2` (-162.193, -2.852, 329.859; 88513, 367). No CROSS_NOCHANGER / CROSS_ERROR.
+  3. Two CROSS_RESUME, Garbage then Cordon, each after its request: PASS.
+  4. New level in the snapshot after the first `cross` pose: PASS (21.7 s out, 21.5 s back).
+  5. After each resume at least 200 P2, no GUARD: PASS (598 on Garbage, 7,065 back on Cordon; 0 GUARD).
+  6. First applied pose within 5 m of the changer's destination: PASS (0.000 m and 0.001 m).
+  7. Two runner cross holds, no restart: PASS.
+- **Guess:** PASS 60 %. It passed; none of the three named risks happened.
+- **Reported:** 0 HOLD on both levels. Each of the three Lua states wrote its own SUMMARY and VITALS line: hits 0,
+  refills 0, lowest health 1.000, radiation 0, bleeding 0, 0 unread, all three. The project's cordon1 save is
+  unchanged (scoc a9f9a8a9..., scop 6dea752b... before and after).
+- **Consequence for the joint crossing run's checker:** a crossing run has one VITALS line per Lua state (three for
+  there-and-back), so its vitals gate must take every line, not "exactly one" as T3 proper does.
+- **Not covered:** an unknown name in the engine (offline only); a crossing during a freeze or a death; the bridge
+  live throughout (the joint crossing run).
+- **Script frozen for T3 proper: sha256 1d7143cf7883bf6b0af1b82202cf442245411e4d41291d4ad3e58ec735330f45.**
