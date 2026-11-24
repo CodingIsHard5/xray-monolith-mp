@@ -4302,7 +4302,9 @@ static void vr_bp_draw(IDSGraphManager* DM)
 // -vr_bp_each (every item its own model, no stacks), -vr_bp_face <1|-1> (which face of the bag). TEST ONLY, passed by
 // no launcher: -vr_bp_items_off (the control: nothing is shown, the same per-frame line), -vr_bp_fake_missing <section>,
 // -vr_bp_quiet (frame-time measurement: the per-frame draw lines are not written).
-// B1b PROBE (TEST ONLY for now, no verdict): -vr_bp_open. The closed prop is not drawn; an open-top box takes its
+// B1b (Amendment 40): the open bag, on by default (-vr_bp_closed = B1). The closed prop is not drawn; an open-top box takes its
+// place. Inside it items are real size and may clip (-vr_bp_shrink), long ones laid flat (-vr_bp_noflat).
+// It began as:  an open-top box takes its
 // place: a floor and four walls, each a copy of a game crate model squeezed into a thin panel, on the prop's footprint.
 // The contents stand on the floor inside it. No new mesh code: the same model path as everything else here.
 static const float VR_BPO_WALL = 0.012f, VR_BPO_DEPTH = 0.15f;
@@ -4311,9 +4313,10 @@ static bool vr_bpo_on()
 	static int s = -1;
 	if (s < 0)
 	{
-		s = strstr(Core.Params, "-vr_bp_open") ? 1 : 0;
-		if (s)
-			Msg("! [vr13o] -vr_bp_open: B1b probe, TEST ONLY: an open-top box of five crate panels replaces the backpack prop");
+		// B1b (Amendment 40): the open bag is the default. -vr_bp_closed (feel switch) brings back B1: the closed prop
+		// with the items on its outside face. (-vr_bp_open, the probe's switch, is still accepted and changes nothing.)
+		s = strstr(Core.Params, "-vr_bp_closed") ? 0 : 1;
+		Msg("* [vr13o] held backpack: %s", s ? "open bag of five crate panels, real-size items inside" : "closed prop, items on its face (-vr_bp_closed)");
 	}
 	return s == 1;
 }
@@ -4322,8 +4325,10 @@ struct vr_bpi_entry
 	shared_str sect, kind, visname;
 	int count;
 	bool box, failed;
-	Fvector spot, bc;
+	Fvector spot, bc, ext;
 	float scale, longest;
+	bool flat; // open bag: turned so its longest side lies along the bag
+	Fmatrix rot; // the turn (identity when not flat)
 	IRenderVisual* vis;
 	IKinematics* K;
 	Fmatrix xf;
@@ -4342,7 +4347,7 @@ static vr_bpi_state s_vr_bpi = {};
 struct vr_bpi_size
 {
 	shared_str name;
-	Fvector bc;
+	Fvector bc, ext;
 	float longest;
 };
 static xr_vector<vr_bpi_size> s_vr_bpi_sizes;
@@ -4533,6 +4538,10 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 			}
 			e.scale = 0.f;
 			e.longest = 0.f;
+			e.flat = false;
+			e.rot.identity();
+			e.ext.set(0, 0, 0);
+			float up = 0.f; // the model's height in the bag once placed (open bag only)
 			if (e.vis)
 			{
 				const vr_bpi_size* known = nullptr;
@@ -4545,16 +4554,19 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 				if (known)
 				{
 					e.bc = known->bc;
+					e.ext = known->ext;
 					e.longest = known->longest;
 				}
 				else
 				{
 					const Fbox& ib = e.vis->getVisData().box;
 					ib.getcenter(e.bc);
-					e.longest = _max(ib.max.x - ib.min.x, _max(ib.max.y - ib.min.y, ib.max.z - ib.min.z));
+					e.ext.set(ib.max.x - ib.min.x, ib.max.y - ib.min.y, ib.max.z - ib.min.z);
+					e.longest = _max(e.ext.x, _max(e.ext.y, e.ext.z));
 					vr_bpi_size z;
 					z.name = e.visname;
 					z.bc = e.bc;
+					z.ext = e.ext;
 					z.longest = e.longest;
 					s_vr_bpi_sizes.push_back(z);
 				}
@@ -4564,10 +4576,51 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 				// ("kind of like itr"). -vr_bp_shrink (feel switch, off) brings the shrink-to-cell rule back. The stand-in
 				// box stays cell-sized: it is a placeholder, not an item.
 				if (vr_bpo_on() && !e.box && !strstr(Core.Params, "-vr_bp_shrink"))
+				{
 					e.scale = 1.f;
+					// Overseer 2026-11-24: an item longer than the bag is deep is laid flat: its longest side along the
+					// bag's longer floor side, its shortest side up. -vr_bp_noflat (feel switch) leaves it as modelled.
+					// Every real-size item rests on the bag's floor (its lowest point on the floor).
+					const float me[3] = { e.ext.x, e.ext.y, e.ext.z };
+					up = me[a];
+					if (e.longest > VR_BPO_DEPTH && !strstr(Core.Params, "-vr_bp_noflat"))
+					{
+						int lo = 0, sh = 0;
+						for (int k = 1; k < 3; ++k)
+						{
+							if (me[k] > me[lo])
+								lo = k;
+							if (me[k] < me[sh])
+								sh = k;
+						}
+						if (sh == lo)
+							sh = (lo + 1) % 3;
+						const int mi = 3 - lo - sh;
+						const int bl = ext[u] >= ext[v] ? u : v, bo = ext[u] >= ext[v] ? v : u;
+						Fvector img[3]; // where each model axis goes, in the bag's frame
+						for (int k = 0; k < 3; ++k)
+							img[k].set(0, 0, 0);
+						img[lo][bl] = 1.f;
+						img[sh][a] = 1.f;
+						img[mi][bo] = 1.f;
+						Fvector cr;
+						cr.crossproduct(img[0], img[1]);
+						if (cr.dotproduct(img[2]) < 0.f)
+							img[mi][bo] = -1.f; // keep it a turn, not a mirror image
+						e.rot.identity();
+						e.rot.i.set(img[0]);
+						e.rot.j.set(img[1]);
+						e.rot.k.set(img[2]);
+						e.flat = true;
+						up = me[sh];
+					}
+					p[a] = mn[a] + VR_BPO_WALL + 0.5f * up;
+					e.spot.set(p[0], p[1], p[2]);
+				}
 			}
-			Msg("* [vr13b] frame %u model %d section '%s' kind '%s' count %d visual '%s' box %d made %d longest %.4f scale %.4f spot %.4f %.4f %.4f", f, i, e.sect.c_str(),
-				e.kind.c_str(), e.count, e.visname.size() ? e.visname.c_str() : "", e.box ? 1 : 0, e.vis ? 1 : 0, e.longest, e.scale, e.spot.x, e.spot.y, e.spot.z);
+			Msg("* [vr13b] frame %u model %d section '%s' kind '%s' count %d visual '%s' box %d made %d longest %.4f scale %.4f spot %.4f %.4f %.4f flat %d up %.4f size %.4f %.4f %.4f", f, i, e.sect.c_str(),
+				e.kind.c_str(), e.count, e.visname.size() ? e.visname.c_str() : "", e.box ? 1 : 0, e.vis ? 1 : 0, e.longest, e.scale, e.spot.x, e.spot.y, e.spot.z, e.flat ? 1 : 0, up,
+				e.ext.x, e.ext.y, e.ext.z);
 		}
 	}
 	if (!B.quiet)
@@ -4579,9 +4632,16 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 		vr_bpi_entry& e = B.list[i];
 		if (!e.vis)
 			continue;
-		Fmatrix L;
-		L.scale(e.scale, e.scale, e.scale);
-		L.c.set(e.spot.x - e.scale * e.bc.x, e.spot.y - e.scale * e.bc.y, e.spot.z - e.scale * e.bc.z); // the model's box centre lands on the spot
+		Fmatrix L = e.rot; // identity unless laid flat in the open bag
+		L.i.mul(e.scale);
+		L.j.mul(e.scale);
+		L.k.mul(e.scale);
+		Fvector rc; // the model's box centre, turned and scaled
+		rc.set(0, 0, 0);
+		rc.mad(L.i, e.bc.x);
+		rc.mad(L.j, e.bc.y);
+		rc.mad(L.k, e.bc.z);
+		L.c.set(e.spot.x - rc.x, e.spot.y - rc.y, e.spot.z - rc.z); // the model's box centre lands on the spot
 		e.xf.mul_43(bag_xf, L);
 		if (e.K)
 		{
