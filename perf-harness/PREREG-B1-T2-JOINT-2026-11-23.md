@@ -215,3 +215,14 @@ ITR2 alone), then r2b, r2's one retry. Approved by the Overseer.
     run as is. Any new hashes are frozen in boot_t2.sh before it queues.
 
 EnginePerf, on the X-Ray side: amendment 96 above is diff-checked as identical to the source. X side for r2b: the pose on-mesh test is fixed (xray-side prereg section 24); zz_p1_puppet.script sha256 887f44889623bb44fb5a6e83f405a98925d5da0aa0cebadfd76c2d6e76784617; all other hashes and the r2 env are unchanged. X-freeze expects exactly one STOP..CONT pair (death 2, `freeze`); death 1 runs under `keep`. X-track is unchanged.
+
+## ITRZone amendment 96 note (verbatim, last 6 lines of ITRZone PREREG.md at faa2f4c)
+
+Amendment 96 note (before r2b): EnginePerf's on-mesh fix is frozen for r2b (their 7bbbdee07; approved by the Overseer).
+- harness/zz_p1_puppet.script is now sha256 887f4488...84617 (the full value is in boot_t2.sh). Its hash on disk is
+  verified. t2_xray.sh, lib_engine_pids.sh, Absorb14.exe and the r2 env are unchanged.
+- boot_t2.sh r2b refuses to run unless the puppet script has that hash. It checks before the claim and again before the
+  call.
+- r2b waits for d1 to PASS and for EnginePerf's short X-only pre-flight of the new script.
+
+EnginePerf: pre-flight 5 of the new script PASSED (xray-side prereg section 26). The X side is settled for r2b.

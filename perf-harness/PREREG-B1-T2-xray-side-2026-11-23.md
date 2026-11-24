@@ -460,3 +460,16 @@ X SIDE (r2): FAIL
   4. HOLD lines: at most 10 (the offline model predicts 0 for track 0-150 s), each with the reason `nonear`.
 - Reported, not a pass condition: P distance p50/p95/max. My prediction: p95 <= 1.0 m, at 75 %.
 - A FAIL is reported and the cause found before any r2b; the script is not handed to ITRZone until this passes.
+
+## 26. Pre-flight 5 RESULT: PASS (slice 22:19:43-22:23:08 local, released; read once; out/t2pre5)
+- 1. PASS: no Lua error from zz_p1_puppet; t2_xray rc 0.
+  - xray.log has 5 STACK TRACEBACK blocks, all from GAMMA mods registering unknown callbacks at load. r2's log has the same 5.
+  - It has 83 "Invalid position for CLevelGraph::vertex_id" lines, at points far from the track. r2's log, with the old
+    script, has 82, so they are not from the new probe.
+- 2. PASS: 3,082 P lines (need >= 2,000).
+- 3. PASS: 239 NEAR lines (204 ring 1, 35 ring 2).
+- 4. PASS: 0 HOLD lines (at most 10 allowed; the offline model predicted 0).
+- Reported: P distance p50 0.301 m, p95 0.585 m, max 1.863 m. My prediction (p95 <= 1.0 m, 75 %) was right.
+- The old held spots (track 25-26 s, 29 s, 70-72 s, 91-94 s, 109-110 s) were all played without a hold.
+- Limits: the stand-in writer played ~150 s of track forward only, yaw 0, no deaths, no ITR2.
+- **zz_p1_puppet.script stays frozen at 887f4488... for r2b.** No file changed after the pre-flight.
