@@ -38,7 +38,14 @@ def trk_at(t):
     return [a[k] + f * (b[k] - a[k]) for k in (1, 2, 3)]
 while True:
     t = time.time() - t0
-    if ARG == 'pf4':   # pre-flight 4: A play | D dead+freeze 20-50 s (armed) | E play (planned kill follows)
+    if ARG == 'pf6':   # pre-flight 6 (section 29): A play 0-20 | D dead+freeze 20-50 (real STOP, armed) | E play 50-70 | ONE final `end`+freeze pose, then no more writes (r2b's stray-arm case)
+        if t >= 70:
+            n += 1; u = utc()
+            with open(os.path.join(shm, 'pose.txt'), 'wb') as f: f.write(f"seq,{n},{u},end,{lvl},freeze\np,{x:.3f},{y:.3f},{z:.3f},0.0000,1.0\nend,{n}\n".encode())
+            log.write(f'{u},{n},END,0.0\n'); log.flush()
+            while True: time.sleep(1)
+        ph, st, aw, yw = ('A', 'play', 'freeze', 0.0) if t < 20 else ('D', 'dead', 'freeze', 0.0) if t < 50 else ('E', 'play', 'freeze', 0.0)
+    elif ARG == 'pf4':   # pre-flight 4: A play | D dead+freeze 20-50 s (armed) | E play (planned kill follows)
         ph, st, aw, yw = ('A', 'play', 'freeze', 0.0) if t < 20 else ('D', 'dead', 'freeze', 0.0) if t < 50 else ('E', 'play', 'freeze', 0.0)
     elif ARG == 'pf3':   # pre-flight 3: A play (3 s hitch at track 20) | D1 freeze 60 s (unarmed control) | E1 play | D2 freeze 60 s (armed) | E
         ph, st, aw, yw = ('A', 'play', 'freeze', 0.0) if t < 40 else ('D1', 'dead', 'freeze', 0.0) if t < 100 else \

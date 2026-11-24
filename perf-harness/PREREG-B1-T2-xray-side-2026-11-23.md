@@ -497,3 +497,50 @@ X SIDE (r2): PASS
   - T2d: its checker counts snapshots X-Ray wrote after ITR2 had ended. X-Ray ran its full T2_RUN_S = 1500 s.
   - T2e: 7 spawn failures in its mod.
   - The Overseer decides what follows.
+
+## 28. Fix of the stray absorb arm, registered BEFORE r3 (Overseer order after r2b)
+- **Cause (confirmed with ITRZone's header values):** ITR2's one final pose is state `end` with `freeze`
+  (seq 24671 in r2b), and then nothing is written. The old script armed on ANY non-play state with `freeze`. The
+  bridge freezes only on `dead` or `away`. So the script armed, no STOP came, and the flag stayed 1 for ~6 min.
+- **New rules (zz_p1_puppet.script):**
+  - ARM only on state `dead` or `away` with `freeze`: exactly the bridge's own test.
+  - DISARM, each logged as `ABSORB_DISARM,<tg>,<seq>,<game ms>,<reason>`:
+    - `play`: a play pose (the path after every CONT);
+    - `state`: any other pose that is not dead/away + freeze (for example `end`);
+    - `stale`: the pose is stale and X-Ray is still running 4 s after arming;
+    - `timeout`: X-Ray is still running 10 s after arming;
+    - `end`: at game end.
+  - Why 4 s and 10 s: the bridge stops X-Ray within ~3 s of the ARM line (it waits at most 3 s for it; r2b: 26 ms).
+    While X-Ray is stopped no Lua runs, and an absorbed gap does not advance time_global, so a real freeze never
+    reaches either limit. X-Ray still running after them means no stop is coming.
+  - The engine itself already clears the flag when it absorbs a gap (perf/freeze-absorb 7c8331264, unchanged).
+  - "Disarm on bridge exit": the bridge cannot run a console command inside X-Ray. If the bridge is gone, no STOP comes,
+    and the `stale` / `timeout` rules clear the flag within 4-10 s. t2_xray.sh is NOT changed (6ae8d27f...).
+- **Fake tests, REAL script with engine stubs (t2-offline/arm_stub.lua), old script 887f4488 as the witness.**
+  Engine flag at the end, old -> new:
+  - end_freeze (r2b's case): 1 -> 0 (new: no ARM at all).
+  - dead_then_stale (writer dies after the dead pose, no STOP): 1 -> 0 (`stale`, 4 s after arming).
+  - dead_no_stop (poses keep coming, bridge never stops): 1 -> 0 (`timeout`, 10 s).
+  - dead_then_end: 1 -> 0 (`state`).
+  - armed_at_game_end: 1 -> 0 (`end`).
+  - dead_then_play (the CONT path): 0 -> 0 (`play`).
+  - real_freeze (stop, gap absorbed, then play): 0 -> 0 (`play`); no early disarm.
+  - The on-mesh offline test is unchanged: 7 of 7,600 held, 467 near.
+- **New hash:** harness/zz_p1_puppet.script sha256
+  11c81c5538133c2efb8daf613af6328eb682a9fc65cf3914c86c496cda9efffd (was 887f4488...). All other hashes unchanged.
+
+## 29. Pre-flight 6: the new arm rules inside the engine (registered BEFORE the run; X-Ray only)
+- One WANT slice, 20-min claim, one boot, about 6 min.
+  `PF_OUT=out/t2pre6 PF_EXE=Absorb14.exe PF_FREEZE=sigstop PF_ABSORB=2000 PF_PAUSE=0 PF_KILL_AT=99999 PF_RUN_S=130
+   PF_POSE_ARG=pf6 tools/t2_preflight.sh`
+- Stand-in writer (`pf6` mode; NOT ITR2's code), actor held at its start point:
+  - play 0-20 s;
+  - dead + freeze 20-50 s (a real bridge STOP, armed);
+  - play 50-70 s;
+  - then ONE final pose `end` + `freeze` and no more writes (r2b's case), with X-Ray running ~45 s more.
+- **PASS needs all of:**
+  1. no Lua error from zz_p1_puppet; t2_xray rc 0;
+  2. freeze.csv: exactly one STOP and one CONT; game_ms delta <= 1000; one `[FREEZE] absorbed` engine line;
+  3. exactly one ABSORB_ARM line, followed by one `ABSORB_DISARM,...,play`;
+  4. NO ABSORB_ARM after the `end` pose (the old script armed there).
+- A FAIL is reported and fixed before the hash goes to ITRZone for r3.

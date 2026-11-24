@@ -151,12 +151,33 @@ local function t2_near_ring(x, y, z)
 end
 local p_killed, p_torn_n = {}, nil
 local g_last_wall, g_f_until, g_last_g, p_fz_logged, g_prev_tg, g_prev_game = nil, nil, nil, false, nil, nil
+-- Absorb arming (prereg section 28). The engine flag g_freeze_absorb_armed may be 1 ONLY while the bridge is about to
+-- stop, or has stopped, X-Ray: pose state dead or away with `freeze` (exactly the bridge's own test in t2_xray.sh).
+-- It is cleared: on a play pose; on any pose that is not dead/away + freeze; when the pose is STALE and X-Ray is still
+-- running T2_ARM_STALE_MS after arming; T2_ARM_MAX_MS after arming if X-Ray is still running; and at game end.
+-- The bridge stops X-Ray within ~3 s of the ARM line (it waits at most 3 s for it), so X-Ray still running 4 s after
+-- arming means no stop is coming: bridge gone, or not freezing. While X-Ray is stopped no Lua runs, and the absorbed
+-- gap does not advance time_global, so a real freeze never reaches these limits. r2b: the old script armed on ITR2's last non-play pose, which the
+-- bridge does not treat as a freeze, and stayed armed ~6 min.
+local T2_ARM_MAX_MS, T2_ARM_STALE_MS, t2_eng_armed, t2_arm_tg = 10000, 4000, false, nil
+local function t2_disarm(now, n, why)
+	if not t2_eng_armed then return end
+	t2_eng_armed = false; get_console():execute("g_freeze_absorb_armed 0")
+	m(string.format("ABSORB_DISARM,%d,%d,%.0f,%s", now, n, gtime(), why)); if meta then meta:flush() end
+end
+local function t2_stale(now, t)
+	p_stale = true; m(string.format("STALE,%.2f,%d,%d", t, now, p_last))
+end
 local function t2_pose(a, now, t)
+	if t2_eng_armed and t2_arm_tg then
+		if p_stale and now - t2_arm_tg >= T2_ARM_STALE_MS then t2_disarm(now, p_last, "stale")
+		elseif now - t2_arm_tg >= T2_ARM_MAX_MS then t2_disarm(now, p_last, "timeout") end
+	end
 	local f = io.open(DIR .. "pose.txt", "rb"); if not f then return end
 	local first = f:read("*l"); first = first and string.gsub(first, "\r", "")
 	local n = first and tonumber(string.match(first, "^seq,(%d+),"))
 	if not n or n <= p_last then f:close()
-		if p_last_t and not p_stale and now - p_last_t >= 1000 then p_stale = true; m(string.format("STALE,%.2f,%d,%d", t, now, p_last)) end
+		if p_last_t and not p_stale and now - p_last_t >= 1000 then t2_stale(now, t) end
 		return end
 	local rest = f:read("*a") or ""; f:close()
 	local _, utc, state, zone, aw = string.match(first, "^seq,(%d+),(%d+),([^,]+),([^,]+),([^,]+)$")
@@ -169,7 +190,7 @@ local function t2_pose(a, now, t)
 	end
 	if endn ~= n or not utc or not px then   -- torn: count and log once per seq; a file left torn still goes stale
 		if n ~= p_torn_n then p_torn_n = n; p_torn = p_torn + 1; m(string.format("TORN,%d,%d", now, n)) end
-		if p_last_t and not p_stale and now - p_last_t >= 1000 then p_stale = true; m(string.format("STALE,%.2f,%d,%d", t, now, p_last)) end
+		if p_last_t and not p_stale and now - p_last_t >= 1000 then t2_stale(now, t) end
 		return end
 	p_last = n; p_last_t = now
 	if p_stale then p_stale = false; m(string.format("RESUME,%.2f,%d,%d", t, now, n)) end
@@ -179,13 +200,18 @@ local function t2_pose(a, now, t)
 			if o and o:alive() then o:kill(a); p_killed[id] = true; m(string.format("KILL,%d,%d,%d", now, n, id)) end end
 	end
 	local hold_state = state ~= "play"
-	if hold_state and aw == "freeze" and not t2_armed and t2_absorb > 0 then
+	local fz_state = (state == "dead" or state == "away") and aw == "freeze"   -- the bridge's own freeze test
+	if fz_state and not t2_armed and t2_absorb > 0 then
 		t2_armed = true; t2_nfreeze = t2_nfreeze + 1
-		if t2_nfreeze > t2_absorb_skip then get_console():execute("g_freeze_absorb_armed 1"); m(string.format("ABSORB_ARM,%d,%d,%.0f", now, n, gtime()))
+		if t2_nfreeze > t2_absorb_skip then
+			get_console():execute("g_freeze_absorb_armed 1"); t2_eng_armed = true; t2_arm_tg = now
+			m(string.format("ABSORB_ARM,%d,%d,%.0f", now, n, gtime()))
 		else m(string.format("ABSORB_SKIP,%d,%d,%.0f", now, n, gtime())) end
 		if meta then meta:flush() end
-	elseif not hold_state and t2_armed then
-		t2_armed = false; get_console():execute("g_freeze_absorb_armed 0"); m(string.format("ABSORB_DISARM,%d,%d,%.0f", now, n, gtime()))
+	elseif not fz_state and t2_armed then
+		t2_armed = false
+		if t2_eng_armed then t2_disarm(now, n, hold_state and "state" or "play")
+		else m(string.format("ABSORB_DISARM,%d,%d,%.0f,%s", now, n, gtime(), hold_state and "state_noop" or "play_noop")) end
 	end
 	if hold_state and aw == "freeze" and not p_paused then
 		if t2_pause_ok then device():pause(true); p_paused = true; m(string.format("PAUSE,%d,%d,%s", now, n, state))
@@ -260,6 +286,7 @@ on_quit = function()
 	local p99 = exp_n > 0 and exp_times[math.max(1, math.ceil(exp_n * 0.99))] or 0
 	m(string.format("SUMMARY,hits=%d,cancelled=%d,refills=%d,min_health=%.3f,export_ticks=%d,export_mean_us=%.1f,export_p99_us=%.1f,export_max_us=%.1f",
 		hits, cancels, refills, min_health, exp_n, exp_n > 0 and exp_sum / exp_n or 0, p99, exp_max))
+	if t2 then t2_disarm(time_global(), p_last, "end") end
 	if t2 then m(string.format("T2SUM,last_seq=%d,torn=%d,holds=%d,paused=%s,near=%d", p_last, p_torn, p_holds, tostring(p_paused), p_near)) end
 	out:close(); meta:close(); out, meta = nil, nil
 end
