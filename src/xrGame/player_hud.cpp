@@ -4759,19 +4759,13 @@ static bool vr_bpo_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 		}
 		DM->add_Dynamic(P.vis, &P.xf);
 	}
-	if (f % 50 == 0)
+	// B1b's check line, once per eye: the floor panel's centre in the world (the bag frame's point cx, y0 + wall / 2, cz)
+	if (!s_vr_bpi.quiet)
 	{
-		Msg("* [vr13o] frame %u open bag drawn: 5 panels", f);
-		// probe diagnostics: the bag's box and placement now, and each panel's own box now (a visual's box can change once drawn)
-		Msg("* [vr13o] frame %u bag box now %.4f %.4f %.4f .. %.4f %.4f %.4f; bag axes %.4f %.4f %.4f at %.4f %.4f %.4f", f, b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z,
-			bag_xf.i.magnitude(), bag_xf.j.magnitude(), bag_xf.k.magnitude(), bag_xf.c.x, bag_xf.c.y, bag_xf.c.z);
-		for (int i = 0; i < 5; ++i)
-		{
-			const Fbox& pb = s_vr_bpo[i].vis->getVisData().box;
-			const Fmatrix& X = s_vr_bpo[i].xf;
-			Msg("* [vr13o] frame %u panel %d box now %.4f %.4f %.4f .. %.4f %.4f %.4f; axes %.4f %.4f %.4f at %.4f %.4f %.4f; bones %d", f, i, pb.min.x, pb.min.y, pb.min.z, pb.max.x,
-				pb.max.y, pb.max.z, X.i.magnitude(), X.j.magnitude(), X.k.magnitude(), X.c.x, X.c.y, X.c.z, s_vr_bpo[i].K ? int(s_vr_bpo[i].K->LL_BoneCount()) : 0);
-		}
+		Fvector fc, fw;
+		fc.set(C[0][0], C[0][1], C[0][2]);
+		bag_xf.transform_tiny(fw, fc);
+		Msg("* [vr13o] frame %u panels 5 floor %.4f %.4f %.4f", f, fw.x, fw.y, fw.z);
 	}
 	return true;
 }
