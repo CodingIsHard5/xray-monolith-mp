@@ -4140,6 +4140,146 @@ static void vr_item_draw(IDSGraphManager* DM)
 		Msg("* [vr11d] frame %u drawn '%s' at %.4f %.4f %.4f", g_vr_track.frame, V.name.c_str(), V.xf.c.x, V.xf.c.y, V.xf.c.z);
 }
 
+// GammaVR milestone 12a (SPIKE_PLAN Amendment 38): the backpack in the off hand. A grip press of the free off hand in a
+// zone over the left shoulder (head-relative as 11a's pouches; -vr_bp_pos "x y z", side always left) brings GAMMA's
+// backpack model to the hand; it is held while the grip is held and put away on release. No inventory change. While it
+// is held (and on the press frame in the zone) the off hand's grip goes to nobody else (PDA, pouches, reload, two hands).
+// TEST ONLY: -vr_bp_off (the control: nothing acts, the same log lines are written).
+static const char* VR_BP_VISUAL = "dynamics\\devices\\dev_rukzak\\dev_rukzak";
+struct vr_bp_state
+{
+	bool parsed, off;
+	Fvector zone;
+	float r;
+	int state;                // 0 away, 1 held
+	bool prev_grab, claims;
+	float d;
+};
+static vr_bp_state s_vr_bp = {};
+bool vr_bp_claims() { return s_vr_bp.claims; }
+static void vr_bp_parse()
+{
+	vr_bp_state& S = s_vr_bp;
+	if (S.parsed)
+		return;
+	S.parsed = true;
+	S.off = !!strstr(Core.Params, "-vr_bp_off");
+	S.zone.set(-0.15f, -0.05f, -0.20f);
+	if (LPCSTR q = strstr(Core.Params, "-vr_bp_pos "))
+	{
+		Fvector p;
+		if (sscanf(q + 11, "%f %f %f", &p.x, &p.y, &p.z) == 3)
+			S.zone.set(-_abs(p.x), p.y, p.z);
+	}
+	S.r = 0.12f;
+	Msg("* [vr12] backpack in the off hand: %s; zone side %.3f y %.3f fwd %.3f r %.3f; model '%s'", S.off ? "OFF (-vr_bp_off, TEST ONLY)" : "on",
+		S.zone.x, S.zone.y, S.zone.z, S.r, VR_BP_VISUAL);
+}
+static void vr_bp_update(const vr_input_info& I, bool grab, bool off_free)
+{
+	vr_bp_state& S = s_vr_bp;
+	vr_bp_parse();
+	S.claims = false;
+	const int gun = I.gun ? 1 : 0, off = 1 - gun;
+	const bool press = grab && !S.prev_grab;
+	S.prev_grab = grab;
+	const bool geo = I.head.valid && I.grip[off].valid;
+	S.d = 1000.f;
+	Fvector zc;
+	zc.set(0.f, 0.f, 0.f);
+	if (geo)
+	{
+		vr_item_point(I, S.zone, zc);
+		S.d = I.grip[off].pos.distance_to(zc);
+	}
+	if (!S.off)
+	{
+		if (S.state == 0)
+		{
+			const bool in = geo && S.d <= S.r;
+			if (in && off_free)
+				S.claims = true;
+			if (press && in)
+			{
+				if (off_free)
+				{
+					S.state = 1;
+					S.claims = true;
+					Msg("* [vr12] frame %u take: backpack to the off hand (d_zone %.4f)", I.frame, S.d);
+				}
+				else
+					Msg("* [vr12] frame %u take refused: the off hand is not free (hand magazine %d, PDA %d, item %d, cancel pending %d)", I.frame,
+						s_vr_rl.hand_mag ? 1 : 0, (s_vr_pda.shown && !s_vr_pda.placed && s_vr_pda.hand == off) ? 1 : 0, s_vr_item.state, s_vr_item.pending ? 1 : 0);
+			}
+		}
+		else if (!grab)
+		{
+			S.state = 0;
+			Msg("* [vr12] frame %u put away: grip released", I.frame);
+		}
+		else
+			S.claims = true;
+	}
+	// the off hand's grip in world space (the draw puts the model's origin here), and what the other off-hand users hold
+	Fvector gw;
+	gw.set(1000.f, 1000.f, 1000.f);
+	if (I.grip[off].valid)
+		g_vr_track.track_to_world.transform_tiny(gw, I.grip[off].pos);
+	Msg("* [vr12s] frame %u state %d d_zone %.4f grab %d free %d claims %d grip_world %.4f %.4f %.4f zone_track %.4f %.4f %.4f item %d pending %d hand_mag %d pda_off %d two_hand %d t %.4f",
+		I.frame, S.state, S.d, grab ? 1 : 0, off_free ? 1 : 0, S.claims ? 1 : 0, gw.x, gw.y, gw.z, zc.x, zc.y, zc.z, s_vr_item.state, s_vr_item.pending ? 1 : 0,
+		s_vr_rl.hand_mag ? 1 : 0, (s_vr_pda.shown && !s_vr_pda.placed && s_vr_pda.hand == off) ? 1 : 0, s_vr_2h_grabbed ? 1 : 0, Device.fTimeGlobal);
+}
+static vr_item_vis s_vr_bpv = {};
+static void vr_bp_reset()
+{
+	if (s_vr_bpv.vis)
+		::Render->model_Delete(s_vr_bpv.vis);
+	s_vr_bpv.vis = nullptr;
+	s_vr_bpv.K = nullptr;
+	s_vr_bpv.name = nullptr;
+	s_vr_bpv.failed = false;
+	s_vr_bp.state = 0;
+	s_vr_bp.claims = false;
+}
+static void vr_bp_draw(IDSGraphManager* DM)
+{
+	vr_bp_state& S = s_vr_bp;
+	vr_item_vis& V = s_vr_bpv;
+	if (!S.parsed || S.off || !S.state)
+		return;
+	vr_grip_info G;
+	if (!g_vr_get_grip || !g_vr_get_grip(&G) || !G.off.valid)
+		return;
+	if (!V.vis && !V.failed)
+	{
+		V.name = VR_BP_VISUAL;
+		::Render->hud_loading = true;
+		V.vis = ::Render->model_Create(VR_BP_VISUAL);
+		::Render->hud_loading = false;
+		V.K = V.vis ? V.vis->dcast_PKinematics() : nullptr;
+		V.failed = !V.vis;
+		if (V.vis)
+		{
+			const Fbox& b = V.vis->getVisData().box;
+			Msg("* [vr12] model '%s' made: box %.3f x %.3f x %.3f m (min %.3f %.3f %.3f)", VR_BP_VISUAL, b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z, b.min.x, b.min.y, b.min.z);
+		}
+		else
+			Msg("* [vr12] model '%s' NOT made", VR_BP_VISUAL);
+	}
+	if (!V.vis)
+		return;
+	Fmatrix off_track;
+	vr_pose_matrix(G.off, off_track);
+	V.xf.mul_43(g_vr_track.track_to_world, off_track); // model origin at the grip point (placement is a feel item)
+	if (V.K)
+	{
+		V.K->CalculateBones_Invalidate();
+		V.K->CalculateBones(TRUE);
+	}
+	DM->add_Dynamic(V.vis, &V.xf);
+	Msg("* [vr12d] frame %u drawn at %.4f %.4f %.4f", g_vr_track.frame, V.xf.c.x, V.xf.c.y, V.xf.c.z);
+}
+
 void vr_input_update()
 {
 	static bool s_trig[2] = { false, false }, s_grab[2] = { false, false };
@@ -4185,8 +4325,16 @@ void vr_input_update()
 				Msg("* [vr3in] frame %u hand %c %s %s value %.3f", I.frame, h ? 'R' : 'L', "grab", s_grab[h] ? "press" : "release", gv);
 		}
 		s_vr_grab_held = s_grab[off];
+		// milestone 12a (Amendment 38): the backpack in the off hand; while it claims the off hand's grip, nobody else sees it
+		vr_bp_update(I, s_grab[off], !s_vr_rl.hand_mag && !(s_vr_pda.shown && !s_vr_pda.placed && s_vr_pda.hand == off) && s_vr_item.state == 0 && !s_vr_item.pending);
+		bool s_grab_pda[2] = { s_grab[0], s_grab[1] };
+		if (vr_bp_claims())
+		{
+			s_grab_pda[off] = false;
+			s_vr_grab_held = false;
+		}
 		// milestone 10a steps 1-2: the PDA in either hand (grip in the chest zone, or passed); the hand holding it does nothing else
-		const int pda_block = vr_pda_update(I, g_actor, vr_fire_allowed(g_actor), s_grab, s_trig, s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to);
+		const int pda_block = vr_pda_update(I, g_actor, vr_fire_allowed(g_actor), s_grab_pda, s_trig, s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to);
 		if (pda_block & 4)
 		{
 			fire_press_edge = false; // step 3: the gun hand's trigger clicked the PDA, not the gun
@@ -4198,7 +4346,7 @@ void vr_input_update()
 		// off hand's grip, the reload (and the two-handed grab, through vr_item_claims) do not see it
 		{
 			const bool off_free = !s_vr_rl.hand_mag && !(s_vr_pda.shown && !s_vr_pda.placed && s_vr_pda.hand == off) && !(pda_block & (1 << off));
-			vr_item_update(I, g_actor, s_grab[off] && !(pda_block & (1 << off)), off_free);
+			vr_item_update(I, g_actor, s_grab[off] && !(pda_block & (1 << off)) && !vr_bp_claims(), off_free && !vr_bp_claims());
 			if (vr_item_claims())
 				s_vr_grab_held = false;
 		}
@@ -4562,7 +4710,7 @@ bool player_hud::vr_place_at_grip()
 				inv.transform_tiny(RS.pouch_track, pc);
 				inv.transform_tiny(RS.sup_track, sp2);
 				// a hand holding a magazine, or placed where a grip press belongs to the reload, does not start a two-handed grab
-				rl_claims = RS.active && (RS.hand_mag || (RS.geo && (RS.d_pouch <= 0.15f || (RS.mag_in && RS.d_mag <= 0.10f && RS.d_mag < RS.d_sup)))) || vr_item_claims(); // 11a: an item in (or being taken by) the off hand
+				rl_claims = RS.active && (RS.hand_mag || (RS.geo && (RS.d_pouch <= 0.15f || (RS.mag_in && RS.d_mag <= 0.10f && RS.d_mag < RS.d_sup)))) || vr_item_claims() || vr_bp_claims(); // 11a: an item in (or being taken by) the off hand; 12a: the backpack
 				if (RS.active && RS.hand_mag)
 					s_vr_2h_grabbed = false;
 			}
@@ -4990,6 +5138,7 @@ void vr_reload_reset()
 {
 	vr_pda_reset();
 	vr_item_reset(); // milestone 11a
+	vr_bp_reset(); // milestone 12a
 	vr_reload_state& S = s_vr_rl;
 	if (S.hand_mag && !S.hand_cart.empty())
 		Msg("! [vr3mag] the HUD was destroyed with a magazine of %u rounds in the hand: not saved", u32(S.hand_cart.size()));
@@ -5588,6 +5737,7 @@ void player_hud::render_hud(IDSGraphManager* DM)
 	if (g_vr_track.active && g_vr_track.head0_set)
 		vr_pda_draw(DM); // GammaVR milestone 10a: the PDA in the free hand (drawn with or without a held item)
 		vr_item_draw(DM); // GammaVR milestone 11a: a consumable in the off hand
+		vr_bp_draw(DM); // GammaVR milestone 12a: the backpack in the off hand
 	if (g_vr_track.active && g_vr_track.head0_set)
 		vr_wrist_draw(DM); // GammaVR milestone 10c: the wrist status device
 	bool b_r0 = ((m_attached_items[0] && m_attached_items[0]->need_renderable()) || script_anim_part == 0 || script_anim_part == 2);
