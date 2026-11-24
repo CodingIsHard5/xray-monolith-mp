@@ -86,11 +86,28 @@ Three boots, each about 4 minutes:
   RESUME, poses applied again. Mutation: the same restart with the OLD session number: no pose may be applied.
 - The first pose after an EPOCH line gets the same guard exemption as the first pose after LOST.
 
-## Open point that may be Caden's
+## Time-out while LOST (Overseer's ruling, 2026-11-24)
 
-- Under freeze, how long X-Ray may stay frozen waiting for a crashed ITR2: for ever, or stop and save after some
-  minutes. Under keep the same question is how long A-Life may run on around an actor nobody moves. The note
-  proposes no time-out; the Overseer decides whether Caden's keep/freeze choice already covers it.
+- **Ruling:** this is resource hygiene, not feel, so it is not Caden's call. His keep/freeze choice covers a player
+  who is away on purpose; a crashed ITR2 is not that. Under either policy, LOST for 30 minutes means: save
+  X-Ray's game and stop it cleanly. The next ITR2 start boots X-Ray from that save as usual.
+- **Before the 30 minutes:** under freeze nothing happens (a stopped process costs nothing); under keep A-Life
+  runs on.
+- **Setting:** the limit is a runner setting (proposed name T2_LOST_SAVE_S, default 1800), measured on the
+  runner's wall clock from the LOST moment. A new pose before it cancels it.
+- **How (proposed):**
+  - The runner writes a small request file on the bridge tmpfs. Under freeze it first lets the engine continue
+    (SIGCONT, with the absorb armed as for any freeze, so no game time jumps).
+  - The script sees the request, logs `LOST_SAVE,<track s>,<game ms>,<age s>,<save name>`, runs the console
+    `save` command, checks the save file exists, logs `LOST_SAVED,<ok|error>`, then quits the game.
+  - The runner logs the save's name, size and sha256, and ends with its own reason `lost save`. No restart.
+  - The save has its own fixed name. It never overwrites a save of Caden's, and in tests never the test save.
+- **Optional witness (does not block the first registration):** boot 1 or 2 of the witness with the limit
+  shortened to 60 s and the writer not restarted. Expected: LOST, then LOST_SAVE and LOST_SAVED,ok at 60 s
+  (within 5 s), the save file present, the engine gone, runner rc 0 with reason `lost save`, test save hash
+  unchanged. A second boot loads that save and runs 60 s with no error.
+- **Not decided here:** who starts X-Ray again when ITR2 comes back, and from which save; that is the bridge's
+  start-up path, to be agreed with ITRZone.
 
 ## Not covered by this note
 
