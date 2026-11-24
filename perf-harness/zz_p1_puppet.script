@@ -150,6 +150,7 @@ local function mvstate()
 	local ok2, ac = pcall(IsMoveState, 'mcAccel'); return (ok2 and ac) and 2 or 1
 end
 local t3_cross_done, t3_crossed = false, nil
+local dmg_mode, dmg_hold = nil, false   -- pre-flight E test mode (see dmg_step); nil = off
 -- every level changer in the save: name, level it stands on, destination level, destination position / vertices
 local function t3_changers()
 	local L, sim, gg = {}, alife(), game_graph()
@@ -291,7 +292,7 @@ local function t2_pose(a, now, t)
 		if t2_pause_ok then device():pause(true); p_paused = true; m(string.format("PAUSE,%d,%d,%s", now, n, state))
 		elseif not p_fz_logged then p_fz_logged = true; m(string.format("FREEZE_UNSUPPORTED,%d,%d,%s", now, n, state)) end   -- once
 	elseif not hold_state and p_paused then device():pause(false); p_paused = false; m(string.format("UNPAUSE,%d,%d", now, n)) end
-	if hold_state then return end
+	if hold_state or dmg_hold then return end
 	if pstance then   -- pose v2: X-Ray grounds its own actor
 		local ring, vid, ny = t3_ground(px, py, pz)
 		if not ring then p_holds = p_holds + 1; m(string.format("HOLD,%d,%d,nonode", now, n))
@@ -342,6 +343,78 @@ local function t2_pose(a, now, t)
 end
 
 local done_logged = false
+-- pre-flight E (prereg section 46): forced-damage test mode. ON only if the bridge tmpfs holds dmgtest.txt with
+-- prot | god_off | god_off_norefill (written and removed by tools/t2_preflight.sh only). Without the file nothing here runs.
+-- Phases by track time: rad 20-80 s (actor pinned at the nearest radiation field's centre), anom 80-140 s (nearest
+-- damaging anomaly), mut 150-240 s (three hostile mutants spawned 4 m from the actor, which the pose holds in place).
+local dmg_phase, dmg_tgt, dmg_last, dmg_spawned = nil, nil, 0, {}
+local dmg_ph = { hits0 = 0, minh = 1, maxr = 0, maxb = 0 }
+local DMG_T = { { "rad", 20, 80 }, { "anom", 80, 140 }, { "mut", 150, 240 } }   -- 10 s between anom and mut: the pose takes the actor home first
+local DMG_MUT = { "dog_strong_red", "boar_01a_hard", "cat_strong_a" }
+local function dmg_find(k)
+	local sim, gg, here, ap = alife(), game_graph(), level.name(), db.actor:position()
+	local best, bd
+	for id = 1, 65534 do
+		local se = sim:object(id)
+		if se then
+			local sec = se:section_name()
+			local hit = (k == "rad" and string.find(sec, "^zone_field_radioactive")) or (k == "anom" and string.find(sec, "^zone_mine_")
+				and (string.find(sec, "electr") or string.find(sec, "acid") or string.find(sec, "chem") or string.find(sec, "therm") or string.find(sec, "gravit")))
+			if hit and sim:level_name(gg:vertex(se.m_game_vertex_id):level_id()) == here then
+				local d = se.position:distance_to(ap)
+				if not bd or d < bd then best, bd = { id = id, name = se:name(), sec = sec, pos = se.position }, d end
+			end
+		end
+	end
+	return best, bd
+end
+local function dmg_end_phase(a, now)
+	if not dmg_phase then return end
+	m(string.format("DMG_PHASE_END,%s,%d,hits=%d,min_health=%.3f,max_radiation=%.4f,max_bleeding=%.4f", dmg_phase, now, hits - dmg_ph.hits0, dmg_ph.minh, dmg_ph.maxr, dmg_ph.maxb))
+	if dmg_mode == "god_off_norefill" then a:set_health_ex(1.0) end   -- each phase starts from full health
+	dmg_hold = false; dmg_tgt = nil; dmg_phase = nil; if meta then meta:flush() end
+end
+local function dmg_step(a, now, t)
+	local cur
+	for _, p in ipairs(DMG_T) do if t >= p[2] and t < p[3] then cur = p[1] end end
+	if cur ~= dmg_phase then
+		dmg_end_phase(a, now)
+		if cur then
+			dmg_phase = cur; dmg_ph = { hits0 = hits, minh = a.health, maxr = 0, maxb = 0 }
+			if cur == "mut" then
+				local ap = a:position(); local off = { { 4, 0 }, { -4, 0 }, { 0, 4 } }
+				for i, sec in ipairs(DMG_MUT) do
+					local ok, se = pcall(function() return alife():create(sec, vector():set(ap.x + off[i][1], ap.y + 0.3, ap.z + off[i][2]), a:level_vertex_id(), a:game_vertex_id()) end)
+					if ok and se then dmg_spawned[#dmg_spawned + 1] = { id = se.id, sec = sec }; m(string.format("DMG_SPAWN,%d,%d,%s", now, se.id, sec))
+					else m(string.format("DMG_SPAWN_ERROR,%d,%s,%s", now, sec, tostring(se))) end
+				end
+			else
+				local ok, tg, d = pcall(dmg_find, cur)
+				if ok and tg then dmg_tgt = tg; dmg_hold = true
+					m(string.format("DMG_TARGET,%s,%d,%d,%s,%s,%.3f,%.3f,%.3f,%.1f", cur, now, tg.id, tg.name, tg.sec, tg.pos.x, tg.pos.y, tg.pos.z, d))
+				else m(string.format("DMG_NOTARGET,%s,%d,%s", cur, now, tostring(tg))) end
+			end
+			if meta then meta:flush() end
+		end
+	end
+	if not dmg_phase then return end
+	local h = a.health; local ok, r, b = pcall(function() return a.radiation, a.bleeding end); if not ok or not r or not b then r, b = -1, -1 end
+	if h < dmg_ph.minh then dmg_ph.minh = h end; if r > dmg_ph.maxr then dmg_ph.maxr = r end; if b > dmg_ph.maxb then dmg_ph.maxb = b end
+	if dmg_mode == "god_off_norefill" and h < 0.2 then m(string.format("DMG_FLOOR,%s,%d,%.3f", dmg_phase, now, h)); a:set_health_ex(1.0) end   -- a death would end the run
+	if dmg_tgt then a:set_actor_position(vector():set(dmg_tgt.pos.x, dmg_tgt.pos.y, dmg_tgt.pos.z), true) end
+	if now - dmg_last < 1000 then return end
+	dmg_last = now
+	if dmg_tgt then
+		m(string.format("DMG_AT,%s,%d,%.2f,%d,%.4f,%.4f,%.4f", dmg_phase, now, a:position():distance_to(dmg_tgt.pos), level.object_by_id(dmg_tgt.id) and 1 or 0, h, r, b))
+	else
+		for _, s in ipairs(dmg_spawned) do
+			local o = level.object_by_id(s.id); local d, al, en = -1, -1, -2
+			if o then d = o:position():distance_to(a:position()); al = o:alive() and 1 or 0
+				local okb, be = pcall(function() return o:best_enemy() end); en = (okb and be) and be:id() or -1 end
+			m(string.format("DMG_MUT,%d,%d,%s,%.2f,%d,%d,%.4f,%.4f,%.4f", now, s.id, s.sec, d, al, en, h, r, b))
+		end
+	end
+end
 local on_quit
 local function on_update()
 	local a = db.actor; if not a then return end
@@ -359,15 +432,18 @@ local function on_update()
 			if not ok then m("CHANGER_ERROR," .. tostring(L)) else for _, c in ipairs(L) do if c.from == level.name() or c.to == level.name() then
 				m(string.format("CHANGER,%s,%s,%s,%.3f,%.3f,%.3f,%d,%d", c.name, c.from, c.to, c.pos.x, c.pos.y, c.pos.z, c.lvid, c.gvid)) end end end
 		end
-		get_console():execute("g_god on")   -- retry amendment: engine-level god mode (registered with -dbg)
+		if dmg_mode then m("DMG_MODE," .. dmg_mode) end
+		get_console():execute((dmg_mode and dmg_mode ~= "prot") and "g_god off" or "g_god on")   -- retry amendment: engine-level god mode (registered with -dbg)
 		if t2 and t2_absorb > 0 then get_console():execute("g_freeze_absorb_ms " .. t2_absorb); m(string.format("ABSORB_ON,%d,%d", now, t2_absorb)) end
 		m(string.format("S,%d,actor_id=%d,switch_distance_at_load=%.1f,export=%s,wait_ms=%d,g_god=%s", now, a:id(), alife():switch_distance(), tostring(do_export), WAIT_MS, tostring(get_console():get_bool("g_god"))))
 	end
 	if a.health < min_health then min_health = a.health end
 	-- retry amendment: refill to 1.0 on EVERY update (god mode does not block set_health_ex, which GAMMA's balancer uses);
 	-- REFILL lines only for drops below 0.5
+	if dmg_mode ~= "god_off_norefill" then
 	if a.health < 0.5 then refills = refills + 1; m(string.format("REFILL,%.2f,%d,%.3f", (now - t0) / 1000, now, a.health)) end
 	if a.health < 1.0 then a:set_health_ex(1.0) end
+	end
 	local t = (now - t0) / 1000
 	if t2 then   -- B1-T2: no track; the pose drives the actor once the warm-up is over (t >= 0)
 		-- long-stop check (Overseer, pre-flight 2): once a second G,<time_global>,<os.time>,<frame>,<game.time ms>,<alife objects>;
@@ -380,6 +456,7 @@ local function on_update()
 		if g_f_until and wall <= g_f_until then m(string.format("F,%d,%.1f", now, device().f_time_delta * 1000)) end
 		if now - (g_last_g or -1e9) >= 1000 then g_last_g = now
 			m(string.format("G,%d,%d,%d,%.0f,%d", now, wall, device().frame, gtime(), alife():object_count())) end
+		if dmg_mode and t >= 0 then dmg_step(a, now, t) end
 		if t >= 0 then t2_pose(a, now, t) end
 		if do_export and now - last_exp >= 100 then last_exp = now; export(now, t) end
 		return
@@ -399,6 +476,7 @@ local function on_before_hit(s_hit, bone_id, flags)
 	w(string.format("h,%.2f,%d,%s,%s,%d,%.4f,%s", t0 and (time_global() - t0) / 1000 or -1e9,
 		d and d:id() or -1, d and d:section() or "none", kind(d), s_hit and s_hit.type or -1, s_hit and s_hit.power or -1, tostring(bone_id)))
 	if out then out:flush() end
+	if dmg_mode and dmg_mode ~= "prot" then return end   -- pre-flight E witness: log only, the hit goes through
 	flags.ret_value = false; if s_hit then s_hit.power = 0 end; cancels = cancels + 1   -- as momo_multihit_fix.script
 end
 
@@ -425,11 +503,13 @@ function on_game_start()
 	-- (the marker is emptied, not removed: an empty marker counts as none)
 	do local f = io.open(DIR .. "cross.txt", "rb"); if f then local l = (f:read("*l") or ""):gsub("\r", ""); f:close()
 		if l ~= "" then t3_crossed = l; f = io.open(DIR .. "cross.txt", "wb"); if f then f:close() end end end end
+	do local f = io.open(DIR .. "dmgtest.txt", "rb"); if f then local l = (f:read("*l") or ""):gsub("%s", ""); f:close()
+		if l == "prot" or l == "god_off" or l == "god_off_norefill" then dmg_mode = l end end end
 	meta = io.open(DIR .. "meta_" .. tag .. ".csv", t3_crossed and "a" or "w")
 	if not meta then printf("p1: CANNOT OPEN META FILE"); active = false; return end
 	RegisterScriptCallback("actor_on_update", on_update)
 	RegisterScriptCallback("actor_on_before_hit", on_before_hit)
-	RegisterScriptCallback("actor_on_hit_callback", function() if db.actor and db.actor.health < 1.0 then db.actor:set_health_ex(1.0) end end)  -- second refill point, after each hit
+	RegisterScriptCallback("actor_on_hit_callback", function() if dmg_mode ~= "god_off_norefill" and db.actor and db.actor.health < 1.0 then db.actor:set_health_ex(1.0) end end)  -- second refill point, after each hit
 	RegisterScriptCallback("on_before_level_changing", on_quit)
 	RegisterScriptCallback("actor_on_net_destroy", on_quit)   -- "on_game_end" is not a callback in this GAMMA build (prereg section 30)
 	-- summary also every 60 s of track time so a killed run keeps it

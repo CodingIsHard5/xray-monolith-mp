@@ -13,9 +13,11 @@ until ! "$T/protected-title-check.sh" >/dev/null 2>&1 && ! pgrep -x sober >/dev/
 "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1
 log "slice granted, load $(cut -d' ' -f1-3 /proc/loadavg)"
 SHM=/dev/shm/itrz_b1; mkdir -p $SHM; rm -f $SHM/pose.txt $SHM/snap.txt
+# pre-flight E (section 46): PF_DMG=prot|god_off|god_off_norefill switches the script's forced-damage test mode on for this boot only
+rm -f $SHM/dmgtest.txt; [ -n "${PF_DMG:-}" ] && echo "$PF_DMG" > $SHM/dmgtest.txt
 python3 tools/t2_preflight_pose.py $SHM $O/pose_written.csv ${PF_POSE_ARG:-} > $O/pose_writer.log 2>&1 & PW=$!
 T2_EXE=${PF_EXE:-RefDet14.exe} T2_ABSORB=${PF_ABSORB:-0} T2_ABSORB_SKIP=${PF_ABSORB_SKIP:-0} T2_STALL_S=${PF_STALL_S:-20} T2_RUN_S=${PF_RUN_S:-240} T2_STALL_AT=${PF_STALL_AT:-99999} T2_KILL_AT=${PF_KILL_AT:-120} T2_PAUSE=${PF_PAUSE:-1} T2_FREEZE=${PF_FREEZE:-} tools/t2_xray.sh $O/run none-itr2 > $O/t2_xray.out 2>&1; rc=$?
-kill $PW 2>/dev/null; wait $PW 2>/dev/null; rm -f $SHM/pose.txt
+kill $PW 2>/dev/null; wait $PW 2>/dev/null; rm -f $SHM/pose.txt $SHM/dmgtest.txt
 log "t2_xray rc=$rc"
 "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1; "$T/quiet-required.sh" release $W >/dev/null 2>&1   # withdraw FIRST
 log "slice end"

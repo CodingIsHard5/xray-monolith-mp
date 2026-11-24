@@ -1046,3 +1046,56 @@ fields stays v1 and takes the T2 path, unchanged.
   - Export cost: mean 711 us, p99 1,358 us, max 8,491 us (one run; no speed claim).
 - **Not covered:** a real hit on the actor; radiation fields and anomalies; a level crossing with the bridge live
   (R3, next); a real player's stance.
+
+## 46. Correction to section 45, and pre-flight E (forced damage at the actor), registered BEFORE its boots
+
+- **Correction (my error in wording T3's check 14):** every run since the P1 retry turns engine god mode on
+  (`g_god on`). In the engine, god mode zeroes a hit on the actor and returns before the script hit callback runs
+  (Actor.cpp:671), so the script's hit handler never fires and `hits` is always 0. This was already recorded in
+  PREREG-P1-puppet ("hit logging under god mode: FAILED, not measurable"). Check 14 (hits = cancelled) could
+  therefore not fail. The T3 result stands (no damage occurred); check 14 carries no evidence.
+- **Overseer's ruling (2026-11-24):** Caden's requirement is that X-Ray's actor takes no damage. "Logged" was the
+  Overseer's wording for diagnosis, not Caden's rule. Pre-flight E now, with the current exe and no engine change;
+  a hit log line in the god-mode path is optional, low priority, later.
+- **What protects the actor today:** engine god mode, plus a health refill to 1.0 on every actor update and after
+  each hit. With god mode off, GAMMA's own damage script lowers health directly inside the hit callback.
+- **Script (sha256 a0322a90...944b8, was 1d7143cf...):** a test mode that is ON only if the bridge tmpfs holds
+  `dmgtest.txt` with `prot`, `god_off` or `god_off_norefill`. Only tools/t2_preflight.sh (bdd67a5b...58af7) writes
+  that file (PF_DMG) and removes it after the boot. Offline: without the file, a 60 s play run and a named crossing
+  give the same lines as 1d7143cf; with it, the three phases run in the stub.
+  - `rad`, track time 20-80 s: the actor is pinned at the centre of the nearest `zone_field_radioactive*` object of
+    the level. `anom`, 80-140 s: the same for the nearest `zone_mine_*` of kind electric, acid, chemical, thermal or
+    gravitational. `mut`, 150-240 s: `dog_strong_red`, `boar_01a_hard` and `cat_strong_a` are spawned 4 m from the
+    actor, which the pose holds in place. Each target is logged by name and section (`DMG_TARGET`, `DMG_SPAWN`).
+  - Once a second: `DMG_AT` (distance to the zone centre, zone online, health, radiation, bleeding) or `DMG_MUT`
+    (per mutant: distance, alive, its enemy, and the actor's three values). `DMG_PHASE_END` per phase.
+  - `prot`: god mode on, refill on, as in every run so far. `god_off`: god mode off, the script's own hit cancel
+    off, refill on. `god_off_norefill`: refill off too; below health 0.2 the script sets it back to 1.0 and logs
+    `DMG_FLOOR`, because a death would end the run.
+- **Runs:** tools/t3_pfE.sh (29ecc163...b293e): three X-only boots of about 7 min, each its own WANT slice with a
+  20-min claim, in the order god_off_norefill, god_off, prot. Stand-in writer mode `nofreeze` (the actor held at its
+  start point). Stance14.exe b4ce9c77..., t2_xray.sh 96160265... (unchanged). Out dirs out/t3pfE_<mode>.
+- **Each boot scored ONCE with t3_pfE_check.py (bcabd34b...1c48c) `<out dir> <mode>`.**
+  - All modes: (1) clean run, the mode line, god mode on for prot and off for the witnesses; (2) rad: one target
+    and at least 40 lines with the actor within 1.5 m of the zone centre and the zone online; (3) anom: the same;
+    (4) mut: three spawned and at least one mutant engaged for at least 10 lines (alive, its enemy is the actor,
+    within 3 m).
+  - prot, (5): health >= 0.999, radiation <= 0.0001, bleeding <= 0.0001 on every line, in every phase and in the
+    VITALS line; 0 refills.
+  - Witnesses, (W): damage shows in EVERY phase (hits logged, or health below 0.99, or radiation or bleeding above
+    0.001); god_off_norefill also needs health below 0.9 or radiation above 0.01 in at least one phase.
+- **Reading the three results together:** the no-damage claim holds for a source only if the witness shows damage
+  from that source and prot shows none. A phase with no damage in the witnesses proves nothing for that source.
+- **Checker witnesses:** PASSES stub data in prot; FAILS stub data as a witness (the stub does no damage); FAILS
+  pre-flight D's data on all five.
+- **Evidence of engagement is by position and target, not by animation:** the script cannot read the mutant's
+  attack animation; the witness boots' hit lines (god mode off, so the callback fires) name the hitter.
+- **Guess, written before the boots:** all three boots PASS: 35 %. Named risks: a zone gives no damage to an actor
+  standing still at its centre, or the centre is under the ground (25 %); the actor dies in a witness boot despite
+  the refill or floor (15 %); no radiation field or usable anomaly on Cordon in this save (10 %); the spawned
+  mutants do not attack or spawn badly (10 %); prot shows a radiation or bleeding change that god mode does not
+  cover (10 %).
+- **Stop rule:** a boot with rc not 0 stops the series. A FAIL is reported with its cause, not tuned; at most one
+  retry, registered first.
+- **Rule One:** the spawns and placements happen only in these test boots, on the project's own test save, which is
+  not written (hash checked before and after).

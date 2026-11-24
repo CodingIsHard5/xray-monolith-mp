@@ -42,10 +42,13 @@ LEVEL = os.getenv("STUB_LEVEL") or "l01_escape"; CHANGED = nil
 clsid = { level_changer_s = 77 }
 local GV = { [10]=1, [20]=2, [30]=3 }; local LN = { "l01_escape", "l02_garbage", "l03_agroprom" }
 function game_graph() return { vertex=function(_, g) return { level_id=function() return GV[g] end } end } end
-local OBJ = { [5]={c=77,n="esc_to_gar",g=10,dg=20,dp=V(1,2,3),dl=111}, [6]={c=77,n="gar_to_esc",g=20,dg=10,dp=V(4,5,6),dl=222}, [7]={c=77,n="gar_to_agr",g=20,dg=30,dp=V(7,8,9),dl=333}, [8]={c=5,n="npc",g=10}, [9]={c=77,n="esc_to_gar_2",g=10,dg=20,dp=V(11,12,13),dl=444} }
+local OBJ = { [5]={c=77,n="esc_to_gar",g=10,dg=20,dp=V(1,2,3),dl=111}, [6]={c=77,n="gar_to_esc",g=20,dg=10,dp=V(4,5,6),dl=222}, [7]={c=77,n="gar_to_agr",g=20,dg=30,dp=V(7,8,9),dl=333}, [8]={c=5,n="npc",g=10}, [9]={c=77,n="esc_to_gar_2",g=10,dg=20,dp=V(11,12,13),dl=444},
+  [11]={c=1,n="rad_far",s="zone_field_radioactive_weak",g=10,p=V(900,0,900)}, [12]={c=1,n="rad_near",s="zone_field_radioactive_strong",g=10,p=V(-200,-19,-140)}, [13]={c=1,n="rad_other_level",s="zone_field_radioactive_weak",g=20,p=V(-221,-19,-145)},
+  [14]={c=1,n="anom_el",s="zone_mine_electric_weak",g=10,p=V(-210,-19,-150)}, [15]={c=1,n="anom_ghost",s="zone_mine_ghost",g=10,p=V(-221,-19,-145)} }
 function alife() return { switch_distance=function() return 450 end, object_count=function() return 0 end, level_name=function(_, i) return LN[i] end,
   object=function(_, id) local o = OBJ[id]; if not o then return nil end
-    return { clsid=function() return o.c end, name=function() return o.n end, m_game_vertex_id=o.g, dest_game_vertex_id=o.dg, dest_position=o.dp, dest_level_vertex_id=o.dl, position=V(0,0,0) } end } end
+    return { clsid=function() return o.c end, name=function() return o.n end, section_name=function() return o.s or "other" end, m_game_vertex_id=o.g, dest_game_vertex_id=o.dg, dest_position=o.dp, dest_level_vertex_id=o.dl, position=o.p or V(0,0,0) } end,
+  create=function(_, sec) NCREATE = (NCREATE or 0) + 1; if sec == os.getenv("STUB_BADSEC") then error("no section") end; return { id = 500 + NCREATE } end } end
 function ChangeLevel(pos, lvid, gvid, ang) CHANGED = string.format("%g,%g,%g,%d,%d", pos.x, pos.y, pos.z, lvid, gvid); error("LEVEL_CHANGE") end
 function get_console() return { execute=function() end, get_bool=function() return true end } end
 function profile_timer() return { start=function() end, stop=function() end, time=function() return 500 end } end
@@ -53,6 +56,8 @@ function getFS() return { update_path=function(_,a,b) return b end } end
 local CB = {}
 function RegisterScriptCallback(n, f) CB[n] = CB[n] or {}; table.insert(CB[n], f) end
 if HAS_STANCE then db.actor.set_actor_stance = function(_, k) STANCE = k end end
+db.actor.radiation = tonumber(os.getenv("STUB_RAD") or "0"); db.actor.bleeding = 0; db.actor.level_vertex_id = function() return 1 end; db.actor.game_vertex_id = function() return 10 end
+level.object_by_id = function(id) if id >= 500 then return { position=function() return V(apos.x + 2, apos.y, apos.z) end, alive=function() return true end, best_enemy=function() return db.actor end } elseif id == 12 or id == 14 then return {} end end
 dofile(SCRIPT); on_game_start()
 local function tick(ms) NOW = NOW + ms; for _, f in ipairs(CB.actor_on_update) do f() end end
 local T = {}
