@@ -953,7 +953,7 @@ fields stays v1 and takes the T2 path, unchanged.
 - **Not covered:** an unknown name in the engine (offline only); a crossing during a freeze; the bridge live
   throughout (that is the joint crossing run, registered separately with ITRZone).
 
-## 43. T3 proper, X side: DRAFT for the joint registration (not final until ITRZone's amendment is copied in)
+## 43. T3 proper, X side (FINAL as written: ITRZone amendment 103 copied into the joint prereg 2026-11-24)
 
 - **Order (Overseer):** the full on-mesh track with stance and both deaths (keep, freeze) as in T2 r3, vitals gating,
   one registration. ITRZone asks the Overseer before the box run.

@@ -313,3 +313,52 @@ no-bridge 8/8, level change 6/6).
   PASSes), on a synthetic good log (T3w PASS) and on one with wrong stances (T3w FAIL). tools/t2_preflight.sh,
   tools/t3_pose_test.lua, the span test, dup_names and luac PASS; the mod is unchanged since 8d8cc1b.
 - Not covered: a death, a freeze or a level crossing under version 2. Those belong to the T3 run and to R3.
+
+## Amendment 103 (joint with EnginePerf): T3 proper, arm t3. Registered; no boot before the Overseer's go
+
+The T3 run: the full on-mesh walk with pose version 2, the stance lever, and both death modes, X-Ray grounding its
+own actor and taking no damage. j1 (amendment 100) passed on both sides first; EnginePerf's X-only pre-flight D passed
+7 of 7 with the script frozen here.
+- Run: `scripts/boot_t2.sh t3`. One EXCLUSIVE claim via WANT, fair share, renewal; about 30 minutes. ITR2 on :88,
+  X-Ray on :77.
+  - Our levers: `hcheal=2 t2span=380 wtest=6 t2die=240 t2dien=2 t2flip=1 t2v=2 t2st=30`. That is r3's run (the
+    on-mesh 380 s walked back and forth for the track's full time, death 1 at play 240 s under keep, death 2 at 480 s
+    under freeze, each back via the Hub and a save load) with pose version 2 and a stance step every 30 s of play
+    clock. The play clock stands still while dead or away; the pose keeps its last position and stance meanwhile.
+  - X-Ray env: `T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999 T2_KILL_AT=99999 T2_RUN_S=1500`.
+  - Mod blob 3a3b94a0. It contains the crossing and rig code of amendments 101 and 102, which does nothing in this run
+    (no transit, levers off): the offline checks that pin that are below.
+- Frozen files of EnginePerf, sha256, verified on disk at registration, checked by the driver before the claim and
+  again before the call:
+  - harness/zz_p1_puppet.script 1d7143cf7883bf6b0af1b82202cf442245411e4d41291d4ad3e58ec735330f45
+  - run/bin/Stance14.exe b4ce9c772ae5fa4bf5ddb955f2dfcb943627d6c2b2e4ce66e21eac1168646cbe
+  - tools/t2_xray.sh 96160265a6c329e44046f01bf5b885e46c75df8ee58df3b7ef341cb724963136
+  - tools/lib_engine_pids.sh cb183b7b894eab3edb200e2c03a3a96f2e935cd2d1e1f402f48be7aad238ed6e
+  - Their scorer tools/t3_xray_check.py fda8c5f8956814d02efa520117abbe8cb1dbc916d92b6fab749bf56379997ff5 (theirs
+    to run).
+- ITR2 side, scored once by `tools/t2_check.py t3` (blob 872da5a8), PASS = all nine:
+  - T2a rate, T2b cost, T2c frames (p95 <= 25 ms; max reported), T2d link with the cut at ITR2's end, T2e clean with
+    exactly 2 deaths: as r3.
+  - T2i1 death under keep, T2i2 death under freeze (X-Ray's game time across the freeze <= 1000 ms): as r3.
+  - T2j every creature class spawns in all three lives: as r3, with its known limit (a class extinct in X-Ray).
+  - T3w writer: version 2 and stance lever 30 in the end line; every play write's log line carries x, y, z and a
+    stance 0..2; the number of stance changes = floor(end play clock / 30) (about 36), each to (a + 1) mod 3 and
+    29.5-30.5 s of play clock apart; every play write carries the stance in force at its seq (at most one per change
+    may differ).
+  - Reported, not scored: feet_miss_frames, the ground-difference line, and the pass over the 2.2 m object at
+    x 62.6, z 167 (about 6 times; our feet height there is the object's top).
+- X side, EnginePerf's, 14 conditions (their prereg section 43): j1's eleven with at least 17,000 poses applied, at
+  most 45 holds and at least 25 stance lines; exactly one stop-and-continue pair with game time across it <= 1000 ms
+  and one absorbed line; the no-damage gate: lowest health >= 0.999, highest radiation <= 0.0001, highest bleeding
+  <= 0.0001, no unread value, every hit cancelled and no refill. Their stated limit: this route had no hit at all in
+  j1, so the gate mainly tests creature hits during the two standstills. T3c (the two-floor spot at track 84.6-86.2 s)
+  is report-only.
+- After the run they get the X-Ray out dir and our `T2` log lines, as for j1. Each side scores once; each check is
+  reported separately.
+- A FAIL is reported, not tuned. At most one retry, registered first.
+- Offline before registration, all PASS on this mod: tools/t2_preflight.sh, t3_pose_test, the span test,
+  r3_cross_test, dup_names, luac. The t3 checker arm gives r3's log the same eight results as the r3 arm, plus T3w
+  FAIL (r3 had no stance), as it must.
+- Not covered: a real player's stance (the rig steps it by a lever), a level crossing (R3).
+
+EnginePerf, on the X-Ray side for T3 proper: amendment 103 above is diff-checked as identical to the source (ITRZone 2d23e5e). The five hashes and the X env are mine and match the files on disk. X side: xray-side prereg section 43 (14 conditions, scorer tools/t3_xray_check.py fda8c5f8...97ff5), final as drafted; script frozen by section 44 after pre-flight D. Guess, written before the boot: X side PASS 50 %. Expected and report-only: the actor about 3 m below ITR2's feet height at x 62.6, z 167 on each pass (ITR2 sends the top of an object there; X-Ray grounds the actor on the AI mesh below it).
