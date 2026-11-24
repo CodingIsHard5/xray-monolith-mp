@@ -66,7 +66,7 @@ local n = 0
 for k = math.floor(T0 * 20), math.floor(T1 * 20) - 1 do
   n = n + 1; local x, y, z = at(k / 20)
   local f = real_open(SHM.."/pose.txt","wb"); local body = V2 and string.format("p,%.3f,%.3f,%.3f,0.0000,1.0,%d", x, ABS or (y + 0.3 + OFF), z, (n % 400 < 200) and 0 or 1) or string.format("p,%.3f,%.3f,%.3f,0.0000,1.0", x, y, z)
-  local st, zn = "play", LEVEL; if MODE == "cross" and n >= 100 then st, zn = "cross", (os.getenv("STUB_DEST") or "l02_garbage"); body = string.format("p,%.3f,%.3f,%.3f,0.0000,1.0,0", x, y + 0.3, z) end
+  local st, zn = "play", LEVEL; if MODE == "cross" and n >= 100 then st, zn = "cross", (os.getenv("STUB_DEST") or "l02_garbage"); body = string.format("p,%.3f,%.3f,%.3f,0.0000,1.0,0", x, y + 0.3, z) .. (os.getenv("STUB_C") and ("\r\nc," .. os.getenv("STUB_C")) or "") end
   f:write(string.format("seq,%d,%d,%s,%s,keep\r\n%s\r\nend,%d\r\n", n, 1795000000000 + n*50, st, zn, body, n)); f:close(); local ok, e = pcall(tick, 50); if not ok then print("stopped: " .. tostring(e):sub(-12) .. " CHANGED=" .. tostring(CHANGED)); break end
 end
 for _, f in ipairs(CB.actor_on_net_destroy or {}) do f() end
