@@ -96,6 +96,9 @@ while :; do
         # STOP row: game time of X-Ray's LAST frame before the gap (pre-flight 3: the arming time was up to ~1 s
         # earlier, which at factor 6 read as 3 s of game time that the absorb never had to remove)
         echo "$SU,STOP,$SST,$FZP,${gpre:-}" >> "$O/freeze.csv"; echo "$CU,CONT,$pst,$FZP,${gms:-}" >> "$O/freeze.csv"; FZP=""; fi; same=0; fi
+    # T3 R3: while the pose says `cross`, X-Ray is changing level (no export during the load): heartbeat skipped, no stop
+    if [ "${pst:-}" = cross ]; then [ -z "${cx:-}" ] && { cx=1; log "cross hold: heartbeat skipped (seq ${s:-none})"; }; same=0
+    elif [ -n "${cx:-}" ] && [ -n "${pst:-}" ]; then cx=""; log "cross hold end: pose state $pst (seq ${s:-none})"; fi
     [ $same -ge 30 ] && { why="no new seq for 30 s"; break; }
     if [ -z "${FZP:-}" ] && [ -z "$(engine_main "$EXE")" ]; then gone=$(( ${gone:-0} + 1 )); [ $gone -ge 3 ] && { kill $WP 2>/dev/null; break; }; else gone=0; fi
     # (engine gone: stop the watcher so tb_run can finish; tb_run's own rc then decides: 0 = normal end, else a crash)

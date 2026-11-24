@@ -786,3 +786,50 @@ fields stays v1 and takes the T2 path, unchanged.
 - **Guess, written before the boots:** PASS 85 %. Risk: a boot ends early for an unrelated reason (the T1 retry
   crash class).
 - **Stop rule:** FAIL means find the cause first; at most one retry.
+
+## 38. No-bridge check RESULT: PASS. Pre-flight C (R3: level change on a `cross` pose) registered BEFORE its boot
+- **No-bridge run:** out/t3nb, slice 2026-11-24 03:22-04:00, script 751022ac..., two full T1 track boots. Scored ONCE
+  with t3_nobridge_check.py.
+- **Result: PASS, 8 of 8.** Both boots: track ended, rc 0, no FATAL; no STANCE line and no `set_actor_stance`
+  anywhere; 0 crouch and 0 low-crouch frames (Stance14 68,766 frames, Absorb14 68,979), 0 unread. The export read
+  -1 (never set) on Stance14 and is absent on Absorb14.
+- **Reported:** SUMMARY lines alike (hits 0, cancelled 0, min health 1.0; export mean 587 us vs 563 us, p99 1,018 us
+  vs 1,052 us; one run each, so no speed claim).
+- **My guess:** PASS (85 %): right. With sections 36 and 37 this closes section 34's checks 1-3 for the stance export.
+- **Script for C (sha256 d5283d23...), change from 751022ac:**
+  - Pose state `cross` whose zone is not the current level: once, find a level changer in the save that stands on
+    this level and leads to that level (server objects of class level_changer_s; levels from the game graph), log
+    `CROSS_REQ,<tg>,<seq>,<from>,<to>,<changer>,<dest x,y,z>,<lvid>,<gvid>,<pose utc>`, flush, write the marker file
+    `cross.txt` on the bridge tmpfs, and call the stock `ChangeLevel(dest position, lvid, gvid, zero angle)`.
+    `CROSS_NOCHANGER` or `CROSS_ERROR` otherwise. `cross` never arms the absorb and is never stopped.
+  - My reading (untested): the level change restarts the Lua state. So at start a non-empty marker means "continue
+    the same log": the meta file is opened in append mode and the marker is emptied; the first update logs
+    `CROSS_RESUME,<tg>,<level>,<marker>`.
+  - Every start logs `CHANGER,<name>,<from>,<to>,<dest x,y,z>,<lvid>,<gvid>` for the changers from or to the current
+    level (the table ITRZone asked for). A failure of that lookup logs `CHANGER_ERROR` and nothing else changes.
+  - Play path otherwise unchanged. Offline: the cross, resume and no-changer cases behave as described
+    (t3c-draft/t3c_stub.lua); the earlier v2, v1 and off-mesh cases give the same counts with the lookup failing in
+    the old stub (CHANGER_ERROR logged, nothing else affected).
+- **Runner t2_xray.sh (96160265..., was 6ae8d27f...):** one addition: while the pose state is `cross` the 30 s
+  "no new seq" rule is skipped and logged ("cross hold"). No stop is sent.
+- **Stand-in writer (f3455247...), mode `cross:<dest>:<track>`:** v2 track poses for 40 s, then `cross` with zone
+  <dest> until the snapshot header names <dest> and 30 s more, then `play` on the new level at the actor's own
+  snapshot position (yfloor = its height + 0.3).
+- **Pre-flight C (X-Ray only, one WANT slice, 20-min claim, one boot):**
+  `PF_OUT=out/t3pfC PF_EXE=Stance14.exe PF_FREEZE=sigstop PF_ABSORB=2000 PF_PAUSE=0 PF_KILL_AT=99999 PF_RUN_S=320
+   PF_POSE_ARG=cross:l02_garbage:<cordon_full_track.csv> tools/t2_preflight.sh`
+- **Scored ONCE with t3_pfC_check.py (80ba5729...) `out/t3pfC l01_escape l02_garbage`. PASS needs all of:**
+  (1) rc 0, no Lua error naming the script, no FATAL ERROR; (2) exactly one CROSS_REQ l01_escape -> l02_garbage and
+  no CROSS_NOCHANGER / CROSS_ERROR; (3) exactly one CROSS_RESUME on l02_garbage after it; (4) the snapshot header
+  names l02_garbage at most 180 s after the first `cross` pose; (5) after the resume at least 200 P2 lines and no
+  GUARD; (6) the runner logged the cross hold and there is no restart row.
+- **Witnesses:** the checker FAILS pre-flight B's data (conditions 2-6) and PASSES stitched stub data.
+- **Report-only:** the load time, the CHANGER table, HOLD count on the new level, the summary lines of both Lua
+  states, anything unexpected in the engine log around the change.
+- **Guess, written before the boot:** PASS 35 %. This is the first level change in this harness. Named risks: the
+  Lua state does not restart the way I read it, or the script does not start again on the new level (25 %); the
+  headless run's own overlay ends or hangs the run at the change (20 %); no changer found because the class or field
+  names differ in this build (15 %); the load takes over 180 s (10 %).
+- **Stop rule:** FAIL means find the cause first; at most one retry. A crash stops everything.
+- **The run writes an autosave on the level change into the project's own run/appdata (never Caden's saves; the
+  runner's no-guard check stays on).**

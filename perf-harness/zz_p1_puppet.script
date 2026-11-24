@@ -148,6 +148,26 @@ local function mvstate()
 	if not cr then return 0 end
 	local ok2, ac = pcall(IsMoveState, 'mcAccel'); return (ok2 and ac) and 2 or 1
 end
+local t3_cross_done, t3_crossed = false, nil
+-- every level changer in the save: name, level it stands on, destination level, destination position / vertices
+local function t3_changers()
+	local L, sim, gg = {}, alife(), game_graph()
+	for id = 1, 65534 do
+		local se = sim:object(id)
+		if se and se:clsid() == clsid.level_changer_s then
+			local ok, dg = pcall(function() return se.dest_game_vertex_id end)
+			if ok and dg then
+				L[#L + 1] = { name = se:name(), from = sim:level_name(gg:vertex(se.m_game_vertex_id):level_id()), to = sim:level_name(gg:vertex(dg):level_id()),
+					pos = se.dest_position, lvid = se.dest_level_vertex_id, gvid = dg, at = se.position }
+			end
+		end
+	end
+	return L
+end
+local function t3_find_changer(to)
+	local here = level.name()
+	for _, c in ipairs(t3_changers()) do if c.from == here and c.to == to then return c end end
+end
 local T3_PROBE_UP, T3_BAND, T3_LIFT, T3_YTOL, T3_GUARD = 0.7, 3.0, 0.05, 0.7, 5.0
 local t3_ray, t3_ray_warned, t3_ly
 local t3_gx, t3_gy, t3_gz, t3_guards, t3_stance_last, t3_stance_warned = nil, nil, nil, 0, nil, false
@@ -228,6 +248,23 @@ local function t2_pose(a, now, t)
 		return end
 	p_last = n; p_last_t = now
 	if p_stale then p_stale = false; m(string.format("RESUME,%.2f,%d,%d", t, now, n)) end
+	-- R3 (T3): pose state `cross` with a zone that is not this level = ITR2's player crossed to that level. Find a
+	-- level changer on this level that leads there and change level through it. ChangeLevel acts at once and the Lua
+	-- state does not survive, so the log line and the marker file are written first. No arm, no stop.
+	if state == "cross" and zone ~= level.name() then
+		if not t3_cross_done then t3_cross_done = true
+			local ok, c = pcall(t3_find_changer, zone)
+			if not ok then m(string.format("CROSS_ERROR,%d,%d,%s", now, n, tostring(c)))
+			elseif not c then m(string.format("CROSS_NOCHANGER,%d,%d,%s,%s", now, n, level.name(), zone))
+			else
+				m(string.format("CROSS_REQ,%d,%d,%s,%s,%s,%.3f,%.3f,%.3f,%d,%d,%s", now, n, level.name(), zone, c.name, c.pos.x, c.pos.y, c.pos.z, c.lvid, c.gvid, utc))
+				if meta then meta:flush() end
+				local f = io.open(DIR .. "cross.txt", "wb"); if f then f:write(level.name(), ",", zone, ",", utc, "\n"); f:close() end
+				ChangeLevel(c.pos, c.lvid, c.gvid, vector():set(0, 0, 0))
+			end
+		end
+		return
+	end
 	if zone ~= level.name() then m(string.format("ZONE_MISMATCH,%d,%d,%s", now, n, zone)); return end
 	for _, id in ipairs(kills) do
 		if not p_killed[id] then local o = level.object_by_id(id)
@@ -311,6 +348,12 @@ local function on_update()
 	if not t0 then
 		if not t2 and not load_track() then active = false; return end
 		t0 = now + WAIT_MS
+		if t2 then   -- R3: the changers of this level, and the resume line after a level change
+			if t3_crossed then m(string.format("CROSS_RESUME,%d,%s,%s", now, level.name(), t3_crossed)) end
+			local ok, L = pcall(t3_changers)
+			if not ok then m("CHANGER_ERROR," .. tostring(L)) else for _, c in ipairs(L) do if c.from == level.name() or c.to == level.name() then
+				m(string.format("CHANGER,%s,%s,%s,%.3f,%.3f,%.3f,%d,%d", c.name, c.from, c.to, c.pos.x, c.pos.y, c.pos.z, c.lvid, c.gvid)) end end end
+		end
 		get_console():execute("g_god on")   -- retry amendment: engine-level god mode (registered with -dbg)
 		if t2 and t2_absorb > 0 then get_console():execute("g_freeze_absorb_ms " .. t2_absorb); m(string.format("ABSORB_ON,%d,%d", now, t2_absorb)) end
 		m(string.format("S,%d,actor_id=%d,switch_distance_at_load=%.1f,export=%s,wait_ms=%d,g_god=%s", now, a:id(), alife():switch_distance(), tostring(do_export), WAIT_MS, tostring(get_console():get_bool("g_god"))))
@@ -372,7 +415,11 @@ function on_game_start()
 	if not active then return end
 	out = io.open(DIR .. (b1 and "hits_" or "export_") .. tag .. ".csv", "w")
 	if not out then printf("p1: CANNOT OPEN EXPORT FILE"); active = false; return end
-	meta = io.open(DIR .. "meta_" .. tag .. ".csv", "w")
+	-- R3: a level change restarts the Lua state. The marker written before ChangeLevel says "continue the same log".
+	-- (the marker is emptied, not removed: an empty marker counts as none)
+	do local f = io.open(DIR .. "cross.txt", "rb"); if f then local l = (f:read("*l") or ""):gsub("\r", ""); f:close()
+		if l ~= "" then t3_crossed = l; f = io.open(DIR .. "cross.txt", "wb"); if f then f:close() end end end end
+	meta = io.open(DIR .. "meta_" .. tag .. ".csv", t3_crossed and "a" or "w")
 	if not meta then printf("p1: CANNOT OPEN META FILE"); active = false; return end
 	RegisterScriptCallback("actor_on_update", on_update)
 	RegisterScriptCallback("actor_on_before_hit", on_before_hit)
