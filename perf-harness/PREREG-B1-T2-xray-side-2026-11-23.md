@@ -1288,3 +1288,28 @@ fields stays v1 and takes the T2 path, unchanged.
   real mod's cross/play timing differs from my writer's and trips 2, 3 or 7 (10 %); other (5 %).
 - **Stop rule:** a FAIL is reported, not tuned; at most one retry, registered first. ITRZone asks the Overseer
   for the box.
+
+## 52. R3 x1, first run: FAIL (scored once, 2026-11-24). The ONE retry registered BEFORE its boot
+
+- **Run:** X out dir ~/Projects/ITRZone/out/runs/20261124-155139-t2x1-xray, files as frozen in section 51 (hashes
+  rechecked after the run), runner rc 0, one boot, no restart. Test save unchanged; control file absent.
+- **What happened:** ITR2 crashed in the frame of its arrival on Garbage, after the first crossing (ITRZone's
+  report: its own transit did not empty its puppet table; its amendment 110). So no play pose after the crossing
+  and no second crossing ever reached X-Ray.
+- **X side, each check:** 1 PASS (rc 0, no Lua error, no FATAL, no DMG line). 2 FAIL (one CROSS_REQ, not two; the
+  one is correct: named changer, D's destination and vertices). 3 FAIL (one CROSS_RESUME, on Garbage). 4 FAIL (no
+  play pose after the cross pose). 5 FAIL (952 P2 before the request, 0 after; 0 GUARD, 0 HOLD). 6 FAIL (no P2
+  after the resume). 7 FAIL (one cross hold; no restart row). 8 PASS (0 of 952 P2 off). 9 FAIL (two VITALS lines,
+  not three; both clean, no REFILL). **X SIDE: FAIL.**
+- **Cause on the X side: none found.** Every failed check needs data ITR2 never sent. What X-Ray did with what it
+  got: crossed by the named changer, resumed on Garbage, then ran about 390 s on a stale pose file with no crash,
+  no guard, no hit and clean vitals.
+- **Seen, report-only, not explained yet:** on Garbage the MOVESUM line shows the actor crouched on all 31,915
+  frames with no stance set by the script (stance_api=-1). The actor was crouched when it crossed (track stance
+  step). Likely the crouch bit survives the level change and nothing clears it without a pose; untested.
+- **Guess scored:** I wrote X PASS 65 %; it failed. My named risks did not include ITR2 dying at arrival.
+- **The one retry (ITRZone's second x1):** amendment 107's text, my four files, env, checker c19740e8 and the nine
+  conditions are all unchanged; only ITR2's mod changes (its amendment 110, commit 9c497a2). Scored once, same
+  command with the new out dir. **Guess, written before the boot: X PASS 55 %.** Risks: ITR2 fails again at or
+  after arrival, so my data is short (25 %); with the first real play poses on Garbage, a stance or height
+  read-back differs or a HOLD/guard trips (15 %); other (5 %). A second FAIL stops R3 x1 and goes to the Overseer.
