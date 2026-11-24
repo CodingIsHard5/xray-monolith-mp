@@ -4638,6 +4638,34 @@ static bool vr_bpo_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 				}
 				made += P.vis ? 1 : 0;
 			}
+		// the panels wear the backpack's own texture (the engine's per-model texture swap, the one scripts use), each surface
+		// keeping its own shader; -vr_bp_open_wood keeps the crate's texture for comparison
+		LPCSTR canvas = nullptr;
+		if (!strstr(Core.Params, "-vr_bp_open_wood"))
+		{
+			xr_vector<IRenderVisual*>* bc = bag->get_children();
+			canvas = (bc && !bc->empty()) ? (*bc)[0]->getDebugTextureDef() : bag->getDebugTextureDef();
+		}
+		int swapped = 0;
+		if (canvas && canvas[0] && made == 5)
+			for (vr_bpo_panel& P : s_vr_bpo)
+			{
+				xr_vector<IRenderVisual*>* pc = P.vis->get_children();
+				if (pc && !pc->empty())
+				{
+					for (IRenderVisual* c : *pc)
+					{
+						c->SetShaderTexture(c->getDebugShaderDef(), canvas);
+						++swapped;
+					}
+				}
+				else
+				{
+					P.vis->SetShaderTexture(P.vis->getDebugShaderDef(), canvas);
+					++swapped;
+				}
+			}
+		Msg("* [vr13o] frame %u open bag: texture '%s' set on %d panel surfaces", f, canvas ? canvas : "(the crate's own)", swapped);
 		Msg("* [vr13o] frame %u open bag: panel model '%s', %d of 5 made; its box %.3f x %.3f x %.3f; wall %.3f m, depth %.3f m", f, name, made, s_vr_bpo_e.x, s_vr_bpo_e.y,
 			s_vr_bpo_e.z, VR_BPO_WALL, VR_BPO_DEPTH);
 	}
