@@ -463,3 +463,38 @@ This replaces amendment 110's plan to run x1 again. Amendment 110's mod block is
   checker run on x1's data gives the same eleven results as scored, and R3p FAIL (no line).
 - Guess: ITR2 side PASS 45 %. Still unseen: puppets spawning in the Garbage, the first crossing's end against X-Ray,
   the way back, 60 s per crossing with X-Ray's part included.
+
+
+---
+
+ITRZone amendment 112, copied verbatim from /home/caden/Projects/ITRZone/PREREG.md at ITRZone commit 619d1ea (2704 bytes). X side: PREREG-B1-T2-xray-side section 54.
+
+## Amendment 112 (REGISTERED 2026-11-24, Overseer's order after x2): two instruments fixed, the R3 pre-flight as a new run, arm x3
+x2 (amendment 111) stands as scored: ITR2 side FAIL 10 of 12 (T2c, R3c), X side PASS 9 of 9 (EnginePerf's section 53).
+Both FAILs were instruments. They are fixed here before the next run, not applied back to x2.
+
+**Changed (scorers only; the mod, the levers, the X side and its four hashes are unchanged, mod blob 60c1c87):**
+1. **T2c reads the summary line.** `t2_check.t0_summary` matches `T0 end ticks=<n> ` exactly; used by t2_check and
+   r3_check (T2c, and T2e's "T0 end present"), and the same match in t0_check and t1_check. The old match took the first
+   line starting `T0 end `, which in x2 was a per-puppet `T0 end id` line.
+2. **R3c reworded to what it was meant to catch:** FAIL if a creature of the OLD level spawns or updates after the transit
+   starts. Per crossing: (a) a `T1 level <old> -> <destination>` line follows the `T2 cross start`, with no `T0 spawn`
+   between the two; (b) from the start to the next crossing's start (or the run's end) no per-puppet line
+   (`T0 <event> id <n>`) carries an id spawned in the level just left; (c) no `T0 FAIL stale puppets` line. Kept: a
+   `T0 stat` with puppets > 0 within 60 s after each crossing's end. Destination-level spawns after the `T1 level` line
+   are allowed, also in the tick that ends the crossing.
+   Known limit: a creature that really walks from one level to the other inside the 60 s stay would fail (b). If that
+   happens it is reported as such, not re-scored.
+3. **Self-test `tools/r3c_selftest.sh`** on x2's real log (local): the summary reader must read p95 18.02 and T2c must
+   PASS on it; R3c must PASS the log as it is and FAIL three mutants (an old-level creature's spawn injected in the
+   Garbage; a spawn injected after the transit start, before X-Ray names the destination; a handoff line of an old-level
+   creature). Result at registration: PASS.
+
+**The run, arm x3** (`scripts/boot_t2.sh x3`): identical to x2 in every lever, hash and X environment. Scored once by
+`tools/r3_check.py` with the twelve checks T2a, T2b, T2c, T2d, T2e, T3w, R3a, R3b, R3c (as reworded), R3h, R3g, R3p.
+PASS = all twelve, and EnginePerf's nine X conditions on their side. One retry only for a run that dies before its data,
+registered first. A crash at an arrival: read the dump before anything else.
+
+Guess before the run: ITR2 side PASS 65 %. x2's data passes all twelve under the fixed scorers, which is why this is not
+higher than it looks: that reading is post-hoc and one run. The main risks are a crossing over 60 s (x2: 48.3 and 49.0)
+and an arrival crash that x2 happened not to hit.

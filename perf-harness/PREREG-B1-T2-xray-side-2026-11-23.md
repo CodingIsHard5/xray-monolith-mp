@@ -1346,3 +1346,20 @@ fields stays v1 and takes the T2 path, unchanged.
   per the stop rule nothing more runs on x1/x2 before the Overseer decides.
 - **Not covered:** a death during a crossing; spots with no AI node; a lost pose writer (design note of
   2026-11-24).
+
+## 54. R3 x3 (ITRZone amendment 112), X side, registered BEFORE its boot
+
+- **Order (Overseer, 2026-11-24):** x2's X PASS 9 of 9 is accepted; ITRZone fixes its two scorers prospectively and
+  registers x3 with everything else unchanged. My X files and conditions stay frozen exactly as in x2.
+- **Files (rechecked on disk at this registration):** script 473dec25...43537, runner t2_xray.sh 6597a067...2a3d7,
+  Stance14.exe b4ce9c77...46cbe, lib_engine_pids.sh cb183b7b...8ed6e. Control file absent.
+- **Env:** T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999 T2_KILL_AT=99999 T2_RUN_S=480.
+- **Scored ONCE** with tools/t3_x1_xray_check.py (c19740e8...2518c), same arguments as x2 with the new out dir. PASS
+  needs all nine conditions of section 51, unchanged.
+- **Witnesses for the checker on real data:** x1's first run FAILS it (section 52); x2 PASSES it (section 53).
+- **Guess, written before the boot: X PASS 80 %.** x2 passed with the same files. Risks: an ITR2 crash at an
+  arrival, which leaves my data short (10 %); run-to-run variation at an arrival (HOLD, guard, stance) (5 %);
+  other (5 %).
+- **Stop rule:** a FAIL is reported, not tuned. One retry only for a run that dies before its data, registered first.
+- **Not part of x3:** the lost-pose work (design note of 2026-11-24) is being drafted in
+  perf-harness/lost-draft/ on copies; no file x3 uses is touched.
