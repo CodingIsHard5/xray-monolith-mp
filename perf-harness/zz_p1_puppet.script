@@ -142,6 +142,7 @@ local T2_NEAR_CELLS, T2_NEAR_H, p_near = 2, 2.0, 0   -- on-mesh test: +-2 cells 
 -- Returns ring, node id, node height; or nil.
 -- real movement state of the actor, as GAMMA's vision script reads it: 0 stand, 1 crouch, 2 low crouch, -1 = cannot read
 local mv_frames, mv_crouch, mv_low, mv_na = 0, 0, 0, 0
+local vit_rad, vit_bleed, vit_na = 0, 0, 0
 local function mvstate()
 	if not IsMoveState then return -1 end
 	local ok, cr = pcall(IsMoveState, 'mcCrouch'); if not ok then return -1 end
@@ -343,6 +344,8 @@ local on_quit
 local function on_update()
 	local a = db.actor; if not a then return end
 	local now = time_global()
+	do local ok, r, b = pcall(function() return a.radiation, a.bleeding end)   -- T3: "the actor takes no damage from anything" (report)
+		if ok and r and b then if r > vit_rad then vit_rad = r end; if b > vit_bleed then vit_bleed = b end else vit_na = vit_na + 1 end end
 	do local k = mvstate(); mv_frames = mv_frames + 1
 		if k == 1 then mv_crouch = mv_crouch + 1 elseif k == 2 then mv_low = mv_low + 1 elseif k < 0 then mv_na = mv_na + 1 end end
 	if not t0 then
@@ -407,6 +410,7 @@ on_quit = function()
 	if t2 then m(string.format("T2SUM,last_seq=%d,torn=%d,holds=%d,paused=%s,near=%d,guards=%d", p_last, p_torn, p_holds, tostring(p_paused), p_near, t3_guards)) end
 	do local a = db.actor; local api = "na"
 		if a and a.get_actor_stance then local ok, v = pcall(a.get_actor_stance, a); api = ok and tostring(v) or "err" end
+		m(string.format("VITALS,min_health=%.3f,max_radiation=%.4f,max_bleeding=%.4f,unread=%d", min_health, vit_rad, vit_bleed, vit_na))
 		m(string.format("MOVESUM,frames=%d,crouch=%d,low=%d,unread=%d,stance_api=%s", mv_frames, mv_crouch, mv_low, mv_na, api)) end
 	out:close(); meta:close(); out, meta = nil, nil
 end

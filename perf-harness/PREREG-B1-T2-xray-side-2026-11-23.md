@@ -833,3 +833,25 @@ fields stays v1 and takes the T2 path, unchanged.
 - **Stop rule:** FAIL means find the cause first; at most one retry. A crash stops everything.
 - **The run writes an autosave on the level change into the project's own run/appdata (never Caden's saves; the
   runner's no-guard check stays on).**
+
+## 39. Pre-flight C RESULT: PASS. Script frozen for the first joint T3 pre-flight
+- **Run:** out/t3pfC, Stance14.exe, script d5283d23..., runner 96160265..., slice 2026-11-24 04:32-04:39, rc 0.
+  Scored ONCE with t3_pfC_check.py (80ba5729...).
+- **Result: PASS, 6 of 6.** One CROSS_REQ l01_escape -> l02_garbage through `esc_level_changer_to_garbage_1`
+  (destination 30.431, 0.489, -326.702, level vertex 188617, game vertex 764); one CROSS_RESUME on l02_garbage; the
+  snapshot named l02_garbage 21.7 s after the first `cross` pose; 5,470 P2 lines on Garbage, 0 GUARD, 0 HOLD;
+  the runner logged the cross hold; no restart; no Lua error, no FATAL.
+- **Reported:** the Lua state did restart as read (the first state wrote its T2SUM / MOVESUM at the change, the second
+  appended to the same file). The engine-time clock kept running (CROSS_REQ at 71,600 ms, CROSS_RESUME at 78,259).
+  Snapshot seq restarted (486 before, 408 at the end of the hold). The project's cordon1 save is unchanged
+  (sha256 6dea752b... before and after). The CHANGER table is in t3-changers-cordon-garbage.csv
+  (name, from, to, destination x,y,z, level vertex, game vertex): Cordon -> Garbage has two changers, Garbage ->
+  Cordon two.
+- **My guess:** PASS at 35 %: it passed, so I was under-confident; none of the four named risks happened.
+- **Not covered by C:** which of two changers to use (the script takes the first that leads to the level; real play
+  should take the one nearest the ITR2 player's crossing point); crossing back; a crossing while a freeze is active.
+- **Script frozen for the joint pre-flight: sha256 899c28e9...** One addition after C, logging only: a `VITALS`
+  line at the end (lowest health, highest radiation and bleeding seen, read in pcall each update), for Caden's rule
+  that the actor takes no damage from anything. Offline: all earlier cases unchanged; a stub actor with radiation
+  0.25 / bleeding 0.1 reports them. This one line has NOT run in the engine yet; the joint pre-flight is its first
+  boot (a read failure only counts `unread`).
