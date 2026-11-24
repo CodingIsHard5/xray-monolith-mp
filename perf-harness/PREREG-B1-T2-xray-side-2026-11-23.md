@@ -444,3 +444,19 @@ X SIDE (r2): FAIL
 - **Expectation for r2b (stated before it runs):** X-track p95 <= 1.0 m, at 75 %. In r2 the non-held poses had p50 0.33 m;
   the risk is slopes where the engine's physics moves the actor after placement. X-freeze: one STOP..CONT pair at death 2
   (ITRZone: death 1 is `keep`, death 2 is `freeze`), game time delta <= 1000 ms, at 80 %.
+
+## 25. Pre-flight 5: the new on-mesh test inside the engine (Overseer approved; registered BEFORE the run; X-Ray only)
+- One WANT slice, 20-min claim, about 6-7 min of engine time, one boot, no kill, no stall, no freeze.
+  `PF_OUT=out/t2pre5 PF_EXE=Absorb14.exe PF_FREEZE=sigstop PF_ABSORB=2000 PF_PAUSE=0 PF_KILL_AT=99999 PF_RUN_S=170
+   PF_POSE_ARG=track:<cordon_full_track.csv> tools/t2_preflight.sh`
+- The stand-in pose writer (t2_preflight_pose.py, new `track:` mode; NOT ITR2's code) plays the real track from t = 0 by
+  wall time at about 20 Hz, state play/keep, yaw 0. About 150 s of track, which covers the old held spots at track time
+  25-26 s, 29 s, 70-72 s, 91-94 s and 109-110 s.
+- Script under test: harness/zz_p1_puppet.script sha256 887f4488... (section 24). t2_xray.sh is unchanged (6ae8d27f...).
+- **PASS needs all of:**
+  1. no Lua error naming zz_p1_puppet in xray.log, and t2_xray rc 0;
+  2. at least 2,000 P lines;
+  3. at least 1 NEAR line (the new path really ran);
+  4. HOLD lines: at most 10 (the offline model predicts 0 for track 0-150 s), each with the reason `nonear`.
+- Reported, not a pass condition: P distance p50/p95/max. My prediction: p95 <= 1.0 m, at 75 %.
+- A FAIL is reported and the cause found before any r2b; the script is not handed to ITRZone until this passes.

@@ -28,6 +28,14 @@ while s is None: s = snap(); time.sleep(0.2)
 lvl, x, y, z = s
 log = open(out, 'w'); log.write('utc_ms,seq,phase,yaw\n')
 t0 = time.time(); n = 0
+TRK = None
+if ARG.startswith('track:'):   # pre-flight 5 (section 25): play a track csv (t,x,y,z,...) by wall time, ping-ponged at 380 s, state play/keep
+    TRK = [[float(v) for v in l.split(',')[:4]] for l in open(ARG[6:], 'rb').read().decode().replace('\r', '').split('\n')[1:] if l]
+def trk_at(t):
+    t = t % 760.0; t = t if t <= 380.0 else 760.0 - t
+    i = max(j for j in range(len(TRK)) if TRK[j][0] <= t) if t >= TRK[0][0] else 0
+    a = TRK[i]; b = TRK[min(i + 1, len(TRK) - 1)]; f = 0 if b[0] == a[0] else min(1.0, (t - a[0]) / (b[0] - a[0]))
+    return [a[k] + f * (b[k] - a[k]) for k in (1, 2, 3)]
 while True:
     t = time.time() - t0
     if ARG == 'pf4':   # pre-flight 4: A play | D dead+freeze 20-50 s (armed) | E play (planned kill follows)
@@ -38,6 +46,7 @@ while True:
     else:
      ph, st, aw, yw = ('A', 'play', 'keep', 0.0) if t < 10 else ('B', 'play', 'keep', 1.0) if t < 20 else \
          ('C', 'play', 'keep', -1.0) if t < 30 else ('D', 'dead', 'freeze', -1.0) if t < DEND and not NOFREEZE else ('E', 'play', 'keep', 0.5)
+    if TRK: ph, st, aw, yw = 'T', 'play', 'keep', 0.0; x, y, z = trk_at(t)
     n += 1; u = utc()
     body = f"seq,{n},{u},{st},{lvl},{aw}\np,{x:.3f},{y:.3f},{z:.3f},{yw:.4f},1.0\nend,{n}\n"
     with open(os.path.join(shm, 'pose.txt'), 'wb') as f: f.write(body.encode())
