@@ -1013,6 +1013,7 @@ BOOL mt_ph_commander = FALSE;
 BOOL mt_TaskManager = FALSE;
 void vr_input_update(); // GammaVR milestone 6, player_hud.cpp
 void vr_item_probe_update(); // GammaVR item 5 probe (TEST ONLY), ActorInput.cpp
+void vr_model_probe_update(); // GammaVR backpack B model probe (TEST ONLY), ActorInput.cpp
 
 void CLevel::OnFrame()
 {
@@ -1040,6 +1041,7 @@ void CLevel::OnFrame()
 	// two-handed grab input (no-op without -vr_openxr; main thread, before the objects update)
 	vr_input_update();
 	vr_item_probe_update(); // inert without -vr_item_probe
+	vr_model_probe_update(); // inert without -vr_model_probe
 	// commit events from bullet manager from prev-frame
 	Device.Statistic->TEST0.Begin();
 	BulletManager().CommitEvents();

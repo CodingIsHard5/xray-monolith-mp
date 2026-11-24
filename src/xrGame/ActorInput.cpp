@@ -940,6 +940,135 @@ void vr_item_probe_update()
 		Msg("* [vr11p] frame %d end: section '%s' count %d uses %d; health %.4f", f, sect, n, u, A->conditions().GetHealth());
 }
 
+// GammaVR backpack B, MODEL PROBE, TEST ONLY, no verdict (docs/backpack_desk.md): "-vr_model_probe <frame> <per frame>".
+// On VR frame <frame> it logs the actor's inventory, one [vr13i] line per item (place, weight, grid size, world model)
+// and a summary. From the next frame on it takes every config section that has inv_name, inv_weight and visual, and
+// makes each distinct world model once, <per frame> models a frame: the file is looked up first (a missing file is
+// logged, never asked of the model pool, which would stop the engine), the make is timed, the box and bone count are
+// logged ([vr13m]) and the model is given back. A summary line ends it. Inert without the switch; no launcher passes it.
+#include "../Include/xrRender/Kinematics.h"
+#include "../Include/xrRender/RenderVisual.h"
+void vr_model_probe_update()
+{
+	static bool s_parsed = false;
+	static int s_frame = -1, s_per = 20;
+	if (!s_parsed)
+	{
+		s_parsed = true;
+		if (LPCSTR p = strstr(Core.Params, "-vr_model_probe "))
+		{
+			if (sscanf(p + 16, "%d %d", &s_frame, &s_per) != 2 || s_frame < 0 || s_per < 1)
+				s_frame = -1;
+			Msg("* [vr13] model probe (TEST ONLY): frame %d, %d models a frame", s_frame, s_per);
+		}
+	}
+	if (s_frame < 0 || !g_vr_track.head0_set)
+		return;
+	CActor* A = smart_cast<CActor*>(Level().CurrentEntity());
+	if (!A)
+		return;
+	const int f = int(g_vr_track.frame);
+	if (f < s_frame)
+		return;
+	static int s_stage = 0;
+	static xr_vector<shared_str> s_vis;
+	static u32 s_next = 0, s_sections = 0, s_made = 0, s_missing = 0, s_failed = 0;
+	static float s_total_ms = 0.f, s_max_ms = 0.f;
+	static shared_str s_max_name;
+	if (s_stage == 0)
+	{
+		s_stage = 1;
+		u32 n = 0, place[4] = { 0, 0, 0, 0 };
+		for (PIItem it : A->inventory().m_all)
+		{
+			if (!it)
+				continue;
+			LPCSTR sect = it->object().cNameSect().c_str();
+			const u32 pl = it->CurrPlace() < 4 ? it->CurrPlace() : 0;
+			++place[pl];
+			++n;
+			Msg("* [vr13i] id %d section '%s' class '%s' kind '%s' place %u slot %u weight %.3f grid %ux%u visual '%s'", int(it->object().ID()), sect,
+				pSettings->line_exist(sect, "class") ? pSettings->r_string(sect, "class") : "-",
+				pSettings->line_exist(sect, "kind") ? pSettings->r_string(sect, "kind") : "-", pl, u32(it->CurrSlot()), it->Weight(),
+				pSettings->line_exist(sect, "inv_grid_width") ? pSettings->r_u32(sect, "inv_grid_width") : 0,
+				pSettings->line_exist(sect, "inv_grid_height") ? pSettings->r_u32(sect, "inv_grid_height") : 0, it->object().cNameVisual().c_str());
+		}
+		Msg("* [vr13i] frame %d inventory: %u items (place 0/undefined %u, 1 %u, 2 %u, 3 %u; the engine's EItemPlace: 1 slot, 2 belt, 3 ruck); weight %.2f of max carry %.2f",
+			f, n, place[0], place[1], place[2], place[3], A->inventory().TotalWeight(), A->MaxCarryWeight());
+		for (const auto& S : pSettings->sections())
+		{
+			LPCSTR sn = S.Name.c_str();
+			if (!pSettings->line_exist(sn, "inv_name") || !pSettings->line_exist(sn, "inv_weight") || !pSettings->line_exist(sn, "visual"))
+				continue;
+			++s_sections;
+			shared_str v = pSettings->r_string_wb(sn, "visual");
+			if (!v.size())
+				continue;
+			bool seen = false;
+			for (const shared_str& o : s_vis)
+				if (o == v)
+				{
+					seen = true;
+					break;
+				}
+			if (!seen)
+				s_vis.push_back(v);
+		}
+		Msg("* [vr13] frame %d: %u item sections (inv_name, inv_weight and visual), %u distinct world models", f, s_sections, u32(s_vis.size()));
+		xrLogger::FlushLog();
+		return;
+	}
+	if (s_stage != 1)
+		return;
+	Msg("* [vr13] frame %d batch from %u", f, s_next);
+	xrLogger::FlushLog();
+	for (int i = 0; i < s_per && s_next < s_vis.size(); ++i, ++s_next)
+	{
+		LPCSTR N = s_vis[s_next].c_str();
+		string_path name, fn;
+		if (0 == strext(N))
+			strconcat(sizeof(name), name, N, ".ogf");
+		else
+			xr_strcpy(name, sizeof(name), N);
+		if (!FS.exist(N) && !FS.exist(fn, "$level$", name) && !FS.exist(fn, "$game_meshes$", name))
+		{
+			++s_missing;
+			Msg("* [vr13m] MISSING '%s' (no file)", N);
+			continue;
+		}
+		CTimer T;
+		T.Start();
+		IRenderVisual* V = ::Render->model_Create(N);
+		const float ms = T.GetElapsed_sec() * 1000.f;
+		if (!V)
+		{
+			++s_failed;
+			Msg("* [vr13m] FAILED '%s' (%.2f ms)", N, ms);
+			continue;
+		}
+		++s_made;
+		s_total_ms += ms;
+		if (ms > s_max_ms)
+		{
+			s_max_ms = ms;
+			s_max_name = s_vis[s_next];
+		}
+		const Fbox& b = V->getVisData().box;
+		IKinematics* K = V->dcast_PKinematics();
+		Msg("* [vr13m] made '%s' %.2f ms box %.3f x %.3f x %.3f bones %d", N, ms, b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z,
+			K ? int(K->LL_BoneCount()) : 0);
+		::Render->model_Delete(V);
+	}
+	if (s_next >= s_vis.size())
+	{
+		s_stage = 2;
+		Msg("* [vr13] frame %d model probe end: %u sections, %u distinct models: made %u, missing %u, failed %u; make time total %.1f ms, mean %.2f ms, worst %.2f ms ('%s')",
+			f, s_sections, u32(s_vis.size()), s_made, s_missing, s_failed, s_total_ms, s_made ? s_total_ms / float(s_made) : 0.f, s_max_ms,
+			s_max_name.size() ? s_max_name.c_str() : "");
+		xrLogger::FlushLog();
+	}
+}
+
 // GammaVR milestone 11a (Amendment 37 note 5): helpers for player_hud.cpp's consumable-in-the-hand code
 bool vr_lam2_skip() // GAMMA's lam2.stop_all_actions (FDDA's own skip); false if the function is not there
 {
