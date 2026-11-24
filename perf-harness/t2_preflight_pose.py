@@ -29,6 +29,12 @@ lvl, x, y, z = s
 log = open(out, 'w'); log.write('utc_ms,seq,phase,yaw\n')
 t0 = time.time(); n = 0
 TRK = None
+# pre-flight C (T3 R3, section 38): `cross:<dest level>:<track csv>`: v2 track poses for 40 s (play), then state `cross`
+# with zone = <dest level> until X-Ray's snapshot header names that level and 30 s more, then `play` on the new level at
+# the actor's own snapshot position (yfloor = its height + 0.3). Phases logged: T, X (cross sent), Y (new level seen), P.
+CROSS = None
+if ARG.startswith('cross:'): _, CROSS, _trk = ARG.split(':', 2); ARG = 'track2:' + _trk
+cross_seen = None
 V3 = ARG.startswith('track3:')   # pre-flight B (section 36): as track2 but the stance cycles 0,1,2 every 10 s
 if V3: ARG = 'track2:' + ARG[7:]
 V2 = ARG.startswith('track2:')   # pre-flight A (T3, section 33): pose v2 `p,x,yfloor,z,yaw,hp,stance`, yfloor = track height + 0.3 m, stance 0/1 alternating every 10 s
@@ -58,8 +64,14 @@ while True:
      ph, st, aw, yw = ('A', 'play', 'keep', 0.0) if t < 10 else ('B', 'play', 'keep', 1.0) if t < 20 else \
          ('C', 'play', 'keep', -1.0) if t < 30 else ('D', 'dead', 'freeze', -1.0) if t < DEND and not NOFREEZE else ('E', 'play', 'keep', 0.5)
     if TRK: ph, st, aw, yw = 'T', 'play', 'keep', 0.0; x, y, z = trk_at(t)
+    zn = lvl
+    if CROSS and t >= 40:
+        zn = CROSS; sn = snap()
+        if cross_seen is None and sn and sn[0] == CROSS: cross_seen = t
+        if cross_seen is not None and t >= cross_seen + 30 and sn and sn[0] == CROSS: ph, st = 'P', 'play'; x, y, z = sn[1], sn[2], sn[3]
+        else: ph, st = ('X' if cross_seen is None else 'Y'), 'cross'
     n += 1; u = utc()
-    if TRK and V2: body = f"seq,{n},{u},{st},{lvl},{aw}\np,{x:.3f},{y + 0.3:.3f},{z:.3f},{yw:.4f},1.0,{int(t // 10) % (3 if V3 else 2)}\nend,{n}\n"
+    if TRK and V2: body = f"seq,{n},{u},{st},{zn},{aw}\np,{x:.3f},{y + 0.3:.3f},{z:.3f},{yw:.4f},1.0,{0 if CROSS else int(t // 10) % (3 if V3 else 2)}\nend,{n}\n"
     else: body = f"seq,{n},{u},{st},{lvl},{aw}\np,{x:.3f},{y:.3f},{z:.3f},{yw:.4f},1.0\nend,{n}\n"
     with open(os.path.join(shm, 'pose.txt'), 'wb') as f: f.write(body.encode())
     log.write(f'{u},{n},{ph},{yw}\n'); log.flush()
