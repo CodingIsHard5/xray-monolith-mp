@@ -101,3 +101,16 @@ In T3 a real ITR2 player moves freely. Four things follow.
    an NPC's visibility value with and without crouch as the witness).
 4. X-only pre-flight C: Cordon -> Garbage by ChangeLevel, with the three unknowns of section 5 measured.
 5. Joint T3 registration with ITRZone, then the joint runs.
+
+## 9. Decisions since this note was written (2026-11-24)
+- **Caden (Discord 05:13 UTC, via the Overseer): X-Ray's actor takes no damage from anything.** Under the hybrid, ITR2
+  owns ALL combat near the player, and the anomalies the player meets are ITR2's own, placed by the mod. So in real
+  play every hit on X-Ray's actor (mutants, stalkers, anomalies, radiation) is cancelled and logged, exactly as the
+  harness does now. X-Ray learns of the player's death only from the pose state, and of puppet kills from ITR2's kill
+  list. No hit-type filter. This answers question 4 of section 7. To be registered with the joint T3.
+  - To check before that registration (read from code, not tested): the harness cancels hits in the
+    `actor_on_before_hit` callback and refills health as a backup. Radiation and other slow effects (bleeding,
+    satiety, psy) may not pass through that callback, so the joint T3 needs a check that the actor's health and
+    radiation stay unchanged over a run, not only that hits are cancelled.
+- Stance: the engine clears the crouch bit every frame, so the export stores the stance (prereg section 34).
+- Height: physics owns it while the actor is near the node height (prereg section 33).
