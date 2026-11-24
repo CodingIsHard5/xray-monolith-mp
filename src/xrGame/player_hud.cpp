@@ -4161,6 +4161,8 @@ static void vr_bpi_take(u32 frame);  // B1: the contents, below
 static void vr_bpi_frame(u32 frame);
 static void vr_bpi_reset();
 static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& bag_xf);
+static bool vr_bpo_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& bag_xf); // B1b probe: the open bag; true = it replaces the prop
+static void vr_bpo_reset();
 bool vr_bp_claims() { return s_vr_bp.claims; }
 static void vr_bp_parse()
 {
@@ -4248,6 +4250,7 @@ static void vr_bp_reset()
 	s_vr_bp.state = 0;
 	s_vr_bp.claims = false;
 	vr_bpi_reset();
+	vr_bpo_reset();
 }
 static void vr_bp_draw(IDSGraphManager* DM)
 {
@@ -4284,7 +4287,8 @@ static void vr_bp_draw(IDSGraphManager* DM)
 		V.K->CalculateBones_Invalidate();
 		V.K->CalculateBones(TRUE);
 	}
-	DM->add_Dynamic(V.vis, &V.xf);
+	if (!vr_bpo_draw(DM, V.vis, V.xf))
+		DM->add_Dynamic(V.vis, &V.xf);
 	Msg("* [vr12d] frame %u drawn at %.4f %.4f %.4f", g_vr_track.frame, V.xf.c.x, V.xf.c.y, V.xf.c.z);
 	vr_bpi_draw(DM, V.vis, V.xf);
 }
@@ -4298,6 +4302,21 @@ static void vr_bp_draw(IDSGraphManager* DM)
 // -vr_bp_each (every item its own model, no stacks), -vr_bp_face <1|-1> (which face of the bag). TEST ONLY, passed by
 // no launcher: -vr_bp_items_off (the control: nothing is shown, the same per-frame line), -vr_bp_fake_missing <section>,
 // -vr_bp_quiet (frame-time measurement: the per-frame draw lines are not written).
+// B1b PROBE (TEST ONLY for now, no verdict): -vr_bp_open. The closed prop is not drawn; an open-top box takes its
+// place: a floor and four walls, each a copy of a game crate model squeezed into a thin panel, on the prop's footprint.
+// The contents stand on the floor inside it. No new mesh code: the same model path as everything else here.
+static const float VR_BPO_WALL = 0.012f, VR_BPO_DEPTH = 0.15f;
+static bool vr_bpo_on()
+{
+	static int s = -1;
+	if (s < 0)
+	{
+		s = strstr(Core.Params, "-vr_bp_open") ? 1 : 0;
+		if (s)
+			Msg("! [vr13o] -vr_bp_open: B1b probe, TEST ONLY: an open-top box of five crate panels replaces the backpack prop");
+	}
+	return s == 1;
+}
 struct vr_bpi_entry
 {
 	shared_str sect, kind, visname;
@@ -4379,6 +4398,7 @@ static void vr_bpi_reset()
 	s_vr_bpi.list.clear();
 	s_vr_bpi.placed = false;
 }
+static void vr_bpo_reset();
 static CInventory* vr_bpi_inv()
 {
 	CActor* A = g_pGameLevel ? smart_cast<CActor*>(Level().CurrentEntity()) : nullptr;
@@ -4500,6 +4520,8 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 			p[u] = mn[u] + ext[u] * (float(i % B.cols) + 0.5f) / float(B.cols);
 			p[v] = mn[v] + ext[v] * (float(i / B.cols) + 0.5f) / float(B.rows);
 			p[a] = (B.face > 0 ? mn[a] + ext[a] : mn[a]) + float(B.face) * 0.5f * B.cell;
+			if (vr_bpo_on())
+				p[a] = mn[a] + VR_BPO_WALL + 0.5f * B.cell; // inside the open bag: standing on its floor
 			e.spot.set(p[0], p[1], p[2]);
 			if (!e.failed)
 			{
@@ -4570,6 +4592,83 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 	}
 	if (!B.quiet || f % 50 == 0)
 		Msg("* [vr13d] frame %u drawn %u%s", f, drawn, B.quiet ? " (-vr_bp_quiet: one line in 50 frames)" : "");
+}
+struct vr_bpo_panel
+{
+	IRenderVisual* vis;
+	IKinematics* K;
+	Fmatrix xf;
+};
+static vr_bpo_panel s_vr_bpo[5] = {};
+static bool s_vr_bpo_tried = false;
+static Fvector s_vr_bpo_c, s_vr_bpo_e; // the crate model's own box: centre and extents, measured once
+static void vr_bpo_reset()
+{
+	for (vr_bpo_panel& P : s_vr_bpo)
+	{
+		if (P.vis)
+			::Render->model_Delete(P.vis);
+		P.vis = nullptr;
+		P.K = nullptr;
+	}
+	s_vr_bpo_tried = false;
+}
+static bool vr_bpo_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& bag_xf)
+{
+	if (!vr_bpo_on() || !bag)
+		return false;
+	const u32 f = g_vr_track.frame;
+	if (!s_vr_bpo_tried)
+	{
+		s_vr_bpo_tried = true;
+		LPCSTR name = VR_BPI_BOXES[0];
+		int made = 0;
+		if (vr_bpi_file(name))
+			for (vr_bpo_panel& P : s_vr_bpo)
+			{
+				::Render->hud_loading = true;
+				P.vis = ::Render->model_Create(name);
+				::Render->hud_loading = false;
+				P.K = P.vis ? P.vis->dcast_PKinematics() : nullptr;
+				if (P.vis && !made)
+				{
+					const Fbox& cb = P.vis->getVisData().box;
+					cb.getcenter(s_vr_bpo_c);
+					s_vr_bpo_e.set(cb.max.x - cb.min.x, cb.max.y - cb.min.y, cb.max.z - cb.min.z);
+				}
+				made += P.vis ? 1 : 0;
+			}
+		Msg("* [vr13o] frame %u open bag: panel model '%s', %d of 5 made; its box %.3f x %.3f x %.3f; wall %.3f m, depth %.3f m", f, name, made, s_vr_bpo_e.x, s_vr_bpo_e.y,
+			s_vr_bpo_e.z, VR_BPO_WALL, VR_BPO_DEPTH);
+	}
+	for (const vr_bpo_panel& P : s_vr_bpo)
+		if (!P.vis)
+			return false; // not all panels: the prop is drawn as before
+	const Fbox& b = bag->getVisData().box;
+	const float w = b.max.x - b.min.x, l = b.max.z - b.min.z, y0 = b.min.y, t = VR_BPO_WALL, d = VR_BPO_DEPTH;
+	const float cx = 0.5f * (b.min.x + b.max.x), cz = 0.5f * (b.min.z + b.max.z);
+	// centre and size of each panel in the bag's frame: floor, -x wall, +x wall, -z wall, +z wall
+	const float C[5][3] = { { cx, y0 + 0.5f * t, cz }, { b.min.x + 0.5f * t, y0 + 0.5f * d, cz }, { b.max.x - 0.5f * t, y0 + 0.5f * d, cz },
+		{ cx, y0 + 0.5f * d, b.min.z + 0.5f * t }, { cx, y0 + 0.5f * d, b.max.z - 0.5f * t } };
+	const float S[5][3] = { { w, t, l }, { t, d, l }, { t, d, l }, { w, d, t }, { w, d, t } };
+	for (int i = 0; i < 5; ++i)
+	{
+		vr_bpo_panel& P = s_vr_bpo[i];
+		const float sx = S[i][0] / _max(s_vr_bpo_e.x, 0.001f), sy = S[i][1] / _max(s_vr_bpo_e.y, 0.001f), sz = S[i][2] / _max(s_vr_bpo_e.z, 0.001f);
+		Fmatrix L;
+		L.scale(sx, sy, sz);
+		L.c.set(C[i][0] - sx * s_vr_bpo_c.x, C[i][1] - sy * s_vr_bpo_c.y, C[i][2] - sz * s_vr_bpo_c.z);
+		P.xf.mul_43(bag_xf, L);
+		if (P.K)
+		{
+			P.K->CalculateBones_Invalidate();
+			P.K->CalculateBones(TRUE);
+		}
+		DM->add_Dynamic(P.vis, &P.xf);
+	}
+	if (f % 50 == 0)
+		Msg("* [vr13o] frame %u open bag drawn: 5 panels", f);
+	return true;
 }
 
 void vr_input_update()
