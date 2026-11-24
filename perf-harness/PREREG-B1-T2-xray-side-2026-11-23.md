@@ -1007,3 +1007,42 @@ fields stays v1 and takes the T2 path, unchanged.
 - **Not covered:** an unknown name in the engine (offline only); a crossing during a freeze or a death; the bridge
   live throughout (the joint crossing run).
 - **Script frozen for T3 proper: sha256 1d7143cf7883bf6b0af1b82202cf442245411e4d41291d4ad3e58ec735330f45.**
+
+## 45. T3 proper: X side RESULT (scored once, 2026-11-24)
+
+- **Run:** ITRZone's driver (arm t3, amendment 103), Overseer's go. X out dir
+  `~/Projects/ITRZone/out/runs/20261124-071431-t2t3-xray`; ITR2 lines
+  `~/Projects/ITRZone/out/runs/20261124-071432-stream-t2t3/t2_lines_for_xside.txt`. Checker fda8c5f8..., script
+  1d7143cf... (both checked on disk before scoring).
+- **X SIDE: PASS, 14 of 14.** ITR2 side (ITRZone's scoring): PASS 9/9.
+  1. No Lua error, rc 0: PASS.
+  2. P2 lines >= 17,000: PASS (21,343).
+  3. No GUARD, no step over 5 m: PASS (0 GUARD; largest step 1.70 m, across both deaths too).
+  4. HOLD <= 45: PASS (22, all nonode: the same two spots as j1, the 7-pose spot on three passes).
+  5. Actor height = node height + 0.05 m on every P2: PASS.
+  6. No RAY_ERROR: PASS.
+  7. STANCE lines >= 25, none unsupported: PASS (37, 0).
+  8. get_actor_stance = pose stance on every P2: PASS (0 differ of 21,343).
+  9. Real movement state = pose stance: PASS (21,231 of 21,343; 35 changes judged, 0 not followed within 2 s).
+  10. Movement state readable on every P2: PASS (0 unread).
+  11. No restart row: PASS.
+  12. Freeze: PASS (1 STOP, 1 CONT; game time across it 198 ms; 1 absorbed line).
+  13. Vitals: PASS (`VITALS,min_health=1.000,max_radiation=0.0000,max_bleeding=0.0000,unread=0`).
+  14. Every hit cancelled, no refill: PASS (`SUMMARY,hits=0,cancelled=0,refills=0,min_health=1.000,...`).
+- **Guess:** PASS 50 %. It passed; none of the named risks happened. I was under-confident again.
+- **What 13 and 14 do NOT show:** there was no hit on the actor at all in 25 minutes (hits=0), also not during the
+  two standstills. So the cancel path and the no-damage rule were not exercised by a real hit in this run; the gate
+  passed with nothing to cancel. A run where creatures do attack the actor is still owed.
+- **Report-only:**
+  - Per-seq compare with ITR2's `T2 wrote` (21,630 play writes): all 21,343 P2 seqs are in ITR2's log, none on a
+    non-play seq; x and z differ by at most 0.005 m; stance differs on 0.
+  - Play seqs not applied: 287 (244 before my first apply, 22 HOLD, 21 single seqs the 20 Hz reader skipped).
+  - Actor height minus the height ITR2 sent: p05 -0.427, p50 -0.231, p95 -0.147, min -3.153, max +0.374 m. 588
+    poses more than 1.0 m below, 68 more than 2.5 m below (the object at x 62.6, z 167, as expected).
+  - Actor height minus track height: p50 +0.050, |.| p95 0.208, max 1.616 m. Ray hit on every pose; ray ground minus
+    node height p05 -0.108, p50 -0.021, p95 +0.097, min -0.612, max +1.200 m. Height drift between sets nonzero on
+    14,536 of 21,343 (min -0.747, max +1.079 m).
+  - Snaps 13; rings 0/1/2: 19,968 / 969 / 406. MOVESUM frames 85,812, crouch 19,497, low 24,652.
+  - Export cost: mean 711 us, p99 1,358 us, max 8,491 us (one run; no speed claim).
+- **Not covered:** a real hit on the actor; radiation fields and anomalies; a level crossing with the bridge live
+  (R3, next); a real player's stance.
