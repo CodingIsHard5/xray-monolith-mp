@@ -386,3 +386,30 @@ X SIDE (r1): FAIL
 - **Overseer ruling, final:** r2 and h1 replay the track's first 380 s ping-ponged. X-track stays exactly as registered
   (p95 <= 1.0 m). The gap (full track 410-600 s) is named, and the HOLD count is reported. Option A is not used.
   ITRZone aligns amendment 95 with this ruling. On the X-Ray side, r2's env and frozen hashes are unchanged.
+
+## 23. Joint r2 X-side RESULT (ITRZone run 20261123-210325; scored ONCE, scorer sha 16e89cb7..., r2)
+Out dir ~/Projects/ITRZone/out/runs/20261123-210325-t2r2-xray. Verbatim:
+```
+X-noplan PASS: 0 unplanned restarts (); last line rc=0: True
+X-freeze FAIL: 0 STOP, 0 CONT; game_ms deltas []; bad []; [FREEZE] absorbed lines 0
+X-track FAIL: 4546 poses applied; dist p50 0.326 p95 1.906 max 8.18 m; off-mesh holds 412; torn 0
+X SIDE (r2): FAIL
+```
+- **X SIDE r2 = FAIL.** It stands.
+- X-freeze: nothing to measure. ITRZone reports a rig defect: after the first planned death (play 240 s) its driver
+  loaded a save that does not exist, the player stayed in the Hub, and the pose said `dead` + `keep` for the rest. So
+  no freeze was ever requested; freeze.csv has only its header. Not an X-Ray fault, but the check needs >= 1 STOP: FAIL.
+- **X-track: this one is MY side's defect, and my earlier readings were wrong.**
+  - Every pose in r2 came from track time 0-380 s, where every track row has node_dist >= 0. Still 412 of 4546 poses
+    (9 %) were HELD by my on-mesh test, and the held distance (2-8 m) gives p95 1.906 m.
+  - The HOLD stretches are at the SAME pose seq in all three runs. r2: 503-525, 576-586, 1394-1438, 1817-1889, ...;
+    r1b: 503-..., 1408-1439, 1839-1890, ...; r1: 503-525.
+  - So r1's 18 rows over 1 m at seq 510-525 were NOT the rig pawn falling, as I wrote in section 21. They were this
+    same held spot (track time ~25-26 s; a slope, y -19.3 -> -17.5, node_dist 0.3-0.8 m). And r1b's "p95 1.44 m outside
+    the off-mesh leg" (section 22) was this too.
+  - Cause, read from the script, not yet measured: my test (zz_p1_puppet.script:176-178) needs an AI node in the exact
+    0.7 m cell under the pose, with its Y within 2 m. The track's own node_dist only says a node is NEAR (up to 1.8 m
+    away). Small holes in the AI mesh (slopes, props) therefore HOLD the actor although a player can stand there.
+    The script does not log which of the two conditions failed.
+  - The frozen script is unchanged. A fix (accept a pose when a node is near, log the HOLD reason) is a change to a
+    frozen file: it needs its own registration and a short X-only pre-flight. Asked the Overseer.
