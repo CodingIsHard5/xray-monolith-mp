@@ -586,3 +586,31 @@ X SIDE (r2): PASS
   (0.6-1.4 m), and r2b has nothing like it at the same seq. So for single ticks the actor's position, read right
   after it was set, was ~90 m away. Not checked: the log has `pfx_teleport` particle lines (854.8 s), so a teleport
   anomaly moving the actor is one candidate; a stale position read is another.
+
+## 32. The three ~90 m single-tick readings in r3: what they most likely are (logs and code only; no box; NOT reproduced)
+- Facts:
+  - P lines seq 19655, 19660, 19663 read 91.5, 75.2 and 90.5 m; the poses between read 0.6-1.4 m. All three were
+    accepted (NEAR ring 1), so the actor WAS set to the pose position on those ticks.
+  - ITRZone: its writes there are normal (50 ms cadence, state play, no turn, no death). Play clock ~950 s, which is
+    track time ~190 s on the second forward leg. Its position code is a plain interpolation and cannot make a one-pose jump.
+  - Track at 186-193 s: x 61-64, z 159-177, y climbing -0.06 -> 2.76 -> 0.69 within 6 m, node_dist up to 1.74 m. It is
+    a steep bank. In the 0.3 s before the first reading the distance was already 1.0-1.4 m, above the usual 0.3 m.
+  - The script reads `a:position()` in the statement right after `a:set_actor_position(pos)`. Nothing else runs in between.
+- Reading from the code: the only code between the set and the read is the engine's own setter.
+  `set_actor_position(pos)` -> `CActor::ForceTransform` -> `CCharacterPhysicsSupport::set_movement_position`
+  -> `CollisionCorrectObjPos` (CharacterPhysicsSupport.cpp:746-790). That activates the actor's box at the target, lets the
+  physics push it out of whatever it overlaps, and then MOVES the entity by the result (`Position().sub(activation_res, shift)`).
+  - So on those three ticks the collision corrector threw the actor ~90 m, because the pose point sat inside
+    geometry on the bank. The next pose put it back.
+  - A teleport anomaly is ruled out as the direct cause: it cannot act between two consecutive Lua statements.
+    The `pfx_teleport` log lines are particle statistics, 77 s earlier.
+  - A stale read is ruled out the same way: position() returns the XFORM that the setter has just written.
+- Not shown: the exact pose coordinates (nobody logged them) and the reproduction. r2b passed the same track point
+  several times with no such reading, so it needs a particular sub-cell position.
+- Consequence for real play (T3): a pose point inside X-Ray geometry can throw the actor far away for a tick. For
+  A-Life that is a one-tick 90 m move of the player: online/offline radius, NPC vision and anomalies all see it.
+  T3's "X-Ray grounds itself" design must not use the collision-correcting setter blindly. Options for the T3 note:
+  - place the actor at the AI node's height plus a small lift, with the setter's skip-collision flag, and let
+    physics settle it;
+  - or check the result and re-place the actor when it lands more than a few metres from the target.
+- For T3 I asked ITRZone to log x/y/z per pose write, and X-Ray should log the pose position it applied.
