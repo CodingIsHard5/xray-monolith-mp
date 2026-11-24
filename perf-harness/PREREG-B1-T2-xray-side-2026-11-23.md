@@ -373,3 +373,13 @@ X SIDE (r1): FAIL
     (c) an axis or height mix-up on some points.
   - My X-track rule (p95 <= 1 m with HOLD on off-mesh points) also counts held distance as tracking error. That is
     a design point for r2's registration, NOT a change to this score.
+- **Cause of the r1b X-track FAIL (explained jointly with ITRZone; checked by me on the file):** it is a fact of the track,
+  not a pose-path bug. ITRZone's writer sends out/p1/cordon_full_track.csv (t,x,y,z,node_dist, X-Ray metres) interpolated
+  by play clock:
+  - 0-380 s: 0 of 947 points have node_dist < 0.
+  - 380-410 s: 9 of 75.
+  - 410-600 s: 475 of 475, with x 10.5-13.2, y fixed at 16.59 (X-Ray y is up), and z sweeping 707-958 m and back at about 2.5 m/s.
+    That is a straight horizontal leg recorded by P1's generator past the walkable area.
+  - The pose sent exactly those points. X-Ray correctly HELD the actor, as its rule says. ITR2's ground traces missed there too.
+  - The r1b FAIL stands.
+- **Overseer ruling:** X-track stays as registered for r2. h1 and r2 play only the on-mesh parts of the track. Option A is not used.
