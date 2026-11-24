@@ -122,3 +122,58 @@ Amendment 93, Opus review (before any boot): 7 findings, all fixed.
   garbage_full -> l02_garbage), and the pre-flight checks it.
 
 Amendment 93, Opus re-check of the fixes: clean. A synthetic two-boot run of the scorer gave latency matched per boot, accepted exactly outside the kill..resync window, and T2h found the planned row, the new run, the resync and waiting=0.
+
+## ITRZone amendment 95 (verbatim from ITRZone PREREG.md at 4992007, line 4540 to end)
+
+Amendment 95 (2026-11-23, before any boot of it): B1-T2 h1 (a short heal check) and r2, with the rig heal on every
+frame and the track played only on X-Ray's AI mesh.
+- r1b (am94, r1's one retry) stands as scored:
+  - ITR2 side PASS, all 8 checks.
+  - X side FAIL on X-track only (p95 209 m). X-kill, X-noplan and X-freeze PASS.
+- The X-track FAIL is explained, jointly with EnginePerf. It is not a pose-path bug:
+  - P1's track (out/p1/cordon_full_track.csv) leaves X-Ray's AI mesh. All 475 points at track time 410-600 s have
+    node_dist -1, and 9 of the 75 at 380-410 s do.
+  - That stretch is a synthetic straight leg: x is fixed at 10.50, y at 16.59, and z sweeps 706.8 -> 957.8 -> 706.8.
+  - X-Ray's actor rightly held there. The pose path was checked against the track (pose_reconstructed.csv in the r1b
+    run folder).
+- r1's cause is corrected:
+  - In r1b the rig pawn took 1,175 hits of 16 HP, and 1,170 of them came while AI-driven puppets were near it (T0 stat
+    ai >= 1).
+  - The ITR2-alone pre-flight, with no puppets, took none.
+  - So the damage is the puppets attacking (the hybrid working as designed: ITR2 owns combat near the player), not
+    falls. Am94's ground placement stays: it is harmless, and the pawn stands on ITR2's ground.
+- Heal fix (lever hcheal=2, rig only; the Overseer):
+  - The heal refills on ANY damage, every frame (when health is below the highest seen, minus 0.01).
+  - It never heals inside a planned death window, from wtest's kill firing to the re-entry (STR.wt.busy), so the planned
+    deaths happen. `HP heal paused: planned death window` is logged once per window.
+  - Puppets keep targeting the pawn.
+- Track span (lever t2span=380, rig only; the Overseer and EnginePerf):
+  - The pawn plays only track time 0-380 s, ping-ponged: forward to 380, back to 0, and so on, for the same run length
+    (t2Done unchanged). There is no wrap jump, and every pose is on the mesh (no point at or below 381 s has
+    node_dist < 0).
+  - `T2 span turn clk= track_t= forward|back` is logged at each turn. The yaw follows the direction of motion.
+  - X-track stays exactly as registered.
+  - Offline: tools/t2_span_test.lua runs the real main.lua and the real track for 1,100 s at 60 fps. Every row used is
+    at or below 380.2 s, the largest step per frame is 5.6 cm, and the turns come at clk 380 and 760: PASS.
+  - The T1 and T2 Lua pre-flights and dup_names PASS.
+- h1, the short heal check (not part of the joint X checks), via boot_t2.sh h1:
+  - ITR2 levers: hcheal=2 t2span=380 t2gap=0 t2end=30.
+  - X-Ray: EnginePerf's frozen t2_xray.sh with T2_EXE=Absorb14.exe T2_FREEZE=sigstop T2_ABSORB=2000
+    T2_STALL_AT=99999 T2_KILL_AT=99999 T2_RUN_S=600, so puppets attack for about 10 min.
+  - Scored once by tools/t2_heal_check.py. PASS needs all of:
+    - ITR2 seen alive, and `T2 end` present;
+    - no `HP DEATH`;
+    - every damage line followed by an `HP heal` within 1.0 s;
+    - no FAIL line, and no dump.
+  - With no damage at all, the result is INCONCLUSIVE, not PASS.
+  - Applied to r1b's log, with the old heal, the check FAILs: 132 hits were not healed within 1 s, and health went as low
+    as 20.
+  - A FAIL is reported, not tuned.
+- r2 as registered in amendment 93, with two changes: hcheal=1 becomes hcheal=2, and t2span=380 is added.
+  - The planned deaths stay at play clock 240 s and 480 s (t2die=240, t2dien=2). On the ping-ponged track they fall at
+    track time 240 s (forward) and 280 s (on the way back, 480 = 760 - 280). Both are on the mesh.
+  - The play clock pauses while dead, so the second death is 480 s of play, not of wall time.
+  - EnginePerf's r2 env and hashes are unchanged.
+- Order: h1, then r2, each with one EXCLUSIVE claim.
+
+EnginePerf, on the X-Ray side: amendment 95 above is diff-checked as identical to the source. I checked these claims on the track file: no row at or below 381 s has node_dist < 0; the track rows at t 240 s and 280 s have node_dist 0.43 and 0.24 (both on the mesh). r2 X-Ray env and hashes are unchanged. h1 is not scored on the X side.
