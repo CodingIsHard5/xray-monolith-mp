@@ -1145,3 +1145,36 @@ fields stays v1 and takes the T2 path, unchanged.
   run shows a radiation or bleeding change (10 %); other (15 %).
 - **Stop rule:** this is the one retry. A second FAIL is reported with its cause and nothing more is run without
   a new registration and the Overseer's word.
+
+## 48. Pre-flight E, the one retry: FAIL (stopped after the first boot). E stops here and goes to the Overseer
+
+- **Run:** PFE_PREFIX=t3pfE2 tools/t3_pfE.sh, slice 2026-11-24 09:14:23-09:19:42 local, boot god_off_norefill only
+  (script 1b1c08d1..., driver 8229f869...). The runner ended with rc 5, so the series stopped; god_off and prot did
+  not run. Scored ONCE with t3_pfE_check.py (bcabd34b...): **FAIL**, on condition 1 only.
+  1. Clean run: FAIL (rc 5: "no new seq for 30 s", restarts used up).
+  2. rad: PASS (60 of 60 lines inside `esc_zone_field_radioactive_weak_0005`, zone online).
+  3. anom: PASS (60 of 60 lines inside `esc_zone_mine_gravitational_weak_0050` at -98.9, 24.1, 318.1).
+  4. mut: PASS (three spawned; the boar engaged on 59 lines and the cat on 63: alive, enemy = the actor, within 3 m).
+  W. Damage in every phase with the protection off: PASS.
+- **Cause of the FAIL (a bug of mine in the test mode):** all three phases finished (the last `DMG_RESET` at engine
+  time 270,890 ms). The last line of the log is 5.7 s later. After the last phase the witness mode left god mode
+  off and applied no floor any more, while the boar and the cat were still attacking and the actor was bleeding.
+  The actor died after the test had ended, snapshots stopped, and the runner counted a dead engine.
+- **What this boot shows, protection off (god mode off, no script cancel, floor 0.7):**
+  - Radiation field: 594 hits in the phase (type 3, about 10 a second); radiation to 0.916; lowest health 0.392.
+  - Gravitational anomaly: 40 hits of type 7 in the phase; lowest health 0.442. Radiation hits went on during
+    this phase too (559), so that spot also lies in a radiation field.
+  - Mutants: 35 hits of type 5 (24 from `cat_strong_a`, 13 from `boar_01a_hard` over the whole boot); lowest
+    health 0.278; bleeding rose to 10.0. The dog ran off (67.9 m away, its enemy was the cat).
+  - The floor was used 77 times. The reset of radiation between phases worked (0 in the mutant phase).
+- **So the witness side is complete in substance:** each of the three sources damages an unprotected actor, with
+  the hitter named in the hit lines. Together with the first try, radiation and anomaly are shown twice.
+- **Still missing:** the protected run (the one that tests Caden's rule), and the witness with the refill on.
+- **The test save is unchanged** (hashes as before); the control file was removed after the boot.
+- **My guess (all three PASS, 40 %):** wrong. The named risk "the actor still dies in a witness" happened, though
+  not in the way I named: it died after the phases, through an end-of-test gap I did not see.
+- **Stop:** as ordered, E stops here. Nothing more runs without a new registration and the Overseer's word.
+- **Proposal for that registration (not run):** at the end of the last phase the witness modes turn god mode on
+  and the refill on, clear bleeding and radiation, and log it, so the actor survives to the end of the boot. Then
+  run only the two missing boots (god_off, prot). The no-refill witness would be taken from this boot's data, with
+  its rc recorded as failed for the stated reason.
