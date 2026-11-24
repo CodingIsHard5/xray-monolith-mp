@@ -659,3 +659,27 @@ fields stays v1 and takes the T2 path, unchanged.
   snaps; rings. Predictions: PASS at 70 %; |actor height - track height| p95 <= 0.5 m at 55 % (the open risk is how the
   physics settles the actor with the skip-collision setter: it may sink, bob or lag on slopes).
 - A FAIL is reported and the cause found before pre-flight B or C.
+
+## 34. T3 engine change: the `set_actor_stance` script export, registered BEFORE it is built (Overseer approved)
+- **Why an export with stored state.** Read from the code: `CActor::UpdateCL` clears the wishful crouch and accel bits
+  every frame unless the player's toggle options are on (Actor.cpp:1874-1877); a held key sets them again each frame
+  (ActorInput.cpp:408-418). A script that only set the bits at 20 Hz would lose them on the next frame.
+- **Change (branch perf/t3-stance, on perf/freeze-absorb 7c8331264):**
+  - `CActor` gets `int m_script_stance`, default -1 (= no script stance).
+  - `actor:set_actor_stance(k)`: k = 0 stand, 1 crouch, 2 low crouch (crouch + accel); any other value sets -1.
+  - In `UpdateCL`, right after the stock per-frame clear: only if `m_script_stance >= 0`, the crouch and accel bits of
+    `mstate_wishful` are set from it (both cleared for 0). With -1 the block does nothing.
+  - `actor:get_actor_stance()` returns the stored value, for the check.
+  - Not saved, not sent over the net, no console variable.
+- **Rule One.** Nothing in GAMMA calls the new function, so `m_script_stance` stays -1 and the frame path is the stock
+  code plus one integer compare. Only the bridge's puppet script calls it.
+- **Checks before it is used in any joint run:**
+  1. CI builds with 0 errors.
+  2. "The exe without the bridge behaves as before": one X-only boot of the new exe WITHOUT `-t2_pose` (the T1 track
+     path, which never calls the export), compared with the same boot on Absorb14. Both must reach the end with rc 0,
+     with no `set_actor_stance` or STANCE line anywhere, and with the actor's movement state unchanged (0 crouch
+     frames in both). Details registered with pre-flight B.
+  3. Pre-flight B (with the bridge): STANCE lines appear, `get_actor_stance` reads back what was set, and the actor's
+     real crouch state (`IsMoveState('mcCrouch')`) follows within a few frames; stance 0 stands it up again.
+     The NPC "noticed later when crouched" witness is tried there, report-only.
+- The puppet script already calls the export when present (section 33); no script change is needed for this.
