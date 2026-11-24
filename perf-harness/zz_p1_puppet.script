@@ -130,6 +130,25 @@ end
 
 -- B1-T2 pose reader: accept only seq,n ... end,n with n newer; strip \r (Wine CRLF); torn reads counted
 local p_last, p_last_t, p_stale, p_torn, p_holds, p_paused, p_lx, p_ly, p_lz = 0, nil, false, 0, 0, false, nil, nil, nil
+local T2_NEAR_CELLS, T2_NEAR_H, p_near = 2, 2.0, 0   -- on-mesh test: +-2 cells (1.4 m), +-2.0 m (prereg section 24)
+-- The pose is on the mesh if an AI node lies within +-T2_NEAR_CELLS cells (0.7 m each) in x and z and within T2_NEAR_H m
+-- in height. level.vertex_id picks the highest node at or below the y it is given (else the lowest above), so probing
+-- at y + H and requiring node y >= y - H means "any node in [y - H, y + H]". The pose's own cell is ring 0 and is
+-- tried first. Returns the ring found (0..T2_NEAR_CELLS) or nil. r1/r1b/r2: the old own-cell-only test held 9 % of
+-- an on-mesh track.
+local function t2_near_ring(x, y, z)
+	for ring = 0, T2_NEAR_CELLS do
+		for dx = -ring, ring do
+			for dz = -ring, ring do
+				if math.max(math.abs(dx), math.abs(dz)) == ring then
+					local vid = level.vertex_id(vector():set(x + dx * 0.7, y + T2_NEAR_H, z + dz * 0.7))
+					if vid ~= 4294967295 and level.vertex_position(vid).y >= y - T2_NEAR_H then return ring end
+				end
+			end
+		end
+	end
+	return nil
+end
 local p_killed, p_torn_n = {}, nil
 local g_last_wall, g_f_until, g_last_g, p_fz_logged, g_prev_tg, g_prev_game = nil, nil, nil, false, nil, nil
 local function t2_pose(a, now, t)
@@ -173,9 +192,12 @@ local function t2_pose(a, now, t)
 		elseif not p_fz_logged then p_fz_logged = true; m(string.format("FREEZE_UNSUPPORTED,%d,%d,%s", now, n, state)) end   -- once
 	elseif not hold_state and p_paused then device():pause(false); p_paused = false; m(string.format("UNPAUSE,%d,%d", now, n)) end
 	if hold_state then return end
-	local v = vector():set(px, py, pz); local vid = level.vertex_id(v)
-	if vid ~= 4294967295 and math.abs(level.vertex_position(vid).y - py) <= 2.0 then p_lx, p_ly, p_lz = px, py, pz
-	else p_holds = p_holds + 1; m(string.format("HOLD,%d,%d", now, n)) end
+	local v = vector():set(px, py, pz)
+	local how = t2_near_ring(px, py, pz)   -- on-mesh test, prereg section 24
+	if how then
+		p_lx, p_ly, p_lz = px, py, pz
+		if how > 0 then p_near = p_near + 1; m(string.format("NEAR,%d,%d,%d", now, n, how)) end
+	else p_holds = p_holds + 1; m(string.format("HOLD,%d,%d,nonear", now, n)) end
 	if p_lx then a:set_actor_position(vector():set(p_lx, p_ly, p_lz)) end
 	a:set_actor_direction(pyaw)   -- sign checked at the pre-flight boot
 	m(string.format("P,%d,%s,%d,%.3f,%.4f,%.4f", n, utc, now, a:position():distance_to(v), pyaw, yaw(a)))   -- pose yaw, actor yaw read back
@@ -238,7 +260,7 @@ on_quit = function()
 	local p99 = exp_n > 0 and exp_times[math.max(1, math.ceil(exp_n * 0.99))] or 0
 	m(string.format("SUMMARY,hits=%d,cancelled=%d,refills=%d,min_health=%.3f,export_ticks=%d,export_mean_us=%.1f,export_p99_us=%.1f,export_max_us=%.1f",
 		hits, cancels, refills, min_health, exp_n, exp_n > 0 and exp_sum / exp_n or 0, p99, exp_max))
-	if t2 then m(string.format("T2SUM,last_seq=%d,torn=%d,holds=%d,paused=%s", p_last, p_torn, p_holds, tostring(p_paused))) end
+	if t2 then m(string.format("T2SUM,last_seq=%d,torn=%d,holds=%d,paused=%s,near=%d", p_last, p_torn, p_holds, tostring(p_paused), p_near)) end
 	out:close(); meta:close(); out, meta = nil, nil
 end
 

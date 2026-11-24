@@ -413,3 +413,34 @@ X SIDE (r2): FAIL
     The script does not log which of the two conditions failed.
   - The frozen script is unchanged. A fix (accept a pose when a node is near, log the HOLD reason) is a change to a
     frozen file: it needs its own registration and a short X-only pre-flight. Asked the Overseer.
+
+## 24. Fix of the pose on-mesh test, registered BEFORE r2b (Overseer approved; a bridge behaviour defect; X-track unchanged)
+- **Cause, now measured offline.** tools/t2_mesh_offline.py reads Cordon's level.ai (624,967 nodes, 0.7 m cells; ITRZone's
+  extracted copy, read only) and samples the track at 20 Hz as ITRZone's writer does.
+  - The OLD test (own cell only) holds 482 of 7,600 poses (6.3 %) on track 0-380 s. In 474 the pose's own cell has no
+    node; in 8 the node is more than 2 m off in height.
+  - The model's held runs are 502-524, 576-586, 1394-1437, 1817-1820, 1823-1889, ... The real runs held
+    503-525, 576-586, 1394-1438, 1817-1821, 1824-1889, ... (r1, r1b, r2). They match to one pose, so the cause is confirmed.
+- **New rule (zz_p1_puppet.script, t2_near_ring):** a pose is on the mesh if an AI node lies within +-2 cells
+  (1.4 m) in x and in z of the pose's cell AND within +-2.0 m of the pose's height. The own cell is tried first.
+  - Why 2 cells: +-1 cell still holds 1.9 %, +-2 holds 0.1 %, +-3 holds 0 %. 1.4 m is under the track's own largest
+    node_dist (1.82 m). Height stays at the old 2.0 m.
+  - The probe calls level.vertex_id at pose y + 2.0 and needs node y >= pose y - 2.0. vertex_id returns the highest
+    node at or below the y given, so this means "any node within the band".
+  - Logging: `HOLD,<tg>,<seq>,nonear` (the reason; the only one left), `NEAR,<tg>,<seq>,<ring 1|2>` when a neighbour
+    cell was needed, and `near=<n>` in T2SUM. The scorer reads only the first HOLD field, so it is unchanged.
+  - Nothing outside the -t2_pose path changes. No engine change.
+- **Offline check (the Overseer's condition), REAL script + REAL mesh + REAL track (t2-offline/mesh_stub.lua):**
+  - on-mesh part 0-380 s: 7 of 7,600 poses held (0.09 %, one run of 7 poses at seq 3292-3298); 467 accepted through
+    a neighbour cell (329 ring 1, 138 ring 2).
+  - witness, the off-mesh leg 410-600 s: 3,800 of 3,800 held. PASS on both.
+  - Limits of the model: node height is the cell-centre height (plane tilt ignored); the engine's physics is not modelled.
+- **Not tested in the engine yet.** The new Lua has only run under lua5.1 with stubs. r2b is r2's one retry, so I asked
+  the Overseer for one short X-only pre-flight first (t2_preflight.sh, about 6 min, WANT queue): PASS = no Lua error,
+  poses applied, NEAR lines present. If refused, r2b carries that risk.
+- **New frozen hash:** harness/zz_p1_puppet.script sha256
+  887f44889623bb44fb5a6e83f405a98925d5da0aa0cebadfd76c2d6e76784617 (was 966e3a47...).
+  Unchanged: t2_xray.sh 6ae8d27f..., lib_engine_pids.sh cb183b7b..., Absorb14.exe e35a289b..., scorer 16e89cb7...
+- **Expectation for r2b (stated before it runs):** X-track p95 <= 1.0 m, at 75 %. In r2 the non-held poses had p50 0.33 m;
+  the risk is slopes where the engine's physics moves the actor after placement. X-freeze: one STOP..CONT pair at death 2
+  (ITRZone: death 1 is `keep`, death 2 is `freeze`), game time delta <= 1000 ms, at 80 %.

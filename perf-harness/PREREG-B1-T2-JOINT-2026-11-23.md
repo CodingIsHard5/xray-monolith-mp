@@ -177,3 +177,41 @@ frame and the track played only on X-Ray's AI mesh.
 - Order: h1, then r2, each with one EXCLUSIVE claim.
 
 EnginePerf, on the X-Ray side: amendment 95 above is diff-checked as identical to the source. I checked these claims on the track file: no row at or below 381 s has node_dist < 0; the track rows at t 240 s and 280 s have node_dist 0.43 and 0.24 (both on the mesh). r2 X-Ray env and hashes are unchanged. h1 is not scored on the X side.
+
+## ITRZone amendment 96 (verbatim from ITRZone PREREG.md at bf31764, from "Amendment 96 (2026-11-23" to end)
+
+Amendment 96 (2026-11-23, before any boot of it): B1-T2 r2's rig defect fixed, d1 (the death path on the real game,
+ITR2 alone), then r2b, r2's one retry. Approved by the Overseer.
+- r2 (scored once) stands: the ITR2 side FAILs. After the first planned death, the Hub load of manual save 1 did
+  nothing, because that save did not exist: r2's start-only route never wrote it. The run idled to the cap.
+  - Kept as evidence: a death with 40 live puppets under T2 went through the stop and the world change with no crash.
+- Fixes:
+  - (1) The r2 arms use out/zones/cordon_full_vis/route_t2r2.txt: route_t0's start waypoint with `reload`. That is a
+    save-and-reload leg before play, as route_w.txt has, and it writes manual save 1 (healthy, Cordon). The driver
+    builds the file from route_t0 and refuses to run without the reload waypoint.
+  - (2) The death driver (wtest 5 and 6) logs `CheckSave manual 1 -> <b>` in its `load from Hub called` line.
+  - (3) The way back has timeouts: 172 s from the kill to the Hub load, and 150 s from the load to the re-entry. On
+    either, `WT FAIL k=<k> ...: run ended` is logged and the run ends (VIL.finish) instead of idling to the cap.
+  - The Lua pre-flights and dup_names PASS. They stub the load call, which is why they missed r2's defect. Hence d1.
+- d1, scripts/boot_t2solo.sh d1: one EXCLUSIVE claim, ITR2 alone with one static snapshot.
+  - Levers: hcheal=2 t2span=380 t2gap=0 t2end=300 wtest=6 t2die=60 t2dien=1.
+  - Scored once by tools/t2_d1_check.py. PASS needs these lines in this order:
+    - `RELOAD save ... CheckSave manual 1 -> true`;
+    - `WT k=1 kill firing`;
+    - `HP DEATH`;
+    - `T2 state play -> dead`;
+    - `WC away in L_Hub`;
+    - `WT k=1 load from Hub called ok=true CheckSave manual 1 -> true`;
+    - `WC zone world ... re-entry`;
+    - `T2 back in play`;
+    - `T2 state dead -> play`;
+    - `T2 end`.
+  - It also needs exactly one HP DEATH, no FAIL line, no dump, and ITR2 seen alive.
+  - Applied to r2's log, the check FAILs at "save written", as it should.
+  - A FAIL is reported, not tuned.
+- r2b: the r2 arm of amendments 93 and 95 unchanged, apart from the route. It is scored once with the same checks and
+  is r2's one retry.
+  - It waits for d1 to PASS, and for EnginePerf's word on their X-track fix: new hashes, or the Overseer's order to
+    run as is. Any new hashes are frozen in boot_t2.sh before it queues.
+
+EnginePerf, on the X-Ray side: amendment 96 above is diff-checked as identical to the source. X side for r2b: the pose on-mesh test is fixed (xray-side prereg section 24); zz_p1_puppet.script sha256 887f44889623bb44fb5a6e83f405a98925d5da0aa0cebadfd76c2d6e76784617; all other hashes and the r2 env are unchanged. X-freeze expects exactly one STOP..CONT pair (death 2, `freeze`); death 1 runs under `keep`. X-track is unchanged.
