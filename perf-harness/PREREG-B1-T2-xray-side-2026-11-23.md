@@ -1241,3 +1241,50 @@ fields stays v1 and takes the T2 path, unchanged.
   restore step, so the flaw does not touch it.
 - **Not tuned, no retry.** A fix (clear bleeding until it reads zero, and make `clear=` report the value read back)
   would be a new pre-flight, registered first, if the Overseer wants the witnesses clean by the rule.
+
+## 51. Restore fix after E2 (Overseer: no E3), script frozen; R3 joint crossing pre-flight (ITRZone arm x1), X side
+
+- **Overseer ruling (2026-11-24):** E2's FAIL stands as recorded; what Caden's rule needs is shown in substance by
+  the protected boot. No E3. The restore is fixed prospectively and recorded; if it ever runs in a scored boot
+  again, its end check covers it.
+- **Restore fix (test mode only, witness modes only):** the bleeding clear now sets a large value (1000), up to
+  five times, until bleeding reads back as zero, and `clear=` is `ok` only if bleeding and radiation both read back
+  <= 0.0001; otherwise it prints the values left. Script **473dec25...43537** (was 7f613c84).
+  - Offline, stub with the engine's subtract rule and a wound of 3: restore gives clear=ok and end-check bleeding
+    0; the mutation still shows bleeding 3; prot unchanged.
+  - Offline, without the control file: play and named-crossing output equal the frozen 1d7143cf, 0 differing lines
+    (wall-clock G lines apart).
+  - Not shown in the engine: no boot has run the fixed restore.
+- **Script 473dec25 is frozen for R3.** R3 never writes the control file; the runner removes a stale one
+  (section 46a) and the checker fails on any DMG line.
+- **R3 x1, ITR2 side (ITRZone amendment 107, commit 1c76503):** boot_t2.sh x1, levers hcheal=2 t2span=380 t2gap=0
+  t2v=2 t2st=30 transit=1 txa=60 txn=esc_level_changer_to_garbage_2 txb=60 txm=gar_level_changer_to_escape_2
+  txe=60. 60 s of Cordon track, into the changer, 60 s standing at the Garbage arrival, back by the paired
+  changer, 60 s, end. No death, no freeze.
+- **X env:** T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999 T2_KILL_AT=99999 T2_RUN_S=480.
+- **X files:** script 473dec25...43537; runner t2_xray.sh **6597a067...2a3d7** (changed since T3: it removes a
+  stale control file); Stance14.exe b4ce9c77...46cbe; lib_engine_pids.sh cb183b7b...8ed6e.
+- **Scored ONCE with tools/t3_x1_xray_check.py (c19740e8...2518c):**
+  `<X out dir> out/t3pfD/run/boot0/meta_t2.csv l01_escape l02_garbage esc_level_changer_to_garbage_2
+  gar_level_changer_to_escape_2`. PASS needs all nine:
+  1. rc 0, no Lua error naming the script, no FATAL ERROR, no DMG line.
+  2. Exactly two CROSS_REQ, in order, each through the named changer with pre-flight D's destination and vertices;
+     no CROSS_NOCHANGER or CROSS_ERROR.
+  3. Exactly two CROSS_RESUME, on Garbage then on Cordon, each after its request.
+  4. For each crossing, the first applied play pose was written by ITR2 at most 90 s after the `cross` pose.
+  5. P2 lines: at least 400 before the first request, at least 600 after each resume; no GUARD; at most 15 HOLD.
+  6. The first P2 after each resume is within 5 m (x, z) of that changer's destination.
+  7. The runner logged exactly two cross holds; restarts.csv has no row.
+  8. On every P2: stance read back = pose stance, movement state readable, actor height = node height + 0.05 m
+     (+-0.01).
+  9. Exactly three VITALS lines (one per Lua state), each with lowest health >= 0.999, highest radiation and
+     bleeding <= 0.0001, 0 unread; no REFILL line.
+- **Witness:** pre-flight D's data fails on 5 only (598 P2 on Garbage, by design: D stood there half as long) and
+  passes the other eight.
+- **Not covered:** a death during a crossing (needs a checker exemption for the first pose after a resume; a later
+  arm); spots with no AI node (ray fallback).
+- **Guess, written before the boot:** X side PASS 65 %. Risks: stance or height read-back off on Garbage, where
+  no stance step has run before (10 %); HOLD over 15 or a guard at an arrival with ITR2's real timing (10 %); the
+  real mod's cross/play timing differs from my writer's and trips 2, 3 or 7 (10 %); other (5 %).
+- **Stop rule:** a FAIL is reported, not tuned; at most one retry, registered first. ITRZone asks the Overseer
+  for the box.
