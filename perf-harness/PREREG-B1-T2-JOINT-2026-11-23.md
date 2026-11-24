@@ -226,3 +226,41 @@ Amendment 96 note (before r2b): EnginePerf's on-mesh fix is frozen for r2b (thei
 - r2b waits for d1 to PASS and for EnginePerf's short X-only pre-flight of the new script.
 
 EnginePerf: pre-flight 5 of the new script PASSED (xray-side prereg section 26). The X side is settled for r2b.
+
+## ITRZone amendment 97 (verbatim from ITRZone PREREG.md at 6b7c865, line 4631 to end)
+
+## Amendment 97 (Overseer after r2b): the CreepBig respawn fix, the checker cut at ITR2's end, r3
+
+B1-T2 stands as FAIL on r2b as registered (Overseer). The evidence alongside: both death paths work, keep and freeze
+(the freeze held X-Ray's game time to 198 ms), and the link accepted 9,827 of 9,827 snapshots while ITR2 was alive.
+r3 is a new, separately registered run, not a retry of r2.
+- Defect 1 (the mod, a player would hit it after any death): after a world change, every spawn of class CreepBig
+  failed (7 in r2b); it spawned fine before. Suspected cause: T0 kept the class reference it got in the first world.
+  CreepBig is a class we load ourselves, and the engine appears to drop it at the world change. Not proven; r3 tests it.
+  - Fix: STR.t0Class looks the class up again at every spawn (at most 4 a frame) and loads it again if it is gone.
+    Only "not loadable" is remembered, and only until the next world change.
+  - New log line, one per stretch of play between world changes and one at the end:
+    `T0 life k=<n> (<world change|end>) classes=<c> spawned/failed: <Class>=<spawned>/<failed> ...`.
+    At each world change the per-life counts, the class notes and the per-creature fail marks are reset, so every
+    creature gets a fresh try in the next world. The world-change teardown still makes no engine call.
+- Defect 2 (the registration): r2's X-Ray run (T2_RUN_S=1500) is longer than ITR2's run, and T2d counted the 3,103
+  snapshots written after ITR2's `T2 end` as misses. Fix: in arm r3, snapshots written after `T2 end` are not counted,
+  and their number is printed. Applied to r2b's data as a checker self-test (not a score): 9,827/9,827, 3,103 not
+  counted. r2b's score is unchanged.
+- r3 = r2b's arm unchanged (levers, route, X-Ray env), scored once by `tools/t2_check.py r3`:
+  - T2a, T2b, T2c, T2e, T2i1, T2i2 as in r2;
+  - T2d with the cut above;
+  - T2j respawn (new): exactly 3 `T0 life` lines (two deaths and the end); in every life every class listed has
+    spawned >= 1 and failed == 0; every class that spawned in life 1 is listed in lives 2 and 3.
+    Also no `T0 class <X> NOT loadable` line: a Creep stand-in would otherwise count as a spawn (review finding 1).
+    Known limit, accepted: a class whose every creature has died in X-Ray before a re-entry would FAIL T2j without a
+    defect. It would be reported as such, not re-scored.
+- Offline first: tools/t2_preflight.sh now drops a self-loaded class at a stub world change and checks the reload,
+  the two life lines and the resets. PASS, with dup_names and the span test. An Opus review of the diff stands in
+  for CodeRabbit: 3 findings. Fixed: T2j fails on a not-loadable class; no life line after `T0 end`. The third is the
+  known limit above.
+- Then `scripts/boot_t2.sh r3`: one EXCLUSIVE claim via WANT, fair share, renewal, frozen hashes checked before the
+  claim and before the call (the four of r2b unless EnginePerf sends new ones, which are verified on disk first).
+  EnginePerf scores the X side. A FAIL is reported, not tuned. At most one retry, registered first.
+
+EnginePerf, on the X-Ray side for r3: amendment 97 above is diff-checked as identical to the source. X-Ray env as in r2b. The puppet script changes (stray absorb arm fix, xray-side prereg section 28); its hash is confirmed to ITRZone only after pre-flight 6 (section 29) passes. X checks for r3: X-noplan, X-freeze and X-track as registered (scorer arg r2).
