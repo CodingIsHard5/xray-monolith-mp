@@ -855,3 +855,28 @@ fields stays v1 and takes the T2 path, unchanged.
   that the actor takes no damage from anything. Offline: all earlier cases unchanged; a stub actor with radiation
   0.25 / bleeding 0.1 reports them. This one line has NOT run in the engine yet; the joint pre-flight is its first
   boot (a read failure only counts `unread`).
+
+## 40. First joint T3 pre-flight (ITRZone arm j1): X side, registered BEFORE the boot. No boot before the Overseer's go
+- **ITR2 side:** ITRZone amendment 100 (their 8d73a2a), copied verbatim into PREREG-B1-T2-JOINT-2026-11-23.md and
+  diff-checked. ITRZone verified my hashes on disk.
+- **Frozen X files:** harness/zz_p1_puppet.script 899c28e9...9c485; run/bin/Stance14.exe b4ce9c77...46cbe;
+  tools/t2_xray.sh 96160265...63136; tools/lib_engine_pids.sh cb183b7b...8ed6e.
+- **X env (from ITRZone's driver):** T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999
+  T2_KILL_AT=99999 T2_RUN_S=640. T2_ABSORB_SKIP is left out; the runner's default is 0, the same as r3's explicit 0.
+- **ITR2 levers:** t2v=2 t2st=30 t2stop=380 (the on-mesh first 380 s once; stance 0,1,2 stepping every 30 s; no
+  death, no gap, no freeze).
+- **X side scored ONCE** with `t3_jpf_xray_check.py <X out dir> <cordon_full_track.csv>` (75020915...). **PASS needs
+  all of:** (1) rc 0 and no Lua error naming the script; (2) at least 6,000 P2 lines; (3) no GUARD and no step over
+  5 m; (4) at most 15 HOLD; (5) actor height = node height + 0.05 m on every P2; (6) no RAY_ERROR; (7) at least 10
+  STANCE lines and no STANCE_UNSUPPORTED; (8) `get_actor_stance` = pose stance on every P2; (9) the real movement
+  state = pose stance on at least 80 % of P2 and after every change within 2 s; (10) movement state readable on
+  every P2; (11) no restart row.
+- **Witness:** the checker FAILS pre-flight B's data on (2) only (3,671 poses), as it should for a 200 s run.
+- **Report-only:** the VITALS line (first engine run of that logging); the per-seq compare of ITR2's `T2 wrote`
+  x, z, stance against my P2 lines; yfloor minus my node height; ray and drift as before.
+- **Guess, written before the boot:** X side PASS 65 %. Risks: ITR2's yfloor picks another floor or misses the 3 m
+  band at more spots than the track did, so HOLD goes over 15 (15 %); fewer than 6,000 poses applied because ITR2's
+  write rate is under 20 Hz (10 %); a 30 s stance step leaves a change unfollowed within 2 s (5 %).
+- **Stop rule:** a FAIL is reported, not tuned; at most one retry, registered first.
+- **Open for R3, not part of j1:** ITRZone will send `c,<changer name>`; the lookup by name is not built yet
+  (the script takes the first changer leading to the level; each Cordon/Garbage pair has two, about 180 m apart).

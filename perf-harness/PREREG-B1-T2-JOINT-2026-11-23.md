@@ -271,3 +271,45 @@ Amendment 97 note (before r3): EnginePerf's end-state fix is frozen for r3 (thei
 - harness/zz_p1_puppet.script is now sha256 11c81c55...efffd (the full value is in boot_t2.sh), verified on disk after
   their pre-flight 6 PASSED. t2_xray.sh, lib_engine_pids.sh, Absorb14.exe and the r2 env are unchanged.
 - boot_t2.sh r3 refuses to run unless the puppet script has that hash, before the claim and again before the call.
+
+## ITRZone amendment 100 (verbatim from ITRZone PREREG.md at 8d73a2a, line 4713 to end)
+
+## Amendment 100 (joint with EnginePerf): the first joint T3 pre-flight, arm j1. Registered; no boot before approval
+
+A pre-flight, not the T3 run: does X-Ray read our version-2 pose in a real joint boot, ground its own actor and follow
+the stance? EnginePerf's X-only pre-flights passed first (their prereg sections 35-39: grounding 6/6, stance 10/10,
+no-bridge 8/8, level change 6/6).
+- Run: `scripts/boot_t2.sh j1`. One EXCLUSIVE claim via WANT, fair share, renewal. ITR2 headless on :88, X-Ray on :77.
+  - Our levers: `hcheal=2 t2span=380 t2gap=0 t2v=2 t2st=30 t2stop=380`. The on-mesh first 380 s of the track, played
+    once; pose version 2; the stance steps 0, 1, 2 every 30 s of play clock (12 changes); no death, no gap, no freeze.
+  - X-Ray env (EnginePerf): `T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999 T2_KILL_AT=99999
+    T2_RUN_S=640`.
+- Frozen files of EnginePerf, sha256, each verified on disk at registration and checked by the driver before the claim
+  and again before the call:
+  - tools/t2_xray.sh 96160265a6c329e44046f01bf5b885e46c75df8ee58df3b7ef341cb724963136 (changed since r3: no heartbeat
+    while the pose says `cross`)
+  - run/bin/Stance14.exe b4ce9c772ae5fa4bf5ddb955f2dfcb943627d6c2b2e4ce66e21eac1168646cbe
+  - harness/zz_p1_puppet.script 899c28e96805a9c8816a230d09b41cb40b05507b57d6b24ac477bb284939c485
+  - tools/lib_engine_pids.sh cb183b7b894eab3edb200e2c03a3a96f2e935cd2d1e1f402f48be7aad238ed6e (unchanged)
+  - Their scorer tools/t3_jpf_xray_check.py, sha256 starting 750209151c2a11eb (theirs to run; seen on disk).
+- ITR2 side, scored once by `tools/t2_check.py j1` (PASS = all six):
+  - T2a rate, T2b cost: as in B1-T2.
+  - T2c frames: p95 <= 25 ms. The maximum is reported, not scored.
+  - T2d link: as r3, with the cut at ITR2's end.
+  - T2e clean: both end lines, no FAIL line, no dump, no death.
+  - T3w writer (new): the end line says version 2 and stance lever 30; every play write's log line carries x, y, z
+    and a stance 0..2; exactly 12 stance changes, each to (a + 1) mod 3, 29.5-30.5 s of play clock apart; every play
+    write carries the stance in force at its seq (at most one write per change may differ).
+  - Reported, not scored: `feet_miss_frames` (frames where our ground trace found nothing and the track height was
+    sent instead), and the ground-difference line.
+- X side, EnginePerf's, as they register it: rc 0 with no Lua error and no restart; at least 6,000 poses applied; no
+  guard trip and no step over 5 m; at most 15 holds; the actor at node + 0.05 m on every pose; at least 10 stance
+  lines; the export equals our pose's stance on every pose; the real crouch state matches on at least 80 % and follows
+  every change within 2 s. Report-only: a VITALS line (lowest health, highest radiation and bleeding; this logging
+  has not yet run in the engine) and the per-seq compare of our `T2 wrote` x, z, stance with their P2 lines.
+- After the run they get the X-Ray out dir and our UE4SS.log lines `T2 wrote`, `T2 stance`, `T2 pose`, `T2 ground`.
+- A FAIL is reported, not tuned. At most one retry, registered first.
+- Offline before registration: the j1 checker was run on r3's log (FAILs T2e and T3w, as it must; r3 as r3 still
+  PASSes), on a synthetic good log (T3w PASS) and on one with wrong stances (T3w FAIL). tools/t2_preflight.sh,
+  tools/t3_pose_test.lua, the span test, dup_names and luac PASS; the mod is unchanged since 8d8cc1b.
+- Not covered: a death, a freeze or a level crossing under version 2. Those belong to the T3 run and to R3.
