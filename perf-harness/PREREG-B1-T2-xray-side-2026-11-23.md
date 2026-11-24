@@ -327,3 +327,23 @@ FROZEN for the joint B1-T2 runs (sha256):
   the joint file. On pre-flight data it gives: pre-flight 4 as r2 PASS (game_ms +198); pre-flight 3 FAIL as expected
   (365106 unarmed, 3096 old STOP definition).
 - NEW FROZEN t2_xray.sh sha256: 6ae8d27fd8a8f6ad4409b5618bbf60b4e9bb94b32fc5d7228bf135c0ed66142d (other frozen files unchanged).
+
+## 21. Joint r1 X-side RESULT (ITRZone run 20261123-185125; scored ONCE with the committed scorer, r1)
+Out dir ~/Projects/ITRZone/out/runs/20261123-185125-t2r1-xray. Verbatim scorer output:
+```
+X-kill PASS: kill at 1795478751980, boot 1 first snapshot after 30319 ms
+X-noplan PASS: 0 unplanned restarts (); last line rc=0: True
+X-freeze PASS: r1: 0 STOP rows (none expected); absorbed lines 0
+X-track FAIL: 328 poses applied; dist p50 0.295 p95 1.053 max 3.014 m; off-mesh holds 30; torn 0
+X SIDE (r1): FAIL
+```
+- **X SIDE r1 = FAIL** (X-track p95 1.053 m > 1.0 m). The score stands; it is not re-scored.
+- Context (read after scoring, descriptive only): ITRZone reports its rig pawn took fall damage during placement and
+  died at play 29.1 s; the pose said `dead` for the rest (~23 min), so only 328 poses were applied (all in boot 0,
+  none in boot 1). The off-mesh HOLDs are seq 503-505 and so on; all 18 P rows over 1 m are seq 510-525 (distance growing smoothly
+  1.13 -> 3.01 m in ~0.75 s, which looks like a free fall of the target, ~0.5 g t^2 = 2.7 m) plus 579 and 582 (1.05, 1.04 m).
+  My reading, not checked: the actor stayed on the navmesh while the ITR2 pose fell, so the tracking error comes from the
+  same rig fall. The sample is too small and too short to judge following.
+- Kill/restart worked: new boot's first snapshot 30.3 s after the kill (limit 90 s); ITRZone I-T2h resync 42.6 s, 43
+  puppets held. No unplanned restart, rc 0.
+- A re-run with a fixed rig is a NEW run (needs its own registration); r2 is held by ITRZone for the same reason.
