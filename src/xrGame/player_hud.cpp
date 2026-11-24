@@ -4318,6 +4318,15 @@ struct vr_bpi_state
 	xr_vector<vr_bpi_entry> list;
 };
 static vr_bpi_state s_vr_bpi = {};
+// a model's own box moves once it has been drawn (its bones are calculated), so the size and centre measured on the
+// first make are remembered per model name: the same item is drawn the same size on every take
+struct vr_bpi_size
+{
+	shared_str name;
+	Fvector bc;
+	float longest;
+};
+static xr_vector<vr_bpi_size> s_vr_bpi_sizes;
 static const char* VR_BPI_BOXES[] = { "dynamics\\box\\box_1a", "dynamics\\box\\box_wood_01", "dynamics\\box\\box_metall_01", "dynamics\\box\\box_paper",
 	"dynamics\\devices\\dev_rukzak\\dev_rukzak" }; // the last one is 12a's own model, known to be there
 static bool vr_bpi_file(LPCSTR N) // the model pool's own lookup, without its stop
@@ -4504,9 +4513,29 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 			e.longest = 0.f;
 			if (e.vis)
 			{
-				const Fbox& ib = e.vis->getVisData().box;
-				ib.getcenter(e.bc);
-				e.longest = _max(ib.max.x - ib.min.x, _max(ib.max.y - ib.min.y, ib.max.z - ib.min.z));
+				const vr_bpi_size* known = nullptr;
+				for (const vr_bpi_size& z : s_vr_bpi_sizes)
+					if (z.name == e.visname)
+					{
+						known = &z;
+						break;
+					}
+				if (known)
+				{
+					e.bc = known->bc;
+					e.longest = known->longest;
+				}
+				else
+				{
+					const Fbox& ib = e.vis->getVisData().box;
+					ib.getcenter(e.bc);
+					e.longest = _max(ib.max.x - ib.min.x, _max(ib.max.y - ib.min.y, ib.max.z - ib.min.z));
+					vr_bpi_size z;
+					z.name = e.visname;
+					z.bc = e.bc;
+					z.longest = e.longest;
+					s_vr_bpi_sizes.push_back(z);
+				}
 				const float fit = e.longest > 0.001f ? 0.9f * B.cell / e.longest : 1.f;
 				e.scale = e.box ? fit : _min(B.scale, fit);
 			}
