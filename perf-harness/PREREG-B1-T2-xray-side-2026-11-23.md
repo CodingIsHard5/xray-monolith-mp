@@ -1214,3 +1214,30 @@ fields stays v1 and takes the T2 path, unchanged.
 - **Stop rule:** a FAIL is reported with its cause, not tuned. No retry without a new registration.
 - **Rule One:** spawns, releases and placements happen only in these test boots on the project's test save, which
   is not written (hash checked before and after). The control file is removed after every boot (section 46a).
+
+## 50. Pre-flight E2: FAIL (scored once, 2026-11-24). The protected run passes; both witnesses fail the end check
+
+- **Boots:** four, each its own slice (10:30, 12:09, 13:16, 13:58), out/t3pfE3_<mode>. No retry was used. Script
+  7f613c84, checker 11fcdb6f, as registered. Test save unchanged (scoc a9f9a8a9..., scop 6dea752b...). The control
+  file was absent after the series.
+- **Result per boot:**
+  - god_off_norefill (witness): **FAIL on 6 only.** 1, 2, 3, 4, W PASS. Hits: radiation 593 (health down to 0.46,
+    radiation 0.90), gravitational anomaly 17 (0.50), mutants 32 (0.30, bleeding 10). End check: alive, health 1.0,
+    radiation 0, mutants 0, god mode on, but **bleeding 7.65**.
+  - god_off (witness, refill on): **FAIL on 6 only.** 1, 2, 3, 4, W PASS. 1,230 hit lines. End check as above but
+    **bleeding 10.0**.
+  - prot (the protected run): **PASS 6/6.** Zero hits reach the script in all three phases; health 1.000, radiation
+    0, bleeding 0 on all 390 lines; no refill needed; end check clean.
+  - god_off_norefill_norestore (mutation): **FAILS, as it must** (on 6: no restore line, health 0.10, bleeding 10,
+    god mode off; and on 1: runner rc 5).
+- **E2 by its rule: FAIL** (it needs both witnesses to PASS). The guess was 40 % PASS; the named 20 % risk
+  ("bleeding is not fully cleared at the end check") is what happened.
+- **Cause (read from code after scoring):** the restore clears bleeding with `a.bleeding = 1`. Section 49 said this
+  heals all wounds. It does not: CWound::Incarnation (Wound.cpp:97) subtracts the value from each wound size, it is
+  not a fraction. Wounds larger than 1 stay. The script printed `clear=ok` because the call did not error, not
+  because bleeding was zero. This is a flaw in the test's restore step, in witness modes only.
+- **What the data shows in substance:** with protection off, all three sources damage the actor in both witnesses;
+  with protection on, none of them changes health, radiation or bleeding. The protected run never needs the
+  restore step, so the flaw does not touch it.
+- **Not tuned, no retry.** A fix (clear bleeding until it reads zero, and make `clear=` report the value read back)
+  would be a new pre-flight, registered first, if the Overseer wants the witnesses clean by the rule.
