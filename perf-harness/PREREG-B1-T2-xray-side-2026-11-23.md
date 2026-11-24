@@ -566,3 +566,23 @@ X SIDE (r2): PASS
   Unchanged: t2_xray.sh 6ae8d27f..., lib_engine_pids.sh cb183b7b..., Absorb14.exe e35a289b..., scorer 16e89cb7...
 - **Expectation for r3 (before it runs):** X side PASS on all three, at 80 %. The X side is the same as r2b except the
   arm rules; the risk is run-to-run variation in X-track (r2b p95 0.608 m).
+
+## 31. Joint r3 X-side RESULT: PASS (ITRZone run 20261123-232930; scored ONCE, scorer 16e89cb7..., arg r2)
+Out dir ~/Projects/ITRZone/out/runs/20261123-232930-t2r3-xray. Verbatim:
+```
+X-noplan PASS: 0 unplanned restarts (); last line rc=0: True
+X-freeze PASS: 1 STOP, 1 CONT; game_ms deltas [198]; bad []; [FREEZE] absorbed lines 1
+X-track PASS: 21356 poses applied; dist p50 0.29 p95 0.611 max 91.46 m; off-mesh holds 22; torn 0
+X SIDE (r2): PASS
+```
+- ITR2 side (ITRZone, scored once): PASS, all 8. **So r3 passes on both sides.** My expectation (X PASS, 80 %) was right.
+- Freeze: STOP 04:42:24.26Z, CONT 04:43:41.54Z, 77.3 s; `[FREEZE] absorbed 77276 ms of a 77309 ms gap`; game time +198 ms.
+- Arm rules: one ABSORB_ARM (seq 11149), one `ABSORB_DISARM,...,play` (seq 12655), and NO arm at ITR2's `end` pose
+  (the last pose is seq 24715; STALE follows it, nothing else). r2b's stray arm is gone.
+- Tracking: 22 HOLDs (the same spot as r2b: seq 3292-3298, 3821, 14950-14956, 21538-21544), 1,375 near accepts,
+  122 poses over 1 m.
+- Observed, unexplained (passes the check, but worth a look before T3): three single poses read 91.5, 75.2 and 90.5 m
+  from the pose (seq 19655, 19660, 19663, within 0.4 s, time_global ~931.6-932.0 s). The poses between them are normal
+  (0.6-1.4 m), and r2b has nothing like it at the same seq. So for single ticks the actor's position, read right
+  after it was set, was ~90 m away. Not checked: the log has `pfx_teleport` particle lines (854.8 s), so a teleport
+  anomaly moving the actor is one candidate; a stale position read is another.
