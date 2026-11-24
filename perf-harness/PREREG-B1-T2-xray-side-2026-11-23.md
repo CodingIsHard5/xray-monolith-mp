@@ -880,3 +880,37 @@ fields stays v1 and takes the T2 path, unchanged.
 - **Stop rule:** a FAIL is reported, not tuned; at most one retry, registered first.
 - **Open for R3, not part of j1:** ITRZone will send `c,<changer name>`; the lookup by name is not built yet
   (the script takes the first changer leading to the level; each Cordon/Garbage pair has two, about 180 m apart).
+
+## 41. Joint pre-flight j1: X side RESULT (scored once, 2026-11-24)
+
+- **Run:** ITRZone's driver, 2026-11-24 10:46-10:57 UTC. X out dir
+  `~/Projects/ITRZone/out/runs/20261124-054342-t2j1-xray`; ITR2 lines
+  `~/Projects/ITRZone/out/runs/20261124-054342-stream-t2j1/t2_lines_for_xside.txt`. Checker 75020915..., puppet script
+  899c28e9... (both hashes checked on disk before scoring).
+- **X SIDE: PASS, 11 of 11.** ITR2 side (ITRZone's scoring): PASS 6/6.
+  1. No Lua error, rc 0: PASS.
+  2. P2 lines >= 6,000: PASS (7,338).
+  3. No GUARD, no step over 5 m: PASS (0 GUARD, largest step 1.70 m).
+  4. HOLD <= 15: PASS (8, all "nonode": seqs 3292-3298 and 3821).
+  5. Actor height = node height + 0.05 m on every P2: PASS.
+  6. No RAY_ERROR: PASS.
+  7. STANCE lines >= 10, none unsupported: PASS (13, 0).
+  8. get_actor_stance = pose stance on every P2: PASS (0 differ of 7,338).
+  9. Real movement state = pose stance: PASS (7,326 of 7,338; all 12 changes followed within 2 s).
+  10. Movement state readable on every P2: PASS (0 unread).
+  11. No restart row: PASS (0).
+- **Guess:** PASS 65 %. It passed; none of the three named risks happened (HOLD 8, 7,338 poses, 0 unfollowed).
+- **Report-only:**
+  - `VITALS,min_health=1.000,max_radiation=0.0000,max_bleeding=0.0000,unread=0`. First engine run of this logging.
+  - Per-seq compare with ITR2's `T2 wrote` (7,600 play writes): all 7,338 P2 seqs are in ITR2's log; x and z differ
+    by at most 0.005 m (ITR2's log rounds to 2 decimals); stance differs on 0.
+  - Play seqs not applied: 262. 245 before my first apply (seq 246, engine still loading), 8 HOLD, 9 single seqs the
+    20 Hz reader skipped.
+  - Actor height minus the height ITR2 sent: p05 -0.447, p50 -0.230, p95 -0.144, min -3.112, max +0.374 m (ITR2
+    sends its ground + 0.3 m, so about -0.25 is agreement).
+  - Actor height minus track height: p50 +0.050, |.| p95 0.212, max 1.616 m.
+  - Ray: hit on 7,338 of 7,338; ray ground minus node height p05 -0.108, p50 -0.021, p95 +0.097, min -0.611,
+    max +1.198 m. Height drift between sets nonzero on 4,382 of 7,338 (min -0.497 m).
+  - Snaps 4; rings 0/1/2: 6,871 / 330 / 137. MOVESUM frames 37,350, crouch 6,533, low 6,544.
+- **Not covered by j1:** death, gap, freeze, kill, level change, and the 8 no-node poses (the ray hit there is
+  measured but not used). Vitals become gating from T3 proper (Overseer).
