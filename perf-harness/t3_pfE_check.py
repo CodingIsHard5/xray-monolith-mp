@@ -11,6 +11,11 @@ line, in all three DMG_PHASE_END lines and in the VITALS line (0 unread); SUMMAR
 Witnesses add (W): damage shows in EVERY phase: its DMG_PHASE_END has hits >= 1, or min_health < 0.99, or
 max_radiation > 0.001, or max_bleeding > 0.001. god_off_norefill also needs min_health < 0.9 or max_radiation > 0.01
 in at least one phase.
+E2 (section 49) adds for ALL modes (6): the end of the test: exactly one DMG_RESTORE line with g_god=true, clear=ok and
+remove_errors=0, and exactly one DMG_ENDCHECK line (10 s after the last phase) with alive=1, health >= 0.999,
+radiation <= 0.0001, bleeding <= 0.0001, mutants_left=0 and g_god=true.
+Mode god_off_norefill_norestore is the MUTATION (the restore is skipped on purpose): it is scored as a witness and
+must FAIL on (6) or (1).
 Reported: targets, per-phase lines, hit lines by hitter section and type, DMG_FLOOR and REFILL counts."""
 import sys, os, re, collections
 O, MODE = sys.argv[1], sys.argv[2]
@@ -41,9 +46,14 @@ if MODE == 'prot':
 else:
     shown = {k: (int(p['hits']) >= 1 or float(p['min_health']) < 0.99 or float(p['max_radiation']) > 0.001 or float(p['max_bleeding']) > 0.001) for k, p in PE.items()}
     big = any(float(p['min_health']) < 0.9 or float(p['max_radiation']) > 0.01 for p in PE.values())
-    res.append(('W damage shows in every phase with the protection off', len(PE) == 3 and all(shown.values()) and (MODE != 'god_off_norefill' or big), f'{shown}; clear damage {big}'))
+    res.append(('W damage shows in every phase with the protection off', len(PE) == 3 and all(shown.values()) and (not MODE.startswith('god_off_norefill') or big), f'{shown}; clear damage {big}'))
+RSL = [kv(l) for l in M if l.startswith('DMG_RESTORE,')]; EC = [kv(l) for l in M if l.startswith('DMG_ENDCHECK,')]
+r_ok = len(RSL) == 1 and RSL[0].get('g_god') == 'true' and RSL[0].get('clear') == 'ok' and RSL[0].get('remove_errors') == '0'
+e = EC[0] if len(EC) == 1 else {}
+e_ok = bool(e) and e['alive'] == '1' and float(e['health']) >= 0.999 and float(e['radiation']) <= 0.0001 and float(e['bleeding']) <= 0.0001 and e['mutants_left'] == '0' and e['g_god'] == 'true'
+res.append(('6 end of test: protection restored, mutants removed; 10 s later alive, full health, not bleeding, god mode on', r_ok and e_ok, f'{len(RSL)} RESTORE {RSL[:1]}; {len(EC)} ENDCHECK {EC[:1]}'))
 txt = '\n'.join(f'{n}: {"PASS" if ok else "FAIL"} ({d})' for n, ok, d in res)
-txt += '\nreported: ' + '\nreported: '.join([l for l in M if l.startswith(('DMG_TARGET', 'DMG_NOTARGET', 'DMG_SPAWN', 'DMG_PHASE_END', 'VITALS', 'SUMMARY'))] or ['no DMG lines'])
+txt += '\nreported: ' + '\nreported: '.join([l for l in M if l.startswith(('DMG_TARGET', 'DMG_NOTARGET', 'DMG_SPAWN', 'DMG_PHASE_END', 'DMG_REMOVE', 'DMG_RESTORE', 'DMG_NORESTORE', 'DMG_ENDCHECK', 'VITALS', 'SUMMARY'))] or ['no DMG lines'])
 txt += f'\nreported: hit lines {len(HT)} by hitter section and type: {dict(collections.Counter((h[3], h[5]) for h in HT).most_common(12))}'
 txt += f'\nreported: DMG_FLOOR {sum(1 for l in M if l.startswith("DMG_FLOOR"))}, REFILL {sum(1 for l in M if l.startswith("REFILL"))}'
 txt += f'\nPRE-FLIGHT E ({MODE}): {"PASS" if all(r[1] for r in res) else "FAIL"}\n'

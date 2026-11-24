@@ -1178,3 +1178,39 @@ fields stays v1 and takes the T2 path, unchanged.
   and the refill on, clear bleeding and radiation, and log it, so the actor survives to the end of the boot. Then
   run only the two missing boots (god_off, prot). The no-refill witness would be taken from this boot's data, with
   its rc recorded as failed for the stated reason.
+
+## 49. Pre-flight E2 (forced damage, end of test fixed), registered BEFORE its boots. No boot before the Overseer's go
+
+- **Overseer's order (2026-11-24):** E's FAIL stands. E2 is a new pre-flight: the mutants are removed and the
+  protection is restored BEFORE the test mode ends, with an end-of-test check that the actor is alive and not
+  bleeding; all three boots run again on the fixed script so the witnesses and the protected run share one build;
+  a mutation for the end gap (skip the restore) must fail.
+- **Script (sha256 7f613c84...ce957, was 1b1c08d1...):**
+  - At the end of the last phase, in every mode: the three spawned mutants are released (`DMG_REMOVE` per mutant);
+    radiation and bleeding are cleared, health is set to 1.0, `g_god on` is executed, and from then on the refill
+    and the script's hit cancel work as in a normal run (`DMG_RESTORE,<time>,g_god=,clear=,remove_errors=`).
+  - 10 s later, once: `DMG_ENDCHECK,<time>,alive=,health=,radiation=,bleeding=,mutants_left=,g_god=`.
+  - Mutation mode `god_off_norefill_norestore`: as god_off_norefill, but the restore is skipped on purpose
+    (`DMG_NORESTORE`); the mutants are still removed.
+  - Offline: without the control file the play and crossing lines are the same as the frozen 1d7143cf; with it,
+    all four modes run in the stub and write the new lines.
+- **Driver tools/t3_pfE.sh (9de62bfc...91fb6):** four X-only boots, each its own WANT slice (20-min claim, about
+  7 min each): god_off_norefill, god_off, prot, then the mutation. A boot of the first three with rc not 0 stops
+  the series. `PFE_PREFIX=t3pfE3`, out dirs out/t3pfE3_<mode>. Env as before (Stance14.exe, writer `nofreeze`,
+  PF_RUN_S=330, T2_MAXRESTART=0). Runner t2_xray.sh 6597a067..., t2_preflight.sh 773ac813...
+- **Each boot scored ONCE with t3_pfE_check.py (11fcdb6f...5d9ef).** Conditions 1-5 and W as in section 46, plus
+  for ALL modes: **(6)** exactly one DMG_RESTORE with g_god=true, clear=ok and remove_errors=0, and exactly one
+  DMG_ENDCHECK with alive=1, health >= 0.999, radiation <= 0.0001, bleeding <= 0.0001, mutants_left=0, g_god=true.
+- **E2 PASSES only if:** god_off_norefill PASS, god_off PASS, prot PASS, and the mutation boot FAILS (on 6 or 1).
+  A source is covered only if both witnesses show damage from it and prot shows none.
+- **Checker witnesses:** stub prot data PASSES all six; stub mutation data FAILS on (6) (no restore line, still
+  bleeding); the E retry boot's real data FAILS on (1) and (6) and passes 2, 3, 4 and W as before.
+- **Not shown offline:** that `bleeding = 1` and `change_radiation` clear the real values, and that releasing an
+  online mutant works; the stub only models them. The end check measures exactly that in the engine.
+- **Guess, written before the boots:** E2 PASS (three PASS and the mutation FAIL): 40 %. Risks: bleeding or
+  radiation is not fully cleared at the end check, or a release fails (20 %); the actor dies in the refill-on
+  witness from one big hit (10 %); mutants do not engage in one of the boots (10 %); the protected run shows a
+  change in radiation or bleeding (10 %); the mutation boot passes by luck (5 %); other (5 %).
+- **Stop rule:** a FAIL is reported with its cause, not tuned. No retry without a new registration.
+- **Rule One:** spawns, releases and placements happen only in these test boots on the project's test save, which
+  is not written (hash checked before and after). The control file is removed after every boot (section 46a).
