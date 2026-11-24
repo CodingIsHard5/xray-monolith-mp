@@ -1273,6 +1273,8 @@ public:
 
 	float GetActorCrouchCoef() const;
 	void SetActorCrouchCoef(float val);
+	void SetActorStance(int stance);
+	int GetActorStance() const;
 	float GetActorClimbCoef() const;
 	void SetActorClimbCoef(float val);
 	float GetActorWalkStrafeCoef() const;

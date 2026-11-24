@@ -472,6 +472,10 @@ public:
 	u32 MovingState() const { return mstate_real; }
 protected:
 	u32 mstate_wishful;
+public:
+	// T3 bridge: stance forced from script (set_actor_stance). -1 = none (stock input path), 0 stand, 1 crouch, 2 low crouch.
+	int m_script_stance;
+protected:
 	u32 mstate_old;
 	u32 mstate_real;
 

@@ -2910,6 +2910,23 @@ void CScriptGameObject::SetActorCrouchCoef(float val)
 	}
 	pActor->m_fCrouchFactor = val;
 }
+// T3 bridge: force the actor's stance from script. 0 stand, 1 crouch, 2 low crouch; anything else = none (stock input).
+void CScriptGameObject::SetActorStance(int stance)
+{
+	CActor* pActor = smart_cast<CActor*>(&object());
+	if (!pActor)
+	{
+		ai().script_engine().script_log(ScriptStorage::eLuaMessageTypeError,
+			make_string("CActor [%s]: cannot access class member SetActorStance!", object().cNameSect().c_str()).c_str());
+		return;
+	}
+	pActor->m_script_stance = (stance >= 0 && stance <= 2) ? stance : -1;
+}
+int CScriptGameObject::GetActorStance() const
+{
+	CActor* pActor = smart_cast<CActor*>(&object());
+	return pActor ? pActor->m_script_stance : -1;
+}
 float CScriptGameObject::GetActorClimbCoef() const
 {
 	CActor* pActor = smart_cast<CActor*>(&object());

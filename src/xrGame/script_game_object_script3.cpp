@@ -705,6 +705,8 @@ class_<CScriptGameObject> script_register_game_object2(class_<CScriptGameObject>
 		.def("set_actor_walk_back_coef", SAFE_WRAP(&CScriptGameObject::SetActorWalkBackCoef))
 		.def("get_actor_crouch_coef", SAFE_WRAP(&CScriptGameObject::GetActorCrouchCoef))
 		.def("set_actor_crouch_coef", SAFE_WRAP(&CScriptGameObject::SetActorCrouchCoef))
+		.def("set_actor_stance", SAFE_WRAP(&CScriptGameObject::SetActorStance))
+		.def("get_actor_stance", SAFE_WRAP(&CScriptGameObject::GetActorStance))
 		.def("get_actor_climb_coef", SAFE_WRAP(&CScriptGameObject::GetActorClimbCoef))
 		.def("set_actor_climb_coef", SAFE_WRAP(&CScriptGameObject::SetActorClimbCoef))
 		.def("get_actor_walk_strafe_coef", SAFE_WRAP(&CScriptGameObject::GetActorWalkStrafeCoef))

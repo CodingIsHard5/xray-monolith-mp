@@ -173,6 +173,7 @@ CActor::CActor() : CEntityAlive(), current_ik_cam_shift(0)
 
 	m_fRunFactor = 2.f;
 	m_fCrouchFactor = 0.2f;
+	m_script_stance = -1;
 	m_fClimbFactor = 1.f;
 	m_fCamHeightFactor = 0.87f;
 
@@ -1877,6 +1878,12 @@ void CActor::shedule_Update(u32 DT)
 				mstate_wishful &= ~mcAccel;
 			if (!psActorFlags.test(AF_SPRINT_TOGGLE))
 				mstate_wishful &= ~mcSprint;
+			if (m_script_stance >= 0) // T3 bridge: script stance replaces the crouch/accel input bits; never set in stock play
+			{
+				mstate_wishful &= ~(mcCrouch | mcAccel);
+				if (m_script_stance >= 1) mstate_wishful |= mcCrouch;
+				if (m_script_stance >= 2) mstate_wishful |= mcAccel;
+			}
 			if (!psActorFlags.test(AF_LOOKOUT_TOGGLE) || cam_freelook != eflDisabled)
 			{
 				mstate_wishful &= ~mcLLookout;
