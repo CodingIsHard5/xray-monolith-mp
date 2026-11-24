@@ -4653,6 +4653,9 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 		e.xf.transform_tiny(w, e.bc);
 		if (!B.quiet)
 			Msg("* [vr13d] frame %u model %u at %.4f %.4f %.4f", f, i, w.x, w.y, w.z);
+		if (!B.quiet) // B1b L11: the drawn model's own axes (scale included), so a checker can see it turn with the bag
+			Msg("* [vr13r] frame %u model %u axes %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f", f, i, e.xf.i.x, e.xf.i.y, e.xf.i.z, e.xf.j.x, e.xf.j.y, e.xf.j.z,
+				e.xf.k.x, e.xf.k.y, e.xf.k.z);
 		++drawn;
 	}
 	if (!B.quiet || f % 50 == 0)
