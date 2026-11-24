@@ -28,8 +28,10 @@ files are not touched; this lands in the next registration.
   limit. LOST is treated exactly like the pose state `away`, with the keep or freeze policy of the last good pose.
 - **Limits (proposed):**
   - 5 s when the last pose said play, dead or away. ITR2 writes at 20 poses a second, so 5 s is 100 missed poses.
-    The largest gap between two poses in T3 proper and x1 is to be read from the data before the limit is
-    registered; the limit must be at least three times that.
+    Checked against the data (2026-11-24): the largest gap between two applied poses during play was 408 ms in
+    T3 proper (21,343 poses; median 50 ms, 99th percentile 66 ms) and 95 ms in x1's first run (952 poses). So 5 s
+    is 12 times the largest real gap. T3's two 80 s gaps are its two deaths, where ITR2 kept writing poses and
+    the script applied none; they are not gaps in the file.
   - 120 s when the last pose said `cross`. A crossing took 48 to 52 s so far; ITRZone's own limit is 60 s.
   - Never after a pose that said `end`.
 - **Who measures:** both, each with its own clock.
@@ -71,7 +73,25 @@ Three boots, each about 4 minutes:
   The checker MUST FAIL it: no `LOST` line and no STOP row while the writer is dead. This shows the checker
   cannot pass on a run where nothing noticed.
 
+## Counter reset after an ITR2 restart (gap 2; Overseer: same registration)
+
+- Proposed, pending ITRZone's answer: ITR2 adds a session number to the pose's first line that changes on every
+  ITR2 start (for example its start time in ms). A pose whose session number differs from the last one is
+  accepted whatever its seq, the script's seq counter restarts from it, and it logs
+  `EPOCH,<track s>,<game ms>,<old session>,<new session>,<seq>`. Within one session the rule stays "seq must be
+  higher".
+- Without a session number the script cannot tell a restarted ITR2 from an old pose file left on disk, so a rule
+  like "accept any lower seq" is not safe.
+- Witness: the writer is killed and started again with seq 1 and a new session number: LOST, then EPOCH and
+  RESUME, poses applied again. Mutation: the same restart with the OLD session number: no pose may be applied.
+- The first pose after an EPOCH line gets the same guard exemption as the first pose after LOST.
+
+## Open point that may be Caden's
+
+- Under freeze, how long X-Ray may stay frozen waiting for a crashed ITR2: for ever, or stop and save after some
+  minutes. Under keep the same question is how long A-Life may run on around an actor nobody moves. The note
+  proposes no time-out; the Overseer decides whether Caden's keep/freeze choice already covers it.
+
 ## Not covered by this note
 
-- ITR2 restarting with seq back at 1 (gap 2 above); it needs ITRZone's answer first.
 - What ITR2 does when X-Ray is the one that stops writing snapshots; that is ITRZone's side.
