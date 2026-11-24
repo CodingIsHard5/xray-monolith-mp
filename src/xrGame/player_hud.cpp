@@ -40,6 +40,7 @@
 #include "map_spot.h"     // GammaVR milestone 10a step 3: map spot rects for the log (note 28)
 #include "map_location.h"
 #include <typeinfo>
+#include <algorithm>
 
 extern int g_nearwall;
 
@@ -4156,6 +4157,10 @@ struct vr_bp_state
 	float d;
 };
 static vr_bp_state s_vr_bp = {};
+static void vr_bpi_take(u32 frame);  // B1: the contents, below
+static void vr_bpi_frame(u32 frame);
+static void vr_bpi_reset();
+static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& bag_xf);
 bool vr_bp_claims() { return s_vr_bp.claims; }
 static void vr_bp_parse()
 {
@@ -4206,6 +4211,7 @@ static void vr_bp_update(const vr_input_info& I, bool grab, bool off_free)
 					S.state = 1;
 					S.claims = true;
 					Msg("* [vr12] frame %u take: backpack to the off hand (d_zone %.4f)", I.frame, S.d);
+					vr_bpi_take(I.frame);
 				}
 				else
 					Msg("* [vr12] frame %u take refused: the off hand is not free (hand magazine %d, PDA %d, item %d, cancel pending %d)", I.frame,
@@ -4228,6 +4234,7 @@ static void vr_bp_update(const vr_input_info& I, bool grab, bool off_free)
 	Msg("* [vr12s] frame %u state %d d_zone %.4f grab %d free %d claims %d grip_world %.4f %.4f %.4f zone_track %.4f %.4f %.4f item %d pending %d hand_mag %d pda_off %d two_hand %d t %.4f",
 		I.frame, S.state, S.d, grab ? 1 : 0, off_free ? 1 : 0, S.claims ? 1 : 0, gw.x, gw.y, gw.z, zc.x, zc.y, zc.z, s_vr_item.state, s_vr_item.pending ? 1 : 0,
 		s_vr_rl.hand_mag ? 1 : 0, (s_vr_pda.shown && !s_vr_pda.placed && s_vr_pda.hand == off) ? 1 : 0, s_vr_2h_grabbed ? 1 : 0, Device.fTimeGlobal);
+	vr_bpi_frame(I.frame);
 }
 static vr_item_vis s_vr_bpv = {};
 static void vr_bp_reset()
@@ -4240,6 +4247,7 @@ static void vr_bp_reset()
 	s_vr_bpv.failed = false;
 	s_vr_bp.state = 0;
 	s_vr_bp.claims = false;
+	vr_bpi_reset();
 }
 static void vr_bp_draw(IDSGraphManager* DM)
 {
@@ -4278,6 +4286,254 @@ static void vr_bp_draw(IDSGraphManager* DM)
 	}
 	DM->add_Dynamic(V.vis, &V.xf);
 	Msg("* [vr12d] frame %u drawn at %.4f %.4f %.4f", g_vr_track.frame, V.xf.c.x, V.xf.c.y, V.xf.c.z);
+	vr_bpi_draw(DM, V.vis, V.xf);
+}
+
+// GammaVR backpack B1 (SPIKE_PLAN Amendment 39): look inside. While 12a's backpack is held, the actor's backpack list
+// (the engine's m_ruck) is shown on the bag's face: one copy of the world model per kind of item (config section; the
+// count behind it is logged, not shown), in a fixed order (GAMMA's kind, then section), on a grid across the bag's two
+// long sides, each drawn smaller (-vr_bp_scale, and never larger than its grid cell). Nothing can be taken and the
+// inventory is only read. A model whose file is not there is NEVER asked of the model pool (that stops the game): a
+// plain box model stands in. Switches (feel, Caden's sheet): -vr_bp_scale <f> (default 0.25; 1 = real size),
+// -vr_bp_each (every item its own model, no stacks), -vr_bp_face <1|-1> (which face of the bag). TEST ONLY, passed by
+// no launcher: -vr_bp_items_off (the control: nothing is shown, the same per-frame line), -vr_bp_fake_missing <section>.
+struct vr_bpi_entry
+{
+	shared_str sect, kind, visname;
+	int count;
+	bool box, failed;
+	Fvector spot, bc;
+	float scale, longest;
+	IRenderVisual* vis;
+	IKinematics* K;
+	Fmatrix xf;
+};
+struct vr_bpi_state
+{
+	bool parsed, off, each, placed;
+	float scale, cell;
+	int face, cols, rows;
+	string128 fake;
+	xr_vector<vr_bpi_entry> list;
+};
+static vr_bpi_state s_vr_bpi = {};
+static const char* VR_BPI_BOXES[] = { "dynamics\\box\\box_1a", "dynamics\\box\\box_wood_01", "dynamics\\box\\box_metall_01", "dynamics\\box\\box_paper",
+	"dynamics\\devices\\dev_rukzak\\dev_rukzak" }; // the last one is 12a's own model, known to be there
+static bool vr_bpi_file(LPCSTR N) // the model pool's own lookup, without its stop
+{
+	if (!N || !N[0])
+		return false;
+	string_path name, fn;
+	if (0 == strext(N))
+		strconcat(sizeof(name), name, N, ".ogf");
+	else
+		xr_strcpy(name, sizeof(name), N);
+	return FS.exist(N) || FS.exist(fn, "$level$", name) || FS.exist(fn, "$game_meshes$", name);
+}
+static void vr_bpi_parse()
+{
+	vr_bpi_state& B = s_vr_bpi;
+	if (B.parsed)
+		return;
+	B.parsed = true;
+	B.off = !!strstr(Core.Params, "-vr_bp_items_off");
+	B.each = !!strstr(Core.Params, "-vr_bp_each");
+	B.scale = 0.25f;
+	B.face = 1;
+	B.fake[0] = 0;
+	if (LPCSTR q = strstr(Core.Params, "-vr_bp_scale "))
+	{
+		float f;
+		if (sscanf(q + 13, "%f", &f) == 1 && f >= 0.05f && f <= 1.f)
+			B.scale = f;
+	}
+	if (LPCSTR q = strstr(Core.Params, "-vr_bp_face "))
+	{
+		int f;
+		if (sscanf(q + 12, "%d", &f) == 1 && (f == 1 || f == -1))
+			B.face = f;
+	}
+	if (LPCSTR q = strstr(Core.Params, "-vr_bp_fake_missing "))
+		sscanf(q + 20, "%127s", B.fake);
+	Msg("* [vr13] backpack contents: %s; %s; scale %.3f; face %d; fake missing '%s'%s", B.off ? "OFF (-vr_bp_items_off, TEST ONLY)" : "on",
+		B.each ? "every item its own model (-vr_bp_each)" : "one model per kind", B.scale, B.face, B.fake, B.fake[0] ? " (TEST ONLY)" : "");
+}
+static void vr_bpi_reset()
+{
+	for (vr_bpi_entry& e : s_vr_bpi.list)
+		if (e.vis)
+			::Render->model_Delete(e.vis);
+	s_vr_bpi.list.clear();
+	s_vr_bpi.placed = false;
+}
+static CInventory* vr_bpi_inv()
+{
+	CActor* A = g_pGameLevel ? smart_cast<CActor*>(Level().CurrentEntity()) : nullptr;
+	return (A && A->m_inventory) ? &A->inventory() : nullptr;
+}
+static void vr_bpi_take(u32 frame) // on the take: read the backpack list and group it
+{
+	vr_bpi_state& B = s_vr_bpi;
+	vr_bpi_parse();
+	vr_bpi_reset();
+	CInventory* inv = vr_bpi_inv();
+	if (B.off || !inv)
+		return;
+	int items = 0;
+	for (PIItem it : inv->m_ruck)
+	{
+		if (!it)
+			continue;
+		++items;
+		const shared_str& sect = it->object().cNameSect();
+		vr_bpi_entry* e = nullptr;
+		if (!B.each)
+			for (vr_bpi_entry& o : B.list)
+				if (o.sect == sect)
+				{
+					e = &o;
+					break;
+				}
+		if (e)
+		{
+			++e->count;
+			continue;
+		}
+		vr_bpi_entry n = {};
+		n.sect = sect;
+		n.kind = pSettings->line_exist(sect, "kind") ? pSettings->r_string(sect, "kind") : "";
+		n.visname = it->object().cNameVisual();
+		if (!n.visname.size() && pSettings->line_exist(sect, "visual"))
+			n.visname = pSettings->r_string_wb(sect, "visual");
+		n.count = 1;
+		B.list.push_back(n);
+	}
+	std::stable_sort(B.list.begin(), B.list.end(), [](const vr_bpi_entry& a, const vr_bpi_entry& b) {
+		const int k = xr_strcmp(a.kind.c_str(), b.kind.c_str());
+		return k ? k < 0 : xr_strcmp(a.sect.c_str(), b.sect.c_str()) < 0;
+	});
+	u32 missing = 0;
+	for (vr_bpi_entry& e : B.list)
+	{
+		const bool there = vr_bpi_file(e.visname.c_str()) && !(B.fake[0] && !xr_strcmp(e.sect.c_str(), B.fake));
+		if (there)
+			continue;
+		++missing;
+		Msg("* [vr13] frame %u section '%s': no model file '%s'%s; a plain box stands in", frame, e.sect.c_str(), e.visname.c_str(),
+			(B.fake[0] && !xr_strcmp(e.sect.c_str(), B.fake)) ? " (faked, TEST ONLY)" : "");
+		e.box = true;
+		e.visname = nullptr;
+		for (LPCSTR c : VR_BPI_BOXES)
+			if (vr_bpi_file(c))
+			{
+				e.visname = c;
+				break;
+			}
+		if (!e.visname.size())
+		{
+			e.failed = true;
+			Msg("! [vr13] frame %u section '%s': no box model found either; nothing is drawn for it", frame, e.sect.c_str());
+		}
+	}
+	Msg("* [vr13] frame %u list built: %u models for %d items (%u without a model file)", frame, u32(B.list.size()), items, missing);
+}
+static void vr_bpi_frame(u32 frame) // every frame, held or not: what the engine's inventory holds (read only)
+{
+	vr_bpi_parse();
+	CInventory* inv = vr_bpi_inv();
+	u32 n = 0, all = 0, sum = 0, x = 0;
+	if (inv)
+	{
+		for (PIItem it : inv->m_ruck)
+			if (it)
+			{
+				++n;
+				sum += u32(it->object().ID());
+				x ^= u32(it->object().ID()) * 2654435761u;
+			}
+		all = u32(inv->m_all.size());
+	}
+	Msg("* [vr13s] frame %u held %d models %u ruck %u all %u weight %.4f id_sum %u id_xor %08x", frame, s_vr_bp.state, u32(s_vr_bpi.list.size()), n, all,
+		inv ? inv->TotalWeight() : -1.f, sum, x);
+}
+static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& bag_xf)
+{
+	vr_bpi_state& B = s_vr_bpi;
+	if (B.off || B.list.empty() || !bag)
+		return;
+	const u32 f = g_vr_track.frame;
+	if (!B.placed)
+	{
+		B.placed = true;
+		// the grid: across the bag's two long sides, on the face along its short side
+		const Fbox& b = bag->getVisData().box;
+		const float ext[3] = { b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z };
+		const float mn[3] = { b.min.x, b.min.y, b.min.z };
+		int a = 0;
+		for (int i = 1; i < 3; ++i)
+			if (ext[i] < ext[a])
+				a = i;
+		const int u = (a + 1) % 3, v = (a + 2) % 3;
+		const int n = int(B.list.size());
+		B.cols = _max(1, int(ceilf(_sqrt(float(n) * ext[u] / ext[v]))));
+		B.rows = (n + B.cols - 1) / B.cols;
+		B.cell = _min(ext[u] / float(B.cols), ext[v] / float(B.rows));
+		Msg("* [vr13] frame %u grid: %d x %d cells of %.4f m on the bag's face (short side axis %d, face %d); bag box %.3f x %.3f x %.3f min %.3f %.3f %.3f", f, B.cols,
+			B.rows, B.cell, a, B.face, ext[0], ext[1], ext[2], mn[0], mn[1], mn[2]);
+		for (int i = 0; i < n; ++i)
+		{
+			vr_bpi_entry& e = B.list[i];
+			float p[3];
+			p[u] = mn[u] + ext[u] * (float(i % B.cols) + 0.5f) / float(B.cols);
+			p[v] = mn[v] + ext[v] * (float(i / B.cols) + 0.5f) / float(B.rows);
+			p[a] = (B.face > 0 ? mn[a] + ext[a] : mn[a]) + float(B.face) * 0.5f * B.cell;
+			e.spot.set(p[0], p[1], p[2]);
+			if (!e.failed)
+			{
+				::Render->hud_loading = true;
+				e.vis = ::Render->model_Create(e.visname.c_str()); // the file was looked up in vr_bpi_take
+				::Render->hud_loading = false;
+				e.K = e.vis ? e.vis->dcast_PKinematics() : nullptr;
+				e.failed = !e.vis;
+			}
+			e.scale = 0.f;
+			e.longest = 0.f;
+			if (e.vis)
+			{
+				const Fbox& ib = e.vis->getVisData().box;
+				ib.getcenter(e.bc);
+				e.longest = _max(ib.max.x - ib.min.x, _max(ib.max.y - ib.min.y, ib.max.z - ib.min.z));
+				const float fit = e.longest > 0.001f ? 0.9f * B.cell / e.longest : 1.f;
+				e.scale = e.box ? fit : _min(B.scale, fit);
+			}
+			Msg("* [vr13b] frame %u model %d section '%s' kind '%s' count %d visual '%s' box %d made %d longest %.4f scale %.4f spot %.4f %.4f %.4f", f, i, e.sect.c_str(),
+				e.kind.c_str(), e.count, e.visname.size() ? e.visname.c_str() : "", e.box ? 1 : 0, e.vis ? 1 : 0, e.longest, e.scale, e.spot.x, e.spot.y, e.spot.z);
+		}
+	}
+	Msg("* [vr13x] frame %u bag %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f", f, bag_xf.i.x, bag_xf.i.y, bag_xf.i.z, bag_xf.j.x, bag_xf.j.y, bag_xf.j.z,
+		bag_xf.k.x, bag_xf.k.y, bag_xf.k.z, bag_xf.c.x, bag_xf.c.y, bag_xf.c.z);
+	u32 drawn = 0;
+	for (u32 i = 0; i < B.list.size(); ++i)
+	{
+		vr_bpi_entry& e = B.list[i];
+		if (!e.vis)
+			continue;
+		Fmatrix L;
+		L.scale(e.scale, e.scale, e.scale);
+		L.c.set(e.spot.x - e.scale * e.bc.x, e.spot.y - e.scale * e.bc.y, e.spot.z - e.scale * e.bc.z); // the model's box centre lands on the spot
+		e.xf.mul_43(bag_xf, L);
+		if (e.K)
+		{
+			e.K->CalculateBones_Invalidate();
+			e.K->CalculateBones(TRUE);
+		}
+		DM->add_Dynamic(e.vis, &e.xf);
+		Fvector w;
+		e.xf.transform_tiny(w, e.bc);
+		Msg("* [vr13d] frame %u model %u at %.4f %.4f %.4f", f, i, w.x, w.y, w.z);
+		++drawn;
+	}
+	Msg("* [vr13d] frame %u drawn %u", f, drawn);
 }
 
 void vr_input_update()

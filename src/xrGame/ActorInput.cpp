@@ -957,7 +957,7 @@ void vr_model_probe_update()
 		s_parsed = true;
 		if (LPCSTR p = strstr(Core.Params, "-vr_model_probe "))
 		{
-			if (sscanf(p + 16, "%d %d", &s_frame, &s_per) != 2 || s_frame < 0 || s_per < 1)
+			if (sscanf(p + 16, "%d %d", &s_frame, &s_per) != 2 || s_frame < 0 || s_per < 0)
 				s_frame = -1;
 			Msg("* [vr13] model probe (TEST ONLY): frame %d, %d models a frame", s_frame, s_per);
 		}
@@ -1013,6 +1013,12 @@ void vr_model_probe_update()
 				}
 			if (!seen)
 				s_vis.push_back(v);
+		}
+		if (s_per == 0) // <per frame> 0: the inventory lines only (B1's independent list), no models are made
+		{
+			s_stage = 2;
+			xrLogger::FlushLog();
+			return;
 		}
 		Msg("* [vr13] frame %d: %u item sections (inv_name, inv_weight and visual), %u distinct world models", f, s_sections, u32(s_vis.size()));
 		xrLogger::FlushLog();
