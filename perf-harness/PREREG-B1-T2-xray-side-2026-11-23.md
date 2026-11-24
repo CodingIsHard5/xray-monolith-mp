@@ -347,3 +347,29 @@ X SIDE (r1): FAIL
 - Kill/restart worked: new boot's first snapshot 30.3 s after the kill (limit 90 s); ITRZone I-T2h resync 42.6 s, 43
   puppets held. No unplanned restart, rc 0.
 - A re-run with a fixed rig is a NEW run (needs its own registration); r2 is held by ITRZone for the same reason.
+
+## 22. Joint r1b X-side RESULT (ITRZone run 20261123-201528; r1's one retry; scored ONCE, scorer sha 16e89cb7..., r1)
+(An earlier r1b attempt, 20261123-195823, was a NO-START: ITR2 never launched; the X-Ray out dir was empty and no engine
+ran. Nothing was scored. The Overseer re-queued it.) Out dir ~/Projects/ITRZone/out/runs/20261123-201528-t2r1b-xray. Verbatim:
+```
+X-kill PASS: kill at 1795483794360, boot 1 first snapshot after 30401 ms
+X-noplan PASS: 0 unplanned restarts (); last line rc=0: True
+X-freeze PASS: r1: 0 STOP rows (none expected); absorbed lines 0
+X-track FAIL: 19697 poses applied; dist p50 0.427 p95 209.365 max 271.086 m; off-mesh holds 5183; torn 0
+X SIDE (r1): FAIL
+```
+- **X SIDE r1b = FAIL.** It stands; r1's retry is used up. ITR2 side: all 8 I- checks PASS (ITRZone), no pawn death.
+- Descriptive, after scoring:
+  - One stretch drives the p95: boot 0, pose seq 7811-11824 (time_global 430.8-631.4 s, utc 1795483491328-1795483691979,
+    ~200 s). Every pose in it was off the AI mesh by my HOLD rule (4040 HOLDs; the rule is "no vertex, or vertex more
+    than 2 m off in Y"). The actor held its last on-mesh point while the pose went up to 271 m away.
+  - Yaw followed throughout: pose yaw and actor yaw read back are equal.
+  - Leaving that stretch out (NOT a re-score) gives p50 0.311 m, p95 1.439 m over 15,683 poses. That is still over 1.0 m,
+    from many short HOLD stretches where distance sits at 2-8 m. Boot 1 alone: 6186 of 6505 poses within 1 m.
+  - Unexplained so far: why a pose carrying X-Ray's own track height is off X-Ray's AI mesh for 200 s. I asked ITRZone
+    for the pose x,y,z in that window. Possible readings, not checked:
+    (a) the track itself leaves the AI mesh there (the T1 puppet held those points too);
+    (b) the pose's track-time mapping drifted after the I-T2f gap at play 300 s;
+    (c) an axis or height mix-up on some points.
+  - My X-track rule (p95 <= 1 m with HOLD on off-mesh points) also counts held distance as tracking error. That is
+    a design point for r2's registration, NOT a change to this score.
