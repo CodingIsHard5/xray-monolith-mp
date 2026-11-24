@@ -35,6 +35,12 @@ TRK = None
 CROSS = None
 if ARG.startswith('cross:'): _, CROSS, _trk = ARG.split(':', 2); ARG = 'track2:' + _trk
 cross_seen = None
+# pre-flight D (T3 R3 by name, section 42): `crossn:<dest1>=<changer1>,<dest2>=<changer2>:<track csv>`: v2 track poses
+# for 40 s, then per leg: `cross` with zone <dest> and a `c,<changer>` line until the snapshot names <dest> and 30 s
+# more, then 30 s of `play` on that level at the actor's snapshot position, then the next leg. Phases T, X<k>, Y<k>, P<k>.
+LEGS = None; leg = 0; leg_start = 40.0; cur_lvl = None; hold = None
+if ARG.startswith('crossn:'):
+    _, _legs, _trk = ARG.split(':', 2); LEGS = [tuple(v.split('=')) for v in _legs.split(',')]; ARG = 'track2:' + _trk
 V3 = ARG.startswith('track3:')   # pre-flight B (section 36): as track2 but the stance cycles 0,1,2 every 10 s
 if V3: ARG = 'track2:' + ARG[7:]
 V2 = ARG.startswith('track2:')   # pre-flight A (T3, section 33): pose v2 `p,x,yfloor,z,yaw,hp,stance`, yfloor = track height + 0.3 m, stance 0/1 alternating every 10 s
@@ -70,8 +76,22 @@ while True:
         if cross_seen is None and sn and sn[0] == CROSS: cross_seen = t
         if cross_seen is not None and t >= cross_seen + 30 and sn and sn[0] == CROSS: ph, st = 'P', 'play'; x, y, z = sn[1], sn[2], sn[3]
         else: ph, st = ('X' if cross_seen is None else 'Y'), 'cross'
+    cline = ''
+    if LEGS:
+        sn = snap()
+        if leg < len(LEGS) and t >= leg_start:
+            dest, cname = LEGS[leg]; zn = dest
+            if cross_seen is None and sn and sn[0] == dest: cross_seen = t
+            if cross_seen is not None and t >= cross_seen + 30 and sn and sn[0] == dest:
+                leg += 1; leg_start = t + 30; cross_seen = None; cur_lvl = dest; hold = sn[1:]
+            else: ph, st = ('X' if cross_seen is None else 'Y') + str(leg + 1), 'cross'; cline = f"c,{cname}\n"
+            if st == 'cross' and hold: x, y, z = hold   # second leg: keep sending the last position on the level being left
+        if cur_lvl and st == 'play':
+            if sn and sn[0] == cur_lvl: hold = sn[1:]
+            ph = 'P' + str(leg); zn = cur_lvl; x, y, z = hold
     n += 1; u = utc()
-    if TRK and V2: body = f"seq,{n},{u},{st},{zn},{aw}\np,{x:.3f},{y + 0.3:.3f},{z:.3f},{yw:.4f},1.0,{0 if CROSS else int(t // 10) % (3 if V3 else 2)}\nend,{n}\n"
+    if LEGS: body = f"seq,{n},{u},{st},{zn},{aw}\np,{x:.3f},{y + 0.3:.3f},{z:.3f},{yw:.4f},1.0,0\n{cline}end,{n}\n"
+    elif TRK and V2: body = f"seq,{n},{u},{st},{zn},{aw}\np,{x:.3f},{y + 0.3:.3f},{z:.3f},{yw:.4f},1.0,{0 if CROSS else int(t // 10) % (3 if V3 else 2)}\nend,{n}\n"
     else: body = f"seq,{n},{u},{st},{lvl},{aw}\np,{x:.3f},{y:.3f},{z:.3f},{yw:.4f},1.0\nend,{n}\n"
     with open(os.path.join(shm, 'pose.txt'), 'wb') as f: f.write(body.encode())
     log.write(f'{u},{n},{ph},{yw}\n'); log.flush()

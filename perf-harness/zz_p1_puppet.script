@@ -165,9 +165,10 @@ local function t3_changers()
 	end
 	return L
 end
-local function t3_find_changer(to)
+-- with a name (pose line `c,<changer name>`, R3): only that changer, and only if it leads from here to <to>; no fallback
+local function t3_find_changer(to, name)
 	local here = level.name()
-	for _, c in ipairs(t3_changers()) do if c.from == here and c.to == to then return c end end
+	for _, c in ipairs(t3_changers()) do if c.from == here and c.to == to and (not name or c.name == name) then return c end end
 end
 local T3_PROBE_UP, T3_BAND, T3_LIFT, T3_YTOL, T3_GUARD = 0.7, 3.0, 0.05, 0.7, 5.0
 local t3_ray, t3_ray_warned, t3_ly
@@ -234,12 +235,13 @@ local function t2_pose(a, now, t)
 		return end
 	local rest = f:read("*a") or ""; f:close()
 	local _, utc, state, zone, aw = string.match(first, "^seq,(%d+),(%d+),([^,]+),([^,]+),([^,]+)$")
-	local px, py, pz, pyaw, pstance; local kills = {}; local endn
+	local px, py, pz, pyaw, pstance, pchanger; local kills = {}; local endn
 	for line in string.gmatch(rest, "[^\r\n]+") do
 		local x, y, z, yw = string.match(line, "^p,([^,]+),([^,]+),([^,]+),([^,]+),")
 		if x then px, py, pz, pyaw = tonumber(x), tonumber(y), tonumber(z), tonumber(yw)
 			-- pose v2 (T3): p,x,yfloor,z,yaw,hp,stance  (6 fields after p; v1 has 5 and no stance)
 			pstance = tonumber(string.match(line, "^p,[^,]+,[^,]+,[^,]+,[^,]+,[^,]+,(%d+)$")) end
+		local cn = string.match(line, "^c,([%w_]+)$"); if cn then pchanger = cn end
 		local k = string.match(line, "^k,(%d+)$"); if k then kills[#kills + 1] = tonumber(k) end
 		local e = string.match(line, "^end,(%d+)$"); if e then endn = tonumber(e) end
 	end
@@ -254,9 +256,9 @@ local function t2_pose(a, now, t)
 	-- state does not survive, so the log line and the marker file are written first. No arm, no stop.
 	if state == "cross" and zone ~= level.name() then
 		if not t3_cross_done then t3_cross_done = true
-			local ok, c = pcall(t3_find_changer, zone)
+			local ok, c = pcall(t3_find_changer, zone, pchanger)
 			if not ok then m(string.format("CROSS_ERROR,%d,%d,%s", now, n, tostring(c)))
-			elseif not c then m(string.format("CROSS_NOCHANGER,%d,%d,%s,%s", now, n, level.name(), zone))
+			elseif not c then m(string.format("CROSS_NOCHANGER,%d,%d,%s,%s,%s", now, n, level.name(), zone, tostring(pchanger)))
 			else
 				m(string.format("CROSS_REQ,%d,%d,%s,%s,%s,%.3f,%.3f,%.3f,%d,%d,%s", now, n, level.name(), zone, c.name, c.pos.x, c.pos.y, c.pos.z, c.lvid, c.gvid, utc))
 				if meta then meta:flush() end

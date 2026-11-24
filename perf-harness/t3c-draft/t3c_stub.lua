@@ -42,7 +42,7 @@ LEVEL = os.getenv("STUB_LEVEL") or "l01_escape"; CHANGED = nil
 clsid = { level_changer_s = 77 }
 local GV = { [10]=1, [20]=2, [30]=3 }; local LN = { "l01_escape", "l02_garbage", "l03_agroprom" }
 function game_graph() return { vertex=function(_, g) return { level_id=function() return GV[g] end } end } end
-local OBJ = { [5]={c=77,n="esc_to_gar",g=10,dg=20,dp=V(1,2,3),dl=111}, [6]={c=77,n="gar_to_esc",g=20,dg=10,dp=V(4,5,6),dl=222}, [7]={c=77,n="gar_to_agr",g=20,dg=30,dp=V(7,8,9),dl=333}, [8]={c=5,n="npc",g=10} }
+local OBJ = { [5]={c=77,n="esc_to_gar",g=10,dg=20,dp=V(1,2,3),dl=111}, [6]={c=77,n="gar_to_esc",g=20,dg=10,dp=V(4,5,6),dl=222}, [7]={c=77,n="gar_to_agr",g=20,dg=30,dp=V(7,8,9),dl=333}, [8]={c=5,n="npc",g=10}, [9]={c=77,n="esc_to_gar_2",g=10,dg=20,dp=V(11,12,13),dl=444} }
 function alife() return { switch_distance=function() return 450 end, object_count=function() return 0 end, level_name=function(_, i) return LN[i] end,
   object=function(_, id) local o = OBJ[id]; if not o then return nil end
     return { clsid=function() return o.c end, name=function() return o.n end, m_game_vertex_id=o.g, dest_game_vertex_id=o.dg, dest_position=o.dp, dest_level_vertex_id=o.dl, position=V(0,0,0) } end } end

@@ -914,3 +914,72 @@ fields stays v1 and takes the T2 path, unchanged.
   - Snaps 4; rings 0/1/2: 6,871 / 330 / 137. MOVESUM frames 37,350, crouch 6,533, low 6,544.
 - **Not covered by j1:** death, gap, freeze, kill, level change, and the 8 no-node poses (the ray hit there is
   measured but not used). Vitals become gating from T3 proper (Overseer).
+
+## 42. Pre-flight D (R3: level change by changer NAME, there and back), registered BEFORE its boot
+
+- **Order (Overseer, 2026-11-24):** build the changer lookup by name, give it an X-only pre-flight, then the joint
+  crossing Cordon -> Garbage -> Cordon. No boot before the Overseer's go.
+- **Script installed: sha256 1d7143cf...30f45** (was 899c28e9..., j1's). Change: a pose line `c,<changer name>` is
+  read; on `cross`, with a name only that changer is used, and only if it stands on this level and leads to the pose's
+  zone; no fallback (`CROSS_NOCHANGER,...,<name>` otherwise). Without a `c` line the first changer is taken as before.
+- **Offline (t3c-draft/t3c_stub.lua, two changers to the same level):** no name -> the first; the second's name ->
+  the second (its destination and vertices); an unknown name -> CROSS_NOCHANGER, no marker, no level change; a
+  changer that leads the other way -> CROSS_NOCHANGER. A 60 s play run gives the same lines as 899c28e9 (all but the
+  wall-clock field of G lines).
+- **Stand-in writer (2cb582bc...ef4d6), new mode `crossn:<dest1>=<changer1>,<dest2>=<changer2>:<track>`:** 40 s of v2
+  track poses; then per leg `cross` with the zone and a `c,<changer>` line until the snapshot names that level and
+  30 s more; then 30 s of `play` there at the actor's snapshot position; then the next leg. Smoke-tested against a
+  fake snapshot source.
+- **Run (X-Ray only, one WANT slice, 20-min claim, one boot):**
+  `PF_OUT=out/t3pfD PF_EXE=Stance14.exe PF_FREEZE=sigstop PF_ABSORB=2000 PF_PAUSE=0 PF_KILL_AT=99999 PF_RUN_S=400
+   PF_POSE_ARG=crossn:l02_garbage=esc_level_changer_to_garbage_2,l01_escape=gar_level_changer_to_escape_2:<cordon_full_track.csv>
+   tools/t2_preflight.sh`. Both names are the SECOND changer of their pair, so a fallback to the first would show.
+  Runner t2_xray.sh 96160265..., t2_preflight.sh 88f2cb18..., Stance14.exe b4ce9c77... (all unchanged).
+- **Scored ONCE with t3_pfD_check.py (461b8e53...20dfd)**
+  `out/t3pfD perf-harness/t3-changers-cordon-garbage.csv l01_escape l02_garbage esc_level_changer_to_garbage_2 gar_level_changer_to_escape_2`.
+  **PASS needs all of:** (1) rc 0, no Lua error naming the script, no FATAL ERROR; (2) exactly two CROSS_REQ, in
+  order, each through the named changer with that changer's destination and vertices from the table; no
+  CROSS_NOCHANGER / CROSS_ERROR; (3) exactly two CROSS_RESUME, on Garbage then on Cordon, each after its request;
+  (4) each new level in the snapshot at most 180 s after the first `cross` pose of that leg; (5) after each resume
+  at least 200 P2 lines and no GUARD; (6) the first P2 after each resume within 5 m (x,z) of the changer's
+  destination; (7) the runner logged two cross holds and there is no restart row.
+- **Witness:** the checker FAILS pre-flight C's data on 2-7 (one crossing, by the first changer).
+- **Report-only:** load times, HOLD counts, the VITALS / SUMMARY / MOVESUM lines of each Lua state, the cordon1 save
+  hash before and after, anything unexpected in the engine log.
+- **Guess, written before the boot:** PASS 60 %. Risks: the way back behaves differently from the way out (second
+  Lua restart, marker file, the runner's second cross hold) (20 %); the second changer's arrival spot has no AI node
+  under it, so fewer than 200 poses apply (10 %); a bug in the new writer mode that the fake test did not show (10 %).
+- **Stop rule:** FAIL means find the cause first; at most one retry, registered first. A crash stops everything.
+- **Not covered:** an unknown name in the engine (offline only); a crossing during a freeze; the bridge live
+  throughout (that is the joint crossing run, registered separately with ITRZone).
+
+## 43. T3 proper, X side: DRAFT for the joint registration (not final until ITRZone's amendment is copied in)
+
+- **Order (Overseer):** the full on-mesh track with stance and both deaths (keep, freeze) as in T2 r3, vitals gating,
+  one registration. ITRZone asks the Overseer before the box run.
+- **ITR2 side (ITRZone's proposal, arm t3):** hcheal=2 t2span=380 wtest=6 t2die=240 t2dien=2 t2flip=1 t2v=2 t2st=30;
+  the on-mesh 380 s ping-ponged, about 18 min of play clock; death 1 at play 240 s under keep, death 2 at 480 s under
+  freeze; stance steps every 30 s of play clock and is unchanged through a death.
+- **X env:** T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999 T2_KILL_AT=99999 T2_RUN_S=1500.
+- **X files:** script 1d7143cf...30f45 (the by-name script; its play path is the j1 script's). It is frozen for T3
+  only after pre-flight D has run with it. Stance14.exe b4ce9c77..., t2_xray.sh 96160265..., lib_engine_pids.sh
+  cb183b7b...
+- **While ITR2's player is dead or away:** under keep the script applies no pose; the actor stays where it was last
+  set, A-Life runs on, hits are cancelled, vitals are still read. Under freeze the process is stopped by the bridge.
+- **Scored ONCE with t3_xray_check.py (fda8c5f8...97ff5) `<X out dir> <cordon_full_track.csv>`. PASS needs all of:**
+  1-11 as in j1 (section 40) with these numbers: (2) at least 17,000 P2 lines; (4) at most 45 HOLD (j1: 8 per 380 s
+  pass); (7) at least 25 STANCE lines. New: (12) exactly one STOP..CONT pair, game time across it at most 1000 ms,
+  exactly one "[FREEZE] absorbed" engine line; (13) one VITALS line with lowest health >= 0.999, highest radiation
+  <= 0.0001, highest bleeding <= 0.0001, 0 unread; (14) the SUMMARY line shows hits = cancelled and 0 refills.
+- **Witnesses:** j1's data FAILS on 2, 7 and 12 only; r3's data PASSES 12 (and fails the pose-v2 conditions, as it
+  must: r3 used pose v1 and an older script).
+- **Report-only:** T3c (the two-floor spot at track 84.6-86.2 s) and T3e as agreed; the hit lines (who hit, type,
+  power); the per-seq compare with ITR2's `T2 wrote`; height, ray and drift numbers as in j1.
+- **What the vitals gate does and does not test:** j1 covered this route once with no hit at all. T3 is 25 min with
+  two periods where the actor stands still, so creature hits are likely; (14) tests that each is cancelled, (13)
+  that nothing else lowers health. The route does not cross a radiation field or an anomaly that I know of, so
+  (13) says little about those; a separate check is needed for them.
+- **Guess, written before the boot:** X side PASS 50 %. Risks: a vitals or refill failure in 25 min with creatures
+  near (20 %); HOLD over 45 or a guard trip around the deaths (10 %); a stance change not followed within 2 s
+  around a death (10 %); the freeze check (5 %); anything else (5 %).
+- **Stop rule:** a FAIL is reported, not tuned; at most one retry, registered first.
