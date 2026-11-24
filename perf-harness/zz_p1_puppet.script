@@ -371,7 +371,10 @@ end
 local function dmg_end_phase(a, now)
 	if not dmg_phase then return end
 	m(string.format("DMG_PHASE_END,%s,%d,hits=%d,min_health=%.3f,max_radiation=%.4f,max_bleeding=%.4f", dmg_phase, now, hits - dmg_ph.hits0, dmg_ph.minh, dmg_ph.maxr, dmg_ph.maxb))
-	if dmg_mode == "god_off_norefill" then a:set_health_ex(1.0) end   -- each phase starts from full health
+	if dmg_mode ~= "prot" then   -- witnesses: each phase starts from full health and no radiation (retry, section 47)
+		local ok, r = pcall(function() local r0 = a.radiation; a:change_radiation(-r0); return r0 end)
+		a:set_health_ex(1.0); m(string.format("DMG_RESET,%s,%d,%s", dmg_phase, now, ok and string.format("%.4f", r) or "error"))
+	end
 	dmg_hold = false; dmg_tgt = nil; dmg_phase = nil; if meta then meta:flush() end
 end
 local function dmg_step(a, now, t)
@@ -400,7 +403,7 @@ local function dmg_step(a, now, t)
 	if not dmg_phase then return end
 	local h = a.health; local ok, r, b = pcall(function() return a.radiation, a.bleeding end); if not ok or not r or not b then r, b = -1, -1 end
 	if h < dmg_ph.minh then dmg_ph.minh = h end; if r > dmg_ph.maxr then dmg_ph.maxr = r end; if b > dmg_ph.maxb then dmg_ph.maxb = b end
-	if dmg_mode == "god_off_norefill" and h < 0.2 then m(string.format("DMG_FLOOR,%s,%d,%.3f", dmg_phase, now, h)); a:set_health_ex(1.0) end   -- a death would end the run
+	if dmg_mode == "god_off_norefill" and h < 0.7 then m(string.format("DMG_FLOOR,%s,%d,%.3f", dmg_phase, now, h)); a:set_health_ex(1.0) end   -- a death ends the run (first try: died at floor 0.2)
 	if dmg_tgt then a:set_actor_position(vector():set(dmg_tgt.pos.x, dmg_tgt.pos.y, dmg_tgt.pos.z), true) end
 	if now - dmg_last < 1000 then return end
 	dmg_last = now
@@ -509,7 +512,7 @@ function on_game_start()
 	if not meta then printf("p1: CANNOT OPEN META FILE"); active = false; return end
 	RegisterScriptCallback("actor_on_update", on_update)
 	RegisterScriptCallback("actor_on_before_hit", on_before_hit)
-	RegisterScriptCallback("actor_on_hit_callback", function() if dmg_mode ~= "god_off_norefill" and db.actor and db.actor.health < 1.0 then db.actor:set_health_ex(1.0) end end)  -- second refill point, after each hit
+	RegisterScriptCallback("actor_on_hit_callback", function() if db.actor and db.actor.health < (dmg_mode == "god_off_norefill" and 0.7 or 1.0) then db.actor:set_health_ex(1.0) end end)  -- second refill point, after each hit
 	RegisterScriptCallback("on_before_level_changing", on_quit)
 	RegisterScriptCallback("actor_on_net_destroy", on_quit)   -- "on_game_end" is not a callback in this GAMMA build (prereg section 30)
 	-- summary also every 60 s of track time so a killed run keeps it

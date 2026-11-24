@@ -4,8 +4,8 @@
 set -u
 cd "$(dirname "$0")/.."
 for md in god_off_norefill god_off prot; do
-  O=out/t3pfE_$md; [ -e "$O" ] && { echo "$O exists, not overwriting"; exit 2; }
-  PF_OUT=$O PF_DMG=$md PF_EXE=Stance14.exe PF_PAUSE=0 PF_KILL_AT=99999 PF_RUN_S=330 PF_ABSORB=0 PF_POSE_ARG=nofreeze tools/t2_preflight.sh
+  O=out/${PFE_PREFIX:-t3pfE}_$md; [ -e "$O" ] && { echo "$O exists, not overwriting"; exit 2; }
+  T2_MAXRESTART=0 PF_OUT=$O PF_DMG=$md PF_EXE=Stance14.exe PF_PAUSE=0 PF_KILL_AT=99999 PF_RUN_S=330 PF_ABSORB=0 PF_POSE_ARG=nofreeze tools/t2_preflight.sh
   grep -q 't2_xray rc=0' "$O/preflight.log" || { echo "boot $md: t2_xray rc not 0, stopping"; exit 1; }
   echo "boot $md done"
 done

@@ -1108,3 +1108,40 @@ fields stays v1 and takes the T2 path, unchanged.
   removed and the removal is logged. ITRZone's driver never sets T2_DMG_OK, so no joint run can start in test mode.
   Nothing else in the runner changes. This new runner hash is the one R3 will freeze.
 - Checked in isolation: the file is removed without the flag and kept with it.
+
+## 47. Pre-flight E, first try: FAIL (stopped at the first boot). The ONE retry registered BEFORE its boots
+
+- **Run:** tools/t3_pfE.sh, slice 2026-11-24 08:23:03-08:30:09 local, boot god_off_norefill only. The runner ended
+  with rc 6 (two unplanned restarts), so the series stopped as registered; god_off and prot did not run.
+  Scored ONCE with t3_pfE_check.py: **FAIL** (1 FAIL: rc not 0; 2 rad PASS; 3 anom FAIL: 19 lines, then the run
+  ended; 4 mut FAIL: phase not reached; W FAIL: only the rad phase finished).
+- **Cause (my named risk "the actor dies in a witness boot", 15 %):** with god mode off and no refill, the actor
+  died in the electric anomaly about 19 s into that phase. The 0.2 floor is checked once per update and health
+  fell from 0.29 to below 0 between two updates. Snapshots stopped, the runner restarted the engine twice (each
+  restart ran the test mode again), then the run time was used up.
+- **What the boot did show (protection off):**
+  - Radiation field `esc_zone_field_radioactive_weak_0005` (-109.2, 4.7, 241.2): 60 of 60 lines inside, zone
+    online; 592 hits of type 3 (radiation) from `zone_field_radioactive_weak`; radiation rose to 0.904; health fell
+    to 0.000 (floor used 5 times in the phase).
+  - Anomaly `zone_mine_electric_weak27423` (-121.1, 4.0, 226.8): inside from the first second; 7 hits of type 1
+    (shock), 0.325 damage each by GAMMA's own damage print; the actor died.
+  - So both zone placements do reach the actor and do damage when the protection is off. The mutant phase and the
+    protected run have no data yet.
+- **The test save is unchanged** (scoc a9f9a8a9..., scop 6dea752b... before and after); the control file was
+  removed.
+- **Retry, changes (script 1b1c08d1..., was a0322a90...; driver 8229f869..., was 29ecc163...):**
+  - god_off_norefill: the floor is 0.7 instead of 0.2 and is also applied right after each hit, so a death needs a
+    single hit of 0.7 or more. "Refill off" therefore means: no refill to 1.0 on every update; health can fall to
+    0.7 before it is restored.
+  - Both witnesses: at the end of each phase health is set to 1.0 and radiation back to 0 (`DMG_RESET`), so the
+    anomaly and mutant phases do not start with 0.9 radiation from the first phase.
+  - Driver: T2_MAXRESTART=0, so a dead actor ends the boot instead of restarting it in test mode. Out dirs
+    out/t3pfE2_<mode> (PFE_PREFIX=t3pfE2).
+  - Offline: without the control file the play and crossing lines are still the same as 1d7143cf; the reset lines
+    appear in the stub.
+- **Unchanged:** the checker (bcabd34b...), its conditions, the three modes and their order, the phases, the env.
+- **Guess, written before the boots:** all three boots PASS: 40 %. Risks: the actor still dies in a witness
+  (15 %); the spawned mutants do not attack, spawn badly, or are killed by the anomaly nearby (20 %); the protected
+  run shows a radiation or bleeding change (10 %); other (15 %).
+- **Stop rule:** this is the one retry. A second FAIL is reported with its cause and nothing more is run without
+  a new registration and the Overseer's word.

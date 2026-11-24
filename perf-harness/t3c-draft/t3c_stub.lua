@@ -56,7 +56,7 @@ function getFS() return { update_path=function(_,a,b) return b end } end
 local CB = {}
 function RegisterScriptCallback(n, f) CB[n] = CB[n] or {}; table.insert(CB[n], f) end
 if HAS_STANCE then db.actor.set_actor_stance = function(_, k) STANCE = k end end
-db.actor.radiation = tonumber(os.getenv("STUB_RAD") or "0"); db.actor.bleeding = 0; db.actor.level_vertex_id = function() return 1 end; db.actor.game_vertex_id = function() return 10 end
+db.actor.radiation = tonumber(os.getenv("STUB_RAD") or "0"); db.actor.bleeding = 0; db.actor.change_radiation = function(self, d) self.radiation = self.radiation + d end; db.actor.level_vertex_id = function() return 1 end; db.actor.game_vertex_id = function() return 10 end
 level.object_by_id = function(id) if id >= 500 then return { position=function() return V(apos.x + 2, apos.y, apos.z) end, alive=function() return true end, best_enemy=function() return db.actor end } elseif id == 12 or id == 14 then return {} end end
 dofile(SCRIPT); on_game_start()
 local function tick(ms) NOW = NOW + ms; for _, f in ipairs(CB.actor_on_update) do f() end end
