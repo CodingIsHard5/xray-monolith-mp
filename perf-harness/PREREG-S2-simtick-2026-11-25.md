@@ -429,3 +429,108 @@ window's effect is on the six real-time gated runs, where both scorers work.
 **Pinned (first 16):** s2_series_b.sh 75b2335b52bc662f; s2_score_b.py d4548104e1e00b9d; s2_phase_selftest.py
 8184041ef770aa63 (PASS 49 of 49 with the lowercase tags); s2_order_c.txt 4dabc9d9a488547c; s2_selftest_b.py 46478fc24ffd3a49 (unchanged).
 These replace the 11.1 hashes of the same files.
+
+## 12. Part B: result, scored once (2026-11-25). All 18 registered runs valid. 42 of 48 predictions hit, 6 missed.
+(The registration called this "section 6"; that heading was never made, so the result is here.)
+
+### 12.1 Caveats first
+1. **Costs, not feel.** Headless, nothing presented, no input, one save (Rostok, bench1), 55 to 80 s per capture. The
+   gated build has NO interpolation: between ticks the picture stands still. Nothing here says how 30 or 60 Hz plays.
+2. **"Switch off = stock" is proven only in the serial test mode and for the first 320 A-Life passes** (section 10).
+   The stock arms here run the same build with the switch at 0; the per-run check shows the tick path was not entered,
+   not that the build is identical in the threaded mode.
+3. **Real-clock leaks, unchanged in the prototype:** code that reads the real timer inside the simulation
+   (`timeServer`, 129 uses; anything on the wall clock) sees real time pass during render-only frames; particles
+   advance once per rendered frame with a tick's step. Either can make a gated tick do different work from a stock
+   update of the same step.
+4. **"Delay" is computed, not measured** (half the poll interval plus the time from the poll to the end of the render).
+5. **The 4-core arms are 4 cores only.** The engine's peak memory was 20.8 GB in them, the same as on 16 cores, so the
+   bench's 8 GB figure did not bind. They are not a stand-in for an old PC: stock still made 146 frames a second.
+6. **One box, runs minutes apart.** Replicates agree within 1 % for stock and for 50 and 60 Hz; the two 30 Hz runs
+   differ by 7 % in cost per tick (4.89 and 5.22 ms).
+
+### 12.2 Numbers (scorer of record tools/s2_score_b.py; full output perf-harness/s2-partB-amend/s2_score.txt)
+| arm | updates /s | frames /s | sim ms per tick (main + game thread) | sim ms per second | scripts ms per tick | physics steps per tick | Lua GC ms per second | frame p50 / p99 ms | computed delay ms |
+|---|---|---|---|---|---|---|---|---|---|
+| stock, uncapped | 168 | 168 | 2.15 | 360 | 1.02 | 0.60 | 407 | 5.66 / 11.9 | 8.9 |
+| tick 60 | 60 | 203 | 3.59 | 215 | 1.72 | 1.667 | 151 | 4.10 / 11.2 | 14.2 |
+| tick 50 | 50 | 209 | 3.94 | 197 | 1.90 | 2.000 | 120 | 4.06 / 11.3 | 15.9 |
+| tick 30 | 30 | 217 | 5.05 | 152 | 2.38 | 3.333 | 63 | 4.03 / 11.6 | 23.0 |
+| stock capped 60 | 60 | 60 | 3.06 | 183 | 1.39 | 1.667 | 193 | 16.7 / 22.6 | 25.0 |
+| stock capped 50 | 50 | 50 | 3.29 | 164 | 1.48 | 2.000 | 169 | 20.0 / 26.1 | 30.0 |
+| stock capped 30 | 30 | 30 | 3.88 | 116 | 1.72 | 3.333 | 112 | 33.3 / 39.4 | 50.0 |
+| every frame a tick of 1/60 s | 162 | 162 | 3.09 | (not real time) | 1.43 | 1.667 | | 5.78 / 12.0 | |
+| every frame a tick of 1/50 s | 161 | 161 | 3.29 | | 1.49 | 2.000 | | 5.77 / 12.5 | |
+| every frame a tick of 1/30 s | 155 | 155 | 3.78 | | 1.76 | 3.334 | | 5.95 / 13.1 | |
+| stock fixed 33 ms | 155 | 155 | 3.74 | | 1.73 | 3.300 | | 5.98 / 12.2 | |
+| 4 cores: stock | 146 | 146 | 2.35 | 344 | 1.03 | 0.68 | 353 | 6.43 / 12.7 | 10.3 |
+| 4 cores: tick 60 | 60 | 177 | 4.14 | 249 | 1.74 | 1.667 | 156 | 4.25 / 13.7 | 14.4 |
+| 4 cores: tick 30 | 30 | 196 | 5.58 | 167 | 2.30 | 3.334 | 67 | 4.14 / 13.6 | 23.1 |
+Gated arms, inside the capture: no tick was ever dropped and no frame ever ran two ticks. Share of frames with no
+tick: 86 % at 30 Hz, 76 % at 50, 70 % at 60. Age of the world at the start of a render: mean 16.0 / 9.0 / 7.3 ms,
+largest 34 / 20 / 16 ms.
+
+### 12.3 What the numbers say
+1. **A tick is not a fixed cost: the shorter the step, the cheaper the tick.** 60 Hz costs 1.42 times the simulation
+   CPU of 30 Hz per second, not twice (4 cores: 1.49). 50 Hz costs 1.30 times.
+2. **Against stock at 168 frames a second, the gate cuts simulation CPU per second by 40 % at 60 Hz and by 58 % at
+   30 Hz** (360 to 215 and 152 ms). Lua GC time falls with it (407 to 151 and 63 ms a second): the GC step runs once
+   per update. Whether the garbage is still collected fast enough at 30 steps a second was not measured.
+3. **A gated tick costs MORE than a stock update of the same step: +30 % at 30 Hz, +20 % at 50, +17 % at 60**
+   (5.05 against 3.88; 3.94 against 3.29; 3.59 against 3.06 ms, against stock capped at the same rate). I did not
+   predict this; it is four of my six misses. It is not the fixed step: "every frame a tick of 1/30 s" costs 3.78 ms,
+   like stock capped 30 (3.88) and stock fixed 33 ms (3.74). So the extra comes with the render-only frames between
+   ticks. Cause NOT known. Candidates, none tested: the renders in between push the update's data out of the CPU
+   caches; the real-clock leaks of caveat 3; work that the engine spreads over frames and now finds piled up at the
+   tick. This is the first thing to find out before any more is built on the gate.
+4. **Frames:** the middle frame gets cheaper (4.0 ms against 5.7) because 7 of 10 frames only render; the slow end
+   does not move (p99 11.2 to 11.6 ms against 11.9). One frame over 25 ms in one run of each gated pair (largest 35.6
+   and 32.4 ms; stock's largest 19.2).
+5. **Physics** steps at 100 Hz inside every arm: 30 Hz gives 3, 3, 4 steps per tick, 60 Hz gives 2, 2, 1; 50 Hz gives
+   exactly 2 every tick. That is the one thing 50 Hz has over the other two.
+6. **Computed delay from input to picture:** stock uncapped 8.9 ms; tick 60 14.2; tick 50 15.9; tick 30 23.0. A gated
+   30 Hz world answers later than stock at 168 frames a second, and sooner than a 30 fps cap (50 ms).
+7. **4 cores:** the same picture, with the game thread's half of a tick 19 to 28 % dearer.
+
+### 12.4 Which works best, 30 or 60? What this experiment can and cannot say
+- **By cost:** 30 Hz. It needs 152 ms of simulation CPU per second against 215 at 60 Hz. For a server that only
+  simulates, the stock-capped rows are the nearer guide: 116 against 183 ms a second (60 costs 1.57 times 30).
+- **By lateness of the picture:** 60 Hz (world 7 ms old on average against 16; computed delay 14 against 23 ms).
+- **By feel: not measured.** Without interpolation every rate below the frame rate will look like that rate. The
+  choice is Caden's, on a build with interpolation (stage 4) and a live switch.
+- Not shown at all: a machine too slow to hold the tick rate. There the gate must run several ticks in a frame or
+  drop them; neither happened here (the slowest arm made 146 frames a second).
+
+### 12.5 Predictions (48): 42 hit, 6 missed, 0 without a value
+| missed | predicted | measured | what I had wrong |
+|---|---|---|---|
+| stock frames per second | 170 to 260 | 167.9 | a little low; no cause looked for |
+| tick 30: main-thread ms per tick | 1.4 to 1.9 | 2.28 | finding 3: a gated tick is dearer than a capped one |
+| tick 30: game-thread ms per tick | 1.8 to 2.5 | 2.77 | the same |
+| tick 30: sim ms per second | 95 to 130 | 151.7 | the same |
+| tick 60: sim ms per second | 140 to 210 | 215.4 | the same |
+| tick 60: Lua GC ms per second | 50 to 140 | 151.5 | GC per update is dearer at 60 Hz than I scaled it |
+
+### 12.6 The registered scorer, shown as it is (Overseer's condition; tools/s2_score.py, output s2_score_registered.txt)
+41 hit, 6 missed (the same six), 1 without a value: it cannot name the 4-core arms (the bench's lowercase folders), so
+the 4-core ratio got no value and the two gated 4-core arms were read as "not gated". Every other number is the same
+except the gated arms' gate statistics, where the registered scorer takes one warm-up window in:
+| arm | frames with no tick, of record / registered | mean age ms | largest age ms |
+|---|---|---|---|
+| tick 30 | 0.861 / 0.867 | 16.03 / 16.08 | 33.5 / 33.5 |
+| tick 50 | 0.760 / 0.770 | 9.04 / 9.11 | 19.5 / 19.5 |
+| tick 60 | 0.704 / 0.715 | 7.29 / 7.35 | 16 / 17 |
+The warm-up window moved these by about 1 %. No prediction's verdict depends on it.
+
+### 12.7 The f-arms and their warm-up (limit of 11.1, point 3)
+f30, f50 and f60 warm up gated, f33 stock; the bias would make the f-arms look dearer against f33. Measured: f30 3.78
+against f33 3.74 ms per tick, 1 % apart, and the steps differ by 1 % too (33.33 against 33 ms). No statement above
+rests on an f-against-f33 difference; finding 3 uses f30 only as "the fixed step by itself is not dearer".
+
+### 12.8 Deviations and exclusions, all in one place
+- Three runs excluded, each replaced by one re-run: `s2_t60_2` (conditions not clean, the registered rule),
+  `s2_f30` and the first `s2_offL` (each failed a per-run check that was my error: 11, 11.2). Nothing was re-scored.
+- The series ran in five slices, not one, to yield the box; the re-run of `s2_t60_2` therefore ran at the end of
+  slice 1, not at the very end.
+- Two amendments to the per-run check and two to the scorer, all before any scoring (11, 11.1, 11.2). Four harness
+  errors of mine in parts A and B, each a check that tested a log line, a time, a flag or a path, not the outcome.

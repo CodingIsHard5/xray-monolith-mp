@@ -1,0 +1,342 @@
+ARM s2_c30 (1 valid run: s2_c30; frames 1800, updates 1800)
+  fps              30.005
+  rate             30.005
+  main_tick         1.678
+  gt_tick           2.204
+  sim_tick          3.882
+  sim_s           116.493
+  script_tick       1.718
+  actor_tick        0.939
+  phys_steps        3.333
+  gc_s            112.219
+  render            3.649
+  p50              33.330
+  p95              34.035
+  p99              39.350
+  fmax             42.377
+  over25          999.444
+  delay            49.992
+ARM s2_c50 (1 valid run: s2_c50; frames 3000, updates 3000)
+  fps              50.008
+  rate             50.008
+  main_tick         1.539
+  gt_tick           1.749
+  sim_tick          3.288
+  sim_s           164.414
+  script_tick       1.484
+  actor_tick        0.856
+  phys_steps        2.000
+  gc_s            168.843
+  render            3.509
+  p50              19.995
+  p95              20.708
+  p99              26.139
+  fmax             28.704
+  over25           26.333
+  delay            29.995
+ARM s2_c60 (1 valid run: s2_c60; frames 3600, updates 3600)
+  fps              60.010
+  rate             60.010
+  main_tick         1.501
+  gt_tick           1.556
+  sim_tick          3.057
+  sim_s           183.458
+  script_tick       1.386
+  actor_tick        0.827
+  phys_steps        1.667
+  gc_s            192.753
+  render            3.423
+  p50              16.663
+  p95              17.455
+  p99              22.567
+  fmax             25.072
+  over25            0.278
+  delay            24.996
+ARM s2_f30 (1 valid run: s2_f30_rr; frames 3000, updates 3000)
+  fps             154.934
+  rate            154.934
+  main_tick         1.678
+  gt_tick           2.102
+  sim_tick          3.780
+  sim_s           585.680
+  script_tick       1.764
+  actor_tick        0.979
+  phys_steps        3.334
+  gc_s            322.640
+  render            3.675
+  p50               5.948
+  p95               9.520
+  p99              13.059
+  fmax             23.744
+  over25            0.000
+  delay             9.682
+ARM s2_f33 (1 valid run: s2_f33; frames 3000, updates 3000)
+  fps             154.983
+  rate            154.983
+  main_tick         1.635
+  gt_tick           2.105
+  sim_tick          3.740
+  sim_s           579.657
+  script_tick       1.731
+  actor_tick        0.965
+  phys_steps        3.300
+  gc_s            317.459
+  render            3.664
+  p50               5.984
+  p95               9.427
+  p99              12.176
+  fmax             23.710
+  over25            0.000
+  delay             9.678
+ARM s2_f50 (1 valid run: s2_f50; frames 3000, updates 3000)
+  fps             160.995
+  rate            160.995
+  main_tick         1.553
+  gt_tick           1.733
+  sim_tick          3.286
+  sim_s           528.983
+  script_tick       1.485
+  actor_tick        0.870
+  phys_steps        2.000
+  gc_s            343.137
+  render            3.614
+  p50               5.771
+  p95               8.706
+  p99              12.479
+  fmax             21.243
+  over25            0.000
+  delay             9.317
+ARM s2_f60 (1 valid run: s2_f60; frames 3000, updates 3000)
+  fps             162.314
+  rate            162.314
+  main_tick         1.558
+  gt_tick           1.533
+  sim_tick          3.091
+  sim_s           501.698
+  script_tick       1.427
+  actor_tick        0.877
+  phys_steps        1.667
+  gc_s            357.898
+  render            3.597
+  p50               5.781
+  p95               8.526
+  p99              11.970
+  fmax             18.064
+  over25            0.000
+  delay             9.241
+ARM s2_off (2 valid runs: s2_off_1, s2_off_2; frames 12000/12000, updates 12000/12000)
+  fps             167.890   (168.468 / 167.312)
+  rate            167.890   (168.468 / 167.312)
+  main_tick         1.427   (1.420 / 1.434)
+  gt_tick           0.719   (0.719 / 0.719)
+  sim_tick          2.146   (2.139 / 2.153)
+  sim_s           360.337   (360.417 / 360.256)
+  script_tick       1.018   (1.010 / 1.026)
+  actor_tick        0.784   (0.778 / 0.790)
+  phys_steps        0.596   (0.594 / 0.598)
+  gc_s            407.306   (407.218 / 407.393)
+  render            3.626   (3.626 / 3.625)
+  p50               5.662   (5.657 / 5.668)
+  p95               7.315   (7.232 / 7.398)
+  p99              11.908   (11.844 / 11.972)
+  fmax             18.434   (19.215 / 17.654)
+  over25            0.000   (0.000 / 0.000)
+  delay             8.935   (8.904 / 8.965)
+ARM s2_offl (1 valid run: s2_offl_rr; frames 12000, updates 12000)
+  fps             146.218
+  rate            146.218
+  main_tick         1.413
+  gt_tick           0.937
+  sim_tick          2.350
+  sim_s           343.665
+  script_tick       1.026
+  actor_tick        0.768
+  phys_steps        0.684
+  gc_s            353.480
+  render            3.719
+  p50               6.428
+  p95               9.419
+  p99              12.669
+  fmax             20.875
+  over25            0.000
+  delay            10.259
+ARM s2_t30 (2 valid runs: s2_t30_1, s2_t30_2; frames 12000/12000, updates 1652/1673)
+  fps             216.624   (217.967 / 215.281)
+  rate             30.010   (30.007 / 30.014)
+  main_tick         2.282   (2.166 / 2.398)
+  gt_tick           2.772   (2.720 / 2.824)
+  sim_tick          5.054   (4.886 / 5.222)
+  sim_s           151.676   (146.623 / 156.730)
+  script_tick       2.381   (2.281 / 2.480)
+  actor_tick        1.378   (1.306 / 1.450)
+  phys_steps        3.333   (3.334 / 3.333)
+  gc_s             63.041   (63.970 / 62.112)
+  render            3.501   (3.476 / 3.525)
+  p50               4.026   (4.007 / 4.045)
+  p95               7.904   (7.811 / 7.996)
+  p99              11.625   (11.636 / 11.614)
+  fmax             28.867   (35.627 / 22.107)
+  over25            0.042   (0.083 / 0.000)
+  delay            22.969   (22.836 / 23.102)
+  n0                0.867   (0.867 / 0.866)
+  n1                0.133   (0.133 / 0.134)
+  n2                0.000   (0.000 / 0.000)
+  n3p               0.000   (0.000 / 0.000)
+  dropped           0.000   (0.000 / 0.000)
+  age_avg          16.076   (16.031 / 16.120)
+  age_max          33.500   (33.000 / 34.000)
+ARM s2_t30l (1 valid run: s2_t30l; frames 12000, updates 1841)
+  fps             195.578
+  rate             30.005
+  main_tick         2.296
+  gt_tick           3.285
+  sim_tick          5.581
+  sim_s           167.446
+  script_tick       2.298
+  actor_tick        1.373
+  phys_steps        3.334
+  gc_s             67.099
+  render            3.546
+  p50               4.138
+  p95               9.924
+  p99              13.562
+  fmax             24.589
+  over25            0.000
+  delay            21.777
+ARM s2_t50 (2 valid runs: s2_t50_1, s2_t50_2; frames 12000/12000, updates 2885/2860)
+  fps             208.946   (208.035 / 209.858)
+  rate             50.016   (50.015 / 50.016)
+  main_tick         1.893   (1.885 / 1.901)
+  gt_tick           2.050   (2.058 / 2.042)
+  sim_tick          3.943   (3.942 / 3.944)
+  sim_s           197.220   (197.184 / 197.256)
+  script_tick       1.903   (1.898 / 1.909)
+  actor_tick        1.111   (1.106 / 1.115)
+  phys_steps        2.000   (2.000 / 2.000)
+  gc_s            120.446   (119.886 / 121.007)
+  render            3.486   (3.474 / 3.499)
+  p50               4.057   (4.069 / 4.045)
+  p95               7.759   (7.810 / 7.709)
+  p99              11.258   (11.242 / 11.275)
+  fmax             18.064   (18.188 / 17.940)
+  over25            0.000   (0.000 / 0.000)
+  delay            15.948   (15.951 / 15.944)
+  n0                0.770   (0.770 / 0.771)
+  n1                0.230   (0.230 / 0.229)
+  n2                0.000   (0.000 / 0.000)
+  n3p               0.000   (0.000 / 0.000)
+  dropped           0.000   (0.000 / 0.000)
+  age_avg           9.114   (9.106 / 9.122)
+  age_max          19.500   (19.000 / 20.000)
+ARM s2_t60 (2 valid runs: s2_t60_1, s2_t60_2_rr; frames 12000/12000, updates 3518/3564)
+  fps             203.389   (204.710 / 202.068)
+  rate             60.014   (60.014 / 60.014)
+  main_tick         1.796   (1.805 / 1.787)
+  gt_tick           1.793   (1.809 / 1.777)
+  sim_tick          3.589   (3.614 / 3.564)
+  sim_s           215.398   (216.904 / 213.892)
+  script_tick       1.720   (1.731 / 1.710)
+  actor_tick        1.046   (1.053 / 1.040)
+  phys_steps        1.667   (1.667 / 1.667)
+  gc_s            151.466   (150.969 / 151.963)
+  render            3.513   (3.511 / 3.516)
+  p50               4.103   (4.068 / 4.138)
+  p95               8.001   (7.853 / 8.149)
+  p99              11.184   (11.134 / 11.233)
+  fmax             26.049   (32.411 / 19.687)
+  over25            0.042   (0.083 / 0.000)
+  delay            14.231   (14.205 / 14.257)
+  n0                0.715   (0.716 / 0.714)
+  n1                0.285   (0.284 / 0.286)
+  n2                0.000   (0.000 / 0.000)
+  n3p               0.000   (0.000 / 0.000)
+  dropped           0.000   (0.000 / 0.000)
+  age_avg           7.348   (7.370 / 7.327)
+  age_max          17.000   (17.000 / 17.000)
+ARM s2_t60l (1 valid run: s2_t60l; frames 12000, updates 4069)
+  fps             176.978
+  rate             60.010
+  main_tick         1.840
+  gt_tick           2.303
+  sim_tick          4.144
+  sim_s           248.659
+  script_tick       1.735
+  actor_tick        1.068
+  phys_steps        1.667
+  gc_s            155.992
+  render            3.580
+  p50               4.250
+  p95              10.399
+  p99              13.681
+  fmax             31.113
+  over25            0.167
+  delay            13.982
+RATIO s2_t60/s2_t30 sim_s: 1.420
+RATIO s2_t60/s2_t30 sim_tick: 0.710
+RATIO s2_t60/s2_t30 script_tick: 0.723
+RATIO s2_t60/s2_t30 p99: 0.962
+RATIO s2_t50/s2_t30 sim_s: 1.300
+RATIO s2_t50/s2_t30 sim_tick: 0.780
+RATIO s2_t50/s2_t30 script_tick: 0.800
+RATIO s2_t50/s2_t30 p99: 0.968
+RATIO s2_off/s2_t30 sim_s: 2.376
+RATIO s2_off/s2_t30 sim_tick: 0.425
+RATIO s2_off/s2_t30 script_tick: 0.428
+RATIO s2_off/s2_t30 p99: 1.024
+RATIO s2_off/s2_t60 sim_s: 1.673
+RATIO s2_off/s2_t60 sim_tick: 0.598
+RATIO s2_off/s2_t60 script_tick: 0.592
+RATIO s2_off/s2_t60 p99: 1.065
+RATIO s2_f60/s2_f30 sim_s: 0.857
+RATIO s2_f60/s2_f30 sim_tick: 0.818
+RATIO s2_f60/s2_f30 script_tick: 0.809
+RATIO s2_f60/s2_f30 p99: 0.917
+PREDICTION s2_c30.delay [48, 52]: 49.992 HIT
+PREDICTION s2_c30.sim_tick [3.3, 4.4]: 3.882 HIT
+PREDICTION s2_c60.delay [24, 26]: 24.996 HIT
+PREDICTION s2_c60.sim_tick [2.3, 3.5]: 3.057 HIT
+PREDICTION s2_f30.gt_tick [1.9, 2.3]: 2.102 HIT
+PREDICTION s2_f30.main_tick [1.45, 1.7]: 1.678 HIT
+PREDICTION s2_f30.phys_steps [3.32, 3.35]: 3.334 HIT
+PREDICTION s2_f33.gt_tick [1.9, 2.3]: 2.105 HIT
+PREDICTION s2_f33.main_tick [1.45, 1.7]: 1.635 HIT
+PREDICTION s2_f33.phys_steps [3.29, 3.31]: 3.300 HIT
+PREDICTION s2_f50.phys_steps [1.99, 2.01]: 2.000 HIT
+PREDICTION s2_f60.gt_tick [1.0, 1.7]: 1.533 HIT
+PREDICTION s2_f60.main_tick [1.25, 1.7]: 1.558 HIT
+PREDICTION s2_f60.phys_steps [1.65, 1.68]: 1.667 HIT
+PREDICTION s2_f60.script_tick [1.0, 1.6]: 1.427 HIT
+PREDICTION s2_f60/s2_f30.sim_tick [0.65, 0.9]: 0.818 HIT
+PREDICTION s2_off.delay [6, 9]: 8.935 HIT
+PREDICTION s2_off.fps [170, 260]: 167.890 MISS
+PREDICTION s2_off.gc_s [150, 450]: 407.306 HIT
+PREDICTION s2_off.main_tick [1.0, 1.7]: 1.427 HIT
+PREDICTION s2_off.over25 [0, 2]: 0.000 HIT
+PREDICTION s2_off.sim_s [250, 480]: 360.337 HIT
+PREDICTION s2_off/s2_t30.sim_s [2.2, 4.5]: 2.376 HIT
+PREDICTION s2_t30.delay [20, 24]: 22.969 HIT
+PREDICTION s2_t30.dropped [0, 0]: 0.000 HIT
+PREDICTION s2_t30.gc_s [25, 70]: 63.041 HIT
+PREDICTION s2_t30.gt_tick [1.8, 2.5]: 2.772 MISS
+PREDICTION s2_t30.main_tick [1.4, 1.9]: 2.282 MISS
+PREDICTION s2_t30.n0 [0.82, 0.93]: 0.867 HIT
+PREDICTION s2_t30.over25 [0, 2]: 0.042 HIT
+PREDICTION s2_t30.p50 [2.8, 4.2]: 4.026 HIT
+PREDICTION s2_t30.p99 [6, 14]: 11.625 HIT
+PREDICTION s2_t30.phys_steps [3.3, 3.37]: 3.333 HIT
+PREDICTION s2_t30.sim_s [95, 130]: 151.676 MISS
+PREDICTION s2_t50.phys_steps [1.98, 2.02]: 2.000 HIT
+PREDICTION s2_t60.delay [11.5, 15]: 14.231 HIT
+PREDICTION s2_t60.dropped [0, 0]: 0.000 HIT
+PREDICTION s2_t60.gc_s [50, 140]: 151.466 MISS
+PREDICTION s2_t60.n0 [0.65, 0.85]: 0.715 HIT
+PREDICTION s2_t60.n2 [0, 0.01]: 0.000 HIT
+PREDICTION s2_t60.over25 [0, 2]: 0.042 HIT
+PREDICTION s2_t60.p99 [6, 14]: 11.184 HIT
+PREDICTION s2_t60.phys_steps [1.64, 1.7]: 1.667 HIT
+PREDICTION s2_t60.sim_s [140, 210]: 215.398 MISS
+PREDICTION s2_t60/s2_t30.p99 [0.8, 1.25]: 0.962 HIT
+PREDICTION s2_t60/s2_t30.script_tick [0.6, 0.95]: 0.723 HIT
+PREDICTION s2_t60/s2_t30.sim_s [1.3, 1.8]: 1.420 HIT
+PREDICTION s2_t60L/s2_t30L.sim_s [1.3, 1.8]: NO VALUE
+S2 SCORE: 41 hit, 6 miss, 1 no value, of 48 predictions; arms valid 18 of 18
