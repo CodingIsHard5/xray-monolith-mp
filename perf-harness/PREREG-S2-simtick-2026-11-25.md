@@ -285,3 +285,30 @@ tools/s2_partA2.sh 5b976d5898e67645; s2_partA2_score.py 3e487ea90974315d; s2_par
 counters_diff.py 5f2cf91df575ecf1; det_pair.sh d4c38a79ce0263e7; det_run.sh 01fb40dc2891d060;
 harness/zz_eperf_dump.script 2b79a817a08a1e7f; SimTick14.exe 93fff4b5…858f21; Stance14.exe b4ce9c77.
 Copies of the three new files: perf-harness/s2-partA2/.
+
+## 10. Part A2: result, scored once (2026-11-25). PASS, 4 of 4. Part B has NOT run (it needs the Overseer's GO).
+
+Runs out/det_s2p_s1, _s2, _s3 (Stance14.exe) and out/det_s2p_o1, _o2, _o3 (SimTick14.exe, switch off), alternating, one
+slice; all rc 0; both preflights passed (flags against the 11-19 method; counter file and the engine's command line
+after checkpoint 1). Scorer 3e487ea9, report out/s2_partA2_score.txt.
+
+| check | result | values |
+|---|---|---|
+| R1 stock agrees with stock | PASS | C = 0 at checkpoints 1, 2, 3 for both pairs |
+| R2 switch-off agrees with stock | PASS | C = 0 at 1, 2, 3 for all three runs |
+| R3 frame at checkpoint 1 (gate 8 frames; a pass is 17) | PASS | switch-off mean minus stock mean -2.7 frames; reported: checkpoint 2 +2.0, checkpoint 3 +2.7 |
+| R4 A-Life call spacing to checkpoint 1 | PASS | 100 calls in every run, first on the same frame, gaps 16/17/18 with one 16 |
+
+Frames at which pass 100 / 200 / 320 was reached: stock 1719/3425/5473, 1722/3427/5474, 1721/3426/5475;
+switch-off 1718/3428/5479, 1717/3429/5474, 1719/3427/5477. The two builds overlap; nothing is near 17 frames apart.
+My guess was 65 % for all four; it held.
+
+**What this shows:** in the serial test mode, the build with the switch off makes the same exact A-Life counters as
+stock at equal pass counts, and reaches those pass counts on the same frames within a few frames, with no extra or
+missing A-Life call in the first 100.
+**What it does not show:** (1) the normal threaded, real-time mode; (2) anything after pass 320 (about 180 s);
+(3) a difference that only the online world would show: the counters are exact for offline objects, online ones are
+reported, not gated; (4) an extra pass first appearing between pass 100 and 320 would show only in the reported
+frames of checkpoints 2 and 3 (+2.0, +2.7: none seen).
+**Section 8 in this light:** the one-pass difference there was the time-checkpoint phase drift (9.2), as predicted in
+9.3. Section 8's FAIL stays in the record as scored; part A is met by this section, not by re-reading that one.
