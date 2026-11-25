@@ -529,7 +529,10 @@ BOOL CActor::net_Spawn(CSE_Abstract* DC)
 	}
 
 	if (TRUE == E->s_flags.test(M_SPAWN_OBJECT_LOCAL) && TRUE == E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER))
+	{
 		g_actor = this;
+		g_sim_view_present = &CActor::sim_view_present; // S2 stage 4a: called by the device only in sim_tick gated mode
+	}
 
 	VERIFY(m_pActorEffector == NULL);
 
@@ -760,7 +763,11 @@ void CActor::net_Destroy()
 	SetDefaultVisualOutfit(NULL);
 
 
-	if (g_actor == this) g_actor = NULL;
+	if (g_actor == this)
+	{
+		g_actor = NULL;
+		g_sim_view_present = nullptr; // S2 stage 4a
+	}
 
 	Engine.Sheduler.Unregister(this);
 

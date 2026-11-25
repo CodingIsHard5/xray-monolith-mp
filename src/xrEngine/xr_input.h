@@ -68,6 +68,10 @@ private:
 	void MouseUpdate();
 	void KeyUpdate();
 
+	// S2 stage 4a: mouse buttons and wheel read by MouseMoveOnly, handed in order to the next MouseUpdate.
+	// Always empty with sim_tick 0.
+	xr_vector<DIDEVICEOBJECTDATA> m_mouse_deferred;
+
 public:
 	void resetMouseState();
 	sxr_mouse mouse_property;
@@ -88,6 +92,7 @@ public:
 	~CInput();
 
 	virtual void _BCL OnFrame(void);
+	void MouseMoveOnly(); // S2 stage 4a, sim_tick gated frames with no tick: mouse motion now, buttons and wheel later
 	virtual void OnAppActivate(void);
 	virtual void OnAppDeactivate(void);
 	void DeactivateSoft();

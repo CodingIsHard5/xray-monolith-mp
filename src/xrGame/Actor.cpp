@@ -154,6 +154,13 @@ CActor::CActor() : CEntityAlive(), current_ik_cam_shift(0)
 	fCurAVelocity = 0.0f;
 	fFPCamYawMagnitude = 0.0f; //--#SM+#--
 	fFPCamPitchMagnitude = 0.0f; //--#SM+#--
+	m_sim_view_pos_prev.set(0.f, 0.f, 0.f); // S2 stage 4a
+	m_sim_view_pos_new.set(0.f, 0.f, 0.f);
+	m_sim_view_pos.set(0.f, 0.f, 0.f);
+	m_sim_view_epoch = 0;
+	m_sim_view_time = 0;
+	m_sim_view_have = false;
+	m_sim_view_presenting = false;
 	// Эффекторы (Effectors)
 	pCamBobbing = 0;
 
@@ -1178,7 +1185,12 @@ void CActor::UpdateCL()
 	SetZoomAimingMode(false);
 	CWeapon* pWeapon = smart_cast<CWeapon*>(inventory().ActiveItem());
 
-	cam_Update(float(Device.dwTimeDelta) / 1000.0f, currentFOV());
+	// S2 stage 4a: the one condition. False with sim_tick 0, det_mode, rsConstantFPS: the stock calls, as before.
+	const bool sim_view_gated_now = sim_view_gated();
+	if (!sim_view_gated_now)
+		cam_Update(float(Device.dwTimeDelta) / 1000.0f, currentFOV());
+	else
+		sim_view_tick(); // camera and hands run once per rendered frame in sim_view_present
     m_legs_controller.update(this);
 
 #ifdef STATIONARYMGUN_NEW
@@ -1286,11 +1298,14 @@ void CActor::UpdateCL()
 		else
 			xr_delete(m_sndShockEffector);
 	}
-	Fmatrix trans;
-	Cameras().hud_camera_Matrix(trans);
+	if (!sim_view_gated_now) // S2 stage 4a: gated, the hands follow the camera in sim_view_present
+	{
+		Fmatrix trans;
+		Cameras().hud_camera_Matrix(trans);
 
-	if (IsFocused())
-		g_player_hud->update(trans);
+		if (IsFocused())
+			g_player_hud->update(trans);
+	}
 
 	if (psActorFlags.test(AF_MULTI_ITEM_PICKUP))
 		m_bPickupMode = false;

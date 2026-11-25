@@ -562,6 +562,16 @@ extern ENGINE_API float refresh_rate;
 
 extern ENGINE_API bool g_bBenchmark;
 
+// S2 stage 4a (device.cpp, sim_tick gated mode only): the view every frame. g_sim_view_gate is TRUE only while a
+// gated frame runs its ticks and its presentation step; it is never TRUE with sim_tick 0, det_mode or rsConstantFPS.
+// xrGame sets g_sim_view_present while its actor exists; the engine calls it once per gated frame, after the ticks
+// and before the render, with the real frame time and the position between the last two ticks (0..1).
+// g_sim_view_epoch changes on every resync of the tick clock: tick history from another epoch is not to be used.
+extern ENGINE_API BOOL g_sim_view_gate;
+extern ENGINE_API u32 g_sim_view_epoch;
+typedef void (*sim_view_present_fn)(float dt, float alpha);
+extern ENGINE_API sim_view_present_fn g_sim_view_present;
+
 typedef xr_delegate<bool()> LOADING_EVENT;
 extern ENGINE_API xr_list<LOADING_EVENT> g_loading_events;
 

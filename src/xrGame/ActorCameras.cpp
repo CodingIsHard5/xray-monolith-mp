@@ -548,7 +548,7 @@ void CActor::cam_Update(float dt, float fFOV)
 	Fvector dangle = {0, 0, 0};
 	Fmatrix xform;
 	xform.setXYZ(0, r_torso.yaw, 0);
-	xform.translate_over(XFORM().c);
+	xform.translate_over(m_sim_view_presenting ? m_sim_view_pos : XFORM().c); // S2 stage 4a: between two ticks
 
 	// lookout
 	if (this == Level().CurrentControlEntity())
@@ -669,8 +669,11 @@ void CActor::cam_Update(float dt, float fFOV)
 	//}
 	//-Alundaio
 
-	fCurAVelocity = vPrevCamDir.sub(cameras[eacFirstEye]->vDirection).magnitude() / Device.fTimeDelta;
-	vPrevCamDir = cameras[eacFirstEye]->vDirection;
+	if (!m_sim_view_presenting) // S2 stage 4a: fire dispersion reads it, it stays at tick rate (sim_view_tick)
+	{
+		fCurAVelocity = vPrevCamDir.sub(cameras[eacFirstEye]->vDirection).magnitude() / Device.fTimeDelta;
+		vPrevCamDir = cameras[eacFirstEye]->vDirection;
+	}
 
 	// Высчитываем разницу между предыдущим и текущим Yaw \ Pitch от 1-го лица //--#SM+ Begin#--
 	float& cam_yaw_cur = cameras[eacFirstEye]->yaw;
@@ -705,6 +708,62 @@ void CActor::cam_Update(float dt, float fFOV)
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// S2 stage 4a, the view every frame (sim_tick gated mode only; see g_sim_view_gate in device.h). The gate is TRUE only
+// while the device runs a gated frame's ticks and its presentation step, so with sim_tick 0, det_mode or rsConstantFPS
+// sim_view_gated() is false and UpdateCL calls cam_Update and the hands update as before.
+static const float sim_view_snap_dist = 5.f; // m between two tick positions: more is a teleport, no lerp across it
+
+bool CActor::sim_view_gated() const
+{
+	return g_sim_view_gate && g_sim_view_present && this == g_actor;
+}
+
+// in the tick, where UpdateCL called cam_Update: the part of cam_Update that stays at tick rate, and the position
+// (the camera direction read here is the one the last presentation step built, so the turn rate that fire dispersion
+// reads covers one tick of turning, up to one tick later than stock: a known limit of this stage)
+void CActor::sim_view_tick()
+{
+	if (!m_holder) // cam_Update returned at once with a holder: so does this
+	{
+		fCurAVelocity = vPrevCamDir.sub(cameras[eacFirstEye]->vDirection).magnitude() / Device.fTimeDelta;
+		vPrevCamDir = cameras[eacFirstEye]->vDirection;
+	}
+	const Fvector& cur = XFORM().c;
+	if (!m_sim_view_have || m_sim_view_epoch != g_sim_view_epoch ||
+		m_sim_view_pos_new.distance_to_sqr(cur) > sim_view_snap_dist * sim_view_snap_dist)
+		m_sim_view_pos_prev.set(cur); // first tick, after a resync (pause, load, switch), or a teleport: no history
+	else
+		m_sim_view_pos_prev.set(m_sim_view_pos_new);
+	m_sim_view_pos_new.set(cur);
+	m_sim_view_epoch = g_sim_view_epoch;
+	m_sim_view_time = Device.dwTimeGlobal;
+	m_sim_view_have = true;
+}
+
+// called by the device once per gated frame after the ticks, before the render; dt = real frame time (never 0)
+void CActor::sim_view_present(float dt, float alpha)
+{
+	CActor* A = g_actor;
+	if (!A || !A->sim_view_gated())
+		return;
+	// only when this actor's UpdateCL ran in the newest tick (simulated time stands still between ticks): the stock
+	// engine never updates the camera of an actor it did not update, and neither does this
+	if (!A->m_sim_view_have || A->m_sim_view_epoch != g_sim_view_epoch || A->m_sim_view_time != Device.dwTimeGlobal)
+		return;
+	A->m_sim_view_pos.lerp(A->m_sim_view_pos_prev, A->m_sim_view_pos_new, alpha);
+	A->m_sim_view_presenting = true;
+	A->cam_Update(dt, A->currentFOV());
+	A->m_sim_view_presenting = false;
+
+	Fmatrix trans;
+	A->Cameras().hud_camera_Matrix(trans);
+
+	if (A->IsFocused())
+		g_player_hud->update(trans);
+}
+// ---------------------------------------------------------------------------------------------------------------
 
 // shot effector stuff
 void CActor::update_camera(CCameraShotEffector* effector)

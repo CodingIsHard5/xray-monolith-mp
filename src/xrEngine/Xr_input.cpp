@@ -435,18 +435,27 @@ void CInput::MouseUpdate()
 {
 	HRESULT hr;
 	DWORD dwElements = MOUSEBUFFERSIZE;
-	auto od = std::make_unique<DIDEVICEOBJECTDATA[]>(MOUSEBUFFERSIZE);
+	const u32 deferred = u32(m_mouse_deferred.size()); // S2 stage 4a: 0 with sim_tick 0, and then all is as before
+	auto od = std::make_unique<DIDEVICEOBJECTDATA[]>(MOUSEBUFFERSIZE + deferred);
 
 	VERIFY(pMouse);
 
-	hr = pMouse->GetDeviceData(sizeof(DIDEVICEOBJECTDATA), &od[0], &dwElements, 0);
+	hr = pMouse->GetDeviceData(sizeof(DIDEVICEOBJECTDATA), &od[deferred], &dwElements, 0);
 	if ((hr == DIERR_INPUTLOST) || (hr == DIERR_NOTACQUIRED))
 	{
 		hr = pMouse->Acquire();
 		if (hr != S_OK) return;
-		hr = pMouse->GetDeviceData(sizeof(DIDEVICEOBJECTDATA), &od[0], &dwElements, 0);
+		hr = pMouse->GetDeviceData(sizeof(DIDEVICEOBJECTDATA), &od[deferred], &dwElements, 0);
 		if (hr != S_OK) return;
 	};
+	if (deferred)
+	{
+		// buttons and wheel read by MouseMoveOnly on frames with no tick: they come first, in their order
+		for (u32 i = 0; i < deferred; ++i)
+			od[i] = m_mouse_deferred[i];
+		dwElements += deferred;
+		m_mouse_deferred.clear();
+	}
 
 #ifndef _EDITOR
 	if (Device.dwPrecacheFrame)
@@ -730,6 +739,42 @@ void CInput::OnFrame(void)
 	if (pKeyboard) KeyUpdate();
 	if (pMouse) MouseUpdate();
 	RDEVICE.Statistic->Input.End();
+}
+
+// S2 stage 4a (called by the device only on sim_tick gated frames with no tick; never with sim_tick 0): the mouse
+// MOTION is delivered now, so the view turns on every rendered frame. Buttons and the wheel are actions: they are kept,
+// in order, for the next MouseUpdate (the next tick's poll). The keyboard is not read: key timing stays at tick rate.
+// The mouse-stop check (IR_OnMouseStop) is left to MouseUpdate; the axis time stamps it reads are kept up to date here.
+void CInput::MouseMoveOnly()
+{
+	static const bool perf_noinput = !!strstr(Core.Params, "-perf_noinput");
+	if (perf_noinput || !pMouse || Device.dwPrecacheFrame || cbStack.empty())
+		return;
+	DWORD dwElements = MOUSEBUFFERSIZE;
+	auto od = std::make_unique<DIDEVICEOBJECTDATA[]>(MOUSEBUFFERSIZE);
+	const HRESULT hr = pMouse->GetDeviceData(sizeof(DIDEVICEOBJECTDATA), &od[0], &dwElements, 0);
+	if (FAILED(hr))
+		return; // lost or not acquired: the next tick's MouseUpdate re-acquires
+	int dx = 0, dy = 0;
+	for (u32 i = 0; i < dwElements; i++)
+	{
+		switch (od[i].dwOfs)
+		{
+		case DIMOFS_X:
+			dx += od[i].dwData;
+			timeStamp[0] = od[i].dwTimeStamp;
+			break;
+		case DIMOFS_Y:
+			dy += od[i].dwData;
+			timeStamp[1] = od[i].dwTimeStamp;
+			break;
+		default:
+			m_mouse_deferred.push_back(od[i]);
+			break;
+		}
+	}
+	if (dx || dy)
+		cbStack.back()->IR_OnMouseMove(dx, dy);
 }
 
 IInputReceiver* CInput::CurrentIR()

@@ -386,6 +386,18 @@ protected:
 	Fvector vPrevCamDir;
 	float fCurAVelocity;
 	CEffectorBobbing* pCamBobbing;
+	// S2 stage 4a (sim_tick gated mode only, see g_sim_view_gate in device.h): the camera and the hands run once per
+	// rendered frame in sim_view_present, not in UpdateCL; the camera sits between the last two tick positions
+	bool sim_view_gated() const;
+	void sim_view_tick();
+	static void sim_view_present(float dt, float alpha);
+	Fvector m_sim_view_pos_prev; // actor position (XFORM().c) at the tick before the newest one
+	Fvector m_sim_view_pos_new; // ... at the newest tick, read where cam_Update read it in UpdateCL
+	Fvector m_sim_view_pos; // the position cam_Update uses while m_sim_view_presenting
+	u32 m_sim_view_epoch; // g_sim_view_epoch of m_sim_view_pos_new; another epoch = no history
+	u32 m_sim_view_time; // Device.dwTimeGlobal of the tick that wrote m_sim_view_pos_new
+	bool m_sim_view_have; // m_sim_view_pos_new holds a tick position
+	bool m_sim_view_presenting; // cam_Update is called from sim_view_present
 
 
 	//менеджер эффекторов, есть у каждого актрера

@@ -428,6 +428,13 @@ static bool s_sim_tick_now = false;  // FrameMove: this call is one fixed tick
 static u32 s_st_frames = 0, s_st_ticks = 0, s_st_n[4] = {0, 0, 0, 0}, s_st_dropped = 0, s_st_age_max = 0, s_st_last_log = 0;
 static u64 s_st_age_sum = 0;
 static u32 s_st_tick_real_ms = 0;    // real time (TimerGlobal) at the start of the newest tick: its input poll
+// S2 stage 4a: the view every frame (declared in device.h)
+ENGINE_API BOOL g_sim_view_gate = FALSE;
+ENGINE_API u32 g_sim_view_epoch = 0;
+ENGINE_API sim_view_present_fn g_sim_view_present = nullptr;
+static u64 s_sv_last_ticks = 0;      // TimerGlobal ticks at the previous presentation step
+static u32 s_sv_last_epoch = 0;      // g_sim_view_epoch at the previous presentation step
+static float s_sv_dt = 0.f;          // smoothed real frame time handed to the presentation step
 
 // simulated time advances by one tick; sets the four time values the update reads
 static void sim_tick_advance()
@@ -477,6 +484,7 @@ static int sim_tick_plan()
 	if (!s_sim_synced)
 	{
 		s_st_tick_real_ms = Device.GetTimerGlobal()->GetElapsed_ms();
+		g_sim_view_epoch++;
 		s_sim_ms = double(Device.dwTimeGlobal);
 		s_sim_off = s_sim_ms - double(s_st_tick_real_ms);
 		s_sim_synced = true;
@@ -531,6 +539,43 @@ static void sim_tick_run(int n)
 		Device.fTimeDelta = 0.0f;
 		Device.dwTimeDelta = 0;
 	}
+}
+
+// S2 stage 4a: the presentation step, once per gated frame after the ticks: the actor's camera and hands with the REAL
+// frame time (smoothed and clamped as the stock timer does, never 0), and alpha = how far real time has gone past the
+// newest tick on the tick clock (0..1; the same lag sim_tick_plan counts ticks from, so it runs on evenly from frame to
+// frame whenever the tick itself ran). On a frame with no tick the mouse motion is read here too, inside the same
+// real frame time, so nothing a mouse-move handler calls sees a zero step. Simulated time (dwTimeGlobal, fTimeGlobal)
+// is not touched; the two deltas are set for the calls only and put back, so the render and the next tick see what
+// they saw before this stage.
+static void sim_view_present(int n)
+{
+	if (Device.Paused())
+		return; // paused inside this frame's ticks: no view step, the frame shows the last camera
+	const u64 now = Device.GetTimerGlobal()->GetElapsed_ticks();
+	const double step = 1.0 / double(s_sim_hz);
+	float frame = float(step); // first step after a resync: one tick's time, as a guess
+	if (s_sv_last_ticks && s_sv_last_epoch == g_sim_view_epoch && now > s_sv_last_ticks)
+		frame = float(double(now - s_sv_last_ticks) / double(CPU::qpc_freq));
+	const bool first = s_sv_last_epoch != g_sim_view_epoch;
+	s_sv_last_ticks = now;
+	s_sv_last_epoch = g_sim_view_epoch;
+	s_sv_dt = first ? frame : 0.1f * s_sv_dt + 0.9f * frame;
+	clamp(s_sv_dt, 0.001f, 0.1f);
+	const double now_ms = double(now) * 1000.0 / double(CPU::qpc_freq);
+	float alpha = float((now_ms + s_sim_off - s_sim_ms) / (step * 1000.0));
+	clamp(alpha, 0.f, 1.f);
+
+	const float saved_f = Device.fTimeDelta;
+	const u32 saved_dw = Device.dwTimeDelta;
+	Device.fTimeDelta = s_sv_dt;
+	Device.dwTimeDelta = _max(1u, u32(s_sv_dt * 1000.f + 0.5f));
+	if (n == 0 && pInput)
+		pInput->MouseMoveOnly(); // no tick polled the input this frame: mouse motion only, buttons wait
+	if (g_sim_view_present)
+		g_sim_view_present(s_sv_dt, alpha);
+	Device.fTimeDelta = saved_f;
+	Device.dwTimeDelta = saved_dw;
 }
 
 // statistics for the experiment, taken where the render starts (after the frame limiter): ticks per frame, dropped
@@ -640,7 +685,14 @@ void CRenderDevice::on_idle()
 	if (sim_n < 0)
 		FrameMove();
 	else
+	{
+		// S2 stage 4a, the view every frame: only on this branch (sim_n >= 0) is g_sim_view_gate TRUE, and only
+		// until the presentation step is done; with sim_n < 0 nothing below runs and the actor does what it did
+		g_sim_view_gate = TRUE;
 		sim_tick_run(sim_n);
+		sim_view_present(sim_n);
+		g_sim_view_gate = FALSE;
+	}
 #ifdef XRCORE_PROFILER_AGG
 	xr_det_set_role(2); // render phase from here to the end of the frame
 #endif
