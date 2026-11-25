@@ -316,7 +316,7 @@ local function t2_pose(a, now, t)
 			else
 				m(string.format("CROSS_REQ,%d,%d,%s,%s,%s,%.3f,%.3f,%.3f,%d,%d,%s", now, n, level.name(), zone, c.name, c.pos.x, c.pos.y, c.pos.z, c.lvid, c.gvid, utc))
 				if meta then meta:flush() end
-				local f = io.open(DIR .. "cross.txt", "wb"); if f then f:write(level.name(), ",", zone, ",", utc, "\n", "x,", tostring(aw), ",", tostring(sess or 0), ",", tostring(n), "\n"); f:close() end
+				local f = io.open(DIR .. "cross.txt", "wb"); if f then f:write(level.name(), ",", zone, ",", utc, "\n", "x,", tostring(aw), ",", tostring(sess or p_sess or 0), ",", tostring(n), "\n"); f:close() end   -- p_sess: a run that ever saw a session number keeps it over the level change (review 2026-11-25)
 				ChangeLevel(c.pos, c.lvid, c.gvid, vector():set(0, 0, 0))
 			end
 		end

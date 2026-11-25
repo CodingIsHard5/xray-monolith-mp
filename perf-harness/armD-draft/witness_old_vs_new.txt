@@ -1,4 +1,4 @@
-# Offline witness (2026-11-25): old reader b6be10b4 vs new reader b048dbcf with -t2_v2reset, v3 writers, five L shapes.
+# Offline witness (2026-11-25, redone after the review fix): old reader b6be10b4 vs new reader 5bf69e5c with -t2_v2reset, v3 writers, five L shapes.
 # Raw logs differ ONLY in G lines, field 3 = the stub's wall-clock second (os.time) at the run; masked there, they are byte-identical.
 keep: masked IDENTICAL; bytes 418538 / 418538; masked sha256 b9577f51156f9888 / b9577f51156f9888; raw differing line kinds: G ; RESET lines in new: 0; events: LOST EPOCH FOUND 
 freeze: masked IDENTICAL; bytes 418540 / 418540; masked sha256 2f6061fd443f6ff8 / 2f6061fd443f6ff8; raw differing line kinds: G ; RESET lines in new: 0; events: LOST EPOCH FOUND 

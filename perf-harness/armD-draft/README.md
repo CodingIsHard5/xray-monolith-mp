@@ -176,3 +176,21 @@ No cut file is applied, starts a crossing, or counts as a new session, on any of
 sets the level before the body is checked. The cure is on that side: use nothing of a snapshot, the level included,
 before the end line matches the header seq. That is itrzone's amendment to write; I offer this witness and, if it
 helps, a header field with the line count so a reader can also check the length.
+
+## CodeRabbit on the reader and runner diffs (2026-11-25, after three rate-limited tries)
+
+Four findings on the diff b6be10b4 -> lost3 and b31879be -> the draft runner:
+1. Major, reader: the crossing marker wrote session 0 for a cross pose without a session field, so a run that had
+   seen a session number could lose it over a level change and then meet the reset rule. FIXED: the marker now
+   carries the last known session number. (Only a writer mixing both formats could reach it; ITR2 does not.)
+2. Minor, reader: take the reset only for a pose with the v2 stance field. NOT CHANGED: a pose without it (v1) fails
+   the stance read anyway and no v1 writer exists any more.
+3. Major, bridge: a restarted writer with a lower seq must end the runner's LOST state and continue X-Ray. REFUTED by
+   the code: the runner ends LOST on ANY new complete pose header and never compares the seq (runner lines 109-112).
+4. Major, runner: harness/zz_p1_puppet_lost3.script does not exist where the runner installs it from. TRUE today and
+   intended: the drafts are installed at registration; the runner's install is guarded and refuses to start without it.
+
+After fix 1 the reader draft is 5bf69e5ce0ed7d775efe2ab9755826dca43152e093f6fbc5b9909416f12641cb (earlier draft
+b048dbcf). The old-against-new witness on the five shapes was redone with it (witness_old_vs_new.txt): masked logs
+identical, same hashes as before. The v2 runs repeat: fix off, found after 87 s; fix on, RESET and found after 30 s.
+The cut-file witness above was run on b048dbcf and not repeated: the fix touches only the marker write at a crossing.
