@@ -1654,3 +1654,49 @@ Overseer's GO.
     took 9.2 s and 9.3 s in b1.
   - Applied poses on the Garbage: 0 expected (reported only).
 - My guess for b2, X side PASS: 60 % (was 50 %; one of the two stated risks is now unlikely).
+
+## 63. Result: pre-flight L (lost pose), FAIL: 4 of 5 boots as required, `cross` FAIL (each scored once, 2026-11-25)
+
+Files checked before scoring, all as registered in section 57 (script 0347bdee, runner d2ec0233, writer 7733cbe4,
+driver 625db9d0, checker 77c3ad0b). Test save unchanged. The series driver claimed and released each slice itself.
+
+| boot | ran (EST) | scored as | result | required by section 57 |
+|---|---|---|---|---|
+| keep | 22:08 to 22:12 | keep | PASS, 8 of 8 | PASS |
+| mut_sess | 01:02 to 01:06 | keep | FAIL on check 5 (also 4, 6); 1 and V pass | fails on 5 with 1 and V passing |
+| freeze | 03:42 to 03:46 | freeze | PASS, 8 of 8 | PASS |
+| mut_off | 05:05 to 05:09 | freeze | FAIL on check 3 (also 2, 4 to 7); 1 and V pass | fails on 3 with 1 and V passing |
+| cross | 06:17 to 06:23 | cross | **FAIL: checks 1 and 3** | PASS |
+
+- **keep:** LOST at 5,000 ms; the 3 s pause was not taken as lost; EPOCH on the new session with seq 1; FOUND; 1,878
+  poses applied after; no stop.
+- **freeze:** LOST at 5,005 ms; the bridge stopped X-Ray 27 ms after the runner's LOST; stopped 25.1 s; 198 ms of game
+  time across the stop; EPOCH, FOUND; 2,368 poses applied after.
+- **mut_sess:** the writer came back with the OLD session number: no EPOCH, 0 poses applied. The session rule is what
+  makes `keep` pass.
+- **mut_off:** limits off: no LOST, no stop. The limits are what make `freeze` pass.
+- **cross, check 3 (a real fault in my script):** the LOST line came 135,010 ms of game time after the resume; the rule
+  is 120,000 to 122,500.
+  - Cause: after the level change the script waits 15 s (warm-up) before it reads the pose file. The file then held
+    seq 1237, written by the stand-in 3.5 s after the request (seq 1167), before it was killed. The script took it as
+    a NEW pose and started the 120 s from that read. So LOST = resume + 15 s + 120 s.
+  - My review fix (section 57, "a retained cross pose does not restart the timer") carried only the seq at the
+    request. The offline test used a writer that stopped AT the request, so it showed 120,000 ms. A real writer keeps
+    writing during X-Ray's load. The test did not cover that, and the engine did.
+  - The runner was right: it logged LOST 120,080 ms after the last pose by its own clock, and ended the cross hold.
+  - Effect in play: with ITR2 gone during a crossing, X-Ray's script would call the pose lost 15 s late. Nothing else
+    differs. It is still a FAIL by rule.
+- **cross, check 1 (outside cause):** tb_run stopped the engine at 06:23:03 with "ABORT: protected title started"
+  (Steam game 1818450 was started on the box), 315 s after launch and 95 s after the LOST line. The runner logged
+  it as an unplanned restart (rc 5). All data the checks need was already written. This is the box rule working.
+- **No retry.** The retry is only for a run that dies before its data; this one has its data and check 3 fails
+  whatever check 1 says.
+- **Guesses:** keep 60 % PASS: right. freeze 45 %: it passed, so my lean was wrong. cross 50 %: failed. Each
+  mutation fails as required 80 %: both right. All five as required 20 %: did not happen.
+- **Consequences.**
+  - The lost-pose files do NOT become arm files as they are. Pose v3 reading (session number, EPOCH), LOST under keep
+    and freeze, and both mutation witnesses are shown. LOST during a crossing is 15 s late.
+  - Proposed, prospective, for the Overseer: after a level change the first pose read counts as OLD however high its
+    seq is (the 120 s run from the resume); a writer counts as alive only when the seq changes between two reads in
+    the new Lua state. New offline test with a writer that keeps writing during the load; then `cross` again as a
+    new registered run (one boot), with `keep` as its regression boot.
