@@ -1386,3 +1386,24 @@ fields stays v1 and takes the T2 path, unchanged.
   within 2 lines.
 - **Not covered (unchanged):** a death during a crossing; spots with no AI node; a lost pose writer (design note of
   2026-11-24, draft in perf-harness/lost-draft/); the actor between arrival and the first pose.
+
+## 56. R3 proper, arm A (ITRZone amendment 113, arm a1), X side, registered BEFORE its boot
+
+- **Order (Overseer, 2026-11-24):** after x3's joint PASS, R3 proper runs as arms A, B, C, D, each registered and asked
+  for separately. Arm A: changer pair `_1`, a 300 s stay on the Garbage, the same files as x3.
+- **Files (rechecked on disk at this registration):** script 473dec25...43537, runner t2_xray.sh 6597a067...2a3d7,
+  Stance14.exe b4ce9c77...46cbe, lib_engine_pids.sh cb183b7b...8ed6e. Control file absent.
+- **Env:** as x3 except the run length: T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999
+  T2_KILL_AT=99999 **T2_RUN_S=600**. The run length is counted by a Lua script and starts again at each level load
+  (x3 ended 451 s after its last arrival with 480), so it must exceed the longest stay on one level (about 350 s).
+- **Scored ONCE** with tools/t3_x1_xray_check.py (c19740e8...2518c):
+  `python3 -I tools/t3_x1_xray_check.py <X out dir> out/t3pfD/run/boot0/meta_t2.csv l01_escape l02_garbage esc_level_changer_to_garbage_1 gar_level_changer_to_escape_1`.
+  PASS needs all nine conditions of section 51, unchanged. Table values for the pair: out to 30.431, 0.489, -326.702
+  (vertices 188617, 764); back to 27.484, 16.519, 681.514 (vertices 338146, 369).
+- **New against x3:** this changer pair has never been used by my script; the actor stands 300 s on the Garbage and
+  120 s at the Cordon arrival point (north Cordon, next to the track's off-mesh stretch) instead of 60 s each.
+- **Guess, written before the boot: X PASS 75 %.** Risks: an ITR2 crash or a failed crossing with the new pair
+  (10 %); the Cordon arrival point gives HOLD or a height reading off (8 %); other (7 %).
+- **Stop rule:** a FAIL is reported, not tuned. One retry only for a run that dies before its data, registered first.
+- **Not part of arm A:** a death at a crossing (B), X-Ray lost (C), ITR2 lost and the lost-pose work (D); the
+  lost-pose files stay as drafts and are installed under other names, so no file arm A uses is touched.

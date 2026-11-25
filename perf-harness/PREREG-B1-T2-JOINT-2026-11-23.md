@@ -498,3 +498,36 @@ registered first. A crash at an arrival: read the dump before anything else.
 Guess before the run: ITR2 side PASS 65 %. x2's data passes all twelve under the fixed scorers, which is why this is not
 higher than it looks: that reading is post-hoc and one run. The main risks are a crossing over 60 s (x2: 48.3 and 49.0)
 and an arrival crash that x2 happened not to hit.
+
+ITRZone amendment 113, copied verbatim from /home/caden/Projects/ITRZone/PREREG.md at ITRZone commit d6f9194 (2797 bytes). X side: PREREG-B1-T2-xray-side section 56.
+
+## Amendment 113 (REGISTERED 2026-11-24): R3 proper, arm A: the other changer pair and a long stay, arm a1
+Ordered by the Overseer after x3's joint PASS (order A, B, C, D; each arm registered and its box run asked for separately).
+Desk draft: `docs/design-notes/2026-11-24-r3-proper-draft.md`.
+
+**The run** (`scripts/boot_t2.sh a1`, joint, headless):
+- The mod is x3's, unchanged (blob 60c1c87). Levers as x3 except the rig's: `txa=120 txn=esc_level_changer_to_garbage_1
+  txb=300 txm=gar_level_changer_to_escape_1 txe=120`. So: 120 s of the Cordon track, out by the pair's first changer,
+  300 s standing at the Garbage arrival, back, 120 s standing at the Cordon arrival, end. Two crossings, about 540 s of play.
+- Changed from the draft: one out-and-back, not two. The second, by pair `_2`, would need a rig change, and x3 covered that pair.
+- X side (EnginePerf): the same five files as x3 (script 473dec25…, runner 6597a067…, Stance14.exe b4ce9c77…, lib
+  cb183b7b…, checker c19740e8…); env as x3 except `T2_RUN_S=600` (X-Ray counts its run from each level load; the Garbage
+  stay is about 350 s). Their changer table holds pair `_1`; their nine conditions carry over with the two names.
+- No Garbage track: the hole sampler runs on the Cordon leg only. The Cordon track came from our own `tools/p1_track.py`;
+  a Garbage track and a rig that walks it are a mod change and go into arm B's registration.
+
+**Scored once** by `tools/r3_check.py <run> <x out> 1` (the third argument names the pair; with it x3's data fails R3a, as
+it must). The twelve checks of amendment 112, unchanged in wording: T2a, T2b, T2c, T2d, T2e, T3w, R3a (pair `_1`), R3b
+(each crossing at most 60 s), R3c, R3h, R3g, R3p. PASS = all twelve, and EnginePerf's nine conditions on their side.
+One retry only for a run that dies before its data, registered first. A crash: the dump is read before anything else.
+
+**R3c and a creature that walks across** (EnginePerf, 2026-11-24): snapshots list only creatures on X-Ray's current level,
+and ids stay the same across levels. So an id that was spawned in the level just left and shows up after the `T1 level`
+line is a creature that really crossed. R3c part (b) still fails on it, as registered. If that happens it is reported
+with the id and both snapshots, as a walker and not a leak, and the score is not changed.
+
+**Expected and not scored:** the two known trace misses on the Cordon leg (t 25.9 and 109.8); about 18 stance steps; X-Ray
+running about 8 minutes after our end (its run counter restarts at the last arrival).
+
+Guess before the run: ITR2 side PASS 70 %. Risks: pair `_1` has never been used by the rig (its arrival points, the ring
+there, a crossing over 60 s); 300 s standing in the Garbage with creatures around (the heal lever is on); a walker.
