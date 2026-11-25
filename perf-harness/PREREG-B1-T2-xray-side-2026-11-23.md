@@ -1737,3 +1737,17 @@ Ordered by the Overseer after section 63: the fix is prospective, L stands as FA
   read during the warm-up); something else in the 120 s that the first run hid behind this fault.
 - **If it passes:** the lost2 script is the pose v3 reader for arm D, and itrzone is told. If it fails: recorded, no
   tuning, back to the Overseer.
+
+### 64a. The void rule, tightened by the Overseer (written BEFORE the boot, 2026-11-25)
+
+- The scored window ends 10 s after the runner's line "LOST: no new pose for ..." in t2_xray.log (wall clock). By then
+  the script's LOST line, the runner's lost row and the end of the cross hold are written.
+- A protected-title abort (tb_run.log: "ABORT: protected title started") voids the run ONLY if the runner's
+  "boot 0 end" stamp is before the end of that window, or if there is no runner LOST line at all. A void run is not
+  scored and is run once more on a new GO.
+- If the abort lands after the window, the run is scored once as it is. The abort then shows in check 1 as rc and one
+  restart row; that part of check 1 is recorded beside the result as caused by the abort, and the verdict is taken
+  from the rest: check 1's other parts (engine log present, no Lua error, no FATAL, no DMG line) and checks V, 2, 3,
+  4, 6, 7.
+- The void decision is made from the two timestamps alone, before the checker is run.
+- Overseer: GO for one box run; no CodeRabbit run needed for this change.
