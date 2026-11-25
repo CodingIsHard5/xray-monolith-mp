@@ -571,3 +571,84 @@ Their nine conditions as in arm A. X-Ray runs about 8 minutes after our end; exp
 Guess before the run: ITR2 side PASS 75 %. Arm A's data passes the new R3c for its 80 logged spawns; the 30 unlogged
 ones are the unknown. Other risks as arm A: a crossing over 60 s (arm A: 51.0 s), X-Ray's record and our log disagreeing
 by more than 3 s at an arrival.
+
+## Amendment 116 (REGISTERED 2026-11-25): R3 proper, arm B: a death next to and inside a crossing, arms b1 and b2
+Ordered by the Overseer (order A, B, C, D; arm A closed on A2's joint PASS). Pose v2 stays (Overseer, 2026-11-25: pose v3
+goes to arm D after EnginePerf's lost-pose series). Two runs, each registered here and its box run asked for separately,
+b1 first. One death policy per run, keep in both (EnginePerf's answer; freeze at a level change gets its own run later).
+
+**Changed on our side (mod blob 3e18249, was 7441261):**
+1. **Rig only, three levers** (default off; with them off the rig is arm A's): `txw=1` the rig walks the zone's own track
+   to and fro during the stay (the Garbage track `out/p1/garbage_full_track.csv`, local: 204 points, 284 m, 104 s, made by
+   `tools/p1_track.py --mesh` along the AI mesh between the two Garbage arrival points; the hole sampler keeps its own
+   heights per track); `txd=<s>` one planned death that many s after a changer, while the new zone's ring fills; after a
+   death the rig's plan ends (phase 5: it stands where the return left it, the run ends `txe` s of play after the return).
+2. **Logging only** (amendment 115's measuring lines, registered separately; no behaviour change): the loader's job
+   tally and the `TRANSIT near` / `TRANSIT jobs` lines.
+3. **Pose writer unchanged: version 2**, pinned by this blob; T3w requires the line `T2 pose version=2`.
+4. Offline: `tools/r3_armb_test.lua` (walk, turn, no pose jump, a far arrival stands, the plan ends at a death, the
+   crossing death with and without play-clock deaths, the unfinished jobs line) PASS; span, pose and cross tests PASS;
+   Opus review: no high finding, two medium and three low fixed.
+
+**What play code is under test (never run before):** a death while X-Ray is on the other level. ITR2 sends the player to
+the Hub and the test save loads into Cordon. The mod must rebuild Cordon, hand the player back un-held, and after 3 s of
+level mismatch send X-Ray back with a `cross` pose (`T2 cross recover`) until X-Ray's snapshots name Cordon. In b2 the
+crossing itself must be dropped first (`T2 cross dropped`).
+
+Both runs start with the save-and-reload leg of the earlier death runs (r3, t3), so the test save exists on Cordon at the
+track's first point; after the death the player stands there (X-Ray x -220.9, z -145.0; EnginePerf's condition 6 uses it).
+**b1** (`scripts/boot_t2.sh b1`): `txa=120 txn=esc_level_changer_to_garbage_1 txb=600 txm=gar_level_changer_to_escape_1
+txe=120 txw=1 wtest=6 t2die=210 t2dien=1`. 120 s of the Cordon track, out by pair `_1`, the Garbage walk, a planned death
+at play clock 210 (90 s of play after the crossing; the draft said 10 s: moved so the Garbage walk and its sampler get
+90 s), return to Cordon, recover crossing, 120 s standing, end. `txb` is never reached.
+**b2** (`scripts/boot_t2.sh b2`): the same without `txw` and `t2die`, with `t2dien=0 txd=10`: the death comes 10 s after
+the changer, inside the crossing. If ITR2 does not let the pawn die in that window (no `HP DEATH` within 20 s of the
+changer), b2 is reported as not reachable: a FAIL of R3d by rule, not forced and not retried.
+
+**Scored once each** by `tools/r3_check.py <run> <x out> 1 b1|b2`. PASS = all of:
+- T2a, T2b, T2c, T3w, R3g, as arm A2. T2d as A2, with the window from the death to the first accepted snapshot after
+  the recover crossing's end left out. T2e: as A2 but exactly one `HP DEATH`.
+- R3a cross: one `T2 cross start` by `esc_level_changer_to_garbage_1`; one `T2 cross recover` (we on l01_escape, X-Ray
+  on l02_garbage, a `gar_level_changer_to_escape_*` changer); cross end lines 2 in b1, 1 in b2; `T2 cross dropped` 0 in
+  b1, 1 in b2; no `still open`; one `T2 rig plan ended by a death`; pose states (an `away` right after `dead` accepted)
+  b1: play, cross, play, dead, play, cross, play, end; b2: play, cross, dead, play, cross, play, end.
+- R3b time: the crossing out at most 60 s (b1); the recover crossing at most 90 s.
+- R3c levels: as amendment 114 with one cross start; puppets > 0 within 60 s after every cross end. So nothing of the
+  Garbage is spawned on Cordon after the return, by X-Ray's own record.
+- R3d death (new): `HP DEATH` 85 to 95 s after the first cross end (b1), or 9 to 20 s after the cross start with the
+  dropped line (b2); `T2 back in play after the death` within 120 s; `WC done in cordon_full`; the recover line 0 to 15 s
+  after back in play.
+- R3w walk (new, b1 only): `T2 rig walk starts` with a track end within 5 m of the arrival; between the first cross end
+  and the death the pose goes at least 50 m from its first point with no step over 2 m between two writes.
+- R3h un-held: no `FREE HELD` line, no rig hold release; no `hold rebase` line after the track start except between
+  `HP DEATH` and the next `WC done`.
+- R3p world: one transit, its table emptied to 0; no stale-puppet line. The `WORLD gone` lines of the death are reported.
+- And EnginePerf's ten conditions on their side.
+**Which first-time event failed** (Overseer, 2026-11-25; reported by the scorer, not a check): b1 meets three things for
+the first time (the save leg with the two-zone table, the return into Cordon after a transit, the recover crossing). The
+scorer lists fifteen stages in order from lines the mod already logs (track start, crossing out, walk, death, the Hub
+seen, the Cordon world recognised, Cordon rebuilt, the return's end, back in play, X-Ray seen on the other level, the
+recover's start, its end, creatures back, the run's end) and names the first one not reached. No extra pre-flight.
+One retry only for a run that dies before its data, registered first. A crash: the dump is read before anything else.
+
+**Scorer self-test `tools/r3b_selftest.py`** (PASS): no arm B run exists, so R3a, R3b, R3d, R3w and T2e's death count are
+tested on synthetic logs: a good b1 and a good b2 pass; twelve mutants fail the named check (death at the wrong time, no
+recover, recover of 100 s, rig stands, pose jumps 6 m, arrival 9 m from the track, the wrong zone rebuilt, two deaths, no
+death, b2 death late, b2 without the dropped line, a b1 log scored as b2). A2's real data scores as before without the
+arm argument (12 of 12) and fails as b1, as it must. The synthetic lines are my reading of the mod's log formats; a
+mismatch with the real log would show as a FAIL of the new checks and is then a scorer fault to be ruled on, not tuned.
+
+**Expected and not scored:** the Garbage arrival `_1` to the track's start is under 0.4 m; the two known Cordon trace
+misses; the hole sampler's count on the Garbage track (first time: reported per point, limit 10 with Cordon's).
+
+**X side (EnginePerf, their section 61, commit c4d0453ca):** runner 296563fd…, script 473dec25…, Stance14.exe b4ce9c77…,
+lib cb183b7b…, all as A2; new checker `tools/t3_armB_xray_check.py` a71e36e69b66c009ef827b0946e2ae5df79b38db6fd57d874f66bcbc0c717d65;
+env as A2 (`T2_RUN_S=600 T2_WALL_S=1660 T2_OVER_S=120`). Ten conditions; from our answers, as expected values: about 100
+zone-mismatch lines naming l01_escape before the recover request (floor 20), and the first applied pose after the
+recover within 5 m of x -220.9, z -145.0. Their stated risks for b2: their level load must end within about 40 s of our
+death, and a level change within 30 s of a load has not run before. Their guess, X side PASS: b1 60 %, b2 50 %.
+
+Guess before the runs: b1 ITR2 side PASS 40 %, b2 35 %. Risks: the recover path has only run offline; the return into
+Cordon after a transit has never run (the zone to rebuild, the rig's state); misses on the new track pushing R3g over 10;
+a scorer mismatch on a line never seen in a real log; in b2 the death may not land in the fill window.
+
