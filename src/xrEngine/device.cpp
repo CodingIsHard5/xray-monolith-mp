@@ -404,6 +404,160 @@ static void perf_autocapture()
 }
 #endif
 
+// ---------------------------------------------------------------------------------------------------------------
+// S2 prototype (Caden 2026-11-25: "Experiment with 60 and 30 fps"): a FIXED SIMULATION TICK apart from the render frame.
+// Console `sim_tick <hz>` or start switch `-sim_tick <hz>`; 0 = OFF = the stock path below, untouched.
+// ON (in a running, unpaused level, not in det_mode, not with rsConstantFPS): real time (TimerGlobal) is compared with
+// the simulated time; for every whole tick that is due, the whole per-frame update of today (seqFrame, and the game
+// thread's half: scheduler, seqParallel, seqFrameMT) runs ONCE with a fixed step of 1/hz. The frame is rendered every
+// time. A frame with no tick due only renders again: the frame counter moves (the renderer's per-frame guards need
+// it), time does not, nothing is updated, input is not polled. No interpolation: between ticks the world stands still.
+// At most 0.1 s of game time per frame (the stock clamp); what is over that is dropped and counted.
+// With rsConstantFPS (the bench's -perf_fixed_dt) and sim_tick > 0, every frame is one tick of 1/hz instead of 33 ms.
+// Known limits, named in plan-facts/S2-sim-tick-plan.md: code that reads the real timer inside the simulation
+// (timeServer, the scheduler's wall-clock budget) is not changed; the freeze-absorb lever is not supported with it;
+// particles are advanced once per RENDERED frame with one tick's step, so they run slow on frames with several ticks.
+// Rates under 10 Hz are refused (a step over the stock 0.1 s clamp).
+int g_sim_tick_hz = 0;
+static int s_sim_hz = 0;             // the rate latched for this frame (a console change acts from the next frame)
+static double s_sim_off = 0.0;       // dwTimeGlobal minus the real timer at the last sync (an earlier fixed-step
+                                     // capture can leave simulated time ahead of real time)
+static double s_sim_ms = 0.0;        // simulated time in ms, same origin as dwTimeGlobal
+static bool s_sim_synced = false;    // false after any stock frame: resync to dwTimeGlobal on the next tick frame
+static bool s_sim_tick_now = false;  // FrameMove: this call is one fixed tick
+static u32 s_st_frames = 0, s_st_ticks = 0, s_st_n[4] = {0, 0, 0, 0}, s_st_dropped = 0, s_st_age_max = 0, s_st_last_log = 0;
+static u64 s_st_age_sum = 0;
+static u32 s_st_tick_real_ms = 0;    // real time (TimerGlobal) at the start of the newest tick: its input poll
+
+// simulated time advances by one tick; sets the four time values the update reads
+static void sim_tick_advance()
+{
+	if (!s_sim_tick_now)
+	{
+		// every-frame mode (rsConstantFPS): keep the fraction of a millisecond from tick to tick, resync only when
+		// something else has moved dwTimeGlobal
+		if (u32(s_sim_ms) != Device.dwTimeGlobal)
+			s_sim_ms = double(Device.dwTimeGlobal);
+	}
+	else if (!s_sim_synced)
+	{
+		s_sim_ms = double(Device.dwTimeGlobal);
+		s_sim_synced = true;
+	}
+	const double step = 1000.0 / double(s_sim_tick_now ? s_sim_hz : g_sim_tick_hz);
+	const u32 before = u32(s_sim_ms); // not dwTimeGlobal: time dropped by the clamp must not show in this tick's step
+	s_sim_ms += step;
+	Device.fTimeDelta = float(step / 1000.0);
+	Device.dwTimeGlobal = u32(s_sim_ms);
+	Device.dwTimeDelta = Device.dwTimeGlobal - before;
+	Device.fTimeGlobal = float(s_sim_ms / 1000.0);
+}
+
+// -1 = off (stock path); otherwise the number of ticks due in this frame (0 = render only)
+static int sim_tick_plan()
+{
+	static bool parsed = false;
+	if (!parsed)
+	{
+		parsed = true;
+		if (LPCSTR p = strstr(Core.Params, "-sim_tick "))
+		{
+			int hz = 0;
+			if (sscanf(p + xr_strlen("-sim_tick "), "%d", &hz) == 1 && hz > 0 && hz <= 240)
+				g_sim_tick_hz = hz;
+		}
+	}
+	s_sim_hz = g_sim_tick_hz;
+	if (s_sim_hz < 10 || xr_det_mode() || psDeviceFlags.test(rsConstantFPS) || Device.Paused() || !g_pGameLevel ||
+		!g_bLoaded || Device.dwPrecacheFrame)
+	{
+		s_sim_synced = false;
+		return -1;
+	}
+	if (!s_sim_synced)
+	{
+		s_st_tick_real_ms = Device.GetTimerGlobal()->GetElapsed_ms();
+		s_sim_ms = double(Device.dwTimeGlobal);
+		s_sim_off = s_sim_ms - double(s_st_tick_real_ms);
+		s_sim_synced = true;
+	}
+	const double step = 1000.0 / double(s_sim_hz);
+	const double lag = double(Device.GetTimerGlobal()->GetElapsed_ms()) + s_sim_off - s_sim_ms;
+	int n = lag > 0.0 ? int(lag / step) : 0;
+	const int cap = _max(1, int(100.0 / step));
+	if (n > cap)
+	{
+		s_st_dropped += u32(n - cap);
+		s_sim_ms += double(n - cap) * step; // time jumps on, as the stock clock does when the step is clamped
+		n = cap;
+	}
+	return n;
+}
+
+static void sim_tick_run(int n)
+{
+	for (int i = 0; i < n; ++i)
+	{
+		if (i > 0 && Device.Paused())
+			break; // an earlier tick of this frame paused the game: no more game time in this frame
+		if (i > 0)
+		{
+			// what on_idle does before every update: last update's deferred destroy queue
+			xrCriticalSectionGuard guard(&Device.seqParallelBeforRenderCS);
+			for (size_t it = 0; it < Device.seqParallelBeforRender.size(); ++it)
+			{
+				auto Callback = Device.seqParallelBeforRender[it];
+				if (Callback)
+					Callback();
+			}
+			Device.seqParallelBeforRender.clear();
+		}
+		s_st_tick_real_ms = Device.GetTimerGlobal()->GetElapsed_ms();
+		s_sim_tick_now = true;
+		Device.FrameMove();
+		s_sim_tick_now = false;
+		if (i < n - 1)
+		{
+			// not the last tick of this frame: the game thread's half runs here, inline, and is joined
+			XRay::Engine::GameThread();
+			Device.secondary_tasks.wait();
+		}
+	}
+	if (n == 0)
+	{
+		// render only: a new frame number for the renderer, no time, no update
+		Device.dwFrame++;
+		Core.dwFrame = Device.dwFrame;
+		Device.fTimeDelta = 0.0f;
+		Device.dwTimeDelta = 0;
+	}
+}
+
+// statistics for the experiment, taken where the render starts (after the frame limiter): ticks per frame, dropped
+// ticks, age of the world state (time since the newest tick polled the input)
+static void sim_tick_stat(int n)
+{
+	const u32 now = Device.GetTimerGlobal()->GetElapsed_ms();
+	const u32 age = now - s_st_tick_real_ms;
+	s_st_frames++;
+	s_st_ticks += u32(n);
+	s_st_n[n > 3 ? 3 : n]++;
+	s_st_age_sum += age;
+	if (age > s_st_age_max)
+		s_st_age_max = age;
+	if (now - s_st_last_log >= 10000)
+	{
+		Msg("* [SIMTICK] hz %d frames %u ticks %u n0 %u n1 %u n2 %u n3p %u dropped %u age_avg_ms %.2f age_max_ms %u time_global %u real_ms %u",
+			s_sim_hz, s_st_frames, s_st_ticks, s_st_n[0], s_st_n[1], s_st_n[2], s_st_n[3], s_st_dropped,
+			s_st_frames ? float(double(s_st_age_sum) / double(s_st_frames)) : 0.f, s_st_age_max, Device.dwTimeGlobal, now);
+		s_st_frames = s_st_ticks = s_st_dropped = s_st_age_max = 0;
+		s_st_n[0] = s_st_n[1] = s_st_n[2] = s_st_n[3] = 0;
+		s_st_age_sum = 0;
+		s_st_last_log = now;
+	}
+}
+// ---------------------------------------------------------------------------------------------------------------
+
 void CRenderDevice::on_idle()
 {
 
@@ -482,7 +636,11 @@ void CRenderDevice::on_idle()
 #ifdef XRCORE_PROFILER_AGG
 	xr_det_set_role(1); // gameplay phase of the main thread (see _random.h, test-only stream split)
 #endif
-	FrameMove();
+	const int sim_n = sim_tick_plan(); // S2 prototype: -1 = off, the stock call below
+	if (sim_n < 0)
+		FrameMove();
+	else
+		sim_tick_run(sim_n);
 #ifdef XRCORE_PROFILER_AGG
 	xr_det_set_role(2); // render phase from here to the end of the frame
 #endif
@@ -585,7 +743,11 @@ void CRenderDevice::on_idle()
 	Device.LuaGCDone = false;
 	Device.LuaGCCount = 0;
 
-	if (DET_SERIAL())
+	if (sim_n == 0)
+	{
+		// S2 prototype, render-only frame: the game thread's half belongs to the tick, nothing to run
+	}
+	else if (DET_SERIAL())
 		XRay::Engine::GameThread();
 	else
 		secondary_tasks.run(&XRay::Engine::GameThread);
@@ -615,6 +777,8 @@ void CRenderDevice::on_idle()
 	}
 #endif // ECO_RENDER END
 
+	if (sim_n >= 0)
+		sim_tick_stat(sim_n);
 #ifndef DEDICATED_SERVER
 	Statistic->RenderTOTAL_Real.FrameStart();
 	Statistic->RenderTOTAL_Real.Begin();
@@ -774,7 +938,14 @@ void CRenderDevice::FrameMove()
 	dwTimeContinual = TimerMM.GetElapsed_ms() - app_inactive_time;
 	if (xr_det_mode())
 		dwTimeContinual = dwTimeGlobal + 33; // det_mode: no wall clock in script-visible time
-	if (psDeviceFlags.test(rsConstantFPS))
+	if (s_sim_tick_now || (g_sim_tick_hz >= 10 && psDeviceFlags.test(rsConstantFPS) && !xr_det_mode()))
+	{
+		// S2 prototype: one fixed tick of 1/hz (set by sim_tick_run, or every frame under rsConstantFPS)
+		PROF_EVENT("Sim tick");
+		Timer.Start(); // keep the stock frame timer fresh for the frame on which the switch goes off
+		sim_tick_advance();
+	}
+	else if (psDeviceFlags.test(rsConstantFPS))
 	{
 		PROF_EVENT("Constant FPS");
 
