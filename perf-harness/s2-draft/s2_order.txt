@@ -1,0 +1,21 @@
+# S2 experiment order. tag|exe|save|lowend|warm|frames|fixed|cfg   (cfg = "var=value;..." for user.ltx; unset = 0)
+# arms: off = stock, real time, uncapped. tNN = tick gate at NN Hz, real time. cNN = stock capped at NN fps.
+#       fNN = every frame is one tick of 1/NN s (no waiting). f33 = stock fixed 33 ms (link to older benches). L = 4 cores.
+s2_off_1|SimTick14.exe|bench1|0|3000|12000|0|
+s2_t30_1|SimTick14.exe|bench1|0|3000|12000|0|sim_tick=30
+s2_t60_1|SimTick14.exe|bench1|0|3000|12000|0|sim_tick=60
+s2_t50_1|SimTick14.exe|bench1|0|3000|12000|0|sim_tick=50
+s2_t50_2|SimTick14.exe|bench1|0|3000|12000|0|sim_tick=50
+s2_t60_2|SimTick14.exe|bench1|0|3000|12000|0|sim_tick=60
+s2_t30_2|SimTick14.exe|bench1|0|3000|12000|0|sim_tick=30
+s2_off_2|SimTick14.exe|bench1|0|3000|12000|0|
+s2_c30|SimTick14.exe|bench1|0|450|1800|0|r__framelimit=30
+s2_c60|SimTick14.exe|bench1|0|900|3600|0|r__framelimit=60
+s2_c50|SimTick14.exe|bench1|0|750|3000|0|r__framelimit=50
+s2_f33|SimTick14.exe|bench1|0|600|3000|1|
+s2_f30|SimTick14.exe|bench1|0|600|3000|1|sim_tick=30
+s2_f60|SimTick14.exe|bench1|0|600|3000|1|sim_tick=60
+s2_f50|SimTick14.exe|bench1|0|600|3000|1|sim_tick=50
+s2_offL|SimTick14.exe|bench1|1|3000|12000|0|
+s2_t30L|SimTick14.exe|bench1|1|3000|12000|0|sim_tick=30
+s2_t60L|SimTick14.exe|bench1|1|3000|12000|0|sim_tick=60
