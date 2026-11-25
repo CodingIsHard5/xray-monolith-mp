@@ -1,6 +1,6 @@
 # PREREG S2: fixed simulation tick, 30 against 60 Hz (and 50), prototype behind a switch
 
-Status: DRAFT until the build's hash is filled in and the Overseer gives GO. Ordered by Caden (Discord 2026-11-25
+Status: REGISTERED 2026-11-25, before any run. No box run without the Overseer's GO. Ordered by Caden (Discord 2026-11-25
 17:08 UTC, via the Overseer): "Experiment with 60 and 30 fps and see which works best for the stuff". Plan and code
 read: plan-facts/S2-sim-tick-plan.md, plan-facts/frame-loop-read.md.
 
@@ -19,7 +19,8 @@ read: plan-facts/S2-sim-tick-plan.md, plan-facts/frame-loop-read.md.
 
 ## 1. What is tested
 Build: branch perf/sim-tick, commit 81e0b8fd2 (base perf/t3-stance 8a835585a = Stance14.exe), CI Perf-Build run
-45664597008, installed as run/bin/SimTick14.exe, sha256 TO BE FILLED. Switch: console `sim_tick <hz>` (saved in
+45664597008, green, installed as run/bin/SimTick14.exe, sha256
+93fff4b537711cb38062f432c29551642e36ab852703b191727edb337e858f21 (pdb in ci/45664597008). Switch: console `sim_tick <hz>` (saved in
 user.ltx), 0 = off. CodeRabbit read the change: 6 findings, 5 fixed, 1 named as a limit (particles run slow on a
 frame with several ticks).
 - **off**: stock. One update per rendered frame, real time step.
@@ -115,3 +116,20 @@ not against engine output.
 They can say what each rate costs (per tick, per second, per player), whether the gate holds its rate, how frame times
 and the computed delay move, and whether 50 Hz buys anything from lining up with physics. They cannot say which rate
 feels best, cannot speak for a firefight or a crowded level, and cannot give a verdict for an old machine.
+
+## 5. Pinned files (tools/, installed 2026-11-25)
+| File | sha256 |
+|---|---|
+| tools/s2_series.sh | f014c60f55069721ec29ce501499653d1f2075ad6894b913d9a4f3c88971a336 |
+| tools/s2_bench.sh | 072af8edb67eab095ea4408f3950a428709757b3ce1abdfe25efc25a3fb150b5 |
+| tools/s2_order.txt | c0be4edd55a3a991d7597bb13fab5acdfdbe95d8ac9e399015c5f32483b496e5 |
+| tools/s2_score.py | c6b47292df593211046c609413a2ac5bc2d214f953fb85b0def74ace423cfce1 |
+| tools/s2_pred.json | 27e0ae840f4f64bd04ae3a94e325554aa806ffe21cdb5b7538647472e2389dcc |
+| tools/s2_selftest.py | 31006cf288a3f845c63b2e93e4be77018504267a06be29028887be0a97036128 |
+| tools/det_pair.sh | d4c38a79ce0263e72a9a970191a8d5fea34fc308ae17280aaabe4ac42f093895 |
+| tools/det_run.sh | 01fb40dc2891d0602f3f596b8cde9664d05edd89eaa42a664cc9a34fbdc70f38 |
+| tools/counters_diff.py | 5f2cf91df575ecf1e853c9f7b32b8fd18f72262155f2dd9416977d0c7ccbd61f |
+| run/bin/Stance14.exe (reference) | b4ce9c772ae5fa4bf5ddb955f2dfcb943627d6c2b2e4ce66e21eac1168646cbe |
+Series call: `S2_EXE_SHA=<the hash above> tools/s2_series.sh` (started as a background task). Checked before the
+series: run/appdata/user.ltx has `lua_parallel_gc 1`; `sim_tick` and `r__framelimit` are set per run and left at 0.
+The result goes into section 6 of this file, scored once.
