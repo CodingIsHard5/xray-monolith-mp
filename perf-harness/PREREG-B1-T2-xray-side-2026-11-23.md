@@ -1502,3 +1502,16 @@ fields stays v1 and takes the T2 path, unchanged.
 - **A fault of mine with no effect:** the lost-pose series script's wait matched "cross hold end:" in arm A's log
   and queued for the box at 20:53, during arm A. It never got the box (arm A's claim held; its log has no "slice
   granted" line), so it touched nothing.
+
+### 57b. Series script's wait fixed and tested (Overseer's order, 2026-11-24), before any boot
+
+- **Fault (section 58):** the wait for arm A's end matched any line with " end: ", so "cross hold end:" released it
+  at 20:53, during arm A. The series and its waiting driver were stopped at 21:40; no boot had started and no out
+  directory holds data.
+- **Fix:** the wait now needs the runner's last line only (`<date> <time>Z end: <how>; boots <n>; ...`). New hash of
+  tools/t3_pfL_series.sh: 7da911f42401e41e9ac671d0ad12c1fee4d39bbb48975658150bf3677316d938. Nothing else changed;
+  the four file hashes of section 57 are unchanged.
+- **Test on real logs (`--test-wait`):** arm A's runner log cut after 4, 6, 7, 10 and 11 of its 12 lines (ending
+  in "cross hold end:", "boot 0 end:", "boot 1 end:"): not ended. All 12 lines: ended. x3's full log: ended. A
+  missing file: not ended. The old pattern matched already on the first 4 lines.
+- **Start:** held until the Overseer confirms. Order, boots, scoring and guesses as in 57 and 57a.
