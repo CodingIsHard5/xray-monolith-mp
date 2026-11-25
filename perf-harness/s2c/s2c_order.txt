@@ -1,0 +1,12 @@
+# S2-C E1 (PREREG-S2C-gate-overhead): tick 30 with 1, 2, 4 and 7 frames per tick, against stock capped 30. Mirrored.
+# tag|exe|save|lowend|warm|frames|fixed|cfg   -- all-lowercase tags, as the bench names its folders
+s2c_c30_1|SimTick14.exe|bench1|0|450|1800|0|r__framelimit=30
+s2c_g30x31_1|SimTick14.exe|bench1|0|450|1700|0|sim_tick=30;r__framelimit=31
+s2c_g30x60_1|SimTick14.exe|bench1|0|900|3300|0|sim_tick=30;r__framelimit=60
+s2c_g30x120_1|SimTick14.exe|bench1|0|1800|6600|0|sim_tick=30;r__framelimit=120
+s2c_g30u_1|SimTick14.exe|bench1|0|3000|12000|0|sim_tick=30
+s2c_g30u_2|SimTick14.exe|bench1|0|3000|12000|0|sim_tick=30
+s2c_g30x120_2|SimTick14.exe|bench1|0|1800|6600|0|sim_tick=30;r__framelimit=120
+s2c_g30x60_2|SimTick14.exe|bench1|0|900|3300|0|sim_tick=30;r__framelimit=60
+s2c_g30x31_2|SimTick14.exe|bench1|0|450|1700|0|sim_tick=30;r__framelimit=31
+s2c_c30_2|SimTick14.exe|bench1|0|450|1800|0|r__framelimit=30
