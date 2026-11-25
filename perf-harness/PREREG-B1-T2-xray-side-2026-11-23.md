@@ -1465,3 +1465,40 @@ fields stays v1 and takes the T2 path, unchanged.
 - **Pose v3:** ITRZone confirmed the text of section 57 as written. The old script rejects a seven-field header, so
   the X side moves first: the lost-pose files become my arm B files only if this pre-flight passes.
 - Guesses unchanged.
+
+## 58. R3 arm A (a1): X side FAIL 6 of 9 by rule (scored once, 2026-11-24); the cause is my run-length setting
+
+- **Run:** X out dir ~/Projects/ITRZone/out/runs/20261124-204730-t2a1-xray, 20:49-21:08, files as frozen in section
+  56 (hashes rechecked after the run). Test save unchanged; control file absent.
+- **Each check:**
+  1. FAIL: runner rc 6 (one unplanned restart). No Lua error, no FATAL, no DMG line.
+  2. PASS: two CROSS_REQ by pair `_1` with the table values; no CROSS_NOCHANGER or CROSS_ERROR.
+  3. PASS: two CROSS_RESUME, Garbage then Cordon.
+  4. PASS: first applied play pose 50.9 s and 35.1 s after the cross pose (limit 90 s).
+  5. PASS: P2 2,150 before, 6,001 on the Garbage, 2,400 back on Cordon; 0 GUARD, 0 HOLD.
+  6. PASS: first pose after each resume 0.004 m and 0.006 m from the changer's destination.
+  7. FAIL: two cross holds, but one restart row.
+  8. PASS: 0 of 10,551 P2 off in stance, movement state or height.
+  9. FAIL: two VITALS lines, both clean (health 1.000, radiation 0, bleeding 0); the third is missing; no REFILL.
+- **Cause (mine):** tb_run stopped the engine with its own time limit ("TIMEOUT", rc 5) 1,001 s after launch, 5 min
+  50 s after ITR2's end. The runner sets that limit to T2_RUN_S + 400 s of wall time from the LAUNCH, while the run
+  length T2_RUN_S counts again from each level load. The last arrival was 538 s after launch, so the engine could
+  not reach 600 s on the last level before 1,000 s of wall time. I proposed T2_RUN_S=600 without checking this
+  limit. The runner then started boot 1 (60 s), as built. All three failed checks follow from that kill: the rc,
+  the restart row, and the last VITALS line that the script writes only at a normal end.
+- **What the data shows:** every check on play itself passed, with the new changer pair, a 300 s stay and 120 s at
+  the north Cordon arrival point. Nothing was lost before ITR2's end.
+- **Guess:** 75 % PASS; it failed. The named risks did not happen; the real cause was not on my list.
+- **With the frozen runner this arm cannot pass:** the engine always runs T2_RUN_S after the last arrival, and the
+  limit is T2_RUN_S + 400 s from launch, so the last arrival must come within 400 s of launch. Arm A's comes at
+  about 540 s. A prospective fix needs a runner change (its own setting for the wall limit, or ending the run when
+  the pose says `end`). Not done; the Overseer decides. The stop rule gives no retry: the run did not die before
+  its data.
+- **Creature 19518 (ITRZone's question):** my log shows it online on the Garbage from my first frame there (ON at
+  game time 149,825), offline at 445,220 (OFF, 280 s into the stay), and online on Cordon on my first frame after
+  the return (ON at 500,680, 193.6 m from the actor). The A-Life dump written at that arrival lists it alive and
+  online at game vertex 366, position -122.39, 14.56, 559.28, which is 193.6 m from the actor's arrival point. So
+  X-Ray's A-Life moved it from the Garbage to Cordon: a walker, not a leak.
+- **A fault of mine with no effect:** the lost-pose series script's wait matched "cross hold end:" in arm A's log
+  and queued for the box at 20:53, during arm A. It never got the box (arm A's claim held; its log has no "slice
+  granted" line), so it touched nothing.
