@@ -34,6 +34,9 @@
 #include "Weapon.h"
 #include "Flashlight.h"
 #include "../xrPhysics/IElevatorState.h"
+#include "eatable_item.h"          // GammaVR backpack B2b
+#include "PhysicsShellHolder.h"
+#include "../xrPhysics/PhysicsShell.h"
 #include "holder_custom.h"
 #include "Weapon.h"
 #include "CustomOutfit.h"
@@ -1085,6 +1088,91 @@ bool vr_lam2_skip() // GAMMA's lam2.stop_all_actions (FDDA's own skip); false if
 	return true;
 }
 void vr_item_section_count(CActor* A, LPCSTR sect, int& n, int& uses) { vr_item_count(A, sect, n, uses); }
+
+// ---- GammaVR backpack B2b (SPIKE_PLAN Amendment 41 part 2): the game-side calls for an item taken out of the bag ----
+int vr_bpt_ruck_count(CActor* A, LPCSTR sect) // items of this section in the backpack list (the list the bag shows)
+{
+	int n = 0;
+	if (A && A->m_inventory)
+		for (PIItem it : A->inventory().m_ruck)
+			if (it && !xr_strcmp(it->object().cNameSect().c_str(), sect))
+				++n;
+	return n;
+}
+int vr_bpt_pick(CActor* A, LPCSTR sect, bool& eatable, float& weight) // the one real item: GetAny; its id or -1
+{
+	eatable = false;
+	weight = 0.f;
+	PIItem it = (A && A->m_inventory) ? A->inventory().GetAny(sect) : NULL;
+	if (!it)
+		return -1;
+	eatable = !!smart_cast<CEatableItem*>(it);
+	weight = it->Weight();
+	return int(it->object().ID());
+}
+static PIItem vr_bpt_owned(CActor* A, int id)
+{
+	if (!A || !A->m_inventory || id < 0)
+		return NULL;
+	CObject* O = Level().Objects.net_Find(u16(id));
+	if (!O || !O->H_Parent() || O->H_Parent()->ID() != A->ID())
+		return NULL;
+	return smart_cast<CInventoryItem*>(O);
+}
+bool vr_bpt_drop(CActor* A, int id, const Fvector& pos) // the game's own drop, then sent to pos (as drop_item_and_teleport)
+{
+	if (!vr_bpt_owned(A, id))
+		return false;
+	NET_Packet P;
+	CGameObject::u_EventGen(P, GE_OWNERSHIP_REJECT, A->ID());
+	P.w_u16(u16(id));
+	CGameObject::u_EventSend(P);
+	CGameObject::u_EventGen(P, GE_CHANGE_POS, u16(id));
+	P.w_vec3(pos);
+	CGameObject::u_EventSend(P);
+	return true;
+}
+// the dropped object: 0 gone, 1 still owned, 2 free in the world. centre = its matrix applied to bc. With set (and free,
+// with a physics shell): placed at xf and stopped (the game's drop throws it along the view; B2b lets it fall from rest).
+int vr_bpt_dropped(int id, const Fvector& bc, Fvector& centre, bool set, const Fmatrix& xf, bool& was_set)
+{
+	was_set = false;
+	centre.set(0.f, 0.f, 0.f);
+	CObject* O = id >= 0 ? Level().Objects.net_Find(u16(id)) : NULL;
+	if (!O)
+		return 0;
+	const bool free_ = !O->H_Parent();
+	if (free_ && set)
+	{
+		CPhysicsShellHolder* sh = smart_cast<CPhysicsShellHolder*>(O);
+		if (sh && sh->PPhysicsShell())
+		{
+			sh->XFORM().set(xf);
+			sh->PPhysicsShell()->SetTransform(xf, mh_clear);
+			sh->PPhysicsShell()->set_LinearVel(Fvector().set(0.f, 0.f, 0.f));
+			sh->PPhysicsShell()->set_AngularVel(Fvector().set(0.f, 0.f, 0.f));
+			was_set = true;
+		}
+	}
+	O->XFORM().transform_tiny(centre, bc);
+	return free_ ? 2 : 1;
+}
+int vr_bpt_use(CActor* A, int id) // the game's own use: -1 not ours any more, 0 no script gate, 1 gate false (FDDA took it), 2 gate true and Eat called
+{
+	PIItem it = vr_bpt_owned(A, id);
+	if (!it)
+		return -1;
+	::luabind::functor<bool> funct;
+	if (!ai().script_engine().functor("_G.CInventory__eat", funct))
+		return 0;
+	CGameObject* GO = it->cast_game_object();
+	if (GO && funct(GO->lua_game_object()))
+	{
+		A->inventory().Eat(it);
+		return 2;
+	}
+	return 1;
+}
 
 // GammaVR backpack B2b probe (SPIKE_PLAN Amendment 41), TEST ONLY, no verdict. [vr15] lines.
 //   -vr_bpx_drop <frame> <section>   one item of that section (GetAny) gets the game's own drop (GE_OWNERSHIP_REJECT) and

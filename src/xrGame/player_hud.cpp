@@ -4412,7 +4412,25 @@ struct vr_bph_state
 	int carried1; // index into the list PLUS ONE, 0 = nothing in the hand (so a zeroed state is an empty hand)
 	Fmatrix hand_local; // the carried model's matrix in the hand's frame, frozen at the grab
 	float reach;
+	// B2b (Amendment 41 part 2): taking out. Ids are stored PLUS ONE so a zeroed state means none.
+	bool out_off;       // -vr_bp_out_off (TEST ONLY): B2a exactly
+	int out_id1;        // the one real item in the hand once the carried model's box centre has left the bag
+	bool copy;          // it came off a stack: the stack's model is back at its place, the hand shows one copy
+	bool eatable, pick_failed;
+	int use;            // 0 none, 1 called and not yet landed, 2 cancelled (re-armed outside the zone once FDDA is idle)
+	int base_n, base_u;
+	u32 use_frame;
+	Fmatrix copy_xf;
+	int drop_id1;       // the last dropped item, followed to the end ([vr16d])
+	int drop_set;       // frames on which it was placed and stopped
+	Fmatrix drop_xf;
+	Fvector drop_bc;
 };
+int vr_bpt_ruck_count(CActor* A, LPCSTR sect);                                       // ActorInput.cpp (B2b)
+int vr_bpt_pick(CActor* A, LPCSTR sect, bool& eatable, float& weight);
+bool vr_bpt_drop(CActor* A, int id, const Fvector& pos);
+int vr_bpt_dropped(int id, const Fvector& bc, Fvector& centre, bool set, const Fmatrix& xf, bool& was_set);
+int vr_bpt_use(CActor* A, int id);
 static vr_bph_state s_vr_bph = {};
 struct vr_bph_mem
 {
@@ -4448,7 +4466,26 @@ static void vr_bph_parse()
 	H.reach = 0.03f;
 	if (LPCSTR q = strstr(Core.Params, "-vr_bp_reach "))
 		sscanf(q + 13, "%f", &H.reach);
+	H.out_off = !!strstr(Core.Params, "-vr_bp_out_off");
 	Msg("* [vr14] hands in the bag: %s; reach %.3f m", H.off ? "OFF (-vr_bp_grab_off, TEST ONLY)" : "on", H.reach);
+	Msg("* [vr16] taking out of the bag: %s", H.off ? "off (hands in the bag are off)" : H.out_off ? "OFF (-vr_bp_out_off, TEST ONLY)" : "on");
+}
+static void vr_bph_out_clear(vr_bph_state& H)
+{
+	H.out_id1 = 0;
+	H.copy = false;
+	H.eatable = false;
+	H.pick_failed = false;
+	H.use = 0;
+}
+static void vr_bph_cancel_use(vr_bph_state& H, u32 frame, LPCSTR why)
+{
+	if (H.use != 1)
+		return;
+	const bool ok = vr_lam2_skip();
+	Msg("* [vr16] frame %u cancel: id %d (%s): lam2.stop_all_actions %s, %u frames after the use was called", frame, H.out_id1 - 1, why, ok ? "called" : "NOT FOUND",
+		frame - H.use_frame);
+	H.use = 2;
 }
 // main thread, every VR frame, after vr_bp_update. Returns true while this claims the gun-side hand's grip.
 static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
@@ -4463,6 +4500,21 @@ static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
 		return false;
 	const bool held = s_vr_bp.state == 1 && B.placed && B.ready && !B.off && vr_bpo_on();
 	const bool geo = I.grip[gun].valid && I.grip[off].valid;
+	if (H.drop_id1 > 0) // B2b: the dropped item starts at rest where it was let go, and is followed in the log
+	{
+		Fvector dc;
+		bool ws = false;
+		const int st = vr_bpt_dropped(H.drop_id1 - 1, H.drop_bc, dc, H.drop_set < 2, H.drop_xf, ws);
+		if (ws)
+			++H.drop_set;
+		Msg("* [vr16d] frame %u dropped id %d %s placed %d centre %.4f %.4f %.4f", I.frame, H.drop_id1 - 1, st == 0 ? "GONE" : st == 1 ? "owned" : "free", H.drop_set,
+			dc.x, dc.y, dc.z);
+		if (st == 0)
+			H.drop_id1 = 0;
+	}
+	if (held && !H.out_off && !B.each) // B2b: the list follows the inventory while the bag is held (a kind with none left is not drawn)
+		for (vr_bpi_entry& e : B.list)
+			e.count = vr_bpt_ruck_count(A, e.sect.c_str());
 	Fmatrix bag, hand, t;
 	bag.identity();
 	hand.identity();
@@ -4484,13 +4536,13 @@ static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
 		vr_bpi_entry& e = B.list[carried];
 		if (!held)
 		{
+			vr_bph_cancel_use(H, I.frame, "the bag was put away");
+			vr_bph_out_clear(H);
 			Msg("* [vr14] frame %u back: model %d '%s' returns to its last place (the bag was put away while it was carried)", I.frame, carried, e.sect.c_str());
 			H.carried1 = 0;
 			return false;
 		}
-		if (grab)
-			return true;
-		// let go: where is it in the bag's frame?
+		// where is it in the bag's frame?
 		Fmatrix w, ib, L;
 		w.mul_43(hand, H.hand_local);
 		ib.invert(bag);
@@ -4502,6 +4554,107 @@ static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
 		for (int k = 0; k < 3; ++k)
 			if (cc[k] < B.bmn[k] || cc[k] > B.bmn[k] + B.bext[k] + (k == B.baxis ? 0.05f : 0.f))
 				in = false;
+		if (!H.out_off) // ---- B2b: one real item in the hand once it has left the bag ----
+		{
+			if (grab && geo && !in && !H.out_id1 && !H.pick_failed)
+			{
+				bool eat = false;
+				float wt = 0.f;
+				const int id = vr_bpt_pick(A, e.sect.c_str(), eat, wt);
+				if (id < 0)
+				{
+					H.pick_failed = true;
+					Msg("* [vr16] frame %u out: model %d '%s': no such item in the inventory; it stays a model (B2a's rules)", I.frame, carried, e.sect.c_str());
+				}
+				else
+				{
+					H.out_id1 = id + 1;
+					H.copy = e.count > 1;
+					H.eatable = eat;
+					H.use = 0;
+					Msg("* [vr16] frame %u out: model %d '%s' id %d (count %d, weight %.4f, %s) is the item in the hand%s", I.frame, carried, e.sect.c_str(), id, e.count, wt,
+						eat ? "consumable" : "not a consumable", H.copy ? "; the stack's model is back at its place" : "");
+				}
+			}
+			if (H.out_id1 > 0)
+			{
+				float dz = 1000.f;
+				if (H.eatable && I.head.valid && I.grip[gun].valid)
+				{
+					vr_item_parse();
+					Fvector zc;
+					vr_item_point(I, vr_item_use_class_body(e.sect.c_str()) ? s_vr_item.body : s_vr_item.mouth, zc);
+					dz = I.grip[gun].pos.distance_to(zc);
+				}
+				const bool inzone = dz < s_vr_item.zone_r;
+				int n = 0, u = 0, dn = 0, du = 0;
+				vr_item_section_count(A, e.sect.c_str(), n, u);
+				vr_item_section_count(A, "items_anm_dummy", dn, du);
+				if (grab && H.use == 0 && inzone)
+				{
+					H.base_n = n;
+					H.base_u = u;
+					H.use_frame = I.frame;
+					const int r = vr_bpt_use(A, H.out_id1 - 1);
+					Msg("* [vr16] frame %u use: '%s' id %d (count %d uses %d): %s", I.frame, e.sect.c_str(), H.out_id1 - 1, n, u,
+						r == 2 ? "script gate true, Eat called" : r == 1 ? "script gate false (the script's own use runs)" : r == 0 ? "NO script gate" : "the item is not ours");
+					H.use = r > 0 ? 1 : 2;
+				}
+				else if (H.use == 1 && (n < H.base_n || u < H.base_u))
+				{
+					Msg("* [vr16] frame %u used: '%s' id %d count %d -> %d uses %d -> %d, %u frames after the call; the hand is empty", I.frame, e.sect.c_str(), H.out_id1 - 1,
+						H.base_n, n, H.base_u, u, I.frame - H.use_frame);
+					Msg("* [vr16s] frame %u model %d id %d copy %d in %d d_zone %.4f use %d count %d uses %d dummy %d", I.frame, carried, H.out_id1 - 1, H.copy ? 1 : 0,
+						in ? 1 : 0, dz, 3, n, u, dn);
+					vr_bph_out_clear(H);
+					H.carried1 = 0;
+					return false;
+				}
+				else if (grab && H.use == 1 && !inzone)
+					vr_bph_cancel_use(H, I.frame, "left the zone");
+				else if (H.use == 2 && !inzone && dn == 0)
+					H.use = 0;
+				Msg("* [vr16s] frame %u model %d id %d copy %d in %d d_zone %.4f use %d count %d uses %d dummy %d", I.frame, carried, H.out_id1 - 1, H.copy ? 1 : 0,
+					in ? 1 : 0, dz, H.use, n, u, dn);
+			}
+		}
+		if (grab)
+			return true;
+		// let go
+		if (H.out_id1 > 0)
+		{
+			const int id = H.out_id1 - 1;
+			const bool copy = H.copy;
+			vr_bph_cancel_use(H, I.frame, "grip released");
+			vr_bph_out_clear(H);
+			if (in && copy)
+			{
+				Msg("* [vr16] frame %u joins: '%s' id %d let go inside the bag, it joins its stack (model %d, count %d)", I.frame, e.sect.c_str(), id, carried, e.count);
+				H.carried1 = 0;
+				return false;
+			}
+			if (!in)
+			{
+				Fvector wc;
+				w.transform_tiny(wc, e.bc);
+				H.drop_xf = w; // real size, without any scale
+				H.drop_xf.i.normalize();
+				H.drop_xf.j.normalize();
+				H.drop_xf.k.normalize();
+				H.drop_bc = e.bc;
+				const bool ok = vr_bpt_drop(A, id, w.c);
+				Msg("* [vr16] frame %u drop: '%s' id %d let go outside the bag at %.4f %.4f %.4f (box centre): the game's drop %s", I.frame, e.sect.c_str(), id, wc.x, wc.y,
+					wc.z, ok ? "sent" : "NOT sent (the item is not ours)");
+				if (ok)
+				{
+					H.drop_id1 = id + 1;
+					H.drop_set = 0;
+				}
+				H.carried1 = 0;
+				return false;
+			}
+			// a single item let go inside: B2a's rule below
+		}
 		if (in)
 		{
 			e.loc = L;
@@ -4593,6 +4746,7 @@ static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
 static void vr_bpi_reset()
 {
 	s_vr_bph.carried1 = 0;
+	vr_bph_out_clear(s_vr_bph);
 	for (vr_bpi_entry& e : s_vr_bpi.list)
 		if (e.vis)
 			::Render->model_Delete(e.vis);
@@ -4864,9 +5018,9 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 	for (u32 i = 0; i < B.list.size(); ++i)
 	{
 		vr_bpi_entry& e = B.list[i];
-		if (!e.vis)
+		if (!e.vis || (e.count <= 0 && int(i) != carried)) // B2b: none of this kind left in the bag
 			continue;
-		const bool in_hand = int(i) == carried && hand_ok;
+		const bool in_hand = int(i) == carried && hand_ok && !s_vr_bph.copy; // B2b: off a stack, the hand shows a copy (below)
 		if (in_hand)
 			e.xf.mul_43(hand_xf, s_vr_bph.hand_local); // B2a: fixed to the hand as it was at the grab
 		else
@@ -4892,6 +5046,18 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 			Msg("* [vr14x] frame %u model %u %s centre %.4f %.4f %.4f axes %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f", f, i, in_hand ? "carried" : "left", w.x, w.y, w.z,
 				e.xf.i.x, e.xf.i.y, e.xf.i.z, e.xf.j.x, e.xf.j.y, e.xf.j.z, e.xf.k.x, e.xf.k.y, e.xf.k.z);
 		++drawn;
+	}
+	if (carried >= 0 && carried < int(B.list.size()) && s_vr_bph.copy && hand_ok && B.list[carried].vis) // B2b: one item off a stack, in the hand
+	{
+		vr_bph_state& H = s_vr_bph;
+		vr_bpi_entry& e = B.list[carried];
+		H.copy_xf.mul_43(hand_xf, H.hand_local);
+		DM->add_Dynamic(e.vis, &H.copy_xf);
+		Fvector w;
+		H.copy_xf.transform_tiny(w, e.bc);
+		if (!B.quiet)
+			Msg("* [vr16x] frame %u model %d copy in the hand centre %.4f %.4f %.4f axes %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f", f, carried, w.x, w.y, w.z,
+				H.copy_xf.i.x, H.copy_xf.i.y, H.copy_xf.i.z, H.copy_xf.j.x, H.copy_xf.j.y, H.copy_xf.j.z, H.copy_xf.k.x, H.copy_xf.k.y, H.copy_xf.k.z);
 	}
 	if (!B.quiet || f % 50 == 0)
 		Msg("* [vr13d] frame %u drawn %u%s", f, drawn, B.quiet ? " (-vr_bp_quiet: one line in 50 frames)" : "");
