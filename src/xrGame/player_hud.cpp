@@ -3828,6 +3828,7 @@ static void vr_loco_update(const vr_input_info& I, CActor* A, bool allowed, bool
 // -vr_use_instant (no cancel on leaving); TEST ONLY: -vr_use_off (nothing), -vr_use_nostart (the quick-use call is not made).
 bool vr_lam2_skip();                                                        // ActorInput.cpp
 void vr_item_section_count(CActor* A, LPCSTR sect, int& n, int& uses);      // ActorInput.cpp
+void vr_bpx_probe_step(CActor* A, u32 frame, bool hand_valid, const Fvector& hand);   // ActorInput.cpp (B2b probe)
 static const float VR_ITEM_CANCEL_CAP = 4.0f;
 struct vr_item_state
 {
@@ -5081,6 +5082,17 @@ void vr_input_update()
 		vr_reload_update(I, g_actor, vr_fire_allowed(g_actor), s_vr_grab_held, s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to);
 		// milestone 9a (Amendment 32): holsters (gun hand's grip)
 		// backpack B2a (Amendment 41): the empty gun-side hand in the held bag; its grip at the bag is not the holsters'
+		{
+			// B2b probe (TEST ONLY, no verdict; does nothing without its switches)
+			Fmatrix pt, pw;
+			pw.identity();
+			if (I.grip[gun].valid)
+			{
+				vr_pose_matrix(I.grip[gun], pt);
+				pw.mul_43(g_vr_track.track_to_world, pt);
+			}
+			vr_bpx_probe_step(g_actor, I.frame, I.grip[gun].valid, pw.c);
+		}
 		const bool bph_claims = vr_bph_update(I, g_actor, s_grab[gun] && !(pda_block & (1 << gun)));
 		vr_holster_update(I, g_actor, vr_fire_allowed(g_actor), s_grab[gun] && !(pda_block & (1 << gun)) && !bph_claims, s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to);
 		if (s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to)

@@ -1085,3 +1085,92 @@ bool vr_lam2_skip() // GAMMA's lam2.stop_all_actions (FDDA's own skip); false if
 	return true;
 }
 void vr_item_section_count(CActor* A, LPCSTR sect, int& n, int& uses) { vr_item_count(A, sect, n, uses); }
+
+// GammaVR backpack B2b probe (SPIKE_PLAN Amendment 41), TEST ONLY, no verdict. [vr15] lines.
+//   -vr_bpx_drop <frame> <section>   one item of that section (GetAny) gets the game's own drop (GE_OWNERSHIP_REJECT) and
+//                                    is then sent to the gun-side hand's place (GE_CHANGE_POS), as drop_item_and_teleport does
+//   -vr_bpx_use <frame> <section>    the game's own use of one item of that section: the script gate _G.CInventory__eat, then Eat
+//   -vr_bpx_cancel <frame>           lam2.stop_all_actions once (11a's cancel) at that frame
+// From the first of these frames on, one line per VR frame for 600 frames: the dropped object, counts, weight, FDDA's dummy.
+void vr_bpx_probe_step(CActor* A, u32 frame, bool hand_valid, const Fvector& hand)
+{
+	static bool parsed = false;
+	static u32 df = 0, uf = 0, cf = 0, first = 0;
+	static string128 ds = "", us = "";
+	static int did = -1;
+	if (!parsed)
+	{
+		parsed = true;
+		if (LPCSTR q = strstr(Core.Params, "-vr_bpx_drop "))
+			if (sscanf(q + 13, "%u %127s", &df, ds) != 2)
+				df = 0;
+		if (LPCSTR q = strstr(Core.Params, "-vr_bpx_use "))
+			if (sscanf(q + 12, "%u %127s", &uf, us) != 2)
+				uf = 0;
+		if (LPCSTR q = strstr(Core.Params, "-vr_bpx_cancel "))
+			sscanf(q + 15, "%u", &cf);
+		first = df && uf ? _min(df, uf) : (df ? df : uf);
+		if (first)
+			Msg("* [vr15] B2b probe (TEST ONLY): drop '%s' at frame %u, use '%s' at frame %u, cancel at frame %u", ds, df, us, uf, cf);
+	}
+	if (!first || !A || frame < first || frame > first + 600)
+		return;
+	if (df && frame == df)
+	{
+		int n = 0, u = 0;
+		vr_item_count(A, ds, n, u);
+		PIItem it = A->inventory().GetAny(ds);
+		if (!it || !hand_valid)
+			Msg("* [vr15] frame %u drop: %s", frame, it ? "no valid hand pose" : "no such item in the inventory");
+		else
+		{
+			did = int(it->object().ID());
+			NET_Packet P;
+			CGameObject::u_EventGen(P, GE_OWNERSHIP_REJECT, A->ID());
+			P.w_u16(u16(did));
+			CGameObject::u_EventSend(P);
+			CGameObject::u_EventGen(P, GE_CHANGE_POS, u16(did));
+			P.w_vec3(hand);
+			CGameObject::u_EventSend(P);
+			Msg("* [vr15] frame %u drop: '%s' id %d (count %d, weight %.4f) rejected and sent to %.4f %.4f %.4f", frame, ds, did, n,
+				A->inventory().TotalWeight(), hand.x, hand.y, hand.z);
+		}
+	}
+	if (uf && frame == uf)
+	{
+		int n = 0, u = 0;
+		vr_item_count(A, us, n, u);
+		PIItem it = A->inventory().GetAny(us);
+		::luabind::functor<bool> funct;
+		if (!it)
+			Msg("* [vr15] frame %u use: no '%s' in the inventory", frame, us);
+		else if (!ai().script_engine().functor("_G.CInventory__eat", funct))
+			Msg("* [vr15] frame %u use: _G.CInventory__eat NOT FOUND", frame);
+		else
+		{
+			CGameObject* GO = it->cast_game_object();
+			const int id = int(it->object().ID());
+			const bool gate = GO && funct(GO->lua_game_object());
+			if (gate)
+				A->inventory().Eat(it);
+			Msg("* [vr15] frame %u use: '%s' id %d (count %d uses %d): script gate %s, Eat %s", frame, us, id, n, u, gate ? "true" : "false",
+				gate ? "called" : "not called");
+		}
+	}
+	if (cf && frame == cf)
+	{
+		const bool ok = vr_lam2_skip();
+		Msg("* [vr15] frame %u cancel: lam2.stop_all_actions %s", frame, ok ? "called" : "NOT FOUND");
+	}
+	int dn = 0, du = 0, un = 0, uu = 0, mn = 0, mu = 0;
+	if (ds[0])
+		vr_item_count(A, ds, dn, du);
+	if (us[0])
+		vr_item_count(A, us, un, uu);
+	vr_item_count(A, "items_anm_dummy", mn, mu);
+	CObject* O = did >= 0 ? Level().Objects.net_Find(u16(did)) : NULL;
+	Fvector p = O ? O->Position() : Fvector().set(0.f, 0.f, 0.f);
+	Msg("* [vr15s] frame %u drop '%s' count %d obj %s parent %d at %.4f %.4f %.4f | use '%s' count %d uses %d | dummy %d weight %.4f t %.4f",
+		frame, ds, dn, did < 0 ? "none" : (O ? "alive" : "GONE"), O && O->H_Parent() ? int(O->H_Parent()->ID()) : -1, p.x, p.y, p.z,
+		us, un, uu, mn, A->inventory().TotalWeight(), Device.fTimeGlobal);
+}
