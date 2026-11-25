@@ -1700,3 +1700,40 @@ driver 625db9d0, checker 77c3ad0b). Test save unchanged. The series driver claim
     seq is (the 120 s run from the resume); a writer counts as alive only when the seq changes between two reads in
     the new Lua state. New offline test with a writer that keeps writing during the load; then `cross` again as a
     new registered run (one boot), with `keep` as its regression boot.
+
+## 64. Pre-flight L2 (lost pose during a crossing, fixed), X-Ray only, ONE boot, registered BEFORE it (2026-11-25)
+
+Ordered by the Overseer after section 63: the fix is prospective, L stands as FAIL, L2 is the cross boot only.
+
+- **The fix:** the first pose READ after a level change does not restart the lost timer and keeps the cross limit
+  (120 s from the resume). A pose taken on a LATER read does (the file changed between two reads, so a writer is
+  alive). Variable `p_xwait`, set only in a Lua state that began with a crossing marker and with a lost limit on.
+- **Why only the cross boot:** keep, freeze, mut_sess and mut_off have no level change, so the changed lines never
+  run in them. They passed (or failed as required) in L on code that is otherwise the same. Offline the old and new
+  script write the same log for those four shapes, byte for byte except the wall-clock field of the G lines.
+- **Files** (drafts in perf-harness/lost-draft2/, byte-equal to the installed ones):
+  - harness/zz_p1_puppet_lost2.script b6be10b4e8ae57a4573e8445996feb292c0ca310c23b927916092e3d30de2943
+  - tools/t2_xray_lost2.sh 5890b34b64789382c0d605929a21713368f43c6c3b6304b5b81e38031c6e0bd7 (d2ec0233 with only the
+    script name changed)
+  - tools/t3_pfL2.sh d1c786cd49bf3d9b06cb69b7861742d225734c28ac811fcd81e423e8d32fef7b (625db9d0 with only the runner
+    name changed, and one comment line)
+  - unchanged: tools/t2_lost_pose.py 7733cbe4, checker tools/t3_pfL_check.py 77c3ad0b, Stance14.exe b4ce9c77.
+- **Offline test, as the Overseer required** (stub; a writer that writes 70 more poses during the load, then dies):
+  old script LOST 135,000 ms after CROSS_RESUME (the engine showed 135,010); new script 120,000 ms. With the pose
+  file as at the request: 120,000 ms with both. A live writer after the change: no LOST, 2,830 poses applied, same
+  with both.
+- **Run:** `tools/t3_pfL2.sh cross out/t3pfL2_cross` (its own WANT slice, 20 minutes, headless, no ITR2). As in L:
+  the writer sends `cross` from track 58.5 s and is killed at 62 s, never restarted. Run length 280 s from each level
+  load; expected end about 410 s after launch, wall limit 680 s.
+- **Score once:** `python3 -I tools/t3_pfL_check.py out/t3pfL2_cross cross`. PASS = all of its checks, as in section
+  57: 1 (rc 0, no restart, no Lua error), V, 2 (one CROSS_REQ, one CROSS_RESUME), 3 (one LOST, state cross,
+  120,000 to 122,500 ms of game time after the resume), 4 (no pose applied after the request, no EPOCH, no FOUND),
+  6 (runner: one lost row, cross hold ended as lost), 7 (no STOP).
+- **Void rule, registered now:** if tb_run.log says "ABORT: protected title started", the boot is void (the box rule
+  cut it), not scored, and run once more on a new GO. Any other early end is scored as it is; one retry only for a
+  run that dies before its data.
+- **Not reviewed by CodeRabbit:** the change is four short lines; the offline test above is its check.
+- **Guess:** PASS 80 %. Risks: the engine's read order after the warm-up differs from the stub's (for example a pose
+  read during the warm-up); something else in the 120 s that the first run hid behind this fault.
+- **If it passes:** the lost2 script is the pose v3 reader for arm D, and itrzone is told. If it fails: recorded, no
+  tuning, back to the Overseer.
