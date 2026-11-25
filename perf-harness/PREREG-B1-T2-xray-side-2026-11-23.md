@@ -1515,3 +1515,36 @@ fields stays v1 and takes the T2 path, unchanged.
   in "cross hold end:", "boot 0 end:", "boot 1 end:"): not ended. All 12 lines: ended. x3's full log: ended. A
   missing file: not ended. The old pattern matched already on the first 4 lines.
 - **Start:** held until the Overseer confirms. Order, boots, scoring and guesses as in 57 and 57a.
+
+## 59. R3 arm A2 (arm A again as a new run; ITRZone amendment 114, arm a2), X side, registered BEFORE its boot
+
+- **Order (Overseer, 2026-11-24):** arm A's X FAIL stands; arm A is registered again as A2, same route and stays,
+  with both instruments fixed prospectively. Mine: the runner's wall limit. ITRZone's: the uncapped spawn log, with
+  R3c judged by my A-Life placement record (boot0/meta_t2.csv: ON, OFF, CROSS_RESUME and G lines).
+- **Runner change (tools/t2_xray.sh, now 296563fde4a756882eea024593117a06cfff528ffd38fb085bc3d83a3106c3a7; was
+  6597a067):** two settings, both off by default (then it behaves as before):
+  - `T2_WALL_S`: the launcher's wall limit for boot 0, from the launch (default T2_RUN_S + 400).
+  - `T2_OVER_S`: the engine is killed, as an unplanned restart, when it still runs T2_RUN_S + T2_OVER_S seconds
+    after the last level load seen in the snapshot header. Time stopped by a freeze is not counted.
+  - The 30 s no-new-snapshot rule is unchanged.
+- **Offline test (a sandbox with a fake launcher and a fake engine process; the real runner files):**
+  - Arm A's real schedule (level loads 0, 150 and 538 s after launch, run length 600 s): the old runner ends with
+    "TIMEOUT after 1000s", rc 5, at 1,001 s, as in arm A. The new runner with T2_WALL_S=1660 T2_OVER_S=120 notes
+    the three levels and ends "ran to the end", rc 0, at 1,138 s.
+  - A stall (snapshots stop, engine alive) is killed by the 30 s rule. An engine that never ends is killed by the
+    over-run rule at run length + T2_OVER_S after the last load. With both settings unset the limit is
+    T2_RUN_S + 400 as before.
+  - Not shown offline: the real engine under the new runner. My first version of this test was scaled wrongly and
+    did not reproduce the fault; the full-length one above does.
+- **Files:** script 473dec25...43537, Stance14.exe b4ce9c77...46cbe, lib_engine_pids.sh cb183b7b...8ed6e, checker
+  t3_x1_xray_check.py c19740e8...2518c, all unchanged; runner as above. Control file absent.
+- **Env:** T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999 T2_KILL_AT=99999 T2_RUN_S=600
+  **T2_WALL_S=1660 T2_OVER_S=120**. The wall limit from the schedule: 60 s boot and warm-up, 120 + 300 s stays, two
+  crossings at their 90 s limit, 600 s after the last arrival, 400 s margin.
+- **Scored ONCE**, as section 56: `python3 -I tools/t3_x1_xray_check.py <X out dir>
+  out/t3pfD/run/boot0/meta_t2.csv l01_escape l02_garbage esc_level_changer_to_garbage_1
+  gar_level_changer_to_escape_1`. PASS needs all nine conditions of section 51, unchanged.
+- **Guess, written before the boot: X PASS 75 %.** Arm A passed every play check with these files. Risks: an ITR2
+  crash or a failed crossing (10 %); the changed runner misbehaves with the real engine, its first run (8 %);
+  other (7 %).
+- **Stop rule:** a FAIL is reported, not tuned. One retry only for a run that dies before its data, registered first.
