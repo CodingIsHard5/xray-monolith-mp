@@ -1,4 +1,4 @@
-# S2 part B, the three 4-core runs after amendment 11.2 (lines as registered; the first is the re-run of s2_offL)
-s2_offL_rr|SimTick14.exe|bench1|1|3000|12000|0|
-s2_t30L|SimTick14.exe|bench1|1|3000|12000|0|sim_tick=30
-s2_t60L|SimTick14.exe|bench1|1|3000|12000|0|sim_tick=60
+# S2 part B, the three 4-core runs after amendment 11.2 (lines as registered; the first is the re-run of s2_offL; all-lowercase tags, as the bench names its folders)
+s2_offl_rr|SimTick14.exe|bench1|1|3000|12000|0|
+s2_t30l|SimTick14.exe|bench1|1|3000|12000|0|sim_tick=30
+s2_t60l|SimTick14.exe|bench1|1|3000|12000|0|sim_tick=60

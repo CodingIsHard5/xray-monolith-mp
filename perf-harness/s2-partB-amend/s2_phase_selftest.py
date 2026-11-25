@@ -20,8 +20,8 @@ TYPES = [('s2_off_1',  's2_off_1',  '',                  0, 12000), ('s2_t30_1',
          ('s2_c30',    's2_c30',    'r__framelimit=30',  0, 1800),  ('s2_c60',   's2_c60',   'r__framelimit=60', 0, 3600),
          ('s2_c50',    's2_c50',    'r__framelimit=50',  0, 3000),  ('s2_f33',   's2_f33',   '',            1, 3000),
          ('s2_f30_rr', 's2_f30',    'sim_tick=30',       1, 3000),  ('s2_f60',   's2_f30',   'sim_tick=60', 1, 3000),
-         ('s2_f50',    's2_f30',    'sim_tick=50',       1, 3000),  ('s2_offL_rr', 's2_offl', '',           0, 12000),
-         ('s2_t30L',   's2_t30_1',  'sim_tick=30',       0, 12000), ('s2_t60L',  's2_t60_1', 'sim_tick=60', 0, 12000)]
+         ('s2_f50',    's2_f30',    'sim_tick=50',       1, 3000),  ('s2_offl_rr', 's2_offl', '',           0, 12000),
+         ('s2_t30l',   's2_t30_1',  'sim_tick=30',       0, 12000), ('s2_t60l',  's2_t60_1', 'sim_tick=60', 0, 12000)]
 def want(name, ok, detail=''):
     print(('ok   ' if ok else 'FAIL ') + name + ('' if ok else f'   <- {detail}'));  bad.append(name) if not ok else None
 def make(root, tag, base, cfg, where=None):
@@ -54,7 +54,7 @@ for tag, base, cfg, fixed, frames in TYPES:
         R[v] = (check(r, tag, cfg, fixed, frames), score(r))
     c0, s0 = R['clean']; n0 = re.sub(r'SIMTICK lines \d+', 'SIMTICK lines N', c0)
     want(f'{tag}: check passes, scorer finds the arm valid', c0.startswith('check ok') and any(l.startswith('ARM ') for l in s0) and not any('INVALID' in l for l in s0), f'{c0} | {s0[:1]}')
-    arm = re.sub(r'(_\d)?(_rr)?$', '', tag)   # the registered arm name, as the prediction keys spell it (capital L for 4 cores)
+    arm = re.sub(r'^(s2_(?:off|t\d+))l$', r'\1L', re.sub(r'(_\d)?(_rr)?$', '', tag))   # the registered arm name, as the prediction keys spell it (capital L for 4 cores)
     want(f'{tag}: the scorer files the run under the registered arm name {arm}', any(l.startswith(f'ARM {arm} ') for l in s0), [l for l in s0 if l.startswith('ARM')])
     c1, s1 = R['edges']
     if on: want(f'{tag}: warm-up and quit lines change neither the check nor any scorer value', re.sub(r'SIMTICK lines \d+', 'SIMTICK lines N', c1) == n0 and s1 == s0, f'{c1} | {[l for l in s1 if l not in s0][:3]}')
@@ -63,8 +63,8 @@ for tag, base, cfg, fixed, frames in TYPES:
         dr = lambda S: next((float(l.split()[1]) for l in S if l.strip().startswith('dropped')), None)
         want(f'{tag}: the same line inside the capture IS seen by the scorer (dropped {dr(s0)} -> {dr(R["middle"][1])})', dr(R['middle'][1]) is not None and dr(s0) is not None and dr(R['middle'][1]) >= dr(s0) + 999)
 # the REAL 4-core run folder as the bench left it (lowercase), checked under its registered tag
-c = check(os.path.join(W, 's2_offL_rr', 'clean', 'root'), 's2_offL_rr', '', 0, 12000)
-want('the real 4-core run (copy of out/s2_offl) checked as s2_offL_rr: passes with 12000 updates', c.startswith('check ok (updates 12000 of 12000'), c)
+c = check(os.path.join(W, 's2_offl_rr', 'clean', 'root'), 's2_offl_rr', '', 0, 12000)
+want('the real 4-core run (copy of out/s2_offl) checked as s2_offl_rr: passes with 12000 updates', c.startswith('check ok (updates 12000 of 12000'), c)
 c = subprocess.run([os.path.join(HERE, 's2_series_b.sh'), '--check', 's2_nosuchL', '', '0', '12000'], capture_output=True, text=True, env=dict(os.environ, S2_EXE_SHA='x', S2_CHECK_ROOT=ROOT)).stdout.strip()
 want('a run whose files are missing FAILS by name, not as "0 updates"', c.startswith('check FAIL: run files missing'), c)
 print('PHASE SELFTEST ' + ('PASS' if not bad else 'FAIL: ' + '; '.join(bad))); sys.exit(1 if bad else 0)

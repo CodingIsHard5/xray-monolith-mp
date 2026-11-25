@@ -390,7 +390,7 @@ s2_selftest_b.py 46478fc24ffd3a49; s2_phase_selftest.py d49a671b35c56825; driver
 slices: f30_rr, f60, f50; then offL, t30L, t60L). SimTick14.exe 93fff4b5…858f21. Copies: perf-harness/s2-partB-amend/.
 Score, once, when all six are done: `python3 -I tools/s2_score_b.py out tools/s2_pred.json out/s2_score.txt`.
 
-### 11.2 The first 4-core run failed its check: the instrument again, not the run. AMENDMENT (DRAFT until the Overseer's GO)
+### 11.2 The first 4-core run failed its check: the instrument again, not the run. AMENDMENT, REGISTERED 2026-11-25 on the Overseer's GO, before the last three runs
 **State:** 16 of 18 registered runs are done and passed their checks (the 13 of 11.1, then `s2_f30_rr`, `s2_f60`,
 `s2_f50` under the amended check). `s2_offL` then failed "updates(0) != frames(12000)" and the series stopped.
 `s2_t30L` and `s2_t60L` have not run. Nothing is scored.
@@ -418,10 +418,14 @@ not gated, no rate check. Found before any scoring.
 - Not proven on real 4-core bytes: the two GATED 4-core types (made from the 16-core t30 and t60 folders under
   lowercase names). The first of them to run is its own proof or failure.
 
-**Remaining runs (tools/s2_order_c.txt, one slice):** `s2_offL_rr` (the first failed the check it ran under, so it
-stays excluded as run and is run again, as with s2_f30), `s2_t30L`, `s2_t60L`. Lines as registered.
+**Remaining runs (tools/s2_order_c.txt, one slice), with ALL-LOWERCASE tags (Overseer's condition: the order file and
+the bench agree by construction, not by translation):** `s2_offl_rr` (the first `s2_offL` failed the check it ran
+under, so it stays excluded as run and is run again, as with s2_f30), `s2_t30l`, `s2_t60l`. Lines as registered
+otherwise. The scorer files them under the registered arm names s2_offL, s2_t30L, s2_t60L.
+**If `s2_t30l` or `s2_t60l` trips a check: stop, no fix inside the slice, back to the Overseer.**
 **The registered scorer, to be shown beside the amended one (Overseer's condition):** run as it is, it cannot name
 the 4-core arms (lowercase folders). I will show its output as it is, and say so; the comparison of the warm-up
 window's effect is on the six real-time gated runs, where both scorers work.
-**Pinned (first 16):** s2_series_b.sh 75b2335b52bc662f; s2_score_b.py d4548104e1e00b9d; s2_phase_selftest.py b1994b3173a086cb; s2_order_c.txt c8d1078952884303;
-s2_selftest_b.py 46478fc24ffd3a49 (unchanged). These replace the 11.1 hashes of the same files.
+**Pinned (first 16):** s2_series_b.sh 75b2335b52bc662f; s2_score_b.py d4548104e1e00b9d; s2_phase_selftest.py
+8184041ef770aa63 (PASS 49 of 49 with the lowercase tags); s2_order_c.txt 4dabc9d9a488547c; s2_selftest_b.py 46478fc24ffd3a49 (unchanged).
+These replace the 11.1 hashes of the same files.
