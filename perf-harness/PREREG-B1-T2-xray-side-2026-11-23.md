@@ -1407,3 +1407,50 @@ fields stays v1 and takes the T2 path, unchanged.
 - **Stop rule:** a FAIL is reported, not tuned. One retry only for a run that dies before its data, registered first.
 - **Not part of arm A:** a death at a crossing (B), X-Ray lost (C), ITR2 lost and the lost-pose work (D); the
   lost-pose files stay as drafts and are installed under other names, so no file arm A uses is touched.
+
+## 57. Pre-flight L (lost pose, session number), X-Ray only, registered BEFORE any boot
+
+- **Order (Overseer, 2026-11-24):** the LOST design is approved; both gaps go into one registration: a time limit
+  while the pose says cross, and a counter reset after an ITR2 restart. Design:
+  DESIGN-NOTE-pose-lost-2026-11-24.md (with the corrections and the review changes at its end).
+- **What it must show:** when the pose writer dies, X-Ray notices within about 5 s (120 s during a crossing), treats
+  it as away under the last policy, and takes up a restarted writer whose seq starts at 1 again.
+- **Files, installed under their own names (the files R3 arm A uses are untouched: 473dec25, 6597a067):**
+  - harness/zz_p1_puppet_lost.script 0347bdee58b2f51a7ddbbed027c02737994491f3260da98567ce2f1c4501db71
+  - tools/t2_xray_lost.sh d2ec0233116d353f4644c48e7ace8a1416ff1be865176b3128d87c30524ff875
+  - tools/t2_lost_pose.py 7733cbe43e0bfbeb550ca9e7bf1c1cb85b44f8564749e4f75ef25e41091dc008 (stand-in writer, not ITR2's code)
+  - tools/t3_pfL.sh 625db9d0a0b71e910b326043bd3c7b724ed020699ad7765a50183c258e4edf4f (driver)
+  - tools/t3_pfL_check.py 77c3ad0b337055d0056a02f6d2a24c7a28d34aec6feb77ea0d01b84fe28513bc (checker)
+  - Stance14.exe b4ce9c77...46cbe and lib_engine_pids.sh cb183b7b...8ed6e, unchanged. No engine build.
+- **Pose v3 (proposed joint text, for ITRZone to confirm before any joint run uses it):** the first line gains a
+  seventh field: `seq,<n>,<utc_ms>,<state>,<zone>,<keep|freeze>,<session>`. `<session>` is the ITR2 mod's start time
+  in UTC ms, fixed for the process. X-Ray accepts a pose if its seq is higher than the last accepted one, OR its
+  session differs from the last accepted one (then it logs EPOCH and forgets a finished crossing). A pose without
+  the field is read as before.
+- **Boots:** five, each one call of `tools/t3_pfL.sh <case> out/t3pfL_<case>`, each its own WANT slice, X-Ray only,
+  headless, about 4 to 6 minutes. Env inside the driver: T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000
+  T2_STALL_AT=99999 T2_KILL_AT=99999 T2_MAXRESTART=0, limits 5,000 ms and 120,000 ms.
+  1. `keep`: 3 s pause (must not be lost), writer killed at 60 s, a new writer (new session, seq from 1) 30 s later.
+  2. `mut_sess` (mutation): as keep, but the new writer reuses the old session; it is killed after 45 s.
+  3. `freeze`: as keep with policy freeze; the runner must stop X-Ray at LOST and continue it at the new pose.
+  4. `mut_off` (mutation): as freeze with both limits 0.
+  5. `cross`: a cross pose to the Garbage from 58.5 s, writer killed 3 s later and never restarted.
+- **Scored ONCE per boot** with `python3 -I tools/t3_pfL_check.py out/t3pfL_<case> <keep|freeze|cross>`; mut_sess is
+  scored as keep, mut_off as freeze. The checks are those in the checker's header (1, V, 2 to 7).
+- **PASS** = keep, freeze and cross PASS, AND mut_sess FAILS on check 5 with checks 1 and V passing, AND mut_off
+  FAILS on check 3 with checks 1 and V passing. A mutation that fails only for another reason does not count.
+- **Order and stop rule:** as numbered. Stop at the first boot whose result is not the expected one; report, do not
+  tune. One retry only for a boot that dies before its data, registered first.
+- **Guesses, written before any boot:** keep PASS 60 %; freeze PASS 45 %; cross PASS 50 %; each mutation fails as
+  required 80 %; all five as required 20 %. This is the first engine run of every new line. Named risks:
+  - the runner's wall clock and the script's game clock disagree by more than the checker's windows (STOP within
+    4 s of the runner's LOST; the arm goes stale 4 s after it is set);
+  - the LOST age window 5,000 to 5,600 ms is too narrow for a frame hitch;
+  - the cross case: the stand-in sends the cross pose from a spot far from the changer, which no run has done;
+  - the stance read-back fails on the first poses after FOUND;
+  - the driver or writer has a plain bug that offline tests could not reach (they never ran the runner).
+- **Offline before this registration:** stub results in lost-draft/README.md (LOST at 5,000 ms, EPOCH, FOUND, the
+  retained crossing pose, flags-off regression, the runner's complete-pose reader). The runner's stop and continue
+  and the driver have never run.
+- **Not covered:** ITR2 itself (joint arm D); the 30-minute save-and-stop (optional witness, later); who restarts
+  X-Ray after it was stopped for good; a death during a crossing.

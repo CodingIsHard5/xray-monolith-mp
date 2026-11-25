@@ -2,7 +2,8 @@
 """Pre-flight L (lost pose) checker. Run ONCE per boot.
   t3_pfL_check.py <out dir of t3_pfL.sh> <keep|freeze|cross>
 The mutation boots are scored as the case they copy: mut_off as freeze, mut_sess as keep; both must FAIL.
-All cases: (1) runner rc 0, no restart row, no Lua error naming the script, no FATAL ERROR, no DMG line; (V) every
+Exit status: 0 = PASS, 1 = FAIL.
+All cases: (1) runner rc 0, engine log present (over 100 lines), no restart row, no Lua error naming the script, no FATAL ERROR, no DMG line; (V) every
 VITALS line clean, no REFILL, and on every P2 stance read-back = pose stance, movement state readable, height = node
 height + 0.05 m (+-0.01).
 keep / freeze: (2) negative control: a STALE..RESUME pair before the LOST line and no LOST during it; (3) exactly one
@@ -28,7 +29,8 @@ idx = lambda k: [i for i, l in enumerate(M) if l.startswith(k + ',')]
 F = lambda i: M[i].split(',')
 lua_err = [l for l in X if re.search(r'LUA error|lua error', l) and 'zz_p1_puppet' in l] + [X[i] for i in range(len(X)) if 'zz_p1_puppet.script (line' in X[i] and not any("doesn't exist" in X[j] or 'nil function' in X[j] for j in range(max(0, i - 8), i))]
 fatal = [l for l in X if 'FATAL ERROR' in l]; rc0 = bool(LG) and LG[-1].rstrip().endswith('rc=0'); dmg = [l for l in M if l.startswith('DMG_')]
-res = [('1 rc 0, no restart, no Lua error, no FATAL, no DMG line', rc0 and not RS and not lua_err and not fatal and not dmg, f'rc0 {rc0}, restart rows {len(RS)}, lua errors {len(lua_err)}, fatal {len(fatal)}, DMG lines {len(dmg)}')]
+xlog = sum(1 for l in X if l.strip())   # a missing or empty engine log is no evidence of a clean run
+res = [('1 rc 0, engine log present, no restart, no Lua error, no FATAL, no DMG line', rc0 and xlog > 100 and bool(M) and not RS and not lua_err and not fatal and not dmg, f'rc0 {rc0}, engine log lines {xlog}, meta lines {len(M)}, restart rows {len(RS)}, lua errors {len(lua_err)}, fatal {len(fatal)}, DMG lines {len(dmg)}')]
 P2 = [F(i) for i in idx('P2')]; Q = [q for q in P2 if len(q) > 19]
 st_bad = sum(1 for q in Q if q[19] != q[15]); unread = sum(1 for q in Q if q[18] == '-1'); h_bad = sum(1 for q in P2 if abs(float(q[14]) - float(q[11]) - 0.05) > 0.01)
 kv = lambda l: dict(p.split('=') for p in l.split(',')[1:] if '=' in p)
@@ -78,3 +80,4 @@ for k in ('STALE', 'LOST', 'EPOCH', 'FOUND', 'RESUME', 'ABSORB_ARM', 'ABSORB_DIS
 out += [f'reported: writer {",".join(w)}' for w in WE] + [f'reported: runner {l}' for l in LG if 'LOST' in l or 'lost' in l or 'freeze' in l or 'cross hold' in l]
 out.append(f'PRE-FLIGHT L ({CASE}): {"PASS" if ok else "FAIL"}')
 print('\n'.join(out)); open(os.path.join(O, f't3_pfL_check_{CASE}.txt'), 'w').write('\n'.join(out) + '\n')
+sys.exit(0 if ok else 1)   # the driver of a mutation expects 1

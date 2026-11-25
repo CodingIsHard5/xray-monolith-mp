@@ -36,9 +36,13 @@ utc() { echo $(( $(date +%s%N) / 1000000 )); }
 # pre-flight E test mode (section 46): its control file may exist only when the pre-flight runner says so (T2_DMG_OK=1)
 [ "${T2_DMG_OK:-0}" = 1 ] || { [ -e "$SHM/dmgtest.txt" ] && { rm -f "$SHM/dmgtest.txt"; log "REMOVED a stale test-mode control file (dmgtest.txt)"; }; }
 rm -f "$SHM"/snap.txt "$SHM"/meta_t2.csv "$SHM"/hits_t2.csv; mkdir -p "$SHM"      # pose.txt is ITR2's: never touched here
-cp "$P/harness/zz_p1_puppet.script" "$RUN/gamedata/scripts/zz_p1_puppet.script"
-cleanup() { rm -f "$RUN/gamedata/scripts/zz_p1_puppet.script"; }
-trap cleanup EXIT
+SRC="$P/harness/zz_p1_puppet_lost.script"   # the lost-pose script is installed beside the frozen one, under its own name
+cp "$SRC" "$RUN/gamedata/scripts/zz_p1_puppet.script" && cmp -s "$SRC" "$RUN/gamedata/scripts/zz_p1_puppet.script" || { log "REFUSED: could not install $SRC"; exit 2; }
+# a runner that is cancelled must not leave a stopped engine behind: CONT whatever this runner stopped
+cleanup() { [ -n "${FZP:-}" ] && kill -CONT "$FZP" 2>/dev/null; [ -n "${STP:-}" ] && kill -CONT "$STP" 2>/dev/null; rm -f "$RUN/gamedata/scripts/zz_p1_puppet.script"; }
+trap cleanup EXIT; trap 'exit 143' TERM INT
+# first line of pose.txt, but only of a COMPLETE record (first line seq,<n>,... and last line end,<n>); else empty
+posehdr() { awk '{ sub(/\r$/, "") } NR == 1 { h = $0; split($0, a, ","); if (a[1] != "seq") exit } NF { l = $0 } END { if (h != "" && l == "end," a[2]) print h }' "$SHM/pose.txt" 2>/dev/null; }
 # the engine = the biggest process that (1) is not the watcher, by PID ($WP), (2) is a Wine process by its /proc/<pid>/exe
 # (a wine preloader/loader binary; the watcher's exe is python), (3) names the exe in its command line. Pre-flight 1
 # showed WINEPREFIX is NOT in the engine's /proc environ under Wine, so that check found nothing and a hang was not
@@ -59,7 +63,7 @@ while :; do
   python3 "$P/tools/t1_watch.py" "$SHM/snap.txt" "$B/watch" "bin\\$EXE" "$ITR" > "$B/watch.log" 2>&1 & WP=$!
   log "boot $k: run_id $RID engine_s $TIMES load $(cut -d' ' -f1-3 /proc/loadavg)"
   TB_NOCLAIM=1 TB_EXE=$EXE TB_TIMES=$TIMES TB_TIMEOUT=$(( TIMES + 400 )) tools/tb_run.sh t2b$k "$SAVE" -p1 -t2_pose -t2_run $RID $PFLAG -p1_tag t2 > "$B/tb_run.log" 2>&1 &
-  TBP=$!; L0=$(date +%s); first=""; last=""; same=0; why=""; narm=0; gone=0; ppl=$(head -1 "$SHM/pose.txt" 2>/dev/null | tr -d '\r'); pseen=""; pchg=0; lost=""   # meta_t2.csv is rewritten by every boot
+  TBP=$!; L0=$(date +%s); first=""; last=""; same=0; why=""; narm=0; gone=0; ppl=$(posehdr); pseen=""; pchg=0; lost=""   # meta_t2.csv is rewritten by every boot
   while kill -0 $TBP 2>/dev/null; do
     sleep 1; h=$(hdr); IFS=, read -r _ s _ tt _ rid <<<"$h"
     [ "${rid:-}" = "$RID" ] || { s=""; tt=""; }                         # a snapshot from an earlier boot does not count
@@ -70,7 +74,7 @@ while :; do
     if [ $k = 0 ] && [ -z "$done_stall" ] && [ -n "$tt" ] && awk -v t="$tt" -v a="$AT" 'BEGIN{exit !(t>=a)}'; then
       EP=$(engine); [ -n "$EP" ] || { why="no engine pid found (stall)"; break; }; log "STALL start: seq $s track ${tt}s engine $EP"
       echo "utc_ms,event,seq,track_s" > "$O/stall.csv"; echo "$(utc),STOP,$s,$tt" >> "$O/stall.csv"
-      kill -STOP "$EP"; sleep "$DUR"; kill -CONT "$EP"
+      STP=$EP; kill -STOP "$EP"; sleep "$DUR"; kill -CONT "$EP"; STP=""
       echo "$(utc),CONT,$s,$tt" >> "$O/stall.csv"; log "STALL end: SIGCONT sent"; done_stall=1; same=0; last=$s; continue
     fi
     if [ $k = 0 ] && [ -z "$done_kill" ] && [ -n "$tt" ] && awk -v t="$tt" -v a="$KAT" 'BEGIN{exit !(t>=a)}'; then
@@ -82,8 +86,10 @@ while :; do
     if [ -n "$s" ] && [ "$s" = "$last" ]; then same=$((same+1)); else same=0; fi; last=$s
     # ITRZone review: under freeze X-Ray may legitimately stop exporting while ITR2 is dead/away (Hub ~20 s + reload),
     # so the 30 s rule is skipped while pose.txt says dead/away + freeze; it applies again once the pose says play.
-    pl=$(head -1 "$SHM/pose.txt" 2>/dev/null | tr -d '\r'); IFS=, read -r _ _ _ pst _ paw _ <<<"$pl"   # 7th field (pose v3 session number) dropped here
-    # LOST: wall time since the pose's first line last changed. Counted only after it changed once in this boot.
+    # State and policy come from the last COMPLETE pose and are kept until the next complete one: a writer killed
+    # between truncating and writing the file must not blank them (7th field, the session number, is dropped here).
+    pl=$(posehdr); [ -n "$pl" ] && IFS=, read -r _ _ _ pst _ paw _ <<<"$pl"
+    # LOST: wall time since a new complete pose last appeared. Counted only after one appeared in this boot.
     if [ -n "$pl" ] && [ "$pl" != "$ppl" ]; then ppl=$pl; pchg=$(utc); pseen=1
       [ -n "$lost" ] && { log "lost end: new pose (state ${pst:-?}) after $(( pchg - lostu )) ms"; lost=""; }; fi
     if [ -n "$pseen" ] && [ -z "$lost" ] && [ "${pst:-}" != end ]; then
@@ -91,6 +97,8 @@ while :; do
       if [ "$lim" -gt 0 ] && [ $page -ge "$lim" ]; then lost=1; lostu=$(utc); log "LOST: no new pose for $page ms (limit $lim; last state ${pst:-?}, policy ${paw:-?})"
         echo "$lostu,$page,${pst:-},${paw:-}" >> "$O/lost.csv"; fi; fi
     fzwant=""; [ "${paw:-}" = freeze ] && { [ "${pst:-}" = dead ] || [ "${pst:-}" = away ] || [ -n "$lost" ]; } && fzwant=1
+    # never stop X-Ray in a level change: the script's marker file is non-empty from its request until the arrival
+    [ -n "$fzwant" ] && [ -n "$lost" ] && [ -z "${fz:-}" ] && [ -s "$SHM/cross.txt" ] && fzwant=""
     # T2_FREEZE=sigstop (pre-flight 1: device():pause stops Lua for good, so X-Ray cannot unpause itself): the BRIDGE
     # freezes X-Ray by SIGSTOP of the engine while the pose says dead/away + freeze, and SIGCONT when it says play
     # (T1: X-Ray survived two 20 s SIGSTOPs). Logged in freeze.csv (utc_ms,event,pose_state).
@@ -99,9 +107,12 @@ while :; do
         if [ "${T2_FREEZE:-}" = sigstop ]; then
           # with T2_ABSORB, wait (<= 3 s) for the script's ABSORB_ARM/ABSORB_SKIP line, so the engine is armed BEFORE the stop
           gms=""; if [ "${T2_ABSORB:-0}" -gt 0 ]; then for _w in 1 2 3 4 5 6; do
-              aline=$(grep -a '^ABSORB_ARM\|^ABSORB_SKIP' "$SHM/meta_t2.csv" 2>/dev/null | sed -n "$(( ${narm:-0} + 1 ))p")
+              # the NEWEST arm line not yet used; all older ones are then spent (an arm the runner never acted on
+              # must not be taken for this freeze's)
+              acnt=$(grep -a -c '^ABSORB_ARM\|^ABSORB_SKIP' "$SHM/meta_t2.csv" 2>/dev/null); aline=""
+              [ "${acnt:-0}" -gt "${narm:-0}" ] && aline=$(grep -a '^ABSORB_ARM\|^ABSORB_SKIP' "$SHM/meta_t2.csv" 2>/dev/null | tail -1)
               [ -n "$aline" ] && break; sleep 0.5; done
-            [ -n "$aline" ] && { narm=$(( ${narm:-0} + 1 )); gms=$(cut -d, -f4 <<<"$aline"); log "freeze: ${aline%%,*} seen before STOP"; } || log "freeze: NO arm line within 3 s (stopping anyway)"; fi
+            [ -n "$aline" ] && { narm=$acnt; gms=$(cut -d, -f4 <<<"$aline"); log "freeze: ${aline%%,*} seen before STOP"; } || log "freeze: NO arm line within 3 s (stopping anyway)"; fi
           FZP=$(engine); [ -n "$FZP" ] && kill -STOP "$FZP" && { SU=$(utc); SST=$pst; [ -n "$lost" ] && SST=lost; log "freeze: STOP pid $FZP"; }; fi; fi
       same=0
     elif [ -n "${fz:-}" ] && [ -n "${pst:-}" ] && { [ "${paw:-}" = keep ] || [ "${paw:-}" = freeze ]; }; then fz=""; log "freeze hold end: pose state $pst"   # a torn/empty/truncated pose read (awaysim not exactly keep or freeze) never ends a freeze

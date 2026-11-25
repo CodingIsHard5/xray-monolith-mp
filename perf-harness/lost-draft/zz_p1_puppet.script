@@ -240,9 +240,14 @@ local function t2_age(now, t)
 	if lim > 0 and age >= lim then
 		p_lost = true; p_lost_n = p_lost_n + 1
 		m(string.format("LOST,%.2f,%d,%d,%d,%s,%s", t, now, p_last, age, tostring(p_state), tostring(p_aw)))
-		if p_aw == "freeze" and t2_absorb > 0 and not t2_eng_armed then   -- as for away + freeze: armed BEFORE the bridge stops X-Ray
-			get_console():execute("g_freeze_absorb_armed 1"); t2_eng_armed = true; t2_arm_tg = now; t2_armed = true
-			m(string.format("ABSORB_ARM,%d,%d,%.0f", now, p_last, gtime()))
+		-- as for away + freeze: armed BEFORE the bridge stops X-Ray; one freeze counts once (an away freeze that
+		-- becomes LOST is already armed), and -t2_absorb_skip applies here as there
+		if p_aw == "freeze" and t2_absorb > 0 and not t2_armed then
+			t2_armed = true; t2_nfreeze = t2_nfreeze + 1
+			if t2_nfreeze > t2_absorb_skip then
+				get_console():execute("g_freeze_absorb_armed 1"); t2_eng_armed = true; t2_arm_tg = now
+				m(string.format("ABSORB_ARM,%d,%d,%.0f", now, p_last, gtime()))
+			else m(string.format("ABSORB_SKIP,%d,%d,%.0f", now, p_last, gtime())) end
 		end
 		if meta then meta:flush() end
 	end
@@ -296,7 +301,7 @@ local function t2_pose(a, now, t)
 			else
 				m(string.format("CROSS_REQ,%d,%d,%s,%s,%s,%.3f,%.3f,%.3f,%d,%d,%s", now, n, level.name(), zone, c.name, c.pos.x, c.pos.y, c.pos.z, c.lvid, c.gvid, utc))
 				if meta then meta:flush() end
-				local f = io.open(DIR .. "cross.txt", "wb"); if f then f:write(level.name(), ",", zone, ",", utc, "\n", "x,", tostring(aw), ",", tostring(sess or 0), "\n"); f:close() end
+				local f = io.open(DIR .. "cross.txt", "wb"); if f then f:write(level.name(), ",", zone, ",", utc, "\n", "x,", tostring(aw), ",", tostring(sess or 0), ",", tostring(n), "\n"); f:close() end
 				ChangeLevel(c.pos, c.lvid, c.gvid, vector():set(0, 0, 0))
 			end
 		end
@@ -563,7 +568,12 @@ function on_game_start()
 	-- (the marker is emptied, not removed: an empty marker counts as none)
 	do local f = io.open(DIR .. "cross.txt", "rb"); if f then local l = (f:read("*l") or ""):gsub("\r", "")
 		local l2 = (f:read("*l") or ""):gsub("\r", ""); f:close()
-		do local xa, xs = string.match(l2, "^x,([^,]+),(%d+)$"); if xa then p_aw = xa; if xs ~= "0" then p_sess = xs end end end
+		-- policy, session and seq of the pose that asked for the crossing. With LOST on, the seq watermark is carried
+		-- over, so the SAME pose still on disk (a writer that died during the level change) is not taken as a new one
+		-- and cannot restart the cross timer. A live writer's seq has moved on; a restarted one has a new session.
+		do local xa, xs, xn = string.match(l2, "^x,([^,]+),(%d+),(%d+)$")
+			if xa then p_aw = xa; if xs ~= "0" then p_sess = xs end
+				if t2_lost_ms > 0 or t2_lostx_ms > 0 then p_last = tonumber(xn) end end end
 		if l ~= "" then t3_crossed = l; f = io.open(DIR .. "cross.txt", "wb"); if f then f:close() end end end end
 	do local f = io.open(DIR .. "dmgtest.txt", "rb"); if f then local l = (f:read("*l") or ""):gsub("%s", ""); f:close()
 		if l == "prot" or l == "god_off" or l == "god_off_norefill" then dmg_mode, dmg_raw = l, l

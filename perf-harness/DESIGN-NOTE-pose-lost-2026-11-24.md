@@ -47,7 +47,8 @@ files are not touched; this lands in the next registration.
     only logs.
   - The runner ends a `cross` hold after 120 s, so its "no new snapshot" rule works again.
 - **Coming back:** the first new complete pose ends LOST: the runner sends SIGCONT, the script logs `RESUME`.
-  The 5 m guard does not apply to the first pose after LOST (the player may be anywhere), as after a crossing.
+  CORRECTED 2026-11-24: the 5 m guard needs no exemption. It compares the actor AFTER a set with that set's own
+  target, not with the previous pose, so a first pose far from the last one passes it.
 - **What LOST does under each policy:**
   - keep: the actor stays where it was, A-Life runs on. This is what happened in x1; the change is that it is
     now a named, logged state with a limit, not an accident.
@@ -92,7 +93,7 @@ Three boots, each about 4 minutes:
   like "accept any lower seq" is not safe.
 - Witness: the writer is killed and started again with seq 1 and a new session number: LOST, then EPOCH and
   RESUME, poses applied again. Mutation: the same restart with the OLD session number: no pose may be applied.
-- The first pose after an EPOCH line gets the same guard exemption as the first pose after LOST.
+- CORRECTED 2026-11-24: no guard exemption after an EPOCH line either (see the correction under "Proposal").
 
 ## Time-out while LOST (Overseer's ruling, 2026-11-24)
 
@@ -123,3 +124,21 @@ Three boots, each about 4 minutes:
   logs the stale snapshot after 1 s and keeps the puppets as they were; it resumes at the next accepted snapshot
   (my header's run id or a level change resets its seq check). It has no "X-Ray is gone" behaviour yet; open on
   ITRZone's side.
+
+## Changes after the review of the draft (2026-11-24, CodeRabbit, 16 findings)
+
+- **The crossing pose left on disk.** A writer that dies during X-Ray's level change leaves its last `cross` pose in
+  the file. The new Lua state started its seq watermark at 0, took that pose as new and restarted the timer, so LOST
+  came 135 s after the arrival, not 120 s. Fix: the crossing marker carries the pose's seq, and with LOST on the
+  watermark is carried over. Shown offline both ways (120,000 ms with the fix, 135,000 ms without).
+- **The runner reads only complete poses** (first line `seq,<n>`, last line `end,<n>`) and keeps the state and
+  policy of the last complete one. A writer killed between emptying and writing the file no longer blanks them.
+- **The runner never stops X-Ray in a level change** (the marker file is non-empty from the request to the arrival).
+- **A cancelled runner continues an engine it stopped**; a cancelled driver stops the runner before giving the box
+  back; the driver returns the runner's exit status and stops if the writer dies before its first pose.
+- **The freeze count** treats a LOST freeze as an away freeze (one count, `-t2_absorb_skip` applies).
+- **Checker:** exit status 1 on FAIL; a missing engine log fails check 1. **Mutations** keep the 3 s pause, so
+  they differ from their witness case in one thing only; the reused-session writer is killed 45 s after its start.
+- **Not changed, with reason:** a pose with a non-numeric coordinate and a corrected changer name in a later pose
+  (ITR2's writer formats numbers and sends one changer per crossing; unchanged from the frozen script); a v2 writer
+  replaced by a v3 writer inside one X-Ray boot (not supported: both sides move to v3 together).

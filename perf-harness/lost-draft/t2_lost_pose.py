@@ -10,6 +10,8 @@ Keys:
   pause=<a>-<b>      no write while the track time is in [a, b) (the negative control: a gap under the limit)
   crossat=<s>        from this track time on: state `cross`, zone <dest>, with a `c,<changer>` line
   dest=<level>  changer=<name>
+  lvl=<level>        the level name, instead of waiting for a snapshot (a restarted writer: X-Ray may be stopped, and
+                     must not be waited for). The first writer saves the name it read to <out_csv>.lvl.
 The stance cycles 0,1,2 every 10 s of track time. Each write is appended to <out_csv>: utc_ms,seq,phase,session,track_s.
 The driver kills this process with SIGKILL; it never stops by itself.
 """
@@ -27,8 +29,9 @@ def snap():
     h = L[0].split(',')
     if len(h) < 6 or float(h[3]) < 0: return None   # wait for the warm-up to end (track time >= 0)
     return h[4]
-lvl = None
+lvl = K.get('lvl')
 while lvl is None: lvl = snap(); time.sleep(0.2)
+if 'lvl' not in K: open(out + '.lvl', 'w').write(lvl + '\n')
 TRK = [[float(v) for v in l.split(',')[:4]] for l in open(trk, 'rb').read().decode().replace('\r', '').split('\n')[1:] if l]
 def at(t):
     i = max(j for j in range(len(TRK)) if TRK[j][0] <= t) if t >= TRK[0][0] else 0
