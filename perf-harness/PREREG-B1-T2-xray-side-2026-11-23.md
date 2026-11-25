@@ -1893,3 +1893,49 @@ end 13:35:46.47. The half-finished level change left a normal autosave behind; t
   cross start by the log stamps, the bar says 120 to 125 s). Joint verdict: FAIL as scored, for the Overseer to rule.
 - **Prospective fix for any later arm C run (not applied to this score):** check 3 asks for the kill row and the restart
   wait, and for the marker being EMPTY at boot 1's start (the runner logs its size either way), instead of the line.
+
+## 69. R3 arm C, run c2 (ITRZone amendment 120), X side, registered BEFORE the boot (2026-11-25)
+
+A fresh replicate of c1 (section 67 describes the run; section 68 its result) under two corrected scorers: itrzone's
+(amendment 120) and my check 3. Ordered by the Overseer; c1 stays FAIL as scored. One joint boot on the Overseer's GO,
+which itrzone asks for: `scripts/boot_t2.sh c2`.
+
+- **Files.** Runner tools/t2_xray_c2.sh d140e58300fd9b43999877338f085f69529fb96f28d380fd18453741e7481385 = c1's runner
+  40b87576 plus ONE change (7 lines): at every restart boot it logs `boot k: crossing marker at restart: was <n|absent>
+  bytes, now <0|absent> bytes (was: ...)`, the second figure read back after its emptying step. Unchanged and frozen:
+  script 473dec25, Stance14.exe b4ce9c77, lib cb183b7b. The runner change was not reviewed by CodeRabbit (asked the
+  Overseer; a log line; the account is rate-limited).
+- **Env, as c1:** T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999 T2_KILL_AT=99999 T2_RUN_S=600
+  T2_OVER_S=120 T2_MAXRESTART=1 T2_KILL_XS=4 T2_RESTART_WAIT_S=150.
+- **Checker:** tools/t3_armC2_xray_check.py c24ffd31e8b56a0627780c83396000777af2c2c91f663ebdabbc7d8b8bb673d7 (from
+  7ec98e73). **Score once:** `python3 -I tools/t3_armC2_xray_check.py <X out dir> out/t3pfD/run/boot0/meta_t2.csv`
+- **PASS = all nine.** Checks 1, 2 and 4 to 9 word for word as section 67. **Check 3, new:** restarts.csv has exactly
+  one row, planned, "planned kill (arm C) n s after the cross pose" with n 4 to 6; the runner logged the restart wait;
+  exactly one marker line for boot 1 whose "now" figure is 0 or absent; and boot 1 logs no CROSS_RESUME before its own
+  request (no false arrival). It tests the outcome the marker rule protects, whatever the marker's state was.
+- **Witnesses (perf-harness/armC2-draft/README.md, commit 54773bc37).** Real runner code in the fake-engine sandbox:
+  a kill before the script takes the marker (was 37, now 0), a kill after it (was 0, now 0: c1's real case), no marker
+  file (absent): the line is logged in all three and boot 1 sees an empty marker; the old runner on c1's case logs no
+  line. Checker on copies of c1's real output: with the line PASS (three forms); four mutants each FAIL check 3 (marker
+  not emptied; the line twice; no restart wait; a false arrival). c1 as it is fails check 3 only, as scored.
+- **Each expected line against the paths that may not produce it** (Overseer's process rule): the table is in that
+  README. Only check 3 was conditional. Named, not changed: boot 0's VITALS line exists or not depending on where the
+  kill lands (both allowed); check 2 fails by design if the kill lands after the new level's first update.
+- **Predicted values and margins (from c1):**
+
+| Quantity | Predicted | Bound | Margin |
+|---|---|---|---|
+| Kill after the cross pose, s (the row's n) | 4 | 4 to 6 | **on the lower bound**: the runner counts in whole clock seconds, kills when the count reaches 4 and writes the count just after, so n reads 4 or 5 and cannot read 3. The real delay can be 3.0 to 5.x s for the same reason (c1: 4.14 s) |
+| Kill against the new level's first update | kill at 3.0 to 5.x s (c1: 4.1 s); the Garbage load took 8.2 to 9 s in A2, b2 and c1's boot 1 | no resume in boot 0 | about 4 s; the script reload came before the kill in c1, the first update did not |
+| Marker at the restart | was 0, now 0 | now 0 or absent | either state passes |
+| First applied play pose after the cross pose, s | 22.3 | at most 90 | 68 s |
+| Poses: boot 0 before the request; boot 1 after the resume | 2,157; 2,400 | at least 400; 600 | 1,750; 1,800 |
+| First pose after the resume to the changer destination, m | 0.004 | at most 5 | 5 m |
+| HOLD; GUARD | 0; 0 | at most 15; 0 | GUARD has no margin: one guard line fails |
+| VITALS lines boot 0; boot 1 | 1; 2 | 0 or 1; exactly 2 | boot 1's second line needs the clean end that rc 0 also needs |
+| Level-mismatch lines in boot 1 (reported) | 0 | none | |
+
+- **Guess: X side PASS 75 %.** c1 passed everything but the amended check, on the same engine files. Risks: run-to-run
+  spread of the load time against the 4 s kill; anything outside my files (a protected title, a no-start).
+- **Joint text:** amendment 120 copied into PREREG-B1-T2-JOINT-2026-11-23.md after one blank line: 5,977 bytes, sha256
+  e3dcf4ab5a807add31110c062f271d8443b88ba965044450c518f921f202bb1b (ITRZone master 7d7ffc7).

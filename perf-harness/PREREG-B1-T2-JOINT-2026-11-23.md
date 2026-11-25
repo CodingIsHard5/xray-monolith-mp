@@ -790,3 +790,76 @@ file, and a recover crossing with an X-Ray that has just booted. Risks: the floo
 X-Ray's warm-up snapshots (negative track time) and our held puppets after its restart; the rig's arrival and walk
 starting only after 4 minutes of standing; our own stale-end timer; anything a kill inside X-Ray's load leaves behind
 (EnginePerf's main risk).
+
+## Amendment 120 (REGISTERED 2026-11-25): R3 arm C, c2: a replicate of c1 under a corrected scorer
+c1 (amendment 119) stands as FAIL 14 of 15 on our side, cause: R3a measured the close by the log's time stamps (119.993 s
+between the start line and the closed line; bound 120). It is not re-scored. This amendment changes the scorer only, for a
+new arm `c2`, and registers c2 as a fresh replicate: the same run, the same mod (blob c0b8952), the same levers, the same
+X-Ray runner settings. Arm `c1` in the scorer is left as it was.
+
+**Scorer changes (arm c2 only):**
+- R3a's close: 120.0 to 125.0 s by the mod's own count (the `after N s` figure of its `closed` line), and the log's
+  stamps (start line to closed line) within 0.5 s of that figure. Why the mod's figure: the mod counts from the moment the
+  crossing starts and writes the start line some milliseconds later, so the stamps can be short of 120 s. Why 0.5 s: the
+  two clocks must tell the same story; they differed by 7 ms in c1 and a frame is at most about 0.1 s.
+- The stage list (reported, not scored) has `cross end k=2` before `rig arrived`: the restarted X-Ray's warm-up holds
+  the play clock, so the rig arrives after the end (c1: 12.8 s).
+- Everything else as arm c1 in amendment 119: R3a's other parts, R3q, R3b, R3n, R3c, R3w, R3h, R3g, R3p, T2a to T2e, T3w.
+
+**Offline (`tools/r3c2_selftest.py`):** on c1's real log the old rule fails R3a and the new rule passes all 15 checks
+with all ten stages reached; a mutant of that log closed at 126 s (figure and stamp) fails R3a; a mutant with the stamp at
+126 s and the figure left at 120.0 fails R3a. Margin test: synthetic logs built from the predicted values below (the low
+end of every range, the predicted value, the high end), every line's stamp moved by a random -10 to +10 ms, 100 logs each:
+none fails a check or misses a stage.
+
+**Predicted values and their margins to the pass bounds** (from c1 as measured; a range that touches or crosses a bound is
+marked):
+
+| Quantity | Predicted | Range | Pass bound | Margin |
+|---|---|---|---|---|
+| Our ground ready, s | 49.8 | 48 to 54 | at most 60 | 6 s |
+| The close by the mod's count, s | 120.0 | 120.0 to 120.1 | 120.0 to 125.0 | **touches the lower bound**, see below |
+| The close by the stamps, against the mod's count, s | 0.007 short | 0.05 short to 0.1 long | within 0.5 | 0.4 s |
+| `recover waits` after the close, s | 0.014 | 0 to 0.1 | at least one before the new run | 60 s |
+| New X-Ray run after the cross start, s | 184.5 | 180 to 188 | after the close | 55 s |
+| Recover line after the new run, s | 4.05 | 3.0 to 5.5 | 2 to 10 | 1.0 s below, 4.5 s above |
+| Recover crossing, s | 17.8 | 15 to 26 | at most 90 | 64 s |
+| Rig arrives after the cross end k=2, s | 12.8 | 10 to 16 | after the recover line | not near |
+| Walk after the recover crossing, m; largest step, m | 185; 0.42 | 150 to 200; 0.3 to 0.6 | at least 50; at most 2 | 100 m; 1.4 m |
+| Ground misses (miss + resolved) | 3 | 2 to 5 | at most 10 | 5 |
+| Pose rate, share of the wanted writes | 1.00 | 0.99 to 1.00 | at least 0.95 | 0.04 |
+| Pose write cost, 99th percentile, us | 1000 | 1000 | at most 1000 | **touches the bound**, see below |
+| Frame time, 95th percentile, ms | 17.4 | 16.5 to 19.5 | at most 25 | 5.5 ms |
+| Link: latency 95th percentile, ms; accepted share | 18; 1.000 | 15 to 30; 0.99 to 1.00 | at most 300; at least 0.95 | 270 ms; 0.04 |
+| `level_mismatch_snapshots` (reported) | 8,300 | 7,400 to 9,300 | none | |
+| Play clock at the end (reported) | 240.3 | 240.0 to 240.6 | none | |
+
+The two that touch a bound:
+- **The close by the mod's count** is predicted exactly on the lower bound. The bound is kept, because the mod cannot
+  write a smaller figure: it closes only once its count is above 120 s, and writes the count with one decimal, so the
+  figure is 120.0 or more by construction (120.0 or 120.1 at the frame rates seen). A figure below 120.0 would be a real
+  fault of the rule and must fail.
+- **The pose write cost** (T2b, a bound from the base T2 registration, not changed here): the mod's clock for it resolves
+  1 ms, so the 99th percentile can only read 0, 1000 or 2000. It read 1000 in all seven joint runs so far (the largest
+  single write 2000 in each). It would read 2000, and fail, if more than 1 in 100 writes took 2 ms; the log does not
+  show how far from that the runs were. Named as a known risk of this replicate; a finer measure of the write cost is
+  for a later amendment.
+
+**The run:** `scripts/boot_t2.sh c2`: as c1 (levers `hcheal=2 t2span=380 t2gap=0 t2v=2 t2st=30 transit=1 txa=120
+txn=esc_level_changer_to_garbage_1 txe=120 txw=1 t2end=600`, the save-leg route, `t2cx` at its default 120), scored by
+`tools/r3_check.py <run> <X-Ray dir> 1 c2`, once.
+
+**EnginePerf's side (their section 69):** runner `tools/t2_xray_c2.sh`
+d140e58300fd9b43999877338f085f69529fb96f28d380fd18453741e7481385 (c1's runner plus one log line at the restart boot: the
+marker's size before and after it is emptied), checker `tools/t3_armC2_xray_check.py`
+c24ffd31e8b56a0627780c83396000777af2c2c91f663ebdabbc7d8b8bb673d7 (only their check 3 differs from c1's); unchanged:
+script 473dec25, Stance14.exe b4ce9c77, lib cb183b7b. Env as c1: `T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000
+T2_STALL_AT=99999 T2_KILL_AT=99999 T2_RUN_S=600 T2_OVER_S=120 T2_MAXRESTART=1 T2_KILL_XS=4 T2_RESTART_WAIT_S=150`.
+
+The recover delay of 4.05 s in c1 (3.05 predicted then) is explained by EnginePerf's write times: after a fresh boot
+X-Ray's second snapshot comes 1.05 s after its first, and our "writing" rule needs the second before the 3 s start.
+An X-Ray write ends up as an empty or cut file only if the kill lands inside a write (X-Ray writes in place): as in c1,
+the kill comes inside X-Ray's level load, when it writes none; if it happens anyway c2 is a FAIL by rig with that cause
+named (the reader's fix is amendment 121, not part of this run).
+
+Guess before the run: ITR2 side PASS 75 %.
