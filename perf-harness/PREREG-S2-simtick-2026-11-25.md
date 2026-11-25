@@ -389,3 +389,39 @@ Predictions, margins and the scorer are unchanged. The 13 finished runs stay as 
 s2_selftest_b.py 46478fc24ffd3a49; s2_phase_selftest.py d49a671b35c56825; driver s2_partB2.sh 18bfa3585fa8d70f (two
 slices: f30_rr, f60, f50; then offL, t30L, t60L). SimTick14.exe 93fff4b5…858f21. Copies: perf-harness/s2-partB-amend/.
 Score, once, when all six are done: `python3 -I tools/s2_score_b.py out tools/s2_pred.json out/s2_score.txt`.
+
+### 11.2 The first 4-core run failed its check: the instrument again, not the run. AMENDMENT (DRAFT until the Overseer's GO)
+**State:** 16 of 18 registered runs are done and passed their checks (the 13 of 11.1, then `s2_f30_rr`, `s2_f60`,
+`s2_f50` under the amended check). `s2_offL` then failed "updates(0) != frames(12000)" and the series stopped.
+`s2_t30L` and `s2_t60L` have not run. Nothing is scored.
+
+**Real or instrument: the instrument.** The run did its work: the profiler file has 12,000 calls of the update in
+12,000 frames, the engine read `sim_tick 0` at boot, there is no gate line, conditions clean. The bench lowercases
+the tag for its folder and file names (`TAG=${TAG,,}`, tools/s2_bench.sh line 9), so the run is in `out/s2_offl`;
+the series check looked in `out/s2_offL`, found no file and read "0 updates". The three 4-core tags are the only
+ones in the series with a capital letter. Fourth check error of mine in this series. Why the phase test of 11.1 did
+not catch it: it built its folders under the tag as the ORDER FILE spells it, not as the bench names them.
+**The same fault sat in the scorer** (both the registered and the 11.1 one): its tag pattern wants a capital L, so
+`s2_offl` would have been filed as an unknown arm name with no prediction matched, and `s2_t30l` as "kind unknown":
+not gated, no rate check. Found before any scoring.
+
+**Changes:**
+- Series check: looks in the lowercased folder; when the run's files are missing it FAILS with "run files missing",
+  never as a count of 0. The after-run copy of the settings file and the conditions verdict use the same folder.
+- Scorer: a folder `s2_offl`, `s2_t30l`, `s2_t60l` is filed under the registered arm name with the capital L (the
+  prediction keys are unchanged); a folder whose name is no registered arm is INVALID by name, not silently
+  "unknown"; `s2_offl` joins `s2_f30` in the fixed exclusion list.
+- Phase test: folders and files are now named as the bench names them; the 4-core stock type is the REAL run
+  (a copy of `out/s2_offl`, with the run dir's settings file standing in for the after-run copy it never got);
+  new assertions: every run is filed under its registered arm name; missing files fail by name.
+  Result: PHASE SELFTEST PASS, 49 of 49. Scorer self-test: PASS.
+- Not proven on real 4-core bytes: the two GATED 4-core types (made from the 16-core t30 and t60 folders under
+  lowercase names). The first of them to run is its own proof or failure.
+
+**Remaining runs (tools/s2_order_c.txt, one slice):** `s2_offL_rr` (the first failed the check it ran under, so it
+stays excluded as run and is run again, as with s2_f30), `s2_t30L`, `s2_t60L`. Lines as registered.
+**The registered scorer, to be shown beside the amended one (Overseer's condition):** run as it is, it cannot name
+the 4-core arms (lowercase folders). I will show its output as it is, and say so; the comparison of the warm-up
+window's effect is on the six real-time gated runs, where both scorers work.
+**Pinned (first 16):** s2_series_b.sh 75b2335b52bc662f; s2_score_b.py d4548104e1e00b9d; s2_phase_selftest.py b1994b3173a086cb; s2_order_c.txt c8d1078952884303;
+s2_selftest_b.py 46478fc24ffd3a49 (unchanged). These replace the 11.1 hashes of the same files.

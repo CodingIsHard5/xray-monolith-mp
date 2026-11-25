@@ -29,7 +29,9 @@ set_cfg() { local tmp; tmp=$(mktemp); grep -v -E "^($(tr ' ' '|' <<<"$VARS")) " 
   for v in $VARS; do printf '%s %s\r\n' "$v" "$(want_val $v "$1")" >> "$tmp"; done; cat "$tmp" > "$CFG"; rm -f "$tmp"; }
 read_cfg() { awk -v k="$1" '$1==k{gsub("\r",""); print $2}' "$CFG" | tail -1; }
 check_run() { # tag cfg fixed frames -> "check ok ..." or "check FAIL: ..."; returns 1 on fail
-  local R=${S2_CHECK_ROOT:-out}; local tag=$1 cfg=$2 fixed=$3 frames=$4 f=$R/$1/perf_sites_$1.csv L=$R/$1/xray.log v bad="" hz st up nl
+  local R=${S2_CHECK_ROOT:-out}; local tag=${1,,} cfg=$2 fixed=$3 frames=$4 v bad="" hz st up nl   # Amended (11.2): the bench lowercases the tag for its folder and file names
+  local f=$R/$tag/perf_sites_$tag.csv L=$R/$tag/xray.log
+  [ -s "$f" ] && [ -s "$L" ] || { echo "check FAIL: run files missing ($f, $L)"; return 1; }
   for v in $VARS; do [ "$(read_cfg $v)" = "$(want_val $v "$cfg")" ] || bad="$bad $v=$(read_cfg $v)!=$(want_val $v "$cfg")"; done
   hz=$(want_val sim_tick "$cfg")
   st=$(tr -d '\r' < "$f" 2>/dev/null | awk -F, '$1=="Sim tick"{print $4+$7}' | head -1); st=${st:-0}
@@ -47,7 +49,7 @@ check_run() { # tag cfg fixed frames -> "check ok ..." or "check FAIL: ..."; ret
     [ "$hz" -gt 0 ] || [ "$nl" = 0 ] || bad="$bad SIMTICK-line-in-stock-run($nl)"
   fi
   [ -z "$bad" ] && { echo "check ok (updates $up of $frames frames, sim-tick site $st, SIMTICK lines $nl)"; return 0; }; echo "check FAIL:$bad"; return 1; }
-[ "${1:-}" = "--check" ] && { CFG=${S2_CHECK_ROOT:-out}/$2/user.ltx.after; check_run "$2" "$3" "$4" "$5"; exit $?; }   # desk test of the check on a finished run folder
+[ "${1:-}" = "--check" ] && { CFG=${S2_CHECK_ROOT:-out}/${2,,}/user.ltx.after; check_run "$2" "$3" "$4" "$5"; exit $?; }   # desk test of the check on a finished run folder
 [ -s run/bin/SimTick14.exe ] && [ "$(sha256sum run/bin/SimTick14.exe | cut -d' ' -f1)" = "$EXE_SHA" ] || { log "REFUSED: SimTick14.exe hash differs"; exit 2; }
 "$T/quiet-required.sh" check 2>/dev/null | awk -v w=$W '$1=="HELD:" && $4==w{f=1} END{exit !f}' || "$T/quiet-required.sh" want $W EXCLUSIVE >/dev/null 2>&1
 until ! "$T/protected-title-check.sh" >/dev/null 2>&1 && ! pgrep -x sober >/dev/null && \
@@ -67,8 +69,8 @@ while :; do
   set_cfg "$cfg"
   log "run $tag exe=$exe save=$save lowend=$low warm=$warm frames=$frames fixed=$fixed cfg=[$cfg] load $(cut -d' ' -f1-3 /proc/loadavg)"
   BENCH_NOCLAIM=1 BENCH_EXCLUSIVE=1 BENCH_SAVE=$save BENCH_LOWEND=$low BENCH_FIXED=$fixed tools/s2_bench.sh "$exe" "$tag" "$warm" "$frames" -perf_noinput -perf_nopresent -perf_slow 20 > $ST/run_$tag.log 2>&1; rc=$?
-  cp "$CFG" out/$tag/user.ltx.after 2>/dev/null
-  v=$(grep -a '^VERDICT' out/$tag/conditions.txt 2>/dev/null)
+  cp "$CFG" out/${tag,,}/user.ltx.after 2>/dev/null
+  v=$(grep -a '^VERDICT' out/${tag,,}/conditions.txt 2>/dev/null)
   log "run $tag rc=$rc $v"
   [ $rc = 0 ] || { stop="run $tag ended rc=$rc"; break; }
   c=$(check_run "$tag" "$cfg" "$fixed" "$frames"); crc=$?; log "run $tag $c"

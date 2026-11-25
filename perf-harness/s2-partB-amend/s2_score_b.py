@@ -52,7 +52,9 @@ def arm(tag):
     m['gc_s'] = both('seqLuaGC') / T; m['render'] = S['Process seqRender']['im'] / N
     F.sort(); q = lambda p: F[min(len(F) - 1, int(len(F) * p))]
     m.update(p50=q(.5), p95=q(.95), p99=q(.99), fmax=F[-1], over25=1000.0 * sum(1 for x in F if x > 25) / len(F))
-    k = re.match(r's2_([a-z]+?)(\d*)L?(?:_\d)?(?:_rr)?$', tag); kind, hz = (k.group(1), int(k.group(2) or 0)) if k else ('?', 0)
+    k = re.match(r's2_(off|t|c|f)(\d*)[Ll]?(?:_\d)?(?:_rr)?$', tag); kind, hz = (k.group(1), int(k.group(2) or 0)) if k else ('?', 0)
+    if not k: return dict(tag=tag, valid=False, why='tag is not a registered arm name')   # Amended (11.2): no silent "unknown kind"
+
     gated = kind == 't'
     m['delay'] = 500.0 / m['rate'] + ((S['Render: Frame Move']['im'] / U + m['p50']) if gated else statistics.fmean(F))
     if kind in ('t', 'c') and hz and abs(m['rate'] - hz) > 0.03 * hz: return dict(tag=tag, valid=False, why=f'rate {m["rate"]:.2f} not within 3 % of {hz}')
@@ -74,10 +76,12 @@ tags = sorted(t for t in os.listdir(ROOT) if t.startswith('s2_') and os.path.isd
 rr = {t[:-3] for t in tags if t.endswith('_rr')}; tags = [t for t in tags if t not in rr]     # a re-run replaces its original
 # Amended (prereg section 11, Overseer's condition 1): the first s2_f30 failed the per-run check it was registered with.
 # It stays excluded whatever else happens; the run under the amended check is s2_f30_rr.
-EXCLUDED = {'s2_f30': 'failed its registered per-run check (section 11)'}; XL = [f'EXCLUDED {t}: {EXCLUDED[t]}' for t in sorted(EXCLUDED) if os.path.isdir(os.path.join(ROOT, t))]
+EXCLUDED = {'s2_f30': 'failed its registered per-run check (section 11)', 's2_offl': 'failed its registered per-run check (section 11.2)'}; XL = [f'EXCLUDED {t}: {EXCLUDED[t]}' for t in sorted(EXCLUDED) if os.path.isdir(os.path.join(ROOT, t))]
 tags = [t for t in tags if t not in EXCLUDED]
 A = {t: arm(t) for t in tags}
-base = lambda t: re.sub(r'(_\d)?(_rr)?$', '', t)
+# Amended (11.2): the bench lowercases the tag for its folder, so the 4-core arms arrive as s2_offl, s2_t30l, s2_t60l.
+# The registered arm names and prediction keys end in a capital L.
+base = lambda t: re.sub(r'^(s2_(?:off|t\d+))l$', r'\1L', re.sub(r'(_\d)?(_rr)?$', '', t))
 G = {}
 for t in tags: G.setdefault(base(t), []).append(A[t])
 MET = ['fps', 'rate', 'main_tick', 'gt_tick', 'sim_tick', 'sim_s', 'script_tick', 'actor_tick', 'phys_steps', 'gc_s', 'render', 'p50', 'p95', 'p99', 'fmax', 'over25', 'delay', 'n0', 'n1', 'n2', 'n3p', 'dropped', 'age_avg', 'age_max']
