@@ -207,3 +207,79 @@ Frame number and engine time at every checkpoint are equal in all four runs, and
 **What would decide it (not run; needs the Overseer's GO and its own registration):** the same four builds with
 checkpoints at pass counts (`-det_passes`, the mode adopted on 11-19), three stock runs and three SimTick14 runs, so
 that a one-pass phase shift cannot count as a difference and a real one still does.
+
+## 9. Part A2: off = stock at PASS-COUNT checkpoints. A NEW registration (Overseer GO 2026-11-25), not a re-score.
+
+Section 8 stands: A2 FAILED as registered; "off = stock" is not proven; part B stays blocked.
+
+### 9.1 Desk read of the off path (commit 81e0b8fd2), the Overseer's three suspects
+| suspect | what the code does with the switch off | could it add an A-Life pass? |
+|---|---|---|
+| accumulator init on the first frame | `sim_tick_plan()` parses the start switch once, copies the rate, and returns -1 at its first test (`s_sim_hz < 10`); the only write is `s_sim_synced = false`. The time accumulator is written only after that test | no: nothing the update reads is touched |
+| a tick-gate branch before the switch check | in `FrameMove` the tick branch needs `s_sim_tick_now` (set only inside `sim_tick_run`) or `g_sim_tick_hz >= 10`; in `on_idle` the "no game thread" branch needs `sim_n == 0`, and off is -1; `sim_tick_stat` needs `sim_n >= 0` | no |
+| the frame-number move | `dwFrame++` outside `FrameMove` exists only in `sim_tick_run(0)`, never called when off | no |
+| also checked | the engine logs of both switch-off runs: `sim_tick 0` in the settings, no `[SIMTICK]` line; frame number and engine time at every checkpoint equal to stock | |
+A code read is not a test; the run below is.
+
+### 9.2 What the eight existing runs say about the one-pass shift (data already on disk, no new run)
+The scheduler traces (start to checkpoint 1) of all eight part A runs, four stock and four switch-off:
+- All eight: first A-Life call on frame 32, 107 calls by checkpoint 1, one gap of 16 frames (the first), every other gap 17 or 18.
+- A gap of 18 is one frame of delay. In det_mode the scheduler has no clock budget; its limit is 256 objects a frame,
+  and A-Life already runs 3 frames after it is due (561 ms against a period of 452 ms). How many objects are due
+  depends on what is ONLINE, which differs run to run. Each delay moves the A-Life phase one frame, for good.
+- Delays in the first 107 calls: stock 4, 2, 6, 7; switch-off 2, 9, 2, 3. Means 4.75 and 4.0. No build pattern.
+- In the retry the two stock runs had 6 and 7, the two switch-off runs 2 and 3: about 4 frames apart by 60 s, the
+  switch-off runs ahead. A checkpoint at a fixed TIME then falls on the other side of a pass for both later
+  checkpoints together (the offset stays). So "4 of 4" is two runs, each counted twice, and the direction fits.
+- This is evidence, not proof: the traces end at checkpoint 1, and the difference appeared after it.
+
+### 9.3 Prediction: will pass-count checkpoints show the shift or hide it?
+- If the shift is the phase drift above: C = 0 everywhere (R1, R2 PASS), as for the stock references on 11-19.
+- If the off path really ran one extra pass: a pass-count checkpoint WOULD HIDE it in the counters (every run is
+  compared at the same pass number). So the counters alone are not enough, and two checks are added that see it:
+  **R3** the frame at which checkpoint 1's pass count is reached (an extra pass = 17 frames early), and **R4** the
+  spacing of the A-Life calls in the trace (an extra pass = a short gap or an extra call). Limit: R4's trace ends at
+  checkpoint 1, and R3 is gated at checkpoint 1 only, so an extra pass that first appears later than 100 passes is
+  seen only as a reported number at checkpoints 2 and 3, not as a gate. All three suspects act from the first frames.
+
+### 9.4 Runs and checks (scored once, `tools/s2_partA2_score.py`)
+Six runs in one EXCLUSIVE slice, alternating so that load and order cannot line up with the build:
+Stance14.exe s2p_s1, SimTick14.exe s2p_o1, s2p_s2, s2p_o2, s2p_s3, s2p_o3 (switch off = settings file `sim_tick 0`).
+`DET_EXTRA="-det_passes 100,200,320 -det_lua_streams -det_counters" tools/det_pair.sh 60 3 …` through tools/s2_partA2.sh.
+| check | PASS when | margin / basis |
+|---|---|---|
+| R1 stock agrees with stock | C = 0 at checkpoints 1, 2, 3, s2p_s2 and s2p_s3 against s2p_s1 | exact; 11-19: C = 0 for 3 pairs x 3 checkpoints with this method |
+| R2 switch-off agrees with stock | C = 0 at 1, 2, 3 for each of the three against s2p_s1 | exact |
+| R3 frame at checkpoint 1 | \|mean of switch-off - mean of stock\| <= 8 frames | one pass = 17 frames; in the eight runs the 100th call fell on frames 1716 to 1722, means 0.75 apart |
+| R4 A-Life call spacing to checkpoint 1 | every run: first call on the same frame, gaps only 16/17/18, exactly one 16 | holds in 8 of 8 existing runs |
+- R1 FAIL = the harness is not usable today: no verdict on the build, stop. R1 PASS and any of R2, R3, R4 FAIL =
+  off is NOT stock: stop, part B stays blocked, I look for the cause before anything else runs.
+- All four PASS = part A is met for the serial test mode; then, and only then, part B may be asked for again.
+- Data missing (a file, a checkpoint) = NO VERDICT; the scorer exits 2. No retry without the Overseer.
+- Guesses: R1 PASS 85 %; R2 PASS given R1 90 %; R3 PASS 90 %; R4 PASS 90 %; all four about 65 %.
+- Self-test `python3 -I tools/s2_partA2_selftest.py out`: PASS. On the eight real runs R4 passes and R3 passes
+  (100th call, difference -0.75); six mutants FAIL (an extra call, a late first call, a skipped call, the off runs 17
+  frames early, 17 late); the counters reader gives C = 0/0/0 for the stock pair, 0/20/20 for the known case of
+  section 8, and "no verdict" for runs without counter files.
+
+### 9.5 Preflight 1: this call against the 11-19 counter method (the Overseer's condition)
+Reference: `-det_passes 50,600,1650 -det_save -det_lua_streams -det_counters` on RefDet14.exe
+(PREREG-tierA-counters-amend-and-worldproc-2026-11-19, part 1; adopted: C = 0 for the references, a skipped update caught).
+The wrapper compares the flags word by word and refuses to start on any difference not listed here (tested: an
+added flag is refused).
+| difference | reason |
+|---|---|
+| pass counts 100,200,320 instead of 50,600,1650 | about 60/120/180 s of engine time instead of 28/340/930 s: six runs fit one slice of an hour. Cost: a difference that needs more than 320 passes to show is not seen. The section 8 difference showed by pass 213 |
+| no `-det_save` | the saves feed the state diff, which is not a check here; the counters do not read them. Equal in all six runs |
+| Stance14.exe and SimTick14.exe instead of RefDet14.exe | they are the two builds under test; both carry the counters command (checked in the binaries, and section 8's runs wrote the files) |
+| `60 3` given to det_pair.sh | needed by its argument list; the dump script ignores the interval when `-det_passes` is given and takes the checkpoint count from the list (script lines 39-40, 158) |
+Not different: det_mode, the serial settings file, the save (bench1), the dump script, det_run.sh, counters_diff.py.
+
+### 9.6 Preflight 2, in the run: after checkpoint 1 of the first run its counter file must exist and the engine's own
+command-line log line must carry the three flags; if not, the series is stopped (exit 4) and that is the outcome.
+
+### 9.7 Pinned (sha256, first 16)
+tools/s2_partA2.sh 5b976d5898e67645; s2_partA2_score.py 3e487ea90974315d; s2_partA2_selftest.py 549f353a92cf9462;
+counters_diff.py 5f2cf91df575ecf1; det_pair.sh d4c38a79ce0263e7; det_run.sh 01fb40dc2891d060;
+harness/zz_eperf_dump.script 2b79a817a08a1e7f; SimTick14.exe 93fff4b5…858f21; Stance14.exe b4ce9c77.
+Copies of the three new files: perf-harness/s2-partA2/.
