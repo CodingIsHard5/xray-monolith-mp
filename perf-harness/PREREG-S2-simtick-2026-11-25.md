@@ -153,7 +153,7 @@ to differ between identical builds; it is why the counters exist. It gives no ve
 **The retry (the one retry section 2 allows; no second one).**
 `DET_EXTRA="-det_lua_streams -det_counters" tools/det_pair.sh 60 3 Stance14.exe:s2ref_c Stance14.exe:s2ref_d SimTick14.exe:s2off_c SimTick14.exe:s2off_d`,
 then `tools/counters_diff.py` for s2ref_d, s2off_c, s2off_d against s2ref_c at checkpoints 1, 2, 3.
-Wrapper: tools/s2_partA.sh (sha256 372b275f…), output out/s2_partA_retry.txt. A1, A2 and the guesses are unchanged
+Wrapper: tools/s2_partA.sh (sha256 da21e3c5…, with the preflight below), output out/s2_partA_retry.txt. A1, A2 and the guesses are unchanged
 (A1 PASS 90 %, A2 PASS given A1 95 %). Part B starts only on A1 and A2 PASS.
 
 **Checked at the desk before registering this (the path table for the retry):**
@@ -164,3 +164,9 @@ Wrapper: tools/s2_partA.sh (sha256 372b275f…), output out/s2_partA_retry.txt. 
 | both moved into out/det_<tag>/ | tools/det_run.sh line 45 | read |
 | counters_diff reads them and prints C | | run on out/det_wn against itself: C=0 at k = 1, 2, 3, rc 0 |
 | NOT checked, the open risk | a 60 s interval with counters on these two builds has never run; the 11-19 runs used `-det_times 25,300,900` on RefDet14.exe | if a file is missing again: no verdict, stop, report |
+
+**Preflight inside the retry (the Overseer's condition with its GO, added before the run).** When checkpoint 1 of the
+first run (s2ref_c) is written, `det_alife_counts_s2ref_c_1.txt` must exist and be non-empty. If not, the wrapper stops
+the whole series at once (exit 4, "PREFLIGHT FAIL" in the output) and that abort IS this retry's outcome: no verdict,
+no third attempt without the Overseer. Desk test of the stop path: a group TERM runs the scripts' exit traps and leaves
+no child (tested with two stand-in scripts in the same pipeline shape). Not tested: the stop against a live engine.
