@@ -1454,3 +1454,14 @@ fields stays v1 and takes the T2 path, unchanged.
   and the driver have never run.
 - **Not covered:** ITR2 itself (joint arm D); the 30-minute save-and-stop (optional witness, later); who restarts
   X-Ray after it was stopped for good; a death during a crossing.
+
+### 57a. Amendment before any boot (Overseer's GO, 2026-11-24)
+
+- **Changed stop rule:** all five boots run even if an early one fails; they are independent. Each is scored once.
+  One registered retry per boot, only for a run that dies before its data.
+- **When:** after R3 arm A has run. The series script tools/t3_pfL_series.sh
+  (da23676996d8df8ddb586175a0e5ddc90e225d2e2aee17f89e43f803bbec1b7b) waits for arm A's X-side runner to end, checks the
+  four file hashes of section 57, then calls the driver for keep, mut_sess, freeze, mut_off, cross. It scores nothing.
+- **Pose v3:** ITRZone confirmed the text of section 57 as written. The old script rejects a seven-field header, so
+  the X side moves first: the lost-pose files become my arm B files only if this pre-flight passes.
+- Guesses unchanged.
