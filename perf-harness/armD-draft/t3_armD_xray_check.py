@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """R3 arm D (ITR2 restarts while X-Ray runs; pose v3), X side. DESK DRAFT, not registered. Run ONCE per run.
-  t3_armD_xray_check.py <t2_xray out dir> <changer table csv> <play|cross|v2> <keep|freeze> [gap=<min>-<max> s] [spot=<x>,<z>] [c1=<changer out>]
+  t3_armD_xray_check.py <t2_xray out dir> <changer table csv> <play|cross|v2|v2r> <keep|freeze> [gap=<min>-<max> s] [spot=<x>,<z>] [c1=<changer out>]
 play  = ITR2 is killed during play and comes back as a new session (seq from 1).
 cross = ITR2 is killed during a crossing out; X-Ray finishes its level change alone, the pose is LOST 120 s after the
         resume, the new ITR2 session appears on the home level and sends the recover crossing. keep only.
 v2    = run d0, X-Ray only: a stand-in writer sends pose VERSION 2 (no session field) to the v3 reader, is killed and
-        comes back with its seq at 1 again, as an old ITR2 mod would. keep only.
+        comes back with its seq at 1 again, as an old ITR2 mod would. keep only. This is run d0a, the CONTROL
+        (T2_V2RESET=0): the returning writer is taken only when its seq has passed the old one.
+v2r   = run d0b, the same with T2_V2RESET=1: checks 1-3 and 5-7 as v2; (4) no EPOCH; exactly one RESET line after
+        LOST (old seq = the LOST line's, new seq <= 200), then exactly one FOUND with seq <= 200 and age 25..45 s;
+        (8) the last T2SUM says lost=1, epochs=1. In v2 (control) there must be NO RESET line.
 All: (1) runner rc 0, engine log over 100 lines, no restart row, no Lua error naming the script, no FATAL, no DMG line;
 (V) VITALS lines (1 in play and v2, 3 in cross) all clean, no REFILL; stance read-back, movement state and height on every P2.
 play: (2) exactly one LOST, age 5000..5600 ms, state play, the policy; (3) nothing applied between LOST and FOUND;
@@ -31,7 +35,8 @@ cross: (2) CROSS_REQ, CROSS_RESUME, CROSS_REQ, CROSS_RESUME in this order: out b
  (lost), one "lost end" line, two "cross hold:" lines; (7) no STOP row; (8) one T2SUM says lost=1 and epochs=1 (the counts are per
  Lua state: it is the dest level's T2SUM); (9) with spot=: the first P2 after the second resume within 5 m."""
 import sys, os, re, math
-O, TAB, ARM, AW = sys.argv[1:5]; OUT = next((a[4:] for a in sys.argv[5:] if a.startswith('out=')), None); assert ARM in ('play', 'cross', 'v2') and AW in ('keep', 'freeze') and not (ARM != 'play' and AW == 'freeze')
+O, TAB, ARM, AW = sys.argv[1:5]; OUT = next((a[4:] for a in sys.argv[5:] if a.startswith('out=')), None); V2R = sys.argv[3] == 'v2r'; ARM = 'v2' if V2R else ARM
+assert ARM in ('play', 'cross', 'v2') and AW in ('keep', 'freeze') and not (ARM != 'play' and AW == 'freeze')
 opt = dict(a.split('=', 1) for a in sys.argv[5:]);   # out=<file> writes the report there instead of into the run folder
 GA, GB = (float(v) for v in opt.get('gap', '60-420').split('-'))
 SPOT = [float(v) for v in opt['spot'].split(',')] if 'spot' in opt else None
@@ -84,14 +89,17 @@ elif ARM == 'v2':
     res.append(('2 the writer sent pose version 2: session `none` on every row of its record', len(PW) >= 1000 and all(len(r) > 3 and r[3] == 'none' for r in PW), f'{len(PW)} rows, {sum(1 for r in PW if len(r) > 3 and r[3] != "none")} with a session'))
     res.append(('3 one LOST, age 5000..5600 ms, state play, policy keep', one and 5000 <= int(L[4]) <= 5600 and L[5] == 'play' and L[6] == 'keep', f'{[M[i] for i in LO]}'))
     f1 = F(fo) if fo is not None else None; up = int(f1[3]) - int(L[3]) if f1 and one else None; age = int(f1[4]) / 1000 if f1 else None
-    res.append(('4 no EPOCH; one FOUND after LOST, its seq 1..3 above the old one, age 60..120 s', not EP and one and fo is not None and fo > lo and up is not None and 1 <= up <= 3 and 60 <= age <= 120, f'EPOCH {len(EP)}; FOUND {[M[i] for i in FO]}; seq above the old one {up}; age {age} s'))
+    RSi = idx('RESET'); rs = F(RSi[0]) if len(RSi) == 1 else None
+    if V2R: res.append(('4 no EPOCH; one RESET after LOST (old seq, new seq <= 200), then one FOUND, seq <= 200, age 25..45 s', not EP and one and rs is not None and fo is not None and lo < RSi[0] < fo and rs[3] == L[3] and int(rs[4]) <= 200 and int(f1[3]) <= 200 and 25 <= age <= 45, f'EPOCH {len(EP)}; RESET {[M[i] for i in RSi]}; FOUND {[M[i] for i in FO]}; age {age} s'))
+    else: res.append(('4 no EPOCH, no RESET; one FOUND after LOST, its seq 1..3 above the old one, age 60..120 s', not RSi and not EP and one and fo is not None and fo > lo and up is not None and 1 <= up <= 3 and 60 <= age <= 120, f'EPOCH {len(EP)}; FOUND {[M[i] for i in FO]}; seq above the old one {up}; age {age} s'))
     between = [l for l in M[lo:fo] if l.split(',')[0] in ('P2', 'P', 'HOLD', 'GUARD')] if one and fo is not None and fo > lo else None
     before = sum(1 for i in P2i if one and i < lo); after = sum(1 for i in P2i if fo is not None and i > fo)
     res.append(('5 nothing applied between LOST and FOUND; P2 >= 400 before and >= 400 after; no GUARD; HOLD <= 15', between is not None and not between and before >= 400 and after >= 400 and G == 0 and H <= 15, f'between {None if between is None else len(between)}; P2 {before} before, {after} after; GUARD {G}, HOLD {H}'))
     lend = sum(1 for l in LG if 'lost end:' in l)
     res.append(('6 runner: one lost.csv row with policy keep; one "lost end" line', len(LC) == 1 and LC[0][3] == 'keep' and lend == 1, f'lost.csv {LC}; "lost end" lines {lend}; the runner saw a pose again after {gap} s (reported: it takes any new pose, the script waits for the seq)'))
     res.append(('7 no STOP row, no ABSORB_ARM', not stops and not arm, f'STOP {len(stops)}, ABSORB_ARM {len(arm)}'))
-    res.append(('8 last T2SUM: lost=1, epochs=0', bool(T2S) and T2S[-1].get('lost') == '1' and T2S[-1].get('epochs') == '0', f'{T2S[-1] if T2S else None}'))
+    EX = '1' if V2R else '0'
+    res.append((f'8 last T2SUM: lost=1, epochs={EX}', bool(T2S) and T2S[-1].get('lost') == '1' and T2S[-1].get('epochs') == EX, f'{T2S[-1] if T2S else None}'))
 else:
     RQ, RSM = idx('CROSS_REQ'), idx('CROSS_RESUME'); bad = [l for l in M if l.startswith(('CROSS_NOCHANGER', 'CROSS_ERROR'))]
     def req_ok(i, a, b, names):
@@ -115,8 +123,9 @@ else:
     if SPOT: dd = near(after[0] if after else None); res.append(('9 first P2 after the second resume within 5 m of the spot', dd is not None and dd <= 5, f'{dd} m'))
 ok = all(r[1] for r in res)
 out = [f'{n}: {"PASS" if p else "FAIL"} ({d})' for n, p, d in res]
-for k in ('CROSS_REQ', 'CROSS_RESUME', 'LOST', 'EPOCH', 'FOUND', 'ABSORB_ARM', 'ABSORB_DISARM', 'T2SUM', 'VITALS'): out += [f'reported: {M[i]}' for i in idx(k)]
+for k in ('CROSS_REQ', 'CROSS_RESUME', 'LOST', 'EPOCH', 'FOUND', 'ABSORB_ARM', 'ABSORB_DISARM', 'RESET', 'T2SUM', 'VITALS'): out += [f'reported: {M[i]}' for i in idx(k)]
 out += [f'reported: runner {l}' for l in LG if re.search(r'LOST|lost|freeze|cross hold| end:', l)]
+ARM = sys.argv[3]
 out.append(f'R3 arm D ({ARM}, {AW}) X SIDE: {"PASS" if ok else "FAIL"}')
 print('\n'.join(out)); open(OUT or os.path.join(O, f't3_armD_{ARM}_{AW}_xray_check.txt'), 'w').write('\n'.join(out) + '\n')
 sys.exit(0 if ok else 1)

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Arm D run d0 (made from t3_pfL2.sh d1c786cd): a pose VERSION 2 writer (no session field) against the v3 reader.
-#   t3_pfD0.sh d0 <out dir>   as `keep`, but both writers send v2 and the second starts its seq at 1 again, as an old
-#   ITR2 mod would after a restart. Runner: tools/t2_xray_v3.sh (installs zz_p1_puppet_lost2.script).
+#   t3_pfD0.sh <d0a|d0b> <out dir>   as `keep`, but both writers send v2 and the second starts its seq at 1 again, as an
+#   old ITR2 mod would after a restart. d0a = control, T2_V2RESET=0 (the returning writer waits until its seq has passed
+#   the old one); d0b = T2_V2RESET=1 (it is taken at once, logged RESET). Runner: tools/t2_xray_v3.sh (installs zz_p1_puppet_lost2.script).
 # Pre-flight L (lost pose; design note 2026-11-24): ONE X-Ray-only boot per call, its own WANT slice, no ITR2.
 #   t3_pfL.sh <case> <out dir>
 # The stand-in writer (tools/t2_lost_pose.py) is KILLED with SIGKILL in mid-run, as a crashed ITR2 would stop.
@@ -23,7 +24,8 @@ TRK=${PFL_TRACK:-$HOME/Projects/ITRZone/out/p1/cordon_full_track.csv}
 AW=keep; RUN_S=200; LOSTENV=""; KILL_AT=60; BACK_AFTER=30; W1=""; SAME=""; W2_S=""; V2=""
 case $C in
   keep) W1="pause=20-23" ;;
-  d0) W1="pause=20-23"; V2=1 ;;
+  d0a) W1="pause=20-23"; V2=1; LOSTENV="T2_V2RESET=0" ;;
+  d0b) W1="pause=20-23"; V2=1; LOSTENV="T2_V2RESET=1" ;;
   freeze) AW=freeze; W1="pause=20-23" ;;
   cross) RUN_S=280; KILL_AT=62; BACK_AFTER=""; W1="crossat=58.5 dest=l02_garbage changer=esc_level_changer_to_garbage_2" ;;
   mut_off) AW=freeze; W1="pause=20-23"; LOSTENV="T2_LOST_MS=0 T2_LOSTX_MS=0" ;;

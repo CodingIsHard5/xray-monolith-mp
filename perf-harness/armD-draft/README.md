@@ -47,6 +47,29 @@ Ordered by the Overseer as desk work while arm C waits. Nothing here has run on 
     mut_sess run scored as v2 FAIL (a session was sent; EPOCH present or no FOUND).
   - Guess: PASS 70 %. Risks: first engine run of the runner; the v2 header path of this script has only run in the stub.
 
+- **d0 becomes two boots (Overseer, 2026-11-25: a player must not wait out (old seq)/20 s; pick a fix, d0 scores it,
+  the old behaviour stays as the control).** I picked option (a), the reader takes the reset:
+  - Script draft `zz_p1_puppet_lost3.script` (from b6be10b4; three small edits, flag `-t2_v2reset`): while the pose is
+    LOST, a pose WITHOUT a session number and with a seq BELOW the last one is taken as a restarted writer, logged
+    `RESET,<t>,<game ms>,<old seq>,<new seq>` and counted with the epochs. Never when any pose of this run carried a
+    session number, so a v3 writer is untouched.
+  - Runner draft `t2_xray_v3.sh` here (from b31879be): installs the lost3 script; `T2_V2RESET` (default 1; 0 = the
+    old behaviour). These two replace b6be10b4 and b31879be for ALL of arm D if registered.
+  - Why (a) and not (b), a plain "update the other side" message: (a) makes the mixed install simply work, with no
+    step for the player; (b) needs a place to show a message on both sides and still leaves the wait. Left open:
+    a v2 writer that restarts and counts PAST the old seq within the lost limit (5 s) cannot happen (ITR2 needs
+    minutes to restart).
+  - Runs: `t3_pfD0.sh d0a <out>` = control, T2_V2RESET=0, scored `v2`; `t3_pfD0.sh d0b <out>` = reset on, scored
+    `v2r` (one RESET after LOST, FOUND 25 to 45 s after the last old pose, last T2SUM epochs=1).
+  - Desk, the real lost3 script in the stub: flag off = byte-identical log to b6be10b4 (FOUND after 87 s at seq 1141);
+    flag on = RESET and FOUND 30 s after the last pose, at seq 1, 3,333 poses applied instead of 2,193; flag on with
+    a v3 writer reusing its session number = still rejected (as mut_sess); with a new session = EPOCH as before;
+    v2 writer with a gap but no restart = plain FOUND, no RESET.
+  - Checker: stub data of each boot passes its own arm except V (no stance read-back in the stub) and FAILS the
+    other arm on checks 4 and 8.
+  - Not reviewed by CodeRabbit yet; I run it on the script and runner diffs before registration.
+  - Guesses: d0a PASS 70 %, d0b PASS 65 %.
+
 ## Env (draft; T2_RUN_S and T2_WALL_S are set from itrzone's schedule)
 
 `T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999 T2_KILL_AT=99999 T2_MAXRESTART=0
