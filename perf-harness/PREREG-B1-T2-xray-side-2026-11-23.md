@@ -2012,3 +2012,9 @@ follows itrzone's two ITR2-only runs.
 - **Guesses:** check 3 PASS 95 %; **X side PASS 70 %.** The rest of the risk is the first real engine killed this
   early: the Wine teardown, a cut autosave, a cut last snapshot.
 - **Joint text:** to be added here with byte count and sha256 when itrzone's amendment is registered.
+
+### 71a. Joint text for c3 (added after registration; section 71's own bytes above are unchanged)
+
+ITRZone amendment 123 copied into PREREG-B1-T2-JOINT-2026-11-23.md after one blank line: 6,425 bytes, sha256
+e17685ada4e38e83ac21b09eba48d8cbcde2a238f4aab86f8102eb3b23a2c98a (ITRZone branch desk-c3, commit b725fc9; mod blob for
+c3 4b22ec7e, to be confirmed by itrzone after its merge). What it says of the X side matches section 71.

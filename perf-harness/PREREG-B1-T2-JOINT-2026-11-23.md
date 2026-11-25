@@ -863,3 +863,71 @@ the kill comes inside X-Ray's level load, when it writes none; if it happens any
 named (the reader's fix is amendment 121, not part of this run).
 
 Guess before the run: ITR2 side PASS 75 %.
+
+## Amendment 123 (REGISTERED 2026-11-25): R3 arm C, c3: the early kill (X-Ray dies before its new level takes the crossing marker)
+In c1 and c2 X-Ray was killed about 4 s after our `cross` pose, and both times the new level's script had already
+taken the crossing marker (EnginePerf's limit, their section 70). The case "killed before the marker is taken" has
+passed only offline. c3 runs it live.
+
+**What changes against c2:** only EnginePerf's side. Their new runner `tools/t2_xray_c3.sh` kills the engine as soon as
+the marker file is non-empty (a 20 ms watcher; expected 20 to 60 ms after the write), then waits 150 s and restarts as
+in c2 (marker emptied, save on the Cordon). Their check tests the outcome: the restart line must say the marker held
+the request. If the take beats the kill, their side scores it "not an early kill".
+**Our side:** the mod of master with amendment 121 merged (the last snapshot file may now be cut; with whole files the
+mod's output is identical). Levers, zone file and route as c2. Boot arm `scripts/boot_t2.sh c3`; scored once by
+`tools/r3_check.py <run> <X dir> 1 c2` (arm c2's rules, unchanged: 15 checks). Pinned from EnginePerf's section 71
+(their commit 3f60f5f82; section text 4,903 bytes, sha256 d91e46a563fde8b7ce20efe3219486abbf0a1d7f7f2483fda17356fcb541cfa0):
+runner `tools/t2_xray_c3.sh` sha256 67687701c850f7bee3fb35c3e7c07951380bf9d89cf4d524098213931abe1492, their checker
+`tools/t3_armC3_xray_check.py` 651cbce2a2bbf6f64afebd4b55abb28a8d91b72592f22705f350d1d9ed088cbb; script 473dec25,
+Stance14.exe b4ce9c77 and lib cb183b7b unchanged. Env as c2 except `T2_KILL_XS=0 T2_KILL_MARK=1`. Their estimate of the
+take: 3 to 4.4 s after the request (hard bound: later than 0.15 s); their kill within 60 ms; their guess X side PASS 70 %.
+
+**Predictions and margins** (from c1 and c2 measured; self-test `R3C_SET=c3 python3 tools/r3c2_selftest.py`: c1's and
+c2's real logs as fixtures, two mutants, 300 synthetic logs from the values below with every stamp moved by -10 to
++10 ms: PASS):
+
+| Quantity | Predicted | Range | Pass bound | Margin |
+|---|---|---|---|---|
+| Our ground ready, s | 49.2 | 48 to 54 | at most 60 | 6 s |
+| The close by the mod's count, s | 120.0 | 120.0 to 120.1 | 120.0 to 125.0 | **touches the lower bound**: the figure is the mod's own count, printed with one decimal; it closes on the first frame at or after 120 s, so it cannot read below 120.0 (c1, c2: 120.0) |
+| The close by the stamps against the count, s | 0.003 short | 0.05 short to 0.1 long | within 0.5 | 0.4 s |
+| `recover waits` after the close, s | 0.014 | 0 to 0.1 | at least one before the new run | 59 s |
+| New X-Ray run after the cross start, s | 185 | 180 to 191 | after the close | 60 s |
+| Recover line after the new run, s | 3.8 | 3.0 to 5.5 | 2 to 10 | 1.0 s below (the mod waits 3 s of standing mismatch: 3.0 is its floor), 4.5 s above |
+| Recover crossing, s | 18.0 | 15 to 26 | at most 90 | 64 s |
+| Rig arrives after the cross end k=2, s | 12.9 | 10 to 16 | after the recover line | not near |
+| Walk after the recover crossing, m; largest step, m | 185; 0.43 | 150 to 200; 0.3 to 0.6 | at least 50; at most 2 | 100 m; 1.4 m |
+| Ground misses (miss + resolved) | 3 | 2 to 5 | at most 10 | 5 |
+| Pose rate, share of the wanted writes | 1.00 | 0.99 to 1.00 | at least 0.95 | 0.04 |
+| Pose write cost, 99th percentile, us | 1000 | 1000 | at most 1000 | **touches the bound** (a 1 ms clock; c2's ruling: kept as registered; a finer clock is owed in a later amendment) |
+| Frame time, 95th percentile, ms | 17.2 | 16.5 to 19.5 | at most 25 | 5.5 ms |
+| Link: latency 95th percentile, ms; accepted share | 18; 1.000 | 15 to 30; 0.99 to 1.00 | at most 300; at least 0.95 | 270 ms; 0.04 |
+| Spawns from the old level between the cross start and X-Ray's first Garbage header | 0 | 0 | 0 | the check itself |
+| Reader's `torn` count (reported) | 0 | 0 to 2 | none | |
+| `level_mismatch_snapshots` (reported) | 8,700 | 0 to 9,500 | none | |
+| Play clock at the end (reported) | 240.3 | 240.0 to 240.6 | none | |
+
+- New in c3 on our side, reported: if the file X-Ray leaves is cut (EnginePerf: possible, very unlikely), amendment
+  121's reader uses nothing of it; the mismatch is then logged as `T1 level mismatch: snapshot file not whole …`, the
+  `recover waits` line is written as before, and `level_mismatch_snapshots` reads near 0 (only whole files are counted).
+- The new-run time, from EnginePerf's parts: kill about 0.1 s after the request, their loop picks it up within 0 to 1 s,
+  teardown 4.9 s, wait 150.0 s, boot to the first snapshot 28 to 32 s (their estimate 181 to 190 s, centre 185).
+- If the new level's script takes the marker before the watcher sees it, there is no kill at all: X-Ray crosses and
+  runs on, and our side sees a normal crossing (no closed line). Our scorer then FAILs R3a and R3q as registered; the
+  RESULTS entry names the cause "no kill" and c3 has not shown its case. Not re-scored.
+**Guess:** our side PASS 80 % (two runs of the same behaviour; the risk is T2b on its bound and a new failure from the
+cut-file path live). EnginePerf's guess is theirs.
+
+**Attribution of a FAIL (c3 changes two things against c2: amendment 121 in the mod, and the early kill).** Fixed before
+the run:
+1. Amendment 121's code acts only on a file that is empty, unreadable or not whole, and it leaves a trace each time:
+   the `torn=<n>` figure in every `T1 accepted` line, and a `T1 level mismatch: <no snapshot file | unreadable snapshot
+   file | snapshot file not whole>; …` line. If `torn` is 0 in the last `T1 accepted` line and no such mismatch line
+   exists, amendment 121 never fired: the mod then did what c2's mod does (the offline control is byte-identical with
+   whole files), and a FAIL is the early kill's (or run noise of the kind c2 could also have shown).
+2. If it fired: a failing check is amendment 121's only if the trace lies inside that check's own window (R3q: from the
+   closed line to the recover line; R3n: from the cross start to X-Ray's first Garbage header; R3a: before the closed
+   line; T2d: outside the crossing windows). A trace outside the window leaves the FAIL with the early kill.
+3. If it fired inside the window and that does not settle it: one replicate with lever `t1whole=0` (the reader as in
+   c2), as its own registration. No re-scoring of c3.
+The RESULTS entry states which of the three applied, with the lines.
