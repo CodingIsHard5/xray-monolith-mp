@@ -194,3 +194,7 @@ After fix 1 the reader draft is 5bf69e5ce0ed7d775efe2ab9755826dca43152e093f6fbc5
 b048dbcf). The old-against-new witness on the five shapes was redone with it (witness_old_vs_new.txt): masked logs
 identical, same hashes as before. The v2 runs repeat: fix off, found after 87 s; fix on, RESET and found after 30 s.
 The cut-file witness above was run on b048dbcf and not repeated: the fix touches only the marker write at a crossing.
+
+**Cut-file witness repeated on 5bf69e5c (Overseer's order, 2026-11-25).** Same result: v3 writer 1,800 applied, 160
+TORN, no CROSS_REQ, EPOCH or RESET; v2 writer 1,800 applied, none of the three; no marker file written; control without
+cut files 2,000 applied. The masked logs of both cut runs are identical to the b048dbcf runs.
