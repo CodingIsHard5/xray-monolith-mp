@@ -1612,3 +1612,23 @@ Overseer's GO.
   - Condition 10's "none anywhere else" fails if ITR2 names another level at any other time.
 - **Guess, X side PASS:** b1 60 %, b2 50 %.
 - One retry per run only for a run that dies before its data, registered first.
+
+## 62. Result: arm B, run b1, X side PASS 10/10 (scored once, 2026-11-25)
+
+- Run: ITRZone/out/runs/20261125-051034-t2b1-xray, 05:10:34 to 05:30:15 EST. One boot, runner rc 0, no restart row.
+- Files checked before scoring, all as registered in section 61: runner 296563fd, script 473dec25, Stance14.exe
+  b4ce9c77, lib cb183b7b, checker a71e36e6. Test save cordon1 unchanged. No dmgtest.txt.
+- All ten conditions PASS.
+  - Out by esc_level_changer_to_garbage_1: 50.8 s to the first applied pose, 0.004 m from the destination.
+  - Recover by gar_level_changer_to_escape_1 (ITR2's choice): 22.5 s from the `cross` pose to the first applied pose.
+    That pose is 0.018 m from the registered spot (x -220.9, z -145.0) and 863 m from the changer destination, as
+    expected: the actor follows ITR2's player to its save spot.
+  - Applied poses 2,155 / 1,794 / 2,127. GUARD 0, HOLD 0 (the new Garbage walk met no spot without a node).
+  - Stance, state, height: 0 off of 6,076. Three clean VITALS lines, no refill.
+  - Zone mismatch: 1,055 lines, all in the window (seq 5728 to 6787, 54 s of game time), none elsewhere.
+- Wrong expectation, said plainly: itrzone expected about 100 mismatch lines (5 s); there were 1,055 (54 s). ITR2's
+  pose named l01_escape for much longer before the recover than it had read from its code. The floor of 20 was the
+  registered rule and it holds; the expected count was wrong by ten times. X-Ray logged and ignored every one of them.
+- First runs of: a `dead` pose while on another level; a recover crossing. Both behaved as read from code.
+- My guess (60 % PASS) was right. ITR2 side: FAIL 13 of 14 by itrzone's own score (R3p, which itrzone calls a scorer
+  mistake; the Overseer rules on it). So the joint result of b1 is not PASS as scored.
