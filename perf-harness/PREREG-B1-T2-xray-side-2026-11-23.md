@@ -1564,3 +1564,51 @@ fields stays v1 and takes the T2 path, unchanged.
 - My guess (75 % PASS) was right. ITR2 side: PASS 12/12 by itrzone's score; R3c decided on my boot0/meta_t2.csv
   (109 spawns, none of a creature not online on the level).
 - Joint: arm A2 PASS.
+
+## 61. R3 arm B (ITRZone amendment 116, arms b1 and b2), X side, registered BEFORE any boot (2026-11-25)
+
+A death next to a crossing (b1) and inside one (b2). ITR2's player dies while X-Ray is on the Garbage; ITR2's test
+save loads into Cordon; after 3 s of level mismatch ITR2's pose says `cross` back to l01_escape (the recover crossing).
+Policy keep in both: X-Ray is never stopped. Pose version 2. Two runs, b1 first, each its own box run on the
+Overseer's GO.
+
+- **Files, all frozen as in A2 (section 59):** runner tools/t2_xray.sh 296563fd, script harness/zz_p1_puppet.script
+  473dec25, run/bin/Stance14.exe b4ce9c77, tools/lib_engine_pids.sh cb183b7b.
+- **Env, as A2:** T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999 T2_KILL_AT=99999
+  T2_RUN_S=600 T2_WALL_S=1660 T2_OVER_S=120. Run length counts from each level load; the last load is expected near
+  360 s plus ITR2's save-and-reload leg at the start, so the end is well inside the wall limit.
+- **New: the checker** tools/t3_armB_xray_check.py
+  a71e36e69b66c009ef827b0946e2ae5df79b38db6fd57d874f66bcbc0c717d65 (made from c19740e8). Offline: A2's real data
+  scored as b1 fails condition 10 only; synthetic b1 and b2 pass; b2 data scored as b1 fails 4, 5, 6; a mismatch line
+  outside the window fails 10; a wrong spot fails 6.
+- **Score once per run:**
+  `python3 -I tools/t3_armB_xray_check.py <X out dir> out/t3pfD/run/boot0/meta_t2.csv <b1|b2> spot=-220.9,-145.0`
+- **PASS = all ten:**
+  1. rc 0, no Lua error, no FATAL, test mode off.
+  2. Two CROSS_REQ: out by esc_level_changer_to_garbage_1; the recover by gar_level_changer_to_escape_1 or _2
+     (whichever ITR2's pose names), each with its table values. No CROSS_NOCHANGER or CROSS_ERROR.
+  3. Two CROSS_RESUME, on l02_garbage then l01_escape, each after its request.
+  4. First applied play pose at most 90 s after the `cross` start: both crossings in b1, only the recover in b2.
+  5. Applied poses: at least 400 before; at least 600 on the Garbage in b1 (b2: reported, expected 0); at least 600
+     after the recover. GUARD 0. HOLD at most 15.
+  6. b1: first applied pose on the Garbage within 5 m of the changer destination. Both: first applied pose after the
+     recover within 5 m of x -220.9, z -145.0 (ITR2's save spot; itrzone gave it as an expected value read from its
+     code, not measured in a run of this kind). The distance to the changer destination is only reported.
+  7. Two runner cross holds, no restart row.
+  8. Stance read-back, movement state, height on every applied pose.
+  9. Three VITALS lines, each health >= 0.999, radiation and bleeding <= 0.0001, unread 0. No REFILL.
+  10. The death is seen: at least 20 ZONE_MISMATCH lines naming l01_escape between the first resume and the second
+      request (expected about 100), none anywhere else. The earlier death runs r3 and t3 had 0 such lines with the
+      same save-and-reload leg at the start.
+- **What has never run on my side:** a `dead` pose while on another level; a crossing request to a level the actor did
+  not come from by walking; in b2 a second level change about 30 s after a load.
+- **Risks.**
+  - b2: the runner's cross hold ends when the pose leaves `cross` (the death, 10 s after the changer). From then the
+    30 s no-new-snapshot rule applies while X-Ray may still load. A2's loads took about 9 s; a load over 40 s is
+    killed as a stall and fails condition 7.
+  - The spot of condition 6 is an expected value. If the pawn stands elsewhere, 6 fails by rule and is ruled on, not
+    tuned.
+  - The Garbage walk (284 m, new track) may meet spots without an AI node (HOLD limit 15).
+  - Condition 10's "none anywhere else" fails if ITR2 names another level at any other time.
+- **Guess, X side PASS:** b1 60 %, b2 50 %.
+- One retry per run only for a run that dies before its data, registered first.
