@@ -29,7 +29,7 @@ set_cfg() { local tmp; tmp=$(mktemp); grep -v -E "^($(tr ' ' '|' <<<"$VARS")) " 
   for v in $VARS; do printf '%s %s\r\n' "$v" "$(want_val $v "$1")" >> "$tmp"; done; cat "$tmp" > "$CFG"; rm -f "$tmp"; }
 read_cfg() { awk -v k="$1" '$1==k{gsub("\r",""); print $2}' "$CFG" | tail -1; }
 check_run() { # tag cfg fixed frames -> "check ok ..." or "check FAIL: ..."; returns 1 on fail
-  local tag=$1 cfg=$2 fixed=$3 frames=$4 f=out/$1/perf_sites_$1.csv L=out/$1/xray.log v bad="" hz st up nl
+  local R=${S2_CHECK_ROOT:-out}; local tag=$1 cfg=$2 fixed=$3 frames=$4 f=$R/$1/perf_sites_$1.csv L=$R/$1/xray.log v bad="" hz st up nl
   for v in $VARS; do [ "$(read_cfg $v)" = "$(want_val $v "$cfg")" ] || bad="$bad $v=$(read_cfg $v)!=$(want_val $v "$cfg")"; done
   hz=$(want_val sim_tick "$cfg")
   st=$(tr -d '\r' < "$f" 2>/dev/null | awk -F, '$1=="Sim tick"{print $4+$7}' | head -1); st=${st:-0}
@@ -47,7 +47,7 @@ check_run() { # tag cfg fixed frames -> "check ok ..." or "check FAIL: ..."; ret
     [ "$hz" -gt 0 ] || [ "$nl" = 0 ] || bad="$bad SIMTICK-line-in-stock-run($nl)"
   fi
   [ -z "$bad" ] && { echo "check ok (updates $up of $frames frames, sim-tick site $st, SIMTICK lines $nl)"; return 0; }; echo "check FAIL:$bad"; return 1; }
-[ "${1:-}" = "--check" ] && { CFG=out/$2/user.ltx.after; check_run "$2" "$3" "$4" "$5"; exit $?; }   # desk test of the check on a finished run folder
+[ "${1:-}" = "--check" ] && { CFG=${S2_CHECK_ROOT:-out}/$2/user.ltx.after; check_run "$2" "$3" "$4" "$5"; exit $?; }   # desk test of the check on a finished run folder
 [ -s run/bin/SimTick14.exe ] && [ "$(sha256sum run/bin/SimTick14.exe | cut -d' ' -f1)" = "$EXE_SHA" ] || { log "REFUSED: SimTick14.exe hash differs"; exit 2; }
 "$T/quiet-required.sh" check 2>/dev/null | awk -v w=$W '$1=="HELD:" && $4==w{f=1} END{exit !f}' || "$T/quiet-required.sh" want $W EXCLUSIVE >/dev/null 2>&1
 until ! "$T/protected-title-check.sh" >/dev/null 2>&1 && ! pgrep -x sober >/dev/null && \
@@ -80,4 +80,4 @@ done
 set_cfg ""   # leave both switches at 0 in the run dir
 "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1; "$T/quiet-required.sh" release $W >/dev/null 2>&1   # withdraw FIRST
 log "slice end: $(grep -c . $ST/done.txt) done, $(pending | wc -l) left. ${stop:-list finished}"
-timeout 60 "$T/notify-overseer.sh" engineperf - <<<"EnginePerf S2 tick series: slice ended $(date +%T), $(grep -c . $ST/done.txt) runs done, $(pending | wc -l) left. ${stop:-list finished}. Scoring next." >/dev/null 2>&1
+timeout 60 "$T/notify-overseer.sh" engineperf - <<<"EnginePerf S2 tick series: slice ended $(date +%T), $(grep -c . $ST/done.txt) runs done, $(pending | wc -l) left IN THIS SLICE. ${stop:-list finished}. Nothing is scored until all 18 registered runs are done." >/dev/null 2>&1

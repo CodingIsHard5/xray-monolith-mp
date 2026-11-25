@@ -1,15 +1,15 @@
-tag           cfg                    boot_val  SIMTICK  simsite  seqFrame  frames   ltx_after
-s2_off_1      []                     0         0        0        12000     12000    r__framelimit=0 sim_tick=0 
-s2_t30_1      [sim_tick=30]          30        7        1652     1652      12000    r__framelimit=0 sim_tick=30 
-s2_t60_1      [sim_tick=60]          60        8        3518     3518      12000    r__framelimit=0 sim_tick=60 
-s2_t50_1      [sim_tick=50]          50        7        2885     2885      12000    r__framelimit=0 sim_tick=50 
-s2_t50_2      [sim_tick=50]          50        7        2860     2860      12000    r__framelimit=0 sim_tick=50 
-s2_t60_2      [sim_tick=60]          60        8        3669     3669      12000    r__framelimit=0 sim_tick=60 
-s2_t30_2      [sim_tick=30]          30        7        1673     1673      12000    r__framelimit=0 sim_tick=30 
-s2_off_2      []                     0         0        0        12000     12000    r__framelimit=0 sim_tick=0 
-s2_t60_2_rr   [sim_tick=60]          60        8        3564     3564      12000    r__framelimit=0 sim_tick=60 
-s2_c30        [r__framelimit=30]     0         0        0        1800      1800     r__framelimit=30 sim_tick=0 
-s2_c60        [r__framelimit=60]     0         0        0        3600      3600     r__framelimit=60 sim_tick=0 
-s2_c50        [r__framelimit=50]     0         0        0        3000      3000     r__framelimit=50 sim_tick=0 
-s2_f33        []                     0         0        0        3000      3000     r__framelimit=0 sim_tick=0 
-s2_f30        [sim_tick=30]          30        2        3000     3000      3000     r__framelimit=0 sim_tick=30 
+tag           cfg                  boot_val  SIMTICK  simsite  seqFrame  frames  registered_check       amended_check
+s2_off_1      []                   0         0        0        12000     12000   ok (live, in the run)  ok (desk)
+s2_t30_1      [sim_tick=30]        30        7        1652     1652      12000   ok (live, in the run)  ok (desk)
+s2_t60_1      [sim_tick=60]        60        8        3518     3518      12000   ok (live, in the run)  ok (desk)
+s2_t50_1      [sim_tick=50]        50        7        2885     2885      12000   ok (live, in the run)  ok (desk)
+s2_t50_2      [sim_tick=50]        50        7        2860     2860      12000   ok (live, in the run)  ok (desk)
+s2_t60_2      [sim_tick=60]        60        8        3669     3669      12000   ok (live, in the run)  ok (desk)
+s2_t30_2      [sim_tick=30]        30        7        1673     1673      12000   ok (live, in the run)  ok (desk)
+s2_off_2      []                   0         0        0        12000     12000   ok (live, in the run)  ok (desk)
+s2_t60_2_rr   [sim_tick=60]        60        8        3564     3564      12000   ok (live, in the run)  ok (desk)
+s2_c30        [r__framelimit=30]   0         0        0        1800      1800    ok (live, in the run)  ok (desk)
+s2_c60        [r__framelimit=60]   0         0        0        3600      3600    ok (live, in the run)  ok (desk)
+s2_c50        [r__framelimit=50]   0         0        0        3000      3000    ok (live, in the run)  ok (desk)
+s2_f33        []                   0         0        0        3000      3000    ok (live, in the run)  ok (desk)
+s2_f30        [sim_tick=30]        30        2        3000     3000      3000    FAIL (live, in the run) ok (desk)

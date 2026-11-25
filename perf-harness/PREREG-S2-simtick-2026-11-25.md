@@ -313,7 +313,7 @@ frames of checkpoints 2 and 3 (+2.0, +2.7: none seen).
 **Section 8 in this light:** the one-pass difference there was the time-checkpoint phase drift (9.2), as predicted in
 9.3. Section 8's FAIL stays in the record as scored; part A is met by this section, not by re-reading that one.
 
-## 11. Part B stopped at run 14 of 18 on a failed per-run check. Cause: my check, not the run. AMENDMENT (DRAFT until the Overseer's GO; nothing scored)
+## 11. Part B stopped at run 14 of 18 on a failed per-run check. Cause: my check, not the run. AMENDMENT, REGISTERED 2026-11-25 on the Overseer's GO, before the remaining runs; nothing scored
 
 **What happened.** Slices 1 and 2 ran 14 runs (13 passed their checks; `s2_t60_2` was flagged not clean, excluded and
 re-run as `s2_t60_2_rr`, as registered, at the end of slice 1 because the series was split into slices to yield).
@@ -348,4 +348,44 @@ the same between f33 and f30/f50/f60; between f30, f50 and f60 it differs only b
 `s2_f30_rr` (the registered check failed on `s2_f30`, so it is run again under the amended check, not re-scored; the
 scorer takes `_rr` in place of its original), `s2_f60`, `s2_f50`, `s2_offL`, `s2_t30L`, `s2_t60L`. Lines as registered.
 Predictions, margins and the scorer are unchanged. The 13 finished runs stay as they are.
-Pinned: s2_series_b.sh cce48a0b3a7df1a0; s2_order_b.txt c656b5e4489752f3. Copies: perf-harness/s2-partB-amend/.
+(The hashes of the draft are replaced by 11.1 below.)
+
+### 11.1 Registered form (the Overseer's four conditions)
+1. **The first `s2_f30` stays EXCLUDED**, as run, under the check it was registered with. The amended scorer carries it
+   in a fixed exclusion list and prints an EXCLUDED line for it. The run under this amendment is the new tag
+   `s2_f30_rr`. Nothing is re-scored.
+2. **The 13 finished runs pass BOTH checks:** the registered one live in their run, the amended one at the desk
+   (perf-harness/s2-partB-amend/check_table.txt, two columns). `s2_f30` is the only row with FAIL / ok.
+3. **Warm-up confound, a stated limit of every f-against-f33 comparison:** f30, f50 and f60 warm up gated in real
+   time, f33 warms up stock. Direction: in 600 warm-up frames the gated runs make about 69 world updates and f33
+   makes 600, each at its own step, so at the capture's start the f33 world has been updated about nine times as
+   often. A-Life and scripts that settle after a load (spawn bursts, first schedules) are then further along in f33.
+   If the first seconds after a load cost more per update, the f-runs carry more of that cost inside their capture
+   and look MORE expensive per tick against f33 than they are. f30 against f60 is far less affected (both gated).
+4. **Phase test before the remaining runs, run and passed:** `tools/s2_phase_selftest.py out <work>` = every run type
+   of part B (14 types: off, t30, t60, t50, c30, c60, c50, f33, f30, f60, f50, offL, t30L, t60L), on real run folders
+   (types not run yet are made from the nearest real one), each log with warm-up, capture and quit phases.
+   - every type: the amended check passes and the amended scorer finds the arm valid;
+   - switch on: a poisoned gate line (dropped 999, age 9999) in the warm-up AND in the quit phase changes neither
+     the check's answer nor any scorer value;
+   - switch off: the same line FAILS the check (the gate printed in a run that asked for stock);
+   - gated types: the same line in the middle of the capture IS seen (dropped +999).
+   Result: PHASE SELFTEST PASS, 33 of 33.
+   **It found a second leak, in the SCORER, before any scoring:** the registered scorer took "every [SIMTICK] line but
+   the first" for the gated arms' shares, drops and ages. The first line is printed at the first gated frame and
+   covers ONE frame; the second covers the warm-up; a last one can cover quit frames. So one warm-up window was in
+   the gated arms' numbers. Amended scorer `tools/s2_score_b.py`: only the lines printed between the capture's start
+   and finish lines, less the first of them (its 10 s window reaches back before the start); an arm without those
+   two log lines is invalid. Its self-test `tools/s2_selftest_b.py` gives every gated fixture a poisoned line in
+   the warm-up, at the capture's start and in the quit phase: PASS 20 of 20, and the REGISTERED scorer on the same
+   fixtures reads dropped 999 or more (so the fixtures do catch the leak). No other definition of the scorer changed;
+   the 48 predictions are unchanged. The gated arms' shares, drops and ages come from fewer windows (about 4 of 5).
+   What the phase test cannot see: the profiler's own files (sites, frames) are taken as capture-only by its
+   start/finish; I did not test that.
+   While testing, the amended scorer ran on real run folders one at a time; I read only pass/fail and the dropped
+   count (0 in the gated runs). The series has not been scored.
+- The series script's notice to the Overseer now says its counts are for the slice only.
+**Pinned (sha256, first 16):** s2_series_b.sh 83d809d7e91cf75a; s2_order_b.txt c656b5e4489752f3; s2_score_b.py caeb5715cb86159f;
+s2_selftest_b.py 46478fc24ffd3a49; s2_phase_selftest.py d49a671b35c56825; driver s2_partB2.sh 18bfa3585fa8d70f (two
+slices: f30_rr, f60, f50; then offL, t30L, t60L). SimTick14.exe 93fff4b5…858f21. Copies: perf-harness/s2-partB-amend/.
+Score, once, when all six are done: `python3 -I tools/s2_score_b.py out tools/s2_pred.json out/s2_score.txt`.
