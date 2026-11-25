@@ -146,7 +146,7 @@ nor A2 has a result. Nothing of part B has run.
 counter files exist only with `-det_counters`; section 2 never named it.
 
 **What I saw in the failed attempt, and what it is not.** det_pair's own position diff printed "checkpoints differ"
-for every pair, the two STOCK runs against each other included (14 to 16 objects of 30,461, online squads by
+for every pair, the two STOCK runs against each other included (13 to 16 objects of 30,461, online objects by
 positions; the A-Life generator state is equal in all four runs). That diff is not the registered check and is known
 to differ between identical builds; it is why the counters exist. It gives no verdict either way.
 
