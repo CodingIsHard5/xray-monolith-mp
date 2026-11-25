@@ -140,3 +140,39 @@ T2_LOST_MS=5000 T2_LOSTX_MS=120000 T2_OVER_S=120` plus:
 > checker's arm. Covered: a writer returning after a lost crossing (d2). Not covered: a pose without the session
 > field. Guesses and risks as above. One retry per run only for a run that dies before its data, registered first;
 > a protected-title abort is judged by the timestamp rule of section 64a.
+
+## Half-written files (Overseer's order, 2026-11-25, after the arm C question)
+
+**Why rename was removed in T1.** It was not a choice of ours. The engine removes it from every script's Lua:
+`disable_os_funcs` in src/xrServerEntities/script_storage.cpp (lines 318-335) sets `os.execute`, `os.rename`,
+`os.remove`, `os.exit` and `io.popen` to nil. It is the engine's sandbox for all mods. So a script cannot write to a
+temporary name and rename; the T1 prereg (section 2) says the same and chose "rewrite in place, header seq and
+`end,<seq>` footer, the reader takes a file only when both match".
+
+**What the reason allows.**
+- Write-then-rename from the script: NOT possible without an engine change (give `os.rename` back to all mods, or
+  export a new C++ function for it). Opening the sandbox for every mod is not something I propose for a test bridge.
+- A reader-side whole-file check: possible, and it is the rule both sides agreed in T1. I propose this one.
+
+**My reader (ITR2's pose file) already does it; witness with deliberately cut files.** The stub's `STUB_CUT` makes
+every 10th pose a cut file that would do harm if any part were used: a higher seq, state `cross`, another level, a
+changer line and a NEW session number (or, with `STUB_CUT=v2`, no session and seq 1), cut five ways: empty; half a
+header; header only; header + pose + changer without the end line; whole but with another seq in the end line.
+100 s of track, 2,000 writes, 200 of them cut:
+
+| reader | writer | poses applied | TORN logged | CROSS_REQ | EPOCH | RESET |
+|---|---|---|---|---|---|---|
+| lost2 b6be10b4 | v3 | 1,800 | 160 | 0 | 0 | 0 |
+| lost3 draft, fix on | v3 | 1,800 | 160 | 0 | 0 | 0 |
+| lost3 draft, fix on | v2 | 1,800 | 0 (seq 1 is not newer) | 0 | 0 | 0 |
+| frozen 473dec25 | v2 | 1,800 | 0 | 0 | 0 | 0 |
+| lost3 draft, no cut files (control) | v3 | 2,000 | 0 | 0 | 0 | 0 |
+
+No cut file is applied, starts a crossing, or counts as a new session, on any of the three scripts.
+- Not shown by the stub: a cut v2 file arriving WHILE the pose is lost (the reset path). By reading: the RESET line
+  and the counters are written only after the end-line check, like EPOCH.
+
+**Where the gap is.** In ITR2's reader of my snapshot: amendment 119's finding 8 says a header without its footer
+sets the level before the body is checked. The cure is on that side: use nothing of a snapshot, the level included,
+before the end line matches the header seq. That is itrzone's amendment to write; I offer this witness and, if it
+helps, a header field with the line count so a reader can also check the length.

@@ -83,8 +83,22 @@ for k = math.floor(T0 * 20), math.floor(T1 * 20) - 1 do
   local f = real_open(SHM.."/pose.txt","wb"); local body = V2 and string.format("p,%.3f,%.3f,%.3f,0.0000,1.0,%d", x, ABS or (y + 0.3 + OFF), z, (n % 400 < 200) and 0 or 1) or string.format("p,%.3f,%.3f,%.3f,0.0000,1.0", x, y, z)
   local st, zn = "play", os.getenv("STUB_ZONE") or LEVEL;   -- arm D: STUB_ZONE = the level ITR2 is on, when it is not X-Ray's
    if MODE == "cross" and n >= 100 then st, zn = "cross", (os.getenv("STUB_DEST") or "l02_garbage"); body = string.format("p,%.3f,%.3f,%.3f,0.0000,1.0,0", x, y + 0.3, z) .. (os.getenv("STUB_C") and ("\r\nc," .. os.getenv("STUB_C")) or "") end
-  f:write(string.format("seq,%d,%d,%s,%s,%s%s\r\n%s\r\nend,%d\r\n", n, 1795000000000 + n*50, st, zn, AWS, SESS and ("," .. SESS) or "", body, n)); f:close(); local ok, e = pcall(tick, 50); if not ok then print("stopped: " .. tostring(e):sub(-12) .. " CHANGED=" .. tostring(CHANGED)); break end
+  -- STUB_CUT (half-written file witness): every 10th pose is a deliberately CUT file that would do harm if any of it were
+  -- used: a header with a higher seq, state cross, another level and a NEW session number (or none, with STUB_CUT=v2 and
+  -- seq 1), cut in one of five ways: empty; half a header; header only; header + p + c without the end line; whole but
+  -- with another seq in the end line.
+  local CUT = os.getenv("STUB_CUT")
+  if CUT and n % 10 == 0 then
+    local h = CUT == "v2" and "seq,1,1795000000000,cross,l02_garbage,keep" or string.format("seq,%d,%d,cross,l02_garbage,%s,999", n, 1795000000000 + n*50, AWS)
+    local c = (n / 10) % 5; local pl = "\r\np,1.000,2.000,3.000,0.0000,1.0,0\r\nc,esc_to_gar"
+    f:write(c == 0 and "" or c == 1 and h:sub(1, 9) or c == 2 and (h .. "\r\n") or c == 3 and (h .. pl .. "\r\n") or (h .. pl .. "\r\nend," .. (n + 1) .. "\r\n")); f:close(); NCUT = (NCUT or 0) + 1
+  else
+  f:write(string.format("seq,%d,%d,%s,%s,%s%s\r\n%s\r\nend,%d\r\n", n, 1795000000000 + n*50, st, zn, AWS, SESS and ("," .. SESS) or "", body, n)); f:close();
+  end
+  if true then local ok, e = pcall(tick, 50); if not ok then print("stopped: " .. tostring(e):sub(-12) .. " CHANGED=" .. tostring(CHANGED)); break end
+  end
   end
 end
+if NCUT then print("cut files written " .. NCUT) end
 for _, f in ipairs(CB.actor_on_net_destroy or {}) do f() end
 print("sets "..NSET.." collision-correcting sets "..COLL.." last stance "..tostring(STANCE))
