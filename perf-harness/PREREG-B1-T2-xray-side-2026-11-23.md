@@ -1363,3 +1363,26 @@ fields stays v1 and takes the T2 path, unchanged.
 - **Stop rule:** a FAIL is reported, not tuned. One retry only for a run that dies before its data, registered first.
 - **Not part of x3:** the lost-pose work (design note of 2026-11-24) is being drafted in
   perf-harness/lost-draft/ on copies; no file x3 uses is touched.
+
+## 55. R3 x3: X side PASS 9 of 9 (scored once, 2026-11-24)
+
+- **Run:** X out dir ~/Projects/ITRZone/out/runs/20261124-192917-t2x3-xray, 19:29-19:43, files as frozen in section
+  54 (all four hashes and the checker's rechecked after the run), runner rc 0, one boot, no restart. Test save
+  unchanged (scoc a9f9a8a9..., scop 6dea752b...); control file absent.
+- **Each check:**
+  1. PASS: rc 0, no Lua error, no FATAL, no DMG line.
+  2. PASS: two CROSS_REQ, out by esc_level_changer_to_garbage_2, back by gar_level_changer_to_escape_2, with the
+     table values; no CROSS_NOCHANGER or CROSS_ERROR.
+  3. PASS: two CROSS_RESUME, Garbage then Cordon, each after its request.
+  4. PASS: first applied play pose 47.9 s and 48.7 s after the cross pose (limit 90 s).
+  5. PASS: P2 952 before, 1,201 on Garbage, 1,199 back on Cordon; 0 GUARD, 0 HOLD.
+  6. PASS: first pose after each resume 0.001 m from the changer's destination.
+  7. PASS: two runner cross holds, no restart row.
+  8. PASS: 0 of 3,352 P2 off in stance, movement state or height.
+  9. PASS: three VITALS lines, each health 1.000, radiation 0, bleeding 0, 0 unread; no REFILL; 0 hits.
+- **Guess:** 80 % PASS; it passed. None of the named risks happened.
+- **ITR2 side (ITRZone's own score, its to report):** PASS 12 of 12. The joint result is ITRZone's to send.
+- **Repeat of x2:** crossing times differ from x2 by 0.4 s and 0.3 s; arrival distance and P2 counts match to
+  within 2 lines.
+- **Not covered (unchanged):** a death during a crossing; spots with no AI node; a lost pose writer (design note of
+  2026-11-24, draft in perf-harness/lost-draft/); the actor between arrival and the first pose.
