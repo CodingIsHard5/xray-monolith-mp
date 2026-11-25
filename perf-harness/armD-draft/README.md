@@ -16,6 +16,7 @@ Ordered by the Overseer as desk work while arm C waits. Nothing here has run on 
 
 | run | ITR2 is killed | policy | what it shows on my side |
 |---|---|---|---|
+| d0 | X-ONLY boot, no ITR2: the stand-in writer sends pose VERSION 2, is killed at 60 s and comes back 30 s later with its seq at 1 | keep | an old ITR2 mod against the new reader: v2 poses applied, LOST after 5 s, the returning writer taken only when its seq has passed the old one |
 | d1 | during play on Cordon | keep | LOST after 5 s, X-Ray runs on alone for the whole gap, EPOCH + FOUND on the new session, poses applied again |
 | d2 | during a crossing out, a few seconds after its `cross` pose | keep | X-Ray finishes the level change alone, LOST 120 s after its resume, the new session appears on Cordon, EPOCH + FOUND, recover crossing back |
 | d3 | during play on Cordon | freeze | as d1, but the bridge stops X-Ray at LOST and continues it when a pose returns |
@@ -26,6 +27,25 @@ Ordered by the Overseer as desk work while arm C waits. Nothing here has run on 
   If ITR2's first poses after its restart say `away` + freeze (its save-and-reload leg), the bridge stops X-Ray again
   at once; the checker allows more than one STOP..CONT pair for that. I propose d3 last, on its own GO.
 - Freeze during a crossing is not drafted (the Overseer's earlier rule: freeze at a level change gets its own run).
+
+- **d0 (ordered by the Overseer, 2026-11-25: a mixed version, an old ITR2 mod with the new X-Ray, is a realistic
+  state for Caden).** It runs first, before d1, as its own short X-only boot, and is also the first engine run of
+  runner b31879be.
+  - Files: `t3_pfD0.sh` (driver, from t3_pfL2.sh; case `d0`), `t2_lost_pose2.py` (the stand-in writer with
+    `sess=none` = no session field), runner tools/t2_xray_v3.sh, script b6be10b4. Run length 200 s, one 20-minute slice.
+  - Score: `python3 -I tools/t3_armD_xray_check.py out/t3pfD0 out/t3pfD/run/boot0/meta_t2.csv v2 keep` (eight checks
+    and V).
+  - Desk run with the REAL script in the stub (gap 60 to 90 s, 3 s pause, seq back at 1): LOST at 5,000 ms, no
+    EPOCH, nothing applied for 87 s, FOUND at seq 1141 (the old one was 1140), 1,053 poses applied after.
+  - What it will show, and it is by design: with a v2 writer a restart is NOT picked up at once. The pose stays lost
+    until the new writer's seq passes the old one: (old seq) / 20 seconds, 57 s here, and about 10 minutes after a
+    10-minute session. The session number of v3 is the cure. The runner (bridge) takes any new pose, so it reports
+    the pose back after 30 s while the script still waits; under keep that has no effect.
+  - Under freeze this mixed state would continue X-Ray at once while the script still applies nothing until the seq
+    has passed. Not run; named here so nobody is surprised.
+  - Checker tests: stub data passes checks 2 to 8 (V cannot pass on stub data); the real keep run and the real
+    mut_sess run scored as v2 FAIL (a session was sent; EPOCH present or no FOUND).
+  - Guess: PASS 70 %. Risks: first engine run of the runner; the v2 header path of this script has only run in the stub.
 
 ## Env (draft; T2_RUN_S and T2_WALL_S are set from itrzone's schedule)
 
@@ -56,7 +76,9 @@ T2_LOST_MS=5000 T2_LOSTX_MS=120000 T2_OVER_S=120` plus:
      during the load and dies; LOST 120,000 ms after CROSS_RESUME; a new session (seq from 1) names l01_escape:
      EPOCH and FOUND on its first pose, 99 ZONE_MISMATCH lines, CROSS_REQ back by gar_to_esc on its `cross` pose,
      CROSS_RESUME on Cordon, 400 poses applied there.
-2. **A pose WITHOUT the session field read by this script in the engine: NOT COVERED by arm D.** Arm D's writer is
+2. **A pose WITHOUT the session field read by this script in the engine: COVERED by d0 (added on the Overseer's
+   order), as scored checks.** What follows was the first draft's reasoning:
+   - (first draft) NOT COVERED by arm D. Arm D's writer is
    v3 from its first pose, before and after the restart. Offline only so far (the stub's `L_v3_plain` case).
    - It matters only if a v2 writer ever meets this script. If arm D passes, every later arm uses v3 on both sides
      and the frozen v2 script 473dec25 is retired, so the case would not occur.
@@ -78,6 +100,7 @@ T2_LOST_MS=5000 T2_LOSTX_MS=120000 T2_OVER_S=120` plus:
 
 ## Predictions (X side PASS; to be restated at registration)
 
+- d0 70 % (above).
 - d1 55 %. Risks: first engine run of runner b31879be; a gap eight times longer than any run so far; ITR2's first
   poses after its restart (state and level) are read from code, not seen.
 - d2 40 %. As d1, plus the first recover out of a lost crossing in the engine, and ITR2's new session must send the
