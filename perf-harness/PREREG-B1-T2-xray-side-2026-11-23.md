@@ -2018,3 +2018,32 @@ follows itrzone's two ITR2-only runs.
 ITRZone amendment 123 copied into PREREG-B1-T2-JOINT-2026-11-23.md after one blank line: 6,425 bytes, sha256
 e17685ada4e38e83ac21b09eba48d8cbcde2a238f4aab86f8102eb3b23a2c98a (ITRZone branch desk-c3, commit b725fc9; mod blob for
 c3 4b22ec7e, to be confirmed by itrzone after its merge). What it says of the X side matches section 71.
+
+## 72. Arm C3 (live early kill at the crossing marker) — X-side result, scored once (2026-11-25)
+
+Run folders: X side `ITRZone/out/runs/20261125-140818-t2c3-xray` (copied to `out/t3armC_c3` before scoring);
+ITR2 side `ITRZone/out/runs/20261125-140818-stream-t2c3`. Pinned files rechecked before scoring: runner 67687701,
+checker 651cbce2, puppet script 473dec25, Stance14.exe b4ce9c77, lib_engine_pids cb183b7b. itrzone's mod blob 4b22ec7e.
+
+**X side: PASS, 10 of 10. itrzone's ITR2 side: PASS, 15 of 15 (its own score). Joint: PASS.**
+My guess was X PASS at 70 %, check 3 at 95 %; both held.
+
+| check | result | value |
+|---|---|---|
+| 1 runner rc 0, no Lua error, no FATAL | PASS | 0 / 0 / 0 |
+| 2 boot 0: one request, no resume | PASS | requests 1, resumes 0 |
+| 3 kill at the marker; marker full at restart with boot 0's request, emptied | PASS | kill 4 ms after the marker's write (upper bound); 37 bytes -> 0 |
+| 4 boot 1: one request, then one resume on the destination | PASS | |
+| 5 first applied play pose after the cross pose | PASS | 22.3 s (limit 90 s) |
+| 6 applied poses, no GUARD, HOLD <= 15 | PASS | boot 0 2,151; boot 1 2,401 after the resume; GUARD 0, HOLD 0 |
+| 7 first pose after the resume near the changer destination | PASS | 0.004 m (limit 5 m) |
+| 8 stance, movement state, height on every applied pose | PASS | 0 differ of 4,552 |
+| 9 vitals clean, no refill | PASS | health 1.000, radiation 0, bleeding 0 |
+| 10 test save untouched | PASS | a9f9a8a9, 6dea752b |
+
+What this shows: X-Ray killed inside the level load, one statement after the marker's write and before the new level
+took it, comes back on the old level, repeats the crossing by itself and ends on the destination with ITR2's poses applied.
+itrzone's stamps: new X-Ray run seen 184.8 s after the cross start (my estimate 181 to 190 s).
+
+Limits: one run, one kill moment (the earliest possible). The 4 ms is an upper bound (stamped after the kill).
+With c2 (kill after the take) the two ends of the load are covered; the middle of the load is not.
