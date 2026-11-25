@@ -1852,3 +1852,44 @@ there. Policy keep, pose version 2. One joint boot on the Overseer's GO, which i
 - **Guess: X side PASS 50 %.** First engine run of the runner and of a kill inside a load.
 - **Joint text:** amendment 119 copied into PREREG-B1-T2-JOINT-2026-11-23.md: 12,541 bytes, sha256
   929b5b288e29a66cfb1d4b85f5596f19cbda0f56a7d2a5d1a368f9ed4db15207 (ITRZone master dbf5da9).
+
+## 68. Result: arm C, run c1, X side FAIL 8 of 9 (scored once, 2026-11-25); the one failure is my checker's
+
+Run 13:24 to 13:35 UTC on the Overseer's GO, by itrzone's `scripts/boot_t2.sh c1`. X output copied unchanged to
+out/t3armC_c1 (from ITRZone out/runs/20261125-082115-t2c1-xray). Hashes rechecked after the run: runner 40b87576,
+script 473dec25, Stance14.exe b4ce9c77, lib cb183b7b, checker 7ec98e73; test save a9f9a8a9 / 6dea752b unchanged; no
+script left installed, no engine left. Scored once:
+`python3 -I tools/t3_armC_xray_check.py out/t3armC_c1 out/t3pfD/run/boot0/meta_t2.csv` -> **X SIDE: FAIL**.
+
+| # | Condition | Result |
+|---|---|---|
+| 1 | rc 0, no Lua error, no FATAL, no DMG | PASS |
+| 2 | boot 0: one request, NO resume (the kill landed inside the load) | PASS (1 request, 0 resumes) |
+| 3 | one planned kill 4 to 6 s after the cross pose; restart wait and "marker emptied" logged | **FAIL**: kill row right (4 s, planned), restart wait logged, but NO "crossing marker emptied" line |
+| 4 | boot 1 own log: one request Cordon to Garbage, one resume after it | PASS |
+| 5 | boot 1: first applied play pose at most 90 s after the cross pose | PASS (22.3 s) |
+| 6 | poses: boot 0 at least 400 before the request, boot 1 at least 600 after the resume; GUARD 0; HOLD at most 15 | PASS (2,157; 2,400; 0; 0) |
+| 7 | first pose after the resume within 5 m of the changer's destination | PASS (0.004 m) |
+| 8 | stance, movement state, height on every applied pose | PASS (4,557 poses) |
+| 9 | VITALS clean in both boots, no REFILL | PASS |
+
+**Why check 3 failed: my checker asked for a log line that the runner writes only when the marker is not empty, and
+here it was already empty.** The kill came 4.1 s after the cross pose. By then X-Ray had saved, disconnected and
+started the Garbage load, and the new level's script state had already loaded (engine log line 14963, "loading script
+zz_p1_puppet.script" a second time) and taken the marker, which empties it. The kill then landed before the first
+update of the new level, so no CROSS_RESUME was logged (check 2 holds). The runner found an empty marker at the
+restart, emptied nothing and logged nothing. Boot 1's log shows no false "arrived by crossing" line (check 4), which
+is what the marker rule protects. My offline witness had a marker left by a kill BEFORE the script reload; I did not
+think of a kill after it. The FAIL stands as scored; no re-score.
+
+What the run showed on my side, all firsts in the engine: the new runner (planned kill by pose state, restart wait,
+restart); a kill inside a level load; a level change 15.0 s of game time after a load (the request was read as the
+warm-up ended); no level-mismatch line in boot 1 (the cross pose was there at the first read). Timeline (UTC): cross
+pose seen 13:26:51.56, kill 13:26:55.70, restart 13:29:27.38, Cordon loaded 13:29:56.45, Garbage loaded 13:30:17.03,
+end 13:35:46.47. The half-finished level change left a normal autosave behind; the test save is untouched.
+
+- **My guess was PASS 50 %.** The run did what the arm asks; the verdict is FAIL through my own check.
+- **itrzone's side, as it reports:** FAIL 14 of 15 as scored, also through its scorer (its close came 119.993 s after the
+  cross start by the log stamps, the bar says 120 to 125 s). Joint verdict: FAIL as scored, for the Overseer to rule.
+- **Prospective fix for any later arm C run (not applied to this score):** check 3 asks for the kill row and the restart
+  wait, and for the marker being EMPTY at boot 1's start (the runner logs its size either way), instead of the line.
