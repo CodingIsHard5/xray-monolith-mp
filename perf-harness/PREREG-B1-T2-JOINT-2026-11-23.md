@@ -531,3 +531,43 @@ running about 8 minutes after our end (its run counter restarts at the last arri
 
 Guess before the run: ITR2 side PASS 70 %. Risks: pair `_1` has never been used by the rig (its arrival points, the ring
 there, a crossing over 60 s); 300 s standing in the Garbage with creatures around (the heal lever is on); a walker.
+
+ITRZone amendment 114, copied verbatim from /home/caden/Projects/ITRZone/PREREG.md at ITRZone commit c59bc82 (3506 bytes). X side: PREREG-B1-T2-xray-side section 59.
+
+## Amendment 114 (REGISTERED 2026-11-24): arm A again as a new run, arm a2
+Overseer's ruling after arm A's joint FAIL (ours 11 of 12 on R3c, a walker; X side 6 of 9 on its runner's wall limit):
+re-register arm A as A2, same route and stays, with the spawn log uncapped, R3c judged by X-Ray's own record, and
+EnginePerf's wall limit fixed. Arm B follows after A2.
+
+**Changed on our side:**
+1. **Mod, one log line** (blob 7441261): every puppet spawn is logged (the cap of 80 is gone), with `lv` = the level named
+   by the snapshot it came from, `zone` = our zone's level, `w` = our world number. No behaviour change.
+2. **R3c, new rule (`tools/r3_check.py`, function `r3c`):** every creature we spawn is one X-Ray itself has on our level.
+   (a) every `T0 spawn id` line carries the three fields and lv == zone; (b) for every spawn line, X-Ray's record (the X
+   out dir's `boot0/meta_t2.csv`: ON, OFF, CROSS_RESUME and G lines, read by `xrecord`) has that id online on that level
+   at the line's time, within 3 s; (c) the number of spawn lines equals `spawned=` in the end summary; (d) per crossing
+   a `T1 level <old> -> <destination>` line follows the start, with no spawn between; (e) no `T0 FAIL stale puppets`
+   line; (f) puppets > 0 within 60 s after each crossing's end. A creature that walks between the levels passes.
+   If X-Ray restarts (a `boot1`), spawns after the restart are not in `boot0`'s record and fail (b): reported as such.
+3. **Self-test `tools/r3c_selftest.sh`** (PASS at this draft): on arm A's real log with its 80 spawn lines given the
+   new fields and arm A's real X-Ray record: all 80 real spawns, the walker 19518 among them, are online on our level
+   in X-Ray's record (count not scored): PASS; the same with the count scored: FAIL (80 lines, 110 spawned: the cap is
+   caught); four mutants FAIL: a spawn past spawn 80, on Cordon, of a creature X-Ray only had on the Garbage; a spawn
+   whose snapshot level is not our level; a spawn before X-Ray names the destination; a spawn line without the fields.
+   The T2c reader test on x2's log is kept.
+
+**The run** (`scripts/boot_t2.sh a2`): levers, route and stays exactly arm a1's (amendment 113). Scored once by
+`tools/r3_check.py <run> <x out> 1`: T2a, T2b, T2c, T2d, T2e, T3w, R3a (pair `_1`), R3b, R3c (as above), R3h, R3g, R3p.
+PASS = all twelve and EnginePerf's nine conditions. One retry only for a run that dies before its data, registered first.
+
+**X side (EnginePerf, their section 59):** runner `tools/t2_xray.sh` sha256
+296563fde4a756882eea024593117a06cfff528ffd38fb085bc3d83a3106c3a7 (was 6597a067…: the launcher's wall limit is now set from
+the schedule, and the engine is ended if it still runs 600 + 120 s after the last level load). Unchanged from arm A:
+script 473dec25…, Stance14.exe b4ce9c77…, lib_engine_pids.sh cb183b7b…, checker c19740e8…. Env: `T2_EXE=Stance14.exe
+T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999 T2_KILL_AT=99999 T2_RUN_S=600 T2_WALL_S=1660 T2_OVER_S=120`. Their
+offline test on arm A's schedule: the old runner times out at 1,001 s as in arm A, the new one ends cleanly at 1,138 s.
+Their nine conditions as in arm A. X-Ray runs about 8 minutes after our end; expected. Their guess: X PASS 75 %.
+
+Guess before the run: ITR2 side PASS 75 %. Arm A's data passes the new R3c for its 80 logged spawns; the 30 unlogged
+ones are the unknown. Other risks as arm A: a crossing over 60 s (arm A: 51.0 s), X-Ray's record and our log disagreeing
+by more than 3 s at an arrival.
