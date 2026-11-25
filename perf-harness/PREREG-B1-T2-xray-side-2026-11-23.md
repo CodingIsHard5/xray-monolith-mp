@@ -1548,3 +1548,19 @@ fields stays v1 and takes the T2 path, unchanged.
   crash or a failed crossing (10 %); the changed runner misbehaves with the real engine, its first run (8 %);
   other (7 %).
 - **Stop rule:** a FAIL is reported, not tuned. One retry only for a run that dies before its data, registered first.
+
+## 60. Result: arm A2 (am114), X side PASS 9/9 (scored once, 2026-11-25)
+
+- Run: ITRZone/out/runs/20261124-234012-t2a2-xray, 23:40:12 to 00:01:00 EST. One boot, runner rc 0, no restart rows.
+- Files checked before scoring, all as registered in section 59: runner 296563fd, script 473dec25, Stance14.exe
+  b4ce9c77, lib cb183b7b, checker c19740e8. Test save cordon1 unchanged (scoc a9f9a8a9, scop 6dea752b). No dmgtest.txt.
+- Checker, the nine conditions of section 51: all PASS.
+  - Crossings: 50.9 s out (esc_level_changer_to_garbage_1), 34.9 s back (gar_level_changer_to_escape_1).
+  - Arrival 0.004 m and 0.006 m from the changer destinations.
+  - P2 2,155 / 5,999 / 2,400; GUARD 0; HOLD 0. Stance, state, height: 0 off of 10,554.
+  - Three VITALS lines, each health 1.000, radiation 0, bleeding 0. No refill.
+- The runner fix worked as tested offline: wall limit 1,660 s, engine ended by itself 1,122 s after launch (arm A
+  was killed at 1,001 s). Over-run rule not triggered.
+- My guess (75 % PASS) was right. ITR2 side: PASS 12/12 by itrzone's score; R3c decided on my boot0/meta_t2.csv
+  (109 spawns, none of a creature not online on the level).
+- Joint: arm A2 PASS.
