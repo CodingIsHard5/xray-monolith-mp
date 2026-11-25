@@ -198,6 +198,8 @@ Frame number and engine time at every checkpoint are equal in all four runs, and
 - Looked at after scoring (not a registered check): the frames on which the A-Life simulator was scheduled differ by
   one frame between ALL pairs, the two stock runs and the two SimTick14 runs included (scheduler traces, first 107
   A-Life calls). So the phase does move between identical builds in these four runs.
+- CORRECTION (added after section 9's desk work, Overseer 2026-11-25): the "four of four" below is TWO runs, each
+  counted at two checkpoints that share one offset. Read it as 2 of 2 runs, not 4 of 4.
 - Against that: both SimTick14 runs are ahead at both later checkpoints and neither stock run is. On 11-19 the shift
   hit 2 of 12 run-checkpoints. Four of four on one build by chance is unlikely, so a systematic shift of one pass on
   this build is NOT excluded by this data.
