@@ -1632,3 +1632,25 @@ Overseer's GO.
 - First runs of: a `dead` pose while on another level; a recover crossing. Both behaved as read from code.
 - My guess (60 % PASS) was right. ITR2 side: FAIL 13 of 14 by itrzone's own score (R3p, which itrzone calls a scorer
   mistake; the Overseer rules on it). So the joint result of b1 is not PASS as scored.
+
+### 62a. Overseer's ruling on b1, and what b2 is expected to show (written BEFORE b2 boots, 2026-11-25)
+
+- Ruling: joint b1 is FAIL as scored (ITR2 side 13 of 14). My X side PASS 10/10 stands. Itrzone amends R3p
+  prospectively before b2; no re-score, no b1 repeat. b2 runs next under the amended scorer.
+- The level-mismatch count in b1 was ten times the expected value: 1,055 lines against about 100.
+- Why, from both logs of b1 (ITR2's stamps are UTC):
+  - 10:18:29.7 ITR2's pose turns `dead` (seq 5193), still naming l02_garbage.
+  - about 10:18:57 (my seq 5728, 27 s after the death) the pose names l01_escape: ITR2's zone switch, as it expected.
+  - 10:19:49.8 the pose turns `play` (seq 6727): 80 s of wall time after the death, not the "about 2 s after the
+    switch" that itrzone expected. ITR2's own line calls this "re-entry 28.6 s after it"; that figure is not the
+    wall time from the death pose.
+  - 10:19:52.8 `cross` (seq 6788), 3.0 s later as designed. My CROSS_REQ is on that pose.
+  - So the mismatch poses are about 52 s of `dead` plus 3 s of `play`, 1,055 at 20 Hz.
+- **Expected in b2 (not rules; the rules of section 61 are unchanged):**
+  - Condition 10: about 1,000 mismatch lines (floor 20 unchanged).
+  - The recover request comes about 80 s after the death, so X-Ray has been on the Garbage for over a minute. The
+    risk "a second level change about 30 s after a load" of section 61 is therefore unlikely to be tested by b2.
+  - The runner's 30 s no-snapshot risk is unchanged: it starts at the death pose, 10 s after the changer; my loads
+    took 9.2 s and 9.3 s in b1.
+  - Applied poses on the Garbage: 0 expected (reported only).
+- My guess for b2, X side PASS: 60 % (was 50 %; one of the two stated risks is now unlikely).
