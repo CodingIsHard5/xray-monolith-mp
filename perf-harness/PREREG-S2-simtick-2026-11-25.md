@@ -133,3 +133,34 @@ feels best, cannot speak for a firefight or a crowded level, and cannot give a v
 Series call: `S2_EXE_SHA=<the hash above> tools/s2_series.sh` (started as a background task). Checked before the
 series: run/appdata/user.ltx has `lua_parallel_gc 1`; `sim_tick` and `r__framelimit` are set per run and left at 0.
 The result goes into section 6 of this file, scored once.
+
+## 7. Part A, first attempt: NO VERDICT (my harness error), and the one retry (registered before it runs, 2026-11-25)
+
+**What happened.** The four runs of part A ran to the end (rc 0, 205 to 236 s each, out/det_s2ref_a, _b, s2off_a, _b;
+log out/s2_partA.txt). `tools/counters_diff.py` then stopped with "missing file det_alife_counts_s2ref_a_1.txt" for all
+three comparisons: the exact counters were never written. The call I registered in section 2 lacks the start switch
+`-det_counters` (and `-det_lua_streams`), which the 2026-11-19 counter runs passed through `DET_EXTRA`. So neither A1
+nor A2 has a result. Nothing of part B has run.
+
+**My error, by the process rule:** I did not check the expected files against the path that produces them. The
+counter files exist only with `-det_counters`; section 2 never named it.
+
+**What I saw in the failed attempt, and what it is not.** det_pair's own position diff printed "checkpoints differ"
+for every pair, the two STOCK runs against each other included (14 to 16 objects of 30,461, online squads by
+positions; the A-Life generator state is equal in all four runs). That diff is not the registered check and is known
+to differ between identical builds; it is why the counters exist. It gives no verdict either way.
+
+**The retry (the one retry section 2 allows; no second one).**
+`DET_EXTRA="-det_lua_streams -det_counters" tools/det_pair.sh 60 3 Stance14.exe:s2ref_c Stance14.exe:s2ref_d SimTick14.exe:s2off_c SimTick14.exe:s2off_d`,
+then `tools/counters_diff.py` for s2ref_d, s2off_c, s2off_d against s2ref_c at checkpoints 1, 2, 3.
+Wrapper: tools/s2_partA.sh (sha256 372b275f…), output out/s2_partA_retry.txt. A1, A2 and the guesses are unchanged
+(A1 PASS 90 %, A2 PASS given A1 95 %). Part B starts only on A1 and A2 PASS.
+
+**Checked at the desk before registering this (the path table for the retry):**
+| expected | produced by | checked |
+|---|---|---|
+| det_alife_counts_<tag>_<k>.txt | console command `det_alife_counts`, called by the dump script only with `-det_counters` | the command's name is in Stance14.exe and SimTick14.exe (3 hits each, as in RefDet14.exe) |
+| det_counters_<tag>_<k>.txt | the dump script, same switch | script lines 181-182 |
+| both moved into out/det_<tag>/ | tools/det_run.sh line 45 | read |
+| counters_diff reads them and prints C | | run on out/det_wn against itself: C=0 at k = 1, 2, 3, rc 0 |
+| NOT checked, the open risk | a 60 s interval with counters on these two builds has never run; the 11-19 runs used `-det_times 25,300,900` on RefDet14.exe | if a file is missing again: no verdict, stop, report |
