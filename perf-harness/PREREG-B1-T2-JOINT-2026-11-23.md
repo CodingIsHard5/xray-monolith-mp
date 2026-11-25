@@ -652,3 +652,141 @@ Guess before the runs: b1 ITR2 side PASS 40 %, b2 35 %. Risks: the recover path 
 Cordon after a transit has never run (the zone to rebuild, the rig's state); misses on the new track pushing R3g over 10;
 a scorer mismatch on a line never seen in a real log; in b2 the death may not land in the fill window.
 
+## Amendment 119 (REGISTERED 2026-11-25): R3 proper, arm C: X-Ray lost during a crossing, arm c1
+From the R3 draft (section C) and agreed with EnginePerf (their section 67). Pose v2, their frozen script 473dec25;
+only their runner is new. One joint boot, `scripts/boot_t2.sh c1`.
+
+**What changes in the mod** (new behaviour, default on; lever `t2cx=<s>`, default 120, 0 = off):
+- A crossing is closed on our side when our ground in the new zone is ready, no snapshot names the destination, and
+  `t2cx` s have passed since the changer: log `T2 cross closed without X-Ray`, the pose says `play` on our level.
+- "X-Ray is writing" = the snapshot header's seq or run id was seen to change within the last 5 s, and the change
+  before that came at most 5 s earlier (two changes: snapshots are read only in free play, so after a load the first
+  read of a dead X-Ray's last file is itself one change). Only then does a snapshot naming the destination end a
+  crossing (so one snapshot, about 50 ms, later than before), and only then does a snapshot of another level start a
+  recover crossing, which also needs a change seen within the last second when its 3 s are up. A killed X-Ray's last
+  file does neither; a `T2 cross recover waits` line says so.
+- With `t2cx=0` every rule of this amendment is off and the mod writes exactly what the mod before it wrote.
+- With no snapshot file at all and the last header naming another level, the last tick is dropped, as a mismatching
+  snapshot's is.
+- After a close, with the rig off its track, the pose's position is the pawn's real position (before: the last
+  position sent before the changer).
+Runs that are not arm C: a crossing that X-Ray confirms within 120 s reads as before. A crossing open longer, with our
+ground ready, is now closed (then a recover crossing follows if X-Ray is alive on another level); the scorers of arms
+A and B count a close as a failure of R3a.
+
+**The run.** Cordon track 120 s; changer `esc_level_changer_to_garbage_1`. EnginePerf's runner kills X-Ray 4 to 5 s
+after the pose first says `cross` (inside its level load) and starts it again 150 s later. We close the crossing
+120 s after the changer. The restarted X-Ray boots on Cordon; its first snapshot comes about 180 s after the kill;
+3 s after we see it we send the recover crossing (level l02_garbage, the same changer). X-Ray follows it about 15 s
+later, when its warm-up ends. After its first snapshot of the Garbage the rig walks the Garbage track for 120 s of play;
+end. Levers: `hcheal=2 t2span=380 t2gap=0 t2v=2 t2st=30 transit=1 txa=120 txn=esc_level_changer_to_garbage_1 txe=120
+txw=1 t2end=600`. This also runs, for the first time, a level change about 15 s after a load on X-Ray's side.
+
+**Scored once on each side**, one retry only for a run that dies before its data.
+ITR2 side, `tools/r3_check.py <run> <X dir> 1 c1`. PASS = all of:
+- T2a rate, T2b cost, T2c frames, T3w writer: as in arms A and B.
+- T2d link: as before, outside the window from the cross start to the first accepted snapshot after the recover
+  crossing's end; no accepted snapshot after that end is a FAIL.
+- T2e clean: `T2 end`, no FAIL line, no dump, no death.
+- R3a cross: one cross start by the changer; our ground ready within 60 s; exactly one `closed without X-Ray k=1`,
+  120 to 125 s after the cross start; no cross end for k=1; one recover line (we on l02_garbage, X-Ray on l01_escape, a
+  changer `esc_level_changer_to_garbage_*`); one cross end (k=2); nothing dropped, nothing still open; states play,
+  cross, play, cross, play, end; the summary says `closed_without_xray=1`; the rig arrives after the recover line.
+- R3q quiet: between the close and the `T1 new X-Ray run` line no recover crossing starts and at least one
+  `recover waits` line is written; exactly one new-run line; the recover line 2 to 10 s after it.
+- R3b time: the recover crossing at most 90 s.
+- R3c levels: as arm B, with X-Ray's record read from both boots (`boot0/` and `boot1/`); a missing record of either
+  boot is a FAIL.
+- R3n nothing old: no spawn line between the cross start and the reader's line for X-Ray's first Garbage header after
+  the recover line (`T1 level ... -> l02_garbage`); no stale-puppet line.
+- R3w walk: after the recover crossing's end the pose goes at least 50 m with no step over 2 m.
+- R3h un-held; R3g ground (miss + resolved at most 10); R3p one transit (amendment 118's rule, no other zone switch).
+The scorer names the first of ten stages not reached: cross start; our ground ready; closed without X-Ray; recover
+waits; new X-Ray run; recover crossing starts; rig arrived; cross end k=2; rig walk starts; T2 end.
+X side: EnginePerf's nine conditions, their section 67, checker `t3_armC_xray_check.py` 7ec98e73. Files: runner
+`tools/t2_xray_c.sh` 40b875766c0c984f62a65cda2ab787d4a6b105ac5ea7dd55995852096e678eb3, script 473dec25, Stance14.exe
+b4ce9c77, lib cb183b7b. Env: `T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999 T2_KILL_AT=99999
+T2_RUN_S=600 T2_OVER_S=120 T2_MAXRESTART=1 T2_KILL_XS=4 T2_RESTART_WAIT_S=150`.
+
+**Offline before the boot:** `tools/r3_armc_test.lua` on the real main.lua (close at 120 s and not before; no recover
+on a dead X-Ray's file; recover 3 s after a restarted X-Ray's first snapshots; a recover crossing whose X-Ray dies is
+closed and does not loop; no file drops the tick; a stale file naming the destination does not end a crossing; ground
+not ready or lever off: nothing closes; removing either guard fails the test). `tools/r3c1_selftest.py`: a good log
+passes, ten mutants each fail their check. The scorer's verdicts on the real A2, b1 and b2 logs are unchanged.
+
+**The Opus review of the mod change, and what was done.** No real bug in the three changes; the planned sequence was
+traced through the code. Its points:
+1. Snapshots are read only in free play with the ground and the floor ready, so "X-Ray is writing" is unknown during a
+   load. Effects: a crossing could close with X-Ray alive if our floor build failed for over 120 s; a recover may log
+   one needless `waits` line. Left as is; named as a risk.
+2. The run does not end early: with the tick dropped the stale-end timer (`t2end`) is not reached and the play clock
+   stands. Exception found: with the snapshot file deleted the old tick stayed. FIXED (no file drops the tick).
+3. After a close the pose kept the pre-changer position. FIXED for the rig (the pawn's real position).
+4. The close also applies to a recover crossing: a slow recover closes and starts again 3 s later. Left as is; tested.
+5. A dead X-Ray's last file naming the destination ended a crossing. FIXED (must be writing).
+6. With the lever on, `still open after 120 s` now appears only when our ground is not ready. The scorers of arms A and
+   B now also fail on a close.
+7. The test's weak spots: it calls the reader directly (not through the frame loop), has no warm-up snapshots, and
+   never runs the run-end check. Cases added for the file-gone and stale-destination points; the rest is what the
+   boot tests.
+
+**The solo arms** (`scripts/boot_t2solo.sh`, all modes) now run with `t2cx=0`: their stand-in for X-Ray is a static
+snapshot rewritten once per crossing, which is not a "writing" X-Ray, so with the rules on their crossings would only
+end by the close at 120 s.
+
+**CodeRabbit on the diff (one run, 12 findings; read from its saved review), each handled:**
+1. Major, mod: X-Ray dying inside the recover's 3 s still started a recover crossing. FIXED: a header change seen
+   within the last second is needed when the 3 s are up; tested, and the test fails without it.
+2. Major (question), self-test: does it reach its assertions with no X-Ray folder? Refuted: it runs to the end, the
+   good log passes and every mutant fails its check.
+3. Major (question), mod and scorer: can the first Garbage snapshot spawn a puppet before `T2 cross end k=2`? Yes, by
+   design: that snapshot is ours to apply, and the cross end now comes one snapshot later. FIXED in the scorer: R3n's
+   boundary is the reader's own line for X-Ray's first Garbage header.
+4. Minor, tests: a relative track path aborted the offline test. FIXED.
+5. Minor, self-test: a mutant counted as failed when its verdict was only missing. FIXED: an explicit FAIL is needed.
+6. Major (question), boot: does a restart that never writes a snapshot hang the boot? Refuted: the boot script's own
+   ITR2 time cap ends the run and the claim is released by its exit trap; X-Ray's runner ends by its own run length.
+7. Minor, scorer: one missing X-Ray record was read as complete. FIXED: both boots' records are required.
+8. Major, mod: a header without its footer sets the level before the body is checked, so a half-written destination
+   snapshot could end a crossing. Not changed here: that order is as registered in amendment 101 and unchanged by this
+   diff, and the two-change rule now asks for a second header. Named as a known limit.
+9. Minor, scorer: two zone lines with one time stamp were both excluded. FIXED: paired by record.
+10. Minor, draft: the two-change rule was not stated. FIXED above.
+11. Minor, test: a close at 115 s would have passed. FIXED: the test asserts the close time (120.0 to 120.2 s).
+12. Major, scorer: T2d passed if the link never resumed after the recover crossing. FIXED.
+
+**Second review (Opus, after the fixes above), on the mod and boot script diff:** the planned run goes through, traced
+in the code: the restarted X-Ray's second snapshot makes it "writing", the 3 s are not reset, the recover crossing ends
+on X-Ray's second Garbage snapshot, and the file's deletion at the restart does not hide the new run. Nothing in a run
+with a live X-Ray is delayed by more than one snapshot, also after a freeze or X-Ray's own load. With `t2cx=0` every
+rule is off, and every solo mode gets it. No real bug. Left as is and named:
+- a live X-Ray that never follows would cycle: 120 s of `cross`, a close, 3 s later a recover crossing, and again;
+- a load of ours shorter than 5 s would let the first read after it count as "writing" (ours take about 51 s);
+- polls with no snapshot file are not counted in `level_mismatch_snapshots`.
+
+**Predicted values** (written before the run; reported against, the bounds above are what is scored):
+
+| Quantity | Predicted | Range | From |
+|---|---|---|---|
+| Our ground ready, s after the changer | 51 | 49 to 54 | b1 50.8, A2 50.9 |
+| The close, s after the cross start | 120.05 | 120.0 to 120.1 | the pose tick, 20 a second |
+| First `recover waits` line | at the close, same tick | within 0.1 s after it | the code |
+| `T1 new X-Ray run` line, s after the cross start | 183 | 180 to 187 | kill at 4 to 5 s, wait 150 s, EnginePerf's first snapshot 26 to 30 s after launch |
+| Recover line, s after the new-run line | 3.05 | 3.0 to 3.2 | 3 s of standing mismatch; b1 and b2 3.0 |
+| Recover crossing, s | 21 | 18 to 26 | X-Ray reads poses 15 s after its first snapshot, its load 8 to 9 s |
+| Cross end k=2, s after the cross start | 207 | 201 to 216 | the three rows above |
+| `level_mismatch_snapshots` at the end | 7,200 | 6,300 to 8,000 | one per frame while a snapshot file names Cordon: about 100 s of the dead X-Ray's file and 24 s of the restarted one, at 55 to 61 frames a second (b1: 756 in 12.3 s); the 28 s with no file are not counted |
+| Play clock at the end | 240.3 | 240.0 to 240.6 | 120 s, the arrival, 120 s |
+| Wall time of ITR2's play, cross start to end | 327 | 320 to 340 | 207 s plus 120 s of walk |
+
+**Witness and control, offline** (`tools/r3_armc_witness.lua`, one scripted sequence with the reader called only in
+free play, as the frame loop does): on the mod before this amendment (b408b4d, blob ec2f862) a killed X-Ray's last
+file starts a recover crossing after a death's return (1 started); on this mod with `t2cx=120` it starts none and a
+`recover waits` line is written. With `t2cx=0` this mod's output (every pose state and level, every `T2 cross`,
+`T2 state` and `T1 level` line) is byte-identical to the old mod's on the same sequence.
+
+Guess before the run: ITR2 side PASS 35 %. Three things run for the first time: the close, the wait on a dead X-Ray's
+file, and a recover crossing with an X-Ray that has just booted. Risks: the floor build after the arrival taking long;
+X-Ray's warm-up snapshots (negative track time) and our held puppets after its restart; the rig's arrival and walk
+starting only after 4 minutes of standing; our own stale-end timer; anything a kill inside X-Ray's load leaves behind
+(EnginePerf's main risk).

@@ -1794,3 +1794,61 @@ Ordered by the Overseer after section 63: the fix is prospective, L stands as FA
 - **Not shown:** a v2 pose (no session field) read by this script in the engine (offline only); a recovery AFTER a
   crossing LOST (a new writer appearing on the new level); the lost runner has no wall-limit fix (T2_WALL_S,
   T2_OVER_S of 296563fd), so an arm with a long schedule needs the two runners merged first.
+
+## 67. R3 arm C (ITRZone amendment 119, arm c1), X side, registered BEFORE any boot (2026-11-25)
+
+X-Ray is lost during a crossing. ITR2 walks Cordon for 120 s and crosses by esc_level_changer_to_garbage_1. My runner
+kills X-Ray 4 s after the pose first says `cross`, which is inside X-Ray's level load. ITR2 closes its crossing alone
+120 s after the changer. My runner waits 150 s after the kill and boots X-Ray again on Cordon. ITR2 sees the new run
+and 3 s later sends the recover crossing (the same changer). X-Ray follows it to the Garbage, then 120 s of walk
+there. Policy keep, pose version 2. One joint boot on the Overseer's GO, which itrzone asks for.
+
+- **Files:** NEW runner tools/t2_xray_c.sh
+  40b875766c0c984f62a65cda2ab787d4a6b105ac5ea7dd55995852096e678eb3 (made from 296563fd; never run in the engine).
+  Frozen: script harness/zz_p1_puppet.script 473dec25, run/bin/Stance14.exe b4ce9c77, tools/lib_engine_pids.sh
+  cb183b7b. itrzone's boot script checks these four hashes at claim time and again before my runner starts.
+- **Env:** T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999 T2_KILL_AT=99999 T2_RUN_S=600
+  T2_OVER_S=120 T2_MAXRESTART=1 T2_KILL_XS=4 T2_RESTART_WAIT_S=150. T2_WALL_S is not set.
+- **New in the runner:** the planned kill N wall seconds after the cross pose (T2_KILL_XS); the wait before the
+  restart boot (T2_RESTART_WAIT_S); the crossing marker cross.txt is always emptied before a restart boot. Without
+  that, the marker left by the killed boot made the new boot log a false "arrived by crossing" line and append to the
+  old log (shown offline: old runner 37 bytes left and the false line; new runner 0 bytes and no such line).
+  CodeRabbit reviewed the runner; its findings are fixed except one left with its reason (the over-run limit also
+  counts during a load: an intended strict deadline).
+- **Checker:** tools/t3_armC_xray_check.py 7ec98e7366611df2ec1f9870a87fee6b5b8de9a1c1aefd649d3a0123113a4d0b.
+  Offline: a synthetic good run passes; seven mutants each fail their check.
+- **Score once:** `python3 -I tools/t3_armC_xray_check.py <X out dir> out/t3pfD/run/boot0/meta_t2.csv`
+- **PASS = all nine:**
+  1. The runner ends with rc 0; no Lua error naming the script and no FATAL in either boot; no DMG line.
+  2. Boot 0: exactly one CROSS_REQ by the changer with its table values and NO CROSS_RESUME (the kill landed inside
+     the load). No CROSS_NOCHANGER or CROSS_ERROR in either boot.
+  3. restarts.csv: exactly one row, planned, "planned kill (arm C) n s after the cross pose" with n 4 to 6; the
+     runner logged the restart wait and "crossing marker emptied" for boot 1.
+  4. Boot 1's log is its own: exactly one CROSS_REQ (Cordon to Garbage, the changer, table values) and exactly one
+     CROSS_RESUME on the Garbage after it; none before the request.
+  5. Boot 1: the first applied play pose is written by ITR2 at most 90 s after the `cross` pose of the request.
+  6. Applied poses: at least 400 in boot 0 before its request; at least 600 in boot 1 after the resume; GUARD 0 in
+     both; HOLD at most 15 in all.
+  7. Boot 1: the first applied pose after the resume is within 5 m of the changer's destination.
+  8. Stance read-back, movement state and height on every applied pose of both boots.
+  9. VITALS: boot 0 none or one, boot 1 exactly two, all clean; no REFILL.
+  Reported only: level-mismatch lines in boot 1 (expected 0: the cross pose is already there at my first read);
+  game time from boot 1's first snapshot to its request; poses applied on Cordon in boot 1.
+- **If the kill lands AFTER the load** (a CROSS_RESUME in boot 0): condition 2 fails and the run is a registered FAIL
+  of "kill inside the load". A2 and b2 loads took 8 to 9 s and the kill comes at 4 to 5 s, so I do not expect it.
+- **What has never run on my side:** this runner; a kill inside a level load; a level change about 15 s after a load
+  (the script's 15 s warm-up ends as the request is read); the runner's restart path with a wait.
+- **Stated to itrzone before the boot (their two questions):**
+  - My runner removes snap.txt only before the restart boot (after the 150 s wait), not at the kill. TRUE.
+  - My script replaces snap.txt whole by write-then-rename. NOT SO: it rewrites the file in place (open, one write,
+    close) every tick, as in every run since T1. A reader can meet an empty or half-written file; the `end,<seq>`
+    footer is the only sign of a whole one. The kill can also leave such a file behind for the 150 s until my restart.
+    Their amendment 119 names the half-written header as a known limit (review finding 8) and does not claim a
+    whole-file replace, so the registered text stands; the choice whether that is enough is theirs and the Overseer's.
+- **Risks.** The engine dying inside a load may leave the autosave of the level change half-written in run/appdata
+  (my test save cordon1 is a different file and is hash-checked after the run). The restart boot's wall limit is
+  counted from its own launch. ITR2's first pose after my restart may still say `play` on the Garbage for 3 s: those
+  would be level-mismatch lines, reported, not a failure.
+- **Guess: X side PASS 50 %.** First engine run of the runner and of a kill inside a load.
+- **Joint text:** amendment 119 copied into PREREG-B1-T2-JOINT-2026-11-23.md: 12,541 bytes, sha256
+  929b5b288e29a66cfb1d4b85f5596f19cbda0f56a7d2a5d1a368f9ed4db15207 (ITRZone master dbf5da9).
