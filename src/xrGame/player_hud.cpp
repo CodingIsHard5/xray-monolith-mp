@@ -4332,12 +4332,17 @@ struct vr_bpi_entry
 	IRenderVisual* vis;
 	IKinematics* K;
 	Fmatrix xf;
+	bool posed; // B2a: left by the hand at its own place in the bag (loc), instead of the grid spot
+	Fmatrix loc; // the model's matrix in the bag's frame while posed
 };
 struct vr_bpi_state
 {
 	bool parsed, off, each, placed, quiet;
+	bool ready; // B2a: the placement is complete (the hands may read it)
 	float scale, cell;
 	int face, cols, rows;
+	float bmn[3], bext[3]; // B2a: the bag model's box, kept from the placement (the "inside the bag" test)
+	int baxis;
 	string128 fake;
 	xr_vector<vr_bpi_entry> list;
 };
@@ -4395,13 +4400,204 @@ static void vr_bpi_parse()
 	if (B.quiet)
 		Msg("! [vr13] -vr_bp_quiet: per-frame draw lines off (measurement only, no checked run uses it)");
 }
+// ---- GammaVR backpack B2a (SPIKE_PLAN Amendment 41): the empty gun-side hand handles the items in the held bag ----
+// A grip press takes the item whose real-size box (grown by the reach) holds the hand's grip point, the nearest box
+// centre winning. The model is then fixed to the hand as it was at the press. Let go inside the bag: it keeps that
+// place and attitude in the bag's frame (remembered per section for the session). Let go outside, or the bag put away
+// first: it is back at its last place. Nothing in the inventory changes. -vr_bp_grab_off (TEST ONLY) = B1b exactly.
+struct vr_bph_state
+{
+	bool parsed, off, prev_grab;
+	int carried1; // index into the list PLUS ONE, 0 = nothing in the hand (so a zeroed state is an empty hand)
+	Fmatrix hand_local; // the carried model's matrix in the hand's frame, frozen at the grab
+	float reach;
+};
+static vr_bph_state s_vr_bph = {};
+struct vr_bph_mem
+{
+	shared_str sect;
+	Fmatrix loc;
+};
+static xr_vector<vr_bph_mem> s_vr_bph_mem;
+static void vr_bph_local(const vr_bpi_entry& e, Fmatrix& L) // the model's matrix in the bag's frame
+{
+	if (e.posed)
+	{
+		L = e.loc;
+		return;
+	}
+	L = e.rot; // identity unless laid flat in the open bag
+	L.i.mul(e.scale);
+	L.j.mul(e.scale);
+	L.k.mul(e.scale);
+	Fvector rc; // the model's box centre, turned and scaled
+	rc.set(0, 0, 0);
+	rc.mad(L.i, e.bc.x);
+	rc.mad(L.j, e.bc.y);
+	rc.mad(L.k, e.bc.z);
+	L.c.set(e.spot.x - rc.x, e.spot.y - rc.y, e.spot.z - rc.z); // the model's box centre lands on the spot
+}
+static void vr_bph_parse()
+{
+	vr_bph_state& H = s_vr_bph;
+	if (H.parsed)
+		return;
+	H.parsed = true;
+	H.off = !!strstr(Core.Params, "-vr_bp_grab_off");
+	H.reach = 0.03f;
+	if (LPCSTR q = strstr(Core.Params, "-vr_bp_reach "))
+		sscanf(q + 13, "%f", &H.reach);
+	Msg("* [vr14] hands in the bag: %s; reach %.3f m", H.off ? "OFF (-vr_bp_grab_off, TEST ONLY)" : "on", H.reach);
+}
+// main thread, every VR frame, after vr_bp_update. Returns true while this claims the gun-side hand's grip.
+static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
+{
+	vr_bph_state& H = s_vr_bph;
+	vr_bpi_state& B = s_vr_bpi;
+	vr_bph_parse();
+	const int gun = I.gun ? 1 : 0, off = 1 - gun;
+	const bool press = grab && !H.prev_grab;
+	H.prev_grab = grab;
+	if (H.off)
+		return false;
+	const bool held = s_vr_bp.state == 1 && B.placed && B.ready && !B.off && vr_bpo_on();
+	const bool geo = I.grip[gun].valid && I.grip[off].valid;
+	Fmatrix bag, hand, t;
+	bag.identity();
+	hand.identity();
+	if (geo)
+	{
+		vr_pose_matrix(I.grip[off], t);
+		bag.mul_43(g_vr_track.track_to_world, t);
+		vr_pose_matrix(I.grip[gun], t);
+		hand.mul_43(g_vr_track.track_to_world, t);
+	}
+	const int carried = H.carried1 - 1;
+	if (carried >= 0)
+	{
+		if (carried >= int(B.list.size()))
+		{
+			H.carried1 = 0;
+			return false;
+		}
+		vr_bpi_entry& e = B.list[carried];
+		if (!held)
+		{
+			Msg("* [vr14] frame %u back: model %d '%s' returns to its last place (the bag was put away while it was carried)", I.frame, carried, e.sect.c_str());
+			H.carried1 = 0;
+			return false;
+		}
+		if (grab)
+			return true;
+		// let go: where is it in the bag's frame?
+		Fmatrix w, ib, L;
+		w.mul_43(hand, H.hand_local);
+		ib.invert(bag);
+		L.mul_43(ib, w);
+		Fvector c;
+		L.transform_tiny(c, e.bc);
+		const float cc[3] = {c.x, c.y, c.z};
+		bool in = geo;
+		for (int k = 0; k < 3; ++k)
+			if (cc[k] < B.bmn[k] || cc[k] > B.bmn[k] + B.bext[k] + (k == B.baxis ? 0.05f : 0.f))
+				in = false;
+		if (in)
+		{
+			e.loc = L;
+			e.posed = true;
+			bool found = false;
+			for (vr_bph_mem& m : s_vr_bph_mem)
+				if (m.sect == e.sect)
+				{
+					m.loc = L;
+					found = true;
+				}
+			if (!found)
+			{
+				vr_bph_mem m;
+				m.sect = e.sect;
+				m.loc = L;
+				s_vr_bph_mem.push_back(m);
+			}
+			Msg("* [vr14] frame %u left: model %d '%s' stays in the bag at %.4f %.4f %.4f (box centre, bag frame)", I.frame, carried, e.sect.c_str(), c.x, c.y, c.z);
+		}
+		else
+			Msg("* [vr14] frame %u back: model %d '%s' let go outside the bag (box centre %.4f %.4f %.4f, bag frame); it returns to its last place", I.frame, carried,
+				e.sect.c_str(), c.x, c.y, c.z);
+		H.carried1 = 0;
+		return false;
+	}
+	if (!held || !geo)
+		return false;
+	// the hand's grip point in the bag's frame; is it at the bag at all?
+	Fmatrix ib;
+	ib.invert(bag);
+	Fvector p;
+	ib.transform_tiny(p, hand.c);
+	const float pp[3] = {p.x, p.y, p.z};
+	bool at_bag = true;
+	for (int k = 0; k < 3; ++k)
+		if (pp[k] < B.bmn[k] - H.reach || pp[k] > B.bmn[k] + B.bext[k] + H.reach + (k == B.baxis ? 0.30f : 0.f))
+			at_bag = false;
+	if (!press)
+		return at_bag; // the holsters do not see a grip held at the bag
+	if (!at_bag)
+		return false;
+	const u16 slot = (A && A->m_inventory) ? A->inventory().GetActiveSlot() : NO_ACTIVE_SLOT;
+	if (slot != NO_ACTIVE_SLOT)
+	{
+		Msg("* [vr14] frame %u grab refused: a weapon is in that hand (slot %u); put it away first", I.frame, u32(slot));
+		return true;
+	}
+	int best = -1;
+	float bd = 1000.f;
+	for (int i = 0; i < int(B.list.size()); ++i)
+	{
+		const vr_bpi_entry& e = B.list[i];
+		if (!e.vis)
+			continue;
+		Fmatrix L, iL;
+		vr_bph_local(e, L);
+		iL.invert(L);
+		Fvector q;
+		iL.transform_tiny(q, p); // the hand point in the model's own frame
+		const float g = H.reach / _max(e.scale, 0.001f);
+		if (_abs(q.x - e.bc.x) > 0.5f * e.ext.x + g || _abs(q.y - e.bc.y) > 0.5f * e.ext.y + g || _abs(q.z - e.bc.z) > 0.5f * e.ext.z + g)
+			continue;
+		Fvector c;
+		L.transform_tiny(c, e.bc);
+		const float d = c.distance_to(p);
+		if (d < bd)
+		{
+			bd = d;
+			best = i;
+		}
+	}
+	if (best < 0)
+	{
+		Msg("* [vr14] frame %u grab: nothing there (hand at %.4f %.4f %.4f, bag frame)", I.frame, p.x, p.y, p.z);
+		return true;
+	}
+	vr_bpi_entry& e = B.list[best];
+	Fmatrix L, w, ih;
+	vr_bph_local(e, L);
+	w.mul_43(bag, L);
+	ih.invert(hand);
+	H.hand_local.mul_43(ih, w);
+	H.carried1 = best + 1;
+	Msg("* [vr14] frame %u grab: model %d '%s' (count %d) in the hand, %.4f m from its box centre (hand at %.4f %.4f %.4f, bag frame)", I.frame, best, e.sect.c_str(),
+		e.count, bd, p.x, p.y, p.z);
+	return true;
+}
 static void vr_bpi_reset()
 {
+	s_vr_bph.carried1 = 0;
 	for (vr_bpi_entry& e : s_vr_bpi.list)
 		if (e.vis)
 			::Render->model_Delete(e.vis);
 	s_vr_bpi.list.clear();
 	s_vr_bpi.placed = false;
+	s_vr_bpi.ready = false;
 }
 static void vr_bpo_reset();
 static CInventory* vr_bpi_inv()
@@ -4518,6 +4714,12 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 		B.cell = _min(ext[u] / float(B.cols), ext[v] / float(B.rows));
 		Msg("* [vr13] frame %u grid: %d x %d cells of %.4f m on the bag's face (short side axis %d, face %d); bag box %.3f x %.3f x %.3f min %.3f %.3f %.3f", f, B.cols,
 			B.rows, B.cell, a, B.face, ext[0], ext[1], ext[2], mn[0], mn[1], mn[2]);
+		for (int k = 0; k < 3; ++k)
+		{
+			B.bmn[k] = mn[k];
+			B.bext[k] = ext[k];
+		}
+		B.baxis = a;
 		for (int i = 0; i < n; ++i)
 		{
 			vr_bpi_entry& e = B.list[i];
@@ -4621,8 +4823,39 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 			Msg("* [vr13b] frame %u model %d section '%s' kind '%s' count %d visual '%s' box %d made %d longest %.4f scale %.4f spot %.4f %.4f %.4f flat %d up %.4f size %.4f %.4f %.4f", f, i, e.sect.c_str(),
 				e.kind.c_str(), e.count, e.visname.size() ? e.visname.c_str() : "", e.box ? 1 : 0, e.vis ? 1 : 0, e.longest, e.scale, e.spot.x, e.spot.y, e.spot.z, e.flat ? 1 : 0, up,
 				e.ext.x, e.ext.y, e.ext.z);
+			// B2a: a place left by the hand earlier in this session is kept for the section
+			e.posed = false;
+			if (!s_vr_bph.off && vr_bpo_on())
+				for (const vr_bph_mem& m : s_vr_bph_mem)
+					if (m.sect == e.sect && e.vis)
+					{
+						e.posed = true;
+						e.loc = m.loc;
+						Fvector c;
+						e.loc.transform_tiny(c, e.bc);
+						Msg("* [vr14] frame %u kept: model %d '%s' at its left place %.4f %.4f %.4f (box centre, bag frame)", f, i, e.sect.c_str(), c.x, c.y, c.z);
+					}
+		}
+		B.ready = true;
+	}
+	// B2a: the gun-side hand as located for this frame's draw (the carried model is fixed to it)
+	Fmatrix hand_xf;
+	hand_xf.identity();
+	bool hand_ok = false;
+	{
+		vr_grip_info G;
+		if (g_vr_get_grip && g_vr_get_grip(&G) && G.runtime.valid)
+		{
+			Fmatrix t;
+			vr_pose_matrix(G.runtime, t);
+			hand_xf.mul_43(g_vr_track.track_to_world, t);
+			hand_ok = true;
 		}
 	}
+	const int carried = s_vr_bph.carried1 - 1;
+	if (!B.quiet && hand_ok && !s_vr_bph.off)
+		Msg("* [vr14h] frame %u hand %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f carried %d", f, hand_xf.i.x, hand_xf.i.y, hand_xf.i.z, hand_xf.j.x,
+			hand_xf.j.y, hand_xf.j.z, hand_xf.k.x, hand_xf.k.y, hand_xf.k.z, hand_xf.c.x, hand_xf.c.y, hand_xf.c.z, carried);
 	if (!B.quiet)
 		Msg("* [vr13x] frame %u bag %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f", f, bag_xf.i.x, bag_xf.i.y, bag_xf.i.z, bag_xf.j.x, bag_xf.j.y, bag_xf.j.z,
 		bag_xf.k.x, bag_xf.k.y, bag_xf.k.z, bag_xf.c.x, bag_xf.c.y, bag_xf.c.z);
@@ -4632,17 +4865,15 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 		vr_bpi_entry& e = B.list[i];
 		if (!e.vis)
 			continue;
-		Fmatrix L = e.rot; // identity unless laid flat in the open bag
-		L.i.mul(e.scale);
-		L.j.mul(e.scale);
-		L.k.mul(e.scale);
-		Fvector rc; // the model's box centre, turned and scaled
-		rc.set(0, 0, 0);
-		rc.mad(L.i, e.bc.x);
-		rc.mad(L.j, e.bc.y);
-		rc.mad(L.k, e.bc.z);
-		L.c.set(e.spot.x - rc.x, e.spot.y - rc.y, e.spot.z - rc.z); // the model's box centre lands on the spot
-		e.xf.mul_43(bag_xf, L);
+		const bool in_hand = int(i) == carried && hand_ok;
+		if (in_hand)
+			e.xf.mul_43(hand_xf, s_vr_bph.hand_local); // B2a: fixed to the hand as it was at the grab
+		else
+		{
+			Fmatrix L;
+			vr_bph_local(e, L);
+			e.xf.mul_43(bag_xf, L);
+		}
 		if (e.K)
 		{
 			e.K->CalculateBones_Invalidate();
@@ -4656,6 +4887,9 @@ static void vr_bpi_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 		if (!B.quiet) // B1b L11: the drawn model's own axes (scale included), so a checker can see it turn with the bag
 			Msg("* [vr13r] frame %u model %u axes %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f", f, i, e.xf.i.x, e.xf.i.y, e.xf.i.z, e.xf.j.x, e.xf.j.y, e.xf.j.z,
 				e.xf.k.x, e.xf.k.y, e.xf.k.z);
+		if (!B.quiet && (in_hand || e.posed))
+			Msg("* [vr14x] frame %u model %u %s centre %.4f %.4f %.4f axes %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f", f, i, in_hand ? "carried" : "left", w.x, w.y, w.z,
+				e.xf.i.x, e.xf.i.y, e.xf.i.z, e.xf.j.x, e.xf.j.y, e.xf.j.z, e.xf.k.x, e.xf.k.y, e.xf.k.z);
 		++drawn;
 	}
 	if (!B.quiet || f % 50 == 0)
@@ -4846,7 +5080,9 @@ void vr_input_update()
 		// milestone 8a (Amendment 31): manual reload
 		vr_reload_update(I, g_actor, vr_fire_allowed(g_actor), s_vr_grab_held, s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to);
 		// milestone 9a (Amendment 32): holsters (gun hand's grip)
-		vr_holster_update(I, g_actor, vr_fire_allowed(g_actor), s_grab[gun] && !(pda_block & (1 << gun)), s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to);
+		// backpack B2a (Amendment 41): the empty gun-side hand in the held bag; its grip at the bag is not the holsters'
+		const bool bph_claims = vr_bph_update(I, g_actor, s_grab[gun] && !(pda_block & (1 << gun)));
+		vr_holster_update(I, g_actor, vr_fire_allowed(g_actor), s_grab[gun] && !(pda_block & (1 << gun)) && !bph_claims, s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to);
 		if (s_from >= 0 && int(I.frame) >= s_from && int(I.frame) <= s_to)
 			Msg("* [vr3inp] frame %u L trigger %.3f grab %.3f active %d %d R trigger %.3f grab %.3f active %d %d gun_hand %c fire_pressed %d grab_held %d",
 				I.frame, I.trigger[0], I.grab[0], I.trigger_active[0] ? 1 : 0, I.grab_active[0] ? 1 : 0,
