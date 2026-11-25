@@ -170,3 +170,40 @@ first run (s2ref_c) is written, `det_alife_counts_s2ref_c_1.txt` must exist and 
 the whole series at once (exit 4, "PREFLIGHT FAIL" in the output) and that abort IS this retry's outcome: no verdict,
 no third attempt without the Overseer. Desk test of the stop path: a group TERM runs the scripts' exit traps and leaves
 no child (tested with two stand-in scripts in the same pipeline shape). Not tested: the stop against a live engine.
+
+## 8. Part A retry: result, scored once (2026-11-25). A1 PASS, A2 FAIL as registered. Part B has NOT run.
+
+Runs out/det_s2ref_c, _d (Stance14.exe), out/det_s2off_c, _d (SimTick14.exe, switch off); log out/s2_partA_retry.txt.
+The preflight passed (counter file present after checkpoint 1); all four runs rc 0.
+
+| check | result | values |
+|---|---|---|
+| A1 the two stock runs agree | **PASS** | C = 0 at checkpoints 1, 2, 3 |
+| A2 both SimTick14 runs agree with stock | **FAIL** | both: C = 0 at checkpoint 1, C = 20 at 2 and at 3 |
+
+My guess was A2 PASS at 95 % given A1. Wrong as scored. By the registration a failure stops everything: no part B,
+no third attempt without the Overseer.
+
+**What the 20 are.** At checkpoints 2 and 3 the same 20 offline objects (two blocks of 10 consecutive ids; other ids at
+checkpoint 3) have ONE more update in the SimTick14 runs (7 against 6; 9 against 8). The pass counter says the same:
+213 against 214 A-Life passes at checkpoint 2. The two SimTick14 runs agree with each other exactly (C = 0, 0, 0).
+Frame number and engine time at every checkpoint are equal in all four runs, and so is the A-Life generator state.
+
+**Why I do not read this as "the build differs", and why I cannot rule it out.**
+- This is the signature the 2026-11-19 amendment recorded between IDENTICAL stock runs (PREREG-tierA-counters-amend…,
+  part 1): "exactly ONE scheduler pass (20 consecutive objects) ahead", because a checkpoint taken by TIME and the
+  A-Life pass clock are a few frames out of phase between runs. The cure registered then was checkpoints at fixed
+  pass counts (`-det_passes`). My part A call used time checkpoints (`det_pair.sh 60 3`). That is a second harness
+  error of mine in this part: I registered the mode that amendment had already found unfit.
+- Looked at after scoring (not a registered check): the frames on which the A-Life simulator was scheduled differ by
+  one frame between ALL pairs, the two stock runs and the two SimTick14 runs included (scheduler traces, first 107
+  A-Life calls). So the phase does move between identical builds in these four runs.
+- Against that: both SimTick14 runs are ahead at both later checkpoints and neither stock run is. On 11-19 the shift
+  hit 2 of 12 run-checkpoints. Four of four on one build by chance is unlikely, so a systematic shift of one pass on
+  this build is NOT excluded by this data.
+- In the code, the off path is the stock call: `sim_tick_plan()` returns -1 in det_mode and `FrameMove()` runs as
+  before; the other edits are inside branches that need the switch on. Reading the code is not a test.
+
+**What would decide it (not run; needs the Overseer's GO and its own registration):** the same four builds with
+checkpoints at pass counts (`-det_passes`, the mode adopted on 11-19), three stock runs and three SimTick14 runs, so
+that a one-pass phase shift cannot count as a difference and a real one still does.
