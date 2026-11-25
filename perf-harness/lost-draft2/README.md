@@ -18,3 +18,12 @@ Offline (stub, limits 5,000 / 120,000 ms; phase 1 crosses at seq 100, phase 2 is
 A live writer after the level change: no LOST, 2,830 poses applied, the same with old and new.
 No crossing (keep, freeze, same session, limits off; 30 s gap, 3 s pause): old and new write the same log, byte for
 byte except the wall-clock field of the G lines.
+
+## Merged runner for arm D (2026-11-25)
+
+`t2_xray_v3.sh` = tools/t2_xray_v3.sh: the lost runner (5890b34b) plus the wall-limit lines of the A2 runner
+(T2_WALL_S, T2_OVER_S; merged by hand, the loops differ). Installs zz_p1_puppet_lost2.script.
+Sandbox (RUN_S 60, level loads at 0, 17, 54 s): with WALL 166 / OVER 12 it ends by itself at 114 s, rc 0; a stall at
+70 s is killed by the 30 s rule; an engine that never ends is killed 72 s after the last load; limits unset: wall
+limit 460 s, ends at 114 s, rc 0. Note for a long freeze: tb_run's wall limit counts from the launch through any
+stop, so T2_WALL_S must include the time X-Ray is stopped.
