@@ -312,3 +312,40 @@ reported, not gated; (4) an extra pass first appearing between pass 100 and 320 
 frames of checkpoints 2 and 3 (+2.0, +2.7: none seen).
 **Section 8 in this light:** the one-pass difference there was the time-checkpoint phase drift (9.2), as predicted in
 9.3. Section 8's FAIL stays in the record as scored; part A is met by this section, not by re-reading that one.
+
+## 11. Part B stopped at run 14 of 18 on a failed per-run check. Cause: my check, not the run. AMENDMENT (DRAFT until the Overseer's GO; nothing scored)
+
+**What happened.** Slices 1 and 2 ran 14 runs (13 passed their checks; `s2_t60_2` was flagged not clean, excluded and
+re-run as `s2_t60_2_rr`, as registered, at the end of slice 1 because the series was split into slices to yield).
+`s2_f30` (every frame = one tick of 1/30 s) then failed "no [SIMTICK] line in an ungated run" with 2 lines, and the
+series stopped as registered. Runs `s2_f60`, `s2_f50`, `s2_offL`, `s2_t30L`, `s2_t60L` have not run.
+
+**It is not a switch left over from the run before.** For all 14 runs (table in out/s2_state/check_table.txt): the
+value of `sim_tick` the engine read at boot equals what the run asked for; every stock, capped and fixed-33 run booted
+with 0, has 0 [SIMTICK] lines and 0 calls of the tick path; every gated run has tick-path calls = updates < frames.
+The series script sets both switches before every run and reads them back after it (unchanged).
+
+**The cause.** `s2_f30` is meant to run with `sim_tick 30`. The bench sets the fixed-step flag only DURING the capture
+(device.cpp 386-398). In its warm-up and quit frames the flag is not set, so there the real-time gate runs at 30 Hz
+and prints its 10-second line: one line at the first warm-up frame, one after the capture's end. Inside the capture
+the run did what was asked: 3,000 updates in 3,000 frames, 3,000 calls of the tick path. The check tested a log line
+that another phase of the same run can print: the third time in this series that a check of mine tested something
+other than the outcome. My path table (section 4) had the line as "only printed by the gate" and missed that the gate
+is live outside the capture.
+**A side effect to name:** the warm-up of the three f-runs with `sim_tick > 0` runs gated in real time (about 69
+world updates in 600 frames), the warm-up of `s2_f33` runs stock. The world at the capture's start is therefore not
+the same between f33 and f30/f50/f60; between f30, f50 and f60 it differs only by the gate's rate.
+
+**The amended check (tools/s2_series_b.sh, the pinned script with 8 changed lines):**
+- with `sim_tick > 0`: calls of the tick path = updates (before: more than 0);
+- gated run: unchanged (updates below frames, at least one [SIMTICK] line);
+- every other run: updates = frames; "no [SIMTICK] line" only when `sim_tick` is 0.
+- Desk test on the 14 finished run folders (`--check`, added for this): all 14 pass, `s2_f30` included; five mutants
+  fail (f30 checked as stock; a gated run checked as fixed; a stock run checked as gated; f33 checked as f30; a capped
+  run checked as uncapped).
+
+**The remaining runs (tools/s2_order_b.txt), two slices: three fixed-step runs, then the three 4-core runs:**
+`s2_f30_rr` (the registered check failed on `s2_f30`, so it is run again under the amended check, not re-scored; the
+scorer takes `_rr` in place of its original), `s2_f60`, `s2_f50`, `s2_offL`, `s2_t30L`, `s2_t60L`. Lines as registered.
+Predictions, margins and the scorer are unchanged. The 13 finished runs stay as they are.
+Pinned: s2_series_b.sh cce48a0b3a7df1a0; s2_order_b.txt c656b5e4489752f3. Copies: perf-harness/s2-partB-amend/.

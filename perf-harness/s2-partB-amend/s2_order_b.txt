@@ -1,0 +1,7 @@
+# S2 part B, remaining runs after the amendment of prereg section 11 (same lines as tools/s2_order.txt 13-18; the first is the re-run of s2_f30)
+s2_f30_rr|SimTick14.exe|bench1|0|600|3000|1|sim_tick=30
+s2_f60|SimTick14.exe|bench1|0|600|3000|1|sim_tick=60
+s2_f50|SimTick14.exe|bench1|0|600|3000|1|sim_tick=50
+s2_offL|SimTick14.exe|bench1|1|3000|12000|0|
+s2_t30L|SimTick14.exe|bench1|1|3000|12000|0|sim_tick=30
+s2_t60L|SimTick14.exe|bench1|1|3000|12000|0|sim_tick=60
