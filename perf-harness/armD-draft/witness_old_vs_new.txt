@@ -1,0 +1,7 @@
+# Offline witness (2026-11-25): old reader b6be10b4 vs new reader b048dbcf with -t2_v2reset, v3 writers, five L shapes.
+# Raw logs differ ONLY in G lines, field 3 = the stub's wall-clock second (os.time) at the run; masked there, they are byte-identical.
+keep: masked IDENTICAL; bytes 418538 / 418538; masked sha256 b9577f51156f9888 / b9577f51156f9888; raw differing line kinds: G ; RESET lines in new: 0; events: LOST EPOCH FOUND 
+freeze: masked IDENTICAL; bytes 418540 / 418540; masked sha256 2f6061fd443f6ff8 / 2f6061fd443f6ff8; raw differing line kinds: G ; RESET lines in new: 0; events: LOST EPOCH FOUND 
+cross: masked IDENTICAL; bytes 87319 / 87319; masked sha256 5262f710e3fde14f / 5262f710e3fde14f; raw differing line kinds: G ; RESET lines in new: 0; events: CROSS_REQ CROSS_RESUME LOST EPOCH FOUND CROSS_REQ CROSS_RESUME 
+mut_sess: masked IDENTICAL; bytes 287235 / 287235; masked sha256 e63f3f396ba2ca0a / e63f3f396ba2ca0a; raw differing line kinds: G ; RESET lines in new: 0; events: LOST FOUND 
+mut_off: masked IDENTICAL; bytes 418474 / 418474; masked sha256 0a66ca688459f4c1 / 0a66ca688459f4c1; raw differing line kinds: G ; RESET lines in new: 0; events: EPOCH 
