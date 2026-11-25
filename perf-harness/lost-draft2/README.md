@@ -27,3 +27,6 @@ Sandbox (RUN_S 60, level loads at 0, 17, 54 s): with WALL 166 / OVER 12 it ends 
 70 s is killed by the 30 s rule; an engine that never ends is killed 72 s after the last load; limits unset: wall
 limit 460 s, ends at 114 s, rc 0. Note for a long freeze: tb_run's wall limit counts from the launch through any
 stop, so T2_WALL_S must include the time X-Ray is stopped.
+After the CodeRabbit review: this runner also empties the crossing marker before every restart boot (witnessed in the
+sandbox: planned kill, boot 1 logs "crossing marker emptied", 0 bytes); a freeze is recorded only after the STOP
+succeeded; an empty snapshot read counts as "no new seq". The four schedule cases pass again unchanged.

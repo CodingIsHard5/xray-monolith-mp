@@ -45,9 +45,11 @@ utc() { echo $(( $(date +%s%N) / 1000000 )); }
 # pre-flight E test mode (section 46): its control file may exist only when the pre-flight runner says so (T2_DMG_OK=1)
 [ "${T2_DMG_OK:-0}" = 1 ] || { [ -e "$SHM/dmgtest.txt" ] && { rm -f "$SHM/dmgtest.txt"; log "REMOVED a stale test-mode control file (dmgtest.txt)"; }; }
 rm -f "$SHM"/snap.txt "$SHM"/meta_t2.csv "$SHM"/hits_t2.csv; mkdir -p "$SHM"      # pose.txt is ITR2's: never touched here
-cp "$P/harness/zz_p1_puppet.script" "$RUN/gamedata/scripts/zz_p1_puppet.script"
-cleanup() { rm -f "$RUN/gamedata/scripts/zz_p1_puppet.script"; }
-trap cleanup EXIT
+SRC="$P/harness/zz_p1_puppet.script"
+cp "$SRC" "$RUN/gamedata/scripts/zz_p1_puppet.script" && cmp -s "$SRC" "$RUN/gamedata/scripts/zz_p1_puppet.script" || { log "REFUSED: could not install $SRC"; exit 2; }
+# a runner that is cancelled must not leave a stopped engine behind: CONT whatever this runner stopped
+cleanup() { [ -n "${FZP:-}" ] && kill -CONT "$FZP" 2>/dev/null; [ -n "${STP:-}" ] && kill -CONT "$STP" 2>/dev/null; rm -f "$RUN/gamedata/scripts/zz_p1_puppet.script"; }
+trap cleanup EXIT; trap 'exit 143' TERM INT
 # the engine = the biggest process that (1) is not the watcher, by PID ($WP), (2) is a Wine process by its /proc/<pid>/exe
 # (a wine preloader/loader binary; the watcher's exe is python), (3) names the exe in its command line. Pre-flight 1
 # showed WINEPREFIX is NOT in the engine's /proc environ under Wine, so that check found nothing and a hang was not
@@ -83,16 +85,17 @@ while :; do
     if [ $k = 0 ] && [ -z "$done_stall" ] && [ -n "$tt" ] && awk -v t="$tt" -v a="$AT" 'BEGIN{exit !(t>=a)}'; then
       EP=$(engine); [ -n "$EP" ] || { why="no engine pid found (stall)"; break; }; log "STALL start: seq $s track ${tt}s engine $EP"
       echo "utc_ms,event,seq,track_s" > "$O/stall.csv"; echo "$(utc),STOP,$s,$tt" >> "$O/stall.csv"
-      kill -STOP "$EP"; sleep "$DUR"; kill -CONT "$EP"
+      STP=$EP; kill -STOP "$EP"; sleep "$DUR"; kill -CONT "$EP"; STP=""
       echo "$(utc),CONT,$s,$tt" >> "$O/stall.csv"; log "STALL end: SIGCONT sent"; done_stall=1; same=0; last=$s; continue
     fi
-    if [ $k = 0 ] && [ -z "$done_kill" ] && [ -n "$tt" ] && awk -v t="$tt" -v a="$KAT" 'BEGIN{exit !(t>=a)}'; then
+    if [ $k = 0 ] && [ "$KXS" = 0 ] && [ -z "$done_kill" ] && [ -n "$tt" ] && awk -v t="$tt" -v a="$KAT" 'BEGIN{exit !(t>=a)}'; then
       EP=$(engine); [ -n "$EP" ] || { why="no engine pid found (kill)"; break; }; KC=$(cat /proc/$EP/comm 2>/dev/null); KR=$(awk '/VmRSS/{print $2}' /proc/$EP/status 2>/dev/null); KU=$(utc); kill -KILL "$EP"; done_kill=1
       echo "$KU,$k,planned kill (T2i) seq $s track ${tt}s pid $EP,1" >> "$O/restarts.csv"; log "PLANNED KILL: seq $s track ${tt}s pid $EP comm $KC rss_kb $KR"
       sleep 1; WINEPREFIX=$RUN/prefix wineserver -k >/dev/null 2>&1   # pre-flight 2: the Wine wrappers kept tb_run waiting 10 min
       why="planned"; break
     fi
-    if [ -n "$s" ] && [ "$s" = "$last" ]; then same=$((same+1)); else same=0; fi; last=$s
+    # an empty read (file missing or caught in mid-write) counts as "no new seq": it must not reset the 30 s rule
+    if [ -z "$s" ] || [ "$s" = "$last" ]; then same=$((same+1)); else same=0; fi; [ -n "$s" ] && last=$s
     # ITRZone review: under freeze X-Ray may legitimately stop exporting while ITR2 is dead/away (Hub ~20 s + reload),
     # so the 30 s rule is skipped while pose.txt says dead/away + freeze; it applies again once the pose says play.
     IFS=, read -r _ _ _ pst _ paw <<<"$(head -1 "$SHM/pose.txt" 2>/dev/null | tr -d '\r')"
@@ -117,7 +120,7 @@ while :; do
               aline=$(grep -a '^ABSORB_ARM\|^ABSORB_SKIP' "$SHM/meta_t2.csv" 2>/dev/null | sed -n "$(( ${narm:-0} + 1 ))p")
               [ -n "$aline" ] && break; sleep 0.5; done
             [ -n "$aline" ] && { narm=$(( ${narm:-0} + 1 )); gms=$(cut -d, -f4 <<<"$aline"); log "freeze: ${aline%%,*} seen before STOP"; } || log "freeze: NO arm line within 3 s (stopping anyway)"; fi
-          FZP=$(engine); [ -n "$FZP" ] && kill -STOP "$FZP" && { SU=$(utc); SST=$pst; log "freeze: STOP pid $FZP"; }; fi; fi
+          FZC=$(engine); FZP=""; [ -n "$FZC" ] && kill -STOP "$FZC" && { FZP=$FZC; SU=$(utc); SST=$pst; log "freeze: STOP pid $FZP"; }; fi; fi
       same=0
     elif [ -n "${fz:-}" ] && [ -n "${pst:-}" ] && { [ "${paw:-}" = keep ] || [ "${paw:-}" = freeze ]; }; then fz=""; log "freeze hold end: pose state $pst"   # a torn/empty/truncated pose read (awaysim not exactly keep or freeze) never ends a freeze
       if [ -n "${FZP:-}" ]; then nres=$(grep -a -c '^RESUMED_GAP' "$SHM/meta_t2.csv" 2>/dev/null); kill -CONT "$FZP"; CU=$(utc)

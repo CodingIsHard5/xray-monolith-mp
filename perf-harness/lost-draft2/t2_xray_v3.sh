@@ -67,6 +67,8 @@ while :; do
   # a restart must not inherit the killed boot's last snapshot: the new watcher would stamp it first and then ignore
   # every new snapshot as "not newer" (seq restarts at 1). Found on pre-flight 4's data (boot1/watch: 1 stale row).
   [ $k -gt 0 ] && rm -f "$SHM/snap.txt"
+  # a restart loads the save: a crossing marker left by an engine that died inside a level load must not reach the new script
+  [ $k -gt 0 ] && [ -s "$SHM/cross.txt" ] && { log "boot $k: crossing marker emptied (was: $(head -1 "$SHM/cross.txt" | tr -d '\r'))"; : > "$SHM/cross.txt"; }
   if [ $k = 0 ]; then TIMES=$RUN_S; else TIMES=$(( RUN_S - ($(date +%s) - T_START) + 25 )); [ $TIMES -lt 60 ] && TIMES=60; fi
   python3 "$P/tools/t1_watch.py" "$SHM/snap.txt" "$B/watch" "bin\\$EXE" "$ITR" > "$B/watch.log" 2>&1 & WP=$!
   log "boot $k: run_id $RID engine_s $TIMES load $(cut -d' ' -f1-3 /proc/loadavg)"
@@ -95,7 +97,8 @@ while :; do
       sleep 1; WINEPREFIX=$RUN/prefix wineserver -k >/dev/null 2>&1   # pre-flight 2: the Wine wrappers kept tb_run waiting 10 min
       why="planned"; break
     fi
-    if [ -n "$s" ] && [ "$s" = "$last" ]; then same=$((same+1)); else same=0; fi; last=$s
+    # an empty read (file missing or caught in mid-write) counts as "no new seq": it must not reset the 30 s rule
+    if [ -z "$s" ] || [ "$s" = "$last" ]; then same=$((same+1)); else same=0; fi; [ -n "$s" ] && last=$s
     # ITRZone review: under freeze X-Ray may legitimately stop exporting while ITR2 is dead/away (Hub ~20 s + reload),
     # so the 30 s rule is skipped while pose.txt says dead/away + freeze; it applies again once the pose says play.
     # State and policy come from the last COMPLETE pose and are kept until the next complete one: a writer killed
@@ -125,7 +128,7 @@ while :; do
               [ "${acnt:-0}" -gt "${narm:-0}" ] && aline=$(grep -a '^ABSORB_ARM\|^ABSORB_SKIP' "$SHM/meta_t2.csv" 2>/dev/null | tail -1)
               [ -n "$aline" ] && break; sleep 0.5; done
             [ -n "$aline" ] && { narm=$acnt; gms=$(cut -d, -f4 <<<"$aline"); log "freeze: ${aline%%,*} seen before STOP"; } || log "freeze: NO arm line within 3 s (stopping anyway)"; fi
-          FZP=$(engine); [ -n "$FZP" ] && kill -STOP "$FZP" && { SU=$(utc); SST=$pst; [ -n "$lost" ] && SST=lost; log "freeze: STOP pid $FZP"; }; fi; fi
+          FZC=$(engine); FZP=""; [ -n "$FZC" ] && kill -STOP "$FZC" && { FZP=$FZC; SU=$(utc); SST=$pst; [ -n "$lost" ] && SST=lost; log "freeze: STOP pid $FZP"; }; fi; fi
       same=0
     elif [ -n "${fz:-}" ] && [ -n "${pst:-}" ] && { [ "${paw:-}" = keep ] || [ "${paw:-}" = freeze ]; }; then fz=""; log "freeze hold end: pose state $pst"   # a torn/empty/truncated pose read (awaysim not exactly keep or freeze) never ends a freeze
       if [ -n "${FZP:-}" ]; then nres=$(grep -a -c '^RESUMED_GAP' "$SHM/meta_t2.csv" 2>/dev/null); kill -CONT "$FZP"; CU=$(utc)
