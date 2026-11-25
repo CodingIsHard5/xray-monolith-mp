@@ -1770,3 +1770,27 @@ Ordered by the Overseer after section 63: the fix is prospective, L stands as FA
   itrzone's stamps), so the quick second level change was not tested.
 - My guess (60 % PASS) was right. ITR2 side: PASS 13 of 13 by itrzone's score under its amendment 118.
 - Joint: b2 PASS. Arm B as a whole: b1 joint FAIL as scored (ITR2 side scorer fault, X side 10/10), b2 joint PASS.
+
+## 66. Result: pre-flight L2 (cross boot, fixed lost timer), PASS 7 of 7 checks (scored once, 2026-11-25)
+
+- Run: out/t3pfL2_cross, 06:45:59 to 06:52:37 EST, its own slice, claimed and released by the driver.
+- Void decision first, from the timestamps alone (section 64a): tb_run.log has no "ABORT: protected title" line; the
+  runner's LOST line is at 11:49:42.0 UTC and "boot 0 end" at 11:52:37.0 with rc 0. Not void. Scored as it is.
+- Files checked before scoring, all as registered in section 64: script b6be10b4, runner 5890b34b, driver d1c786cd,
+  writer 7733cbe4, checker 77c3ad0b. Test save unchanged. The installed script copy was removed by the runner.
+- All checks PASS.
+  - 3: one LOST line, state cross, **120,000 ms** of game time after the resume (L: 135,010). The pose file held seq
+    1237 at the first read, 70 poses after the request (seq 1167), as in L; this time it did not restart the timer.
+  - 6: the runner's own LOST after 120,071 ms; cross hold ended as lost. 7: no stop.
+  - 1: rc 0, no restart, no Lua error. V: two clean VITALS lines, 1,166 poses with 0 off. 2: one CROSS_REQ, one
+    CROSS_RESUME. 4: no pose applied after the request, no EPOCH, no FOUND.
+- The run went to its own end this time (397 s after launch), so the part after the LOST line is seen as well: 175 s
+  of X-Ray running on the Garbage with the pose lost under keep, no error.
+- My guess (80 % PASS) was right.
+- **Consequence:** harness/zz_p1_puppet_lost2.script (b6be10b4) with runner tools/t2_xray_lost2.sh (5890b34b) is the
+  pose v3 reader on my side. Shown in the engine, over L and L2: a 7-field header is read; a new session number with
+  seq from 1 is taken at once (EPOCH); the same session with a lower seq is rejected; LOST after 5 s in play and
+  120 s around a crossing; under freeze the bridge stops X-Ray on LOST and continues it when a pose returns.
+- **Not shown:** a v2 pose (no session field) read by this script in the engine (offline only); a recovery AFTER a
+  crossing LOST (a new writer appearing on the new level); the lost runner has no wall-limit fix (T2_WALL_S,
+  T2_OVER_S of 296563fd), so an arm with a long schedule needs the two runners merged first.
