@@ -1939,3 +1939,23 @@ which itrzone asks for: `scripts/boot_t2.sh c2`.
   spread of the load time against the 4 s kill; anything outside my files (a protected title, a no-start).
 - **Joint text:** amendment 120 copied into PREREG-B1-T2-JOINT-2026-11-23.md after one blank line: 5,977 bytes, sha256
   e3dcf4ab5a807add31110c062f271d8443b88ba965044450c518f921f202bb1b (ITRZone master 7d7ffc7).
+
+## 70. RESULT arm C run c2 (2026-11-25, scored once): X side PASS 9 of 9; joint PASS
+
+- **Run:** itrzone's `scripts/boot_t2.sh c2`, 16:38:05 to 16:49:29 UTC. X folder
+  ITRZone/out/runs/20261125-113500-t2c2-xray, copied to out/t3armC_c2 before scoring. Check file
+  t3_armC2_xray_check.txt, sha256 01e4ad252556320a…. Frozen files and the test save rechecked before scoring: all as
+  registered in section 69.
+- **X side: PASS on all 9 checks. My guess (PASS 75 %) held.**
+  - Check 3 (amended): one planned kill at 4.14 s after the cross pose; restart wait 150 s logged; marker line
+    "was 0 bytes, now 0 bytes"; no arrival line in boot 1 before its own request.
+  - Check 5: first applied play pose 22.356 s after the cross pose of boot 1's request (limit 90 s).
+  - Check 6: 2,163 applied poses in boot 0, 2,401 in boot 1 after the arrival; no guard, no hold.
+  - Check 7: first pose after the arrival 0.004 m from the changer's destination (limit 5 m).
+  - Checks 8 and 9: 0 stance, height or vitals faults in 4,564 applied poses; health 1.000 throughout.
+- **ITR2 side (itrzone's own scorer): PASS 15 of 15.** Joint: PASS.
+- **What c2 does NOT show.** The marker was already empty at the restart, as in c1: the kill again landed AFTER the new
+  level's script had taken the marker. The other case (a kill BEFORE the take, marker still full, cleared by the runner)
+  has passed only in the offline witness of section 69, never in a live run. Two live runs, one kill timing.
+- **Reported, not scored:** itrzone's reader counted 8,725 level-mismatch snapshots and no torn file. The half-written
+  snapshot gap stays open for itrzone's amendment 121, before arm D.
