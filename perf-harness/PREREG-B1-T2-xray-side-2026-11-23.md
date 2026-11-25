@@ -1751,3 +1751,22 @@ Ordered by the Overseer after section 63: the fix is prospective, L stands as FA
   4, 6, 7.
 - The void decision is made from the two timestamps alone, before the checker is run.
 - Overseer: GO for one box run; no CodeRabbit run needed for this change.
+
+## 65. Result: arm B, run b2, X side PASS 10/10 (scored once, 2026-11-25)
+
+- Run: ITRZone/out/runs/20261125-062751-t2b2-xray, 06:27:51 to 06:45:20 EST. One boot, runner rc 0, no restart row.
+- Files checked before scoring, all as registered in section 61: runner 296563fd, script 473dec25, Stance14.exe
+  b4ce9c77, lib cb183b7b, checker a71e36e6. Test save unchanged.
+- All ten conditions PASS.
+  - Out by esc_level_changer_to_garbage_1; ITR2 died 10.1 s after the changer and dropped its crossing. X-Ray finished
+    its own level change: the Garbage was named 8.2 s after the request, 2 s before the runner's cross hold ended on
+    the `dead` pose. The 30 s no-snapshot rule was never near.
+  - No pose applied on the Garbage (0, as expected). 1,085 mismatch lines, all in the window (expected about 1,000).
+  - Recover by gar_level_changer_to_escape_1, requested 87 s after my Garbage resume: 22.2 s from the `cross` pose
+    to the first applied pose, which is 0.018 m from the registered spot.
+  - Applied poses 2,148 / 0 / 2,129. GUARD 0, HOLD 0. Stance, state, height: 0 off of 4,277. Three clean VITALS
+    lines, no refill.
+- The expectations of section 62a held: about 1,000 mismatch lines; the recover about 80 s after the death (84 s by
+  itrzone's stamps), so the quick second level change was not tested.
+- My guess (60 % PASS) was right. ITR2 side: PASS 13 of 13 by itrzone's score under its amendment 118.
+- Joint: b2 PASS. Arm B as a whole: b1 joint FAIL as scored (ITR2 side scorer fault, X side 10/10), b2 joint PASS.
