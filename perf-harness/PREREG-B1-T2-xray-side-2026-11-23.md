@@ -1959,3 +1959,56 @@ which itrzone asks for: `scripts/boot_t2.sh c2`.
   has passed only in the offline witness of section 69, never in a live run. Two live runs, one kill timing.
 - **Reported, not scored:** itrzone's reader counted 8,725 level-mismatch snapshots and no torn file. The half-written
   snapshot gap stays open for itrzone's amendment 121, before arm D.
+
+## 71. R3 arm C, run c3: a LIVE early kill, X side, registered BEFORE the boot (2026-11-25)
+
+Ordered by the Overseer after c2: c1 and c2 both killed X-Ray after the new level's script had taken the crossing
+marker; the other case passed only offline. c3 kills X-Ray AT the request, while the marker is still full. Agreed with
+itrzone: ITR2 side as c2 plus its reader amendment (whole-file check); one joint boot on the Overseer's GO, which
+follows itrzone's two ITR2-only runs.
+
+- **CAVEAT FIRST. Check 3 rests on a moment that is bounded, not timed.** The marker is taken when the new Lua state
+  loads zz_p1_puppet.script. By the ORDER of the engine's own log (c1 and c2, boot 1) that is after the autosave, the
+  disconnect, the destruction of the old level and about 1,290 other scripts. The autosave was on disk 0.15 s after
+  the request (hard lower bound); c2's kill at 4.46 s found the marker taken (upper bound). Estimate 3 to 4.4 s (the
+  script sits at 92 % of a loading phase the engine timed at 3,650 ms in c2 and 3,577 ms in c1; line position stands
+  in for time). The kill is expected 20 to 60 ms after the write. No real engine has been killed this early yet.
+- **Files.** Runner tools/t2_xray_c3.sh 67687701c850f7bee3fb35c3e7c07951380bf9d89cf4d524098213931abe1492 (from
+  d140e583): lever T2_KILL_MARK=1, a 20 ms watcher that SIGKILLs the engine as soon as cross.txt is non-empty; the
+  marker is emptied and logged before boot 0. CodeRabbit: three findings, all fixed and re-witnessed. Unchanged and
+  frozen: script 473dec25, Stance14.exe b4ce9c77, lib cb183b7b; test save cordon1 scoc a9f9a8a9, scop 6dea752b.
+- **Env:** T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999 T2_KILL_AT=99999 T2_RUN_S=600
+  T2_OVER_S=120 T2_MAXRESTART=1 T2_KILL_XS=0 T2_KILL_MARK=1 T2_RESTART_WAIT_S=150.
+- **Checker:** tools/t3_armC3_xray_check.py 651cbce2a2bbf6f64afebd4b55abb28a8d91b72592f22705f350d1d9ed088cbb (from
+  c24ffd31). **Score once:** `python3 -I tools/t3_armC3_xray_check.py <X out dir> out/t3pfD/run/boot0/meta_t2.csv`
+- **PASS = all ten.** Checks 1, 2 and 4 to 9 word for word as section 67.
+  - **Check 3, new (the early kill, by its outcome):** restarts.csv has exactly one row, planned, "planned kill (arm
+    C3) at the marker: d ms after its write; marker n bytes" with n > 0; the restart wait is logged; exactly one line
+    "boot 0: crossing marker at start" ending empty or absent; exactly one line "boot 1: crossing marker at restart:
+    was n bytes, now 0|absent bytes (was: line)" with n > 0 and the line equal to home,dest,utc of boot 0's own
+    request; no CROSS_RESUME in boot 1 before its own request. d is reported, not scored.
+  - **Check 10, new:** sha256 of cordon1.scoc and cordon1.scop as registered, read after the run.
+  - **If the script takes the marker before the kill** there is no kill and X-Ray just crosses: check 3 FAILS, named
+    "not an early kill". Scored as a FAIL of the run, no re-scoring.
+- **Witnesses and self-test** (perf-harness/armC3-draft/README.md): real runner code in the fake-engine sandbox,
+  seven cases (early, late, stale marker, miss, fast wrapper exit, stale receipt, old-mode regression); checker on
+  copies of c2's real output: good case PASS, c2 as it is FAIL on 3 only, 12 mutants each FAIL on the right check.
+  The table "each expected line against the paths that may not produce it" is there too.
+- **Predicted values and margins:**
+
+| Quantity | Predicted | Bound | Margin |
+|---|---|---|---|
+| Kill after the marker's write, ms (reported) | 20 to 60 | before the take: later than 150 ms (hard), about 3,000 to 4,400 ms (estimate) | 2.5 times on the hard bound, about 50 times on the estimate |
+| Marker at the restart | was 37 bytes (the request's line), now 0 | was > 0 with the request's content, now 0 or absent | none: an empty marker fails |
+| First applied play pose after the cross pose of boot 1's request, s | 22 | at most 90 | 68 s |
+| Poses: boot 0 before the request; boot 1 after the arrival | about 2,160; 2,400 | at least 400; 600 | 1,750; 1,800 |
+| First pose after the arrival to the changer destination, m | 0.004 | at most 5 | 5 m |
+| HOLD; GUARD | 0; 0 | at most 15; 0 | GUARD has no margin |
+| VITALS lines boot 0; boot 1 | 0 (c2: 1); 2 | 0 or 1; exactly 2 | boot 0's state never ends cleanly now |
+| Test save hashes | unchanged | unchanged | none |
+| New X-Ray run seen by ITR2 after its cross start, s (itrzone's, reported) | 185 | none | range 181 to 190 |
+| Boot 0 engine log; autosave file (reported) | may be cut short; may be half-written | none | neither is read by a check or loaded |
+
+- **Guesses:** check 3 PASS 95 %; **X side PASS 70 %.** The rest of the risk is the first real engine killed this
+  early: the Wine teardown, a cut autosave, a cut last snapshot.
+- **Joint text:** to be added here with byte count and sha256 when itrzone's amendment is registered.
