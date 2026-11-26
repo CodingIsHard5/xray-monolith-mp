@@ -1162,14 +1162,22 @@ int vr_bpt_dropped(int id, const Fvector& bc, Fvector& centre, int mode, const F
 				sh->PPhysicsShell()->SetTransform(root, mh_clear);
 			}
 			else // not placed again: the game's drop has just moved the object's own matrix to its drop point; take the shell's back
-				sh->PPhysicsShell()->InterpolateGlobalTransform(&sh->XFORM());
+				sh->PPhysicsShell()->GetGlobalTransformDynamic(&sh->XFORM());
 			sh->PPhysicsShell()->set_LinearVel(lv);
 			sh->PPhysicsShell()->set_AngularVel(av);
 			was_set = true;
 		}
 	}
 	att.set(O->XFORM());
-	O->XFORM().transform_tiny(centre, bc);
+	if (free_ && !was_set)
+	{
+		// for the log: the shell's pose as of this update (the object's own matrix is refreshed later in the frame, so here it
+		// is a frame old, except on the frames it was set above, which made the log's steps uneven)
+		CPhysicsShellHolder* sh = smart_cast<CPhysicsShellHolder*>(O);
+		if (sh && sh->PPhysicsShell())
+			sh->PPhysicsShell()->GetGlobalTransformDynamic(&att);
+	}
+	att.transform_tiny(centre, bc);
 	return free_ ? 2 : 1;
 }
 int vr_bpt_use(CActor* A, int id) // the game's own use: -1 not ours any more, 0 no script gate, 1 gate false (FDDA took it), 2 gate true and Eat called
