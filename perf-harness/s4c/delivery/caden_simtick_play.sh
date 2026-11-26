@@ -10,13 +10,47 @@
 set -u
 ROOT="$HOME/Projects/StalkerGameEngine"; RUN="$ROOT/run"; EXE="${SIMTICK_EXE:-SimTick17.exe}"; SHA="cb5f2f8706ed89e5bcab9fdc832676b461543e725b13375a3be382240da11d82"
 RES="${SIMTICK_RES:-1920x1080}"; HZ="${SIMTICK_HZ:-30}"; T="$HOME/.claude/overseer/tools"; LOCK="$RUN/.caden-play.lock"
-die() { echo "NOT STARTED: $*"; command -v notify-send >/dev/null && notify-send "Fixed-tick test not started" "$*"; exit 2; }
+TEST="${SIMTICK_SELFTEST:-0}"   # 1 = EnginePerf's own headless boot test: no pop-up, and its own machine claim does not block the start
+die() { echo "NOT STARTED: $*"; [ "$TEST" = 1 ] || { command -v notify-send >/dev/null && notify-send "Fixed-tick test not started" "$*"; }; exit 2; }
 [ "$(sha256sum "$RUN/bin/$EXE" 2>/dev/null | cut -d' ' -f1)" = "$SHA" ] || die "$EXE is not the tested build"
-"$T/quiet-required.sh" check 2>/dev/null | grep -q '^HELD:.* engineperf ' && die "an EnginePerf benchmark holds the machine; try again in a few minutes"
+[ "$TEST" != 1 ] && "$T/quiet-required.sh" check 2>/dev/null | grep -q '^HELD:.* engineperf ' && die "an EnginePerf benchmark holds the machine; try again in a few minutes"
 pgrep -f "$RUN/bin/|${RUN//\//\\\\}\\\\bin" >/dev/null && die "an engine from this run tree is already running"
 [ -e "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null && die "the test is already running"
-echo $$ > "$LOCK"; trap 'WINEPREFIX="$RUN/prefix_play" wineserver -k >/dev/null 2>&1; rm -f "$LOCK"' EXIT
-[ -d "$RUN/prefix_play" ] || cp -a "$RUN/prefix" "$RUN/prefix_play" || die "could not make the play prefix"
+# Everything the game can WRITE must be a private copy (Overseer 2026-11-26). The engine writes only below run/:
+# appdata/ (settings, saves, logs, shader cache, screenshots) and gamedata/configs/axr_options.ltx (MCM).
+#  1. the no-link guard of the benchmarks: no link under run/ may lead to a writable file in ~/Games, no hard links;
+#  2. the written places themselves must be real folders/files inside run/, not links;
+#  3. the play prefix has no link into the home folder (Wine's Documents, Desktop, ... become empty private folders).
+"$ROOT/tools/run_noguard.sh" "$RUN" >/dev/null || die "the write guard refused: a path in the run folder leads into ~/Games"
+for w in appdata appdata/savedgames appdata/logs appdata/shaders_cache gamedata gamedata/configs gamedata/configs/axr_options.ltx appdata/user.ltx fsgame.ltx; do
+  [ -e "$RUN/$w" ] || continue
+  [ "$(realpath "$RUN/$w")" = "$RUN/$w" ] || die "write guard: $w is not a private copy"
+done
+[ -n "$(find "$RUN/appdata" -type l -print -quit)" ] && die "write guard: a link inside appdata"
+echo $$ > "$LOCK"
+# The benchmarks use the same run folder: their MCM options and saves are put back when the game closes; Caden's
+# own MCM options are kept in appdata/axr_options_play.ltx and used again on the next start.
+KEEP="$RUN/.play_keep"; OPT="$RUN/gamedata/configs/axr_options.ltx"; MYOPT="$RUN/appdata/axr_options_play.ltx"
+restore() {
+  WINEPREFIX="$RUN/prefix_play" wineserver -k >/dev/null 2>&1; sleep 1
+  if [ -d "$KEEP" ]; then
+    [ -e "$OPT" ] && cp -f "$OPT" "$MYOPT"
+    [ -e "$KEEP/axr_options.ltx" ] && cp -f "$KEEP/axr_options.ltx" "$OPT"
+    for f in "$KEEP"/saves/*; do [ -e "$f" ] && { cmp -s "$f" "$RUN/appdata/savedgames/${f##*/}" || cp -f "$f" "$RUN/appdata/savedgames/${f##*/}"; }; done
+  fi
+  rm -f "$LOCK"
+}
+trap restore EXIT
+mkdir -p "$KEEP/saves" || die "could not make the keep folder"
+if [ ! -e "$KEEP/axr_options.ltx" ] && [ -e "$OPT" ]; then cp -p "$OPT" "$KEEP/axr_options.ltx"; fi
+for f in bench1.scop bench1.scoc cordon1.scop cordon1.scoc; do [ -e "$KEEP/saves/$f" ] || cp -p "$RUN/appdata/savedgames/$f" "$KEEP/saves/$f" || die "could not keep $f"; done
+[ -e "$MYOPT" ] && cp -f "$MYOPT" "$OPT"
+if [ ! -d "$RUN/prefix_play" ]; then
+  cp -a "$RUN/prefix" "$RUN/prefix_play" || die "could not make the play prefix"
+  find "$RUN/prefix_play/drive_c/users" -type l | while IFS= read -r l; do rm -f "$l" && mkdir -p "$l"; done
+  for d in "$RUN/prefix_play/dosdevices"/*; do case "${d##*/}" in c:|z:) ;; *) [ -L "$d" ] && rm -f "$d";; esac; done
+fi
+[ -n "$(find "$RUN/prefix_play/drive_c" -type l -print -quit)" ] && die "write guard: a link inside the play prefix"
 P="$RUN/appdata/user_play.ltx"
 if [ ! -s "$P" ]; then
   grep -v -E '^(vid_mode|sim_tick|r__framelimit|rs_screenmode|bind_console sim_tick) ' "$RUN/appdata/user.ltx" > "$P"

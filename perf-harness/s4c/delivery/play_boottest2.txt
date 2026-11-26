@@ -1,0 +1,11 @@
+2026-11-26 05:22:30 slice granted
+watched files under ~/Games: 10820 (0 absent)
+own display :141
+B1 engine in game with the tick on: PASS (* [SIMTICK] hz 30 frames 464 ticks 301 n0 170 n1 28)
+B2 no fatal error in the log: PASS
+B3 lock gone, benchmark options, saves and settings unchanged: PASS
+B4 nothing under ~/Games changed (10820 files by sha256 and mtime; none newer than the start): PASS
+launcher output: info:  Game: SimTick17.exe|info:  DXVK: v2.3.1|info:  Vulkan: Found vkGetInstanceProcAddr in winevulkan.dll @ 0x6ffff90f4000|info:  Built-in extension providers:|info:    Win32 WSI|info:    OpenVR|info:    OpenXR|info:  OpenVR: could not open registry key, status 2|info:  OpenVR: Failed to locate mo
+play prefix links left in drive_c: 0; own play settings file: run/appdata/user_play.ltx
+RESULT: PASS
+2026-11-26 05:25:42 end

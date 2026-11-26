@@ -102,3 +102,18 @@ feels. Caden's hands are the first test of that. Output `s4c/s4c_input_score.txt
 ### 6.4 For Caden (not run by me: I start nothing on his screen)
 `s4c/delivery/`: launcher `caden_simtick_play.sh` (pinned to SimTick17, own prefix and settings in run/), a .desktop
 entry, and the short sheet. The launcher has NEVER been started; only its syntax is checked.
+
+### 6.5 Launcher write guard and headless boot (2026-11-26, Overseer's conditions and GO; two boots)
+Added to the launcher before any boot: the benchmarks' no-link guard (tools/run_noguard.sh); every written place must
+be a real file or folder inside run/ (appdata, appdata/savedgames, appdata/logs, appdata/shaders_cache,
+appdata/user.ltx, gamedata/configs/axr_options.ltx, fsgame.ltx); the play prefix has no link into the home folder;
+the benchmark's MCM options and saves are put back at exit, Caden's MCM options kept in appdata/axr_options_play.ltx.
+- Boot 1 (`s4c/delivery/play_boottest.txt`): DID NOT COMPLETE, my mistake. I used Xvfb :78, GammaVR's display number;
+  the display was gone after 88 s. One GammaVR scored run (05:18:22 to 05:20:15) is void because of it. A second
+  mistake: the "no fatal error" check matched Lua traceback warnings that GAMMA prints in every run.
+- Boot 2 (`play_boottest2.txt`, own display :141, refused if taken; corrected check; Overseer's GO): PASS 4 of 4.
+  In game with the tick on (301 ticks at 30 Hz in the log's 10 s window); no fatal error; lock gone and the benchmark's
+  options, saves and settings byte-identical after; 10820 files under ~/Games equal by sha256 and mtime before and
+  after, none newer than the start.
+Not shown: a real window on the desktop, borderless mode on a real monitor, sound, the numpad keys, saving in play.
+Limit: Wine's z: drive maps the whole disk, as in every prefix; the guard covers what the engine is set to write.
