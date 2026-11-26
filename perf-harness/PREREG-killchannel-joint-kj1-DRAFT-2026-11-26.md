@@ -1,4 +1,4 @@
-# Kill channel, joint run "kj1", X side: DRAFT 1 (2026-11-26). NOT registered, nothing built, nothing run.
+# Kill channel, joint run "kj1", X side: DRAFT 4 (2026-11-26). NOT registered, nothing built, nothing run.
 
 Ordered by the Overseer after kw1 (PASS 12/12). No boot until the Overseer has reviewed the registered text.
 Limits first: a rig, not a player (itrzone's lever `kcrig` deals the damage); nobody looks; one stalker and one
@@ -38,6 +38,28 @@ One boot of each side, Cordon, itrzone's boot script starts my runner and holds 
 30 s in step B: derived, not copied. At the stalker's measured 0.01 a second, 30 s without a ceiling is a rise of
 0.30, more than the whole 0.250 hit and 3000 times the check's bound; 5 s would also show it, 30 s shows it on a
 flesh as well (0.0018 in 5 s gives about 0.011 in 30 s, 100 times the bound).
+
+### 1.1 Draft 4 (2026-11-26): kc1 read, the freeze step settled, the schedule
+- itrzone's kc1 (their am135, ITR2 alone against a stand-in): PASS 10/10 by their score; 8 kills, none lost, no puppet
+  removed before the health read, so their death rule stands and nothing changes for my reader. ITR2 did not
+  regenerate a puppet in 215 s. Engine damage on puppets was exact (0.300). Their limits: a stand-in, 8 creatures.
+- Step D is form (ii): MY runner stops X-Ray, their state stays play. Reason (itrzone's desk check): their pose is
+  away or dead only when the ITR2 world changes, and the mod destroys every puppet before that, so there is nothing
+  to kill inside a pose-made freeze, in the rig or in play. What a player can meet is X-Ray stalling while they
+  keep shooting; the runner's stop imitates that.
+- Schedule, seconds on ITR2's play clock from its first play pose: 30 pick, part hit 0.3 on S and M; 70 second part
+  hit 0.2 on S (total 0.500); 90 kill S; 115 kill M; end 160. My stop: 105 to 125.
+  Derivation of the times I depend on: 40 s between the first hit and the second (ceiling check, section 1's 30 s
+  plus 10); the kill at 115 is 10 s inside each end of the stop; my runner polls once a second and sees their first
+  play pose at most about 1 s late, and SIGSTOP is immediate, so the stop starts 105 to about 107 on their clock:
+  8 s of margin before the kill, about 12 after. 35 s after the stop for the death, the 10 s `dead` hold and the end.
+- New on my side for this: a runner trigger "stop N s after the first play pose the runner read" (today's stall
+  trigger counts X-Ray's track time, which has no fixed offset to ITR2's play clock). Stop window from the runner's
+  own STOP and CONT rows (`stall.csv` for this trigger; check 9 reads that file, not `freeze.csv`).
+- New NO VERDICT rule: the first kept pose with dead = 1 for M must be read by the watcher at least 2 s after STOP
+  and 2 s before CONT. Otherwise the step did not test a kill inside a stop; it is not a failure of the channel.
+- Checks 2 and 4 then cover two levels on S (applied 0.300, then 0.500) and one on M (0.300); khits in check 14 is
+  fixed from these at registration.
 
 ## 2. What is kept (new)
 The watcher writes every COMPLETE snapshot, whole, to `snaps_all.txt` and every complete pose it sees, whole, to
