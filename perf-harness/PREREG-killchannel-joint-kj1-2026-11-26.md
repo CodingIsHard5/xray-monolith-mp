@@ -164,3 +164,38 @@ on missing snapshots; unreadable files gave a traceback. NOT changed, with the r
 - watcher, no drain of the last pose at the end: the watcher outlives the engine;
 - check 13's stop-length allowance: the watcher is never stopped, so a snapshot written before STOP is read before CONT;
 - fixture maker's fixed path to kw1's folder; a selftest argument for it.
+
+## 10. Added 2026-11-26 after the Overseer's review, before any boot: margin table and the story-character rule
+No bound, check or pin above is changed by this section.
+
+### 10.1 Margins: what I expect next to each bound
+"Basis" says where the expected value comes from. kw1 = the X-only witness (one stalker, one flesh, stand-in writer).
+| check | bound | expected | margin | basis, and how weak |
+|---|---|---|---|---|
+| 2 arithmetic | 0.0002 | 0.0000 | all of it | kw1: exact to 4 decimals on 6 hits |
+| 4 fall between snapshots | 0.02 | 0 (health only rises) | all of it | kw1: both creatures rose monotonically over 5 s; WEAK for a stalker hit for 0.6 (bleeding or a wounded state not seen) |
+| 5 healing between S's hits | at least 0.15 | 0.40 | 2.7 times | kw1: 0.05 in 5 s on one sim_default stalker at 0.75 and at 0.45 health; a rate at 0.40 health over 40 s is an extrapolation |
+| 5 S survives the second hit (ITR2's rule) | healing above 0.10 | 0.40 | 4 times | as above |
+| 5 S's health after the second hit | above 0.02 | about 0.30 | 15 times | 0.80 - 0.50 |
+| 6 fall of a neighbour | 0.02 | 0 | all of it | kw1 kept no snapshots: NO measurement; from the code only (the reader touches only the ids in k lines) |
+| 7 S's dead line after its pose | -0.05 to 2.0 s | 0.10 to 0.20 s | 10 times above; 0.10 s to the lower edge | kw1: 0.101 s with a 100 ms snapshot period |
+| 9 last frame before STOP | 1.1 s | under 0.05 s plus up to 1.0 s of whole-second stamps | 0.1 s over the stamp error; about 2 times a frame of 0.05 s | the stamp error is the method's, not X-Ray's; a frame over 0.1 s just before STOP would FAIL this: FLAGGED as the thinnest margin |
+| 9 first frame after CONT | 5 s (+1 s) | under 1 s | 5 times | WEAK: out/t2pre2 shows a prompt first frame after a 300 s stop, but that was the older script and no GAMMA timed scripts were looked at. FLAGGED: unknown |
+| 10 M's dead line after the first snapshot after CONT | 2.0 s | 0 to 0.2 s | 10 times | the pose is on disk at CONT; itrzone's stand-in confirmed on the first snapshot (kc1) |
+| 11 dead after the dead line | 2.0 s | 0.1 s (next snapshot) | 20 times | kw1 |
+| 13 r line lag | 2.0 s; not ahead by 0.05 s | 0.05 to 0.15 s; 0 ahead | 13 times; 0.05 s | kw1 (stand-in): never over 2 s in 1001 snapshots; "ahead" never measured |
+| 14 counters | exact | as listed | - | kw1 for the kill counters; lost 0 needs the first pose read after CONT not to be torn (rare, not measured) |
+| NV4 M's dead pose inside the stop | 2.0 s from each end | 6.7 to 9 s after STOP, about 11 s before CONT | 3.3 times; 5.5 times | itrzone's clock and my runner's polling, both read in code |
+| run length | X-Ray must see their clock 145 | ends about 240 | 95 s | d2: level load and their clock 0 under 1 s apart |
+Under 2 times, or unknown: check 9's edge before STOP (thin by construction); check 9's first frame after CONT
+(unknown); check 4 and 6 (expected 0, never measured in this situation). Checks 1, 3, 8, 12 are counts or exact.
+Scorer selftest line, run by me on the pinned bytes:
+`SELFTEST: PASS (110 folders: good 4/4; mutant 40/40; nv 13/13; counter 22/22; nvfail 2/2; missing 7/7; empty 7/7; unreadable 7/7; unparsed 8/8; counters-only 4/4; refuse-overwrite ok)`
+
+### 10.2 Story characters (the Overseer's point; agreed with itrzone, see their amendment 137)
+The nearest stalker to the rig may be Fanatic or Wolf. A story or scripted character failing checks 2, 5 or 11
+would be GAMMA's script, not the channel. So the rig does not pick one: S is picked only among stalkers whose
+snapshot section begins with `sim_default_` (the generic simulation stalkers; kw1's S was `sim_default_stalker_0`).
+My checker is not changed; it prints S's section, and I state it in the result. If the pick still names another
+section, the run is reported as outside the registered conditions and S's checks are not scored (NO VERDICT for S).
+Limit this adds: nothing here says how the channel behaves on a story character. That needs its own run.
