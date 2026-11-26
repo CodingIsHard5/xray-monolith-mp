@@ -3,6 +3,8 @@
 -- frame at least that many ms after the call, health -1 as kj1's real engine showed, snap 964; false = never), (2) eight new
 -- checks with their mutants, (3) a mutant may be a list of patches (all must apply once), (4) stale_section expects the
 -- word `stale` (amendment 138 point 2) and m_death_online / m_snap_hold anchor on kill5's text. Everything else as kj1.
+-- Fix round 2 (2026-11-26, CodeRabbit pass 1): checks pending_stale_noconf and pending_released with their mutants
+-- m_conf_on_stale and m_released_pending; m_conf_never and m_hold_from_call anchor on the changed KCONF line (same mutation).
 -- Offline test of the pose v4 / kill channel bridge script (harness/zz_p1_puppet_kill5.script).
 -- Direct runs need the workspace kill5h_test.sh creates (a workdir with empty subdirectories a, b, c, each with a .keep file).
 -- Runs the REAL script under plain Lua 5.1 with faked engine objects (modelled on armD-draft/armD_stub.lua) and checks
@@ -76,7 +78,7 @@ local MUTANTS = {
 		{ 'o:kill(a); r.kt = now;', 'o:kill(a); r.kt = now; r.dd = now;' },
 		{ 'elseif r.dd and now - r.dd <= K_HOLD and dn then', 'elseif r.dd and now - r.dd <= K_HOLD then' } } },
 	{ "m_pending_noplain", "dead_waits_for_effect", '(r.ap > 0 or r.kt) and', '(r.ap > 0 and not r.kt) and' },
-	{ "m_conf_never", "dead_next_frame", 'if dn then r.dd = now; m(', 'if false then r.dd = now; m(' },
+	{ "m_conf_never", "dead_next_frame", 'if dn and not r.st then r.dd = now; m(', 'if false then r.dd = now; m(' },
 	{ "m_kconf_ms", "dead_next_frame", 'm(string.format("KCONF,%d,%d,%d", now, id, now - r.kt))', 'm(string.format("KCONF,%d,%d,%d", now, id, 0))' },
 	{ "m_dead_word_nodn", "no_dead_beside_alive", 'elseif r.dd and now - r.dd <= K_HOLD and dn then', 'elseif r.dd and now - r.dd <= K_HOLD then' },
 	{ "m_noconf_never", "kill_never_effect", 'kc.kdead_fail = kc.kdead_fail + 1; m(string.format("KNOCONF', 'm(string.format("KNOCONF' },
@@ -87,10 +89,13 @@ local MUTANTS = {
 	{ "m_noobj_alive", "no_object_dead", 'local se = alife():object(id); if not se then return true end', 'local se = alife():object(id); if not se then return false end' },
 	{ "m_noobj_stale", "no_object_dead", 'if not r.dd then m(string.format("KDEAD,%d,%d,%d,released", now, n, id)) end; r.dd = now; return end',
 		'if not r.dd then m(string.format("KDEAD,%d,%d,%d,released", now, n, id)) end; r.dd = now; r.st = true; return end' },
-	{ "m_hold_from_call", "hold_from_confirmation", 'if dn then r.dd = now; m(', 'if dn then r.dd = r.kt; m(' },
+	{ "m_hold_from_call", "hold_from_confirmation", 'if dn and not r.st then r.dd = now; m(', 'if dn and not r.st then r.dd = r.kt; m(' },
 	{ "m_dd_at_call", "hold_from_confirmation", 'o:kill(a); r.kt = now;', 'o:kill(a); r.kt = now; r.dd = now;' },
 	{ "m_r_waits", "r_at_processing", 'k_r = string.format("%s,%d", tostring(sess or 0), n)',
 		'local pend = false; for _, x in pairs(K) do if x.kt and not x.dd then pend = true end end; if not pend then k_r = string.format("%s,%d", tostring(sess or 0), n) end' },
+	-- kj2 fix round 2 (CodeRabbit pass 1, kj2/coderabbit-triage-2026-11-26.md items 1 and 2): each undoes one fix
+	{ "m_conf_on_stale", "pending_stale_noconf", 'if dn and not r.st then r.dd = now; m(', 'if dn then r.dd = now; m(' },
+	{ "m_released_pending", "pending_released", '		if r.kt and not r.dd then return end   -- kill5: a pending kill call', '		-- (mutant) a pending kill call' },
 }
 
 if MODE == "mutants" then for _, mu in ipairs(MUTANTS) do print(mu[1] .. " " .. mu[2]) end; os.exit(0) end
@@ -848,7 +853,7 @@ check("stale_word", function()   -- point 2: both stale cases answer stale, neve
 	expect(count(meta(), "KSTALE,%d+,%d+,101,section") == 1 and count(meta(), "KSTALE,%d+,%d+,102,alive_again") == 1 and sum("kstale") == 2, "KSTALE lines / kstale")
 end)
 
-check("no_object_dead", function()   -- point 2: an id with no object at all keeps k,<id>,0.000,dead (and is not stale)
+check("no_object_dead", function()   -- point 2 (as amendment 134): an id with no object gets a dead line with its applied total (106: 0.300; 105: 0.000, nothing applied), never stale
 	add(105, "dog_weak", "m"); add(106, "boar_strong", "m"); boot()
 	run(v4({ "k,106,boar_strong,0.300,0" }), 300)
 	OBJ[105].released = true; OBJ[106].released = true                -- no game object, no server object
@@ -858,6 +863,44 @@ check("no_object_dead", function()   -- point 2: an id with no object at all kee
 	expect(has_line(s, "k,106,0.300,dead"), "no-object 106 (hit before): " .. tostring(kl(s, 106)) .. ", expected k,106,0.300,dead")
 	finish()
 	expect(count(meta(), "KDEAD,%d+,%d+,10[56],released") == 2 and sum("kstale") == 0, "KDEAD released lines / kstale")
+end)
+
+check("pending_stale_noconf", function()   -- fix round 2 (1): a pending kill is never confirmed on a stale row
+	KILL_LAG = false                                                   -- the call never takes effect on the original
+	add(101, "dog_weak", "m"); boot()
+	run(v4({ "k,101,dog_weak,0.250,0" }), 300)
+	run(v4({ "k,101,dog_weak,0.250,1" }), 50)                          -- the kill call (101 still alive)
+	expect(OBJ[101].dtime and OBJ[101].health > 0, "scenario: no kill call, or already in effect")
+	add(101, "boar_strong", "m", { health = 0 })                       -- id reused by a DEAD creature of another section, before the next export
+	local S = rec(v4({ "k,101,dog_weak,0.250,1" }), 500)
+	expect(#S >= 3, "scenario: snapshots " .. #S)
+	for _, s in ipairs(S) do
+		expect(ofield(s, 101, 10) == "0" and kl(s, 101) == "k,101,0.250,stale", "snapshot " .. sseq(s) .. ": alive " .. tostring(ofield(s, 101, 10)) ..
+			", k line " .. tostring(kl(s, 101)) .. " (expected k,101,0.250,stale beside the dead replacement)") end
+	finish()
+	local s = meta()
+	expect(not string.find(s, "\nKCONF,", 1, true), "KCONF logged for a row marked stale: " .. tostring(string.match(s, "\n(KCONF,[^\n]*)")))
+	expect(count(s, "KSTALE,%d+,%d+,101,section") == 1 and sum("kstale") == 1 and sum("kdead_online") == 1, "KSTALE / kstale / kdead_online")
+end)
+
+check("pending_released", function()   -- fix round 2 (2): released between the kill call and the next export; and the old case
+	KILL_LAG = false
+	add(101, "dog_weak", "m"); add(105, "dog_weak", "m"); boot()
+	run(v4({ "k,101,dog_weak,0.250,0", "k,105,dog_weak,0.200,0" }), 300)
+	run(v4({ "k,101,dog_weak,0.250,1", "k,105,dog_weak,0.200,0" }), 50)   -- the kill call on 101; 105 hit only
+	OBJ[101].released = true; OBJ[105].released = true                -- no game object, no server object for either
+	local S = rec(v4({ "k,101,dog_weak,0.250,1", "k,105,dog_weak,0.200,0" }), 500)
+	expect(#S >= 3, "scenario: snapshots " .. #S)
+	for _, s in ipairs(S) do
+		expect(kl(s, 101) == "k,101,0.250,dead" and kl(s, 105) == "k,105,0.200,dead", "snapshot " .. sseq(s) .. ": " .. tostring(kl(s, 101)) .. " / " .. tostring(kl(s, 105))) end
+	finish()
+	local s = meta(); local T = mnum("\nKDEAD,(%d+),%d+,101,online")
+	expect(count(s, "\nKDEAD,%d+,%d+,101,") == 1 and count(s, "\nKDEAD,%d+,%d+,101,online") == 1, "101: KDEAD lines " .. count(s, "\nKDEAD,%d+,%d+,101,") .. " (expected exactly one, online)")
+	local c = tonumber(string.match(s, "\nKCONF,%d+,101,(%d+)\n")); local Tc = tonumber(string.match(s, "\nKCONF,(%d+),101,"))
+	expect(count(s, "\nKCONF,%d+,101,") == 1 and T and Tc and c == Tc - T and stx(S[1]) == Tc, "101: KCONF lines " .. count(s, "\nKCONF,%d+,101,") ..
+		", ms " .. tostring(c) .. " (call " .. tostring(T) .. ", confirmation " .. tostring(Tc) .. ", first snapshot after the release " .. tostring(S[1] and stx(S[1])) .. ")")
+	expect(count(s, "\nKDEAD,%d+,%d+,105,released") == 1 and not string.find(s, "\nKCONF,%d+,105,"), "105 (no pending kill): KDEAD released once, no KCONF, as before")
+	expect(sum("kdead_online") == 1 and sum("kdead_fail") == 0, "kdead_online / kdead_fail")
 end)
 
 check("hold_from_confirmation", function()   -- the 10 s dead hold runs from the confirmation, not from the call

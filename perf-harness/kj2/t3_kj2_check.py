@@ -8,6 +8,13 @@
         after the kill call); bounds unchanged at 2.0 s;
   (iv)  kill5's new meta lines KCONF and KNOCONF are judged in check 14's one table (rows 14.log.KCONF, 14.log.KNOCONF);
         no T2SUM key was added (kdead_fail now also counts online kills not in effect after 2.0 s).
+  Fix round 2 (CodeRabbit pass 1, kj2/coderabbit-triage-2026-11-26.md):
+  (v)    a snapshot with two o lines or two k lines for one id keeps the FIRST and FAILS check 15 by name (seq, id);
+  (vi)   check 13: the first r may name a pose the watcher read up to EARLY_MS after that snapshot (the read-order
+         inversion already allowed for later poses); no such pose, or one read later, still FAILS;
+  (vii)  KCONF/KNOCONF rows are parsed by one strict parser (parse_conf); a malformed row is an input error (UNPARSED,
+         FAIL, in both modes, never excused by a NO VERDICT rule); well-formed rows are judged in 14 as before;
+  (viii) check 9: the stop's measured length CONT - STOP (stall.csv) = STOP_LEN_MS within STOP_LEN_TOL_MS.
 Everything else is kj1's text. Run ONCE per run, with `python3 -I`, stdlib only:
   t3_kj2_check.py <X run dir> out=<report file>
   t3_kj2_check.py counters-only <meta_t2.csv> out=<report file> [poses=<poses_all.txt>] [snaps=<snaps_all.txt>]
@@ -84,6 +91,12 @@ BOUNDS AND MARGINS (name = value: where it is used; reason). Copy-ready for the 
                              "the stop". Up to 5 s the delay is REPORTED (check 10's CONT -> first snapshot), not judged.
                              NOT in the prereg: agreed with the ITR2 side (a slow first frame after the unabsorbed jump
                              fails neither side by itself)
+  STOP_LEN_MS    = 20000   : 9 ; the registered stop (T2_STALL_S=20): the runner stamps STOP (`date` fork), sends
+  STOP_LEN_TOL_MS= 100       kill -STOP, runs `sleep 20`, sends kill -CONT, stamps CONT (tools/t2_xray_kj2.sh lines
+                             121-123). The measured length is 20 s plus the fork/exec of `sleep` and of the CONT `date`
+                             (kj1 measured 20.002 s: 2 ms); it is shorter only if the sleep is cut short (a signal) or the
+                             wall clock is stepped. 100 ms = 50 times kj1's 2 ms, room for NTP slewing (<= 500 ppm = 10 ms
+                             over 20 s) and scheduling delays on a loaded box; the same 0.1 s as STOP_MARGIN_MS
   KILLER         = '0'     : 8 ; id 0 is the actor
 """
 import sys, os, re, bisect, math
@@ -105,6 +118,8 @@ WALL_ERR_MS = 1000    # 9 (b, d): os.time() whole seconds
 RESUME_MAX_MS = 5000  # 9 (b): X-Ray's first frame after CONT may come up to 5 s late (= the bridge's T2_LOST_MS); reported
 NV4_MS = 2000         # NV (section 1.1): M's first dead pose read >= 2 s after STOP and >= 2 s before CONT
 KILLER = '0'          # 8: id 0 is the actor
+STOP_LEN_MS = 20000   # 9: the registered stop length (T2_STALL_S=20)
+STOP_LEN_TOL_MS = 100 # 9: |CONT - STOP - STOP_LEN_MS| allowed (derivation in the docstring)
 LUA_BRIDGE = 'zz_p1_puppet'   # the bridge script's installed name (t2_xray_kw.sh copies kill4 to zz_p1_puppet.script)
 # NO VERDICT rules: the checks each rule leaves UNTESTED when it fires (one table). A failing check outside the union of
 # the fired rules' sets makes the verdict FAIL. NV1 leaves 13 judged: check 13 uses no S/M (decision, see report).
@@ -146,6 +161,32 @@ def read_status(path):
         return f'unreadable: {e.strerror or e}'
     _BYTES[path] = data
     return 'empty' if not data.strip() else None
+
+
+_INT = re.compile(r'-?[0-9]+\Z')   # ASCII digits only, at most one leading minus: '--10', '1e3', '²' are malformed
+
+
+def pint(s):
+    if not _INT.match(s): raise ValueError(f'not an integer {s!r}')
+    return int(s)
+
+
+def parse_conf(l):
+    """kill5's KCONF,<t>,<id>,<ms> / KNOCONF,<t>,<id>,<ms>: (name, t, id, ms); ValueError if malformed (field count,
+    integer syntax). The ONE parser for these rows, used by both modes; a malformed row is an input error (UNPARSED)."""
+    f = l.split(',')
+    if len(f) != 4 or f[0] not in ('KCONF', 'KNOCONF'): raise ValueError(f'{len(f)} fields')
+    if not re.fullmatch(r'[0-9]+', f[2]): raise ValueError(f'id {f[2]!r}')
+    return f[0], pint(f[1]), f[2], pint(f[3])
+
+
+def bad_conf_rows(meta):
+    out = []
+    for l in meta:
+        if l.split(',')[0] in ('KCONF', 'KNOCONF'):
+            try: parse_conf(l)
+            except ValueError as e: out.append(f'{l!r} ({e})')
+    return out
 
 
 def fnum(s):
@@ -199,11 +240,11 @@ def log_rows(meta, name, want):
     kd, bad, ids, n = {}, [], [], 0
     for l in meta:
         f = l.split(',')
-        if f[0] == 'KDEAD' and len(f) > 4 and f[4] == 'online': kd.setdefault(f[3], int(f[1]) if f[1].lstrip('-').isdigit() else None)
+        if f[0] == 'KDEAD' and len(f) > 4 and f[4] == 'online': kd.setdefault(f[3], int(f[1]) if _INT.match(f[1]) else None)
         if f[0] != name: continue
         n += 1
-        if len(f) != 4 or not all(x.lstrip('-').isdigit() for x in f[1:]): bad.append(f'malformed {l!r}'); continue
-        t, i, ms = int(f[1]), f[2], int(f[3])
+        try: _, t, i, ms = parse_conf(l)
+        except ValueError: bad.append(f'malformed {l!r} (an input error: UNPARSED)'); continue
         ids.append(i)
         if name == 'KCONF':
             if kd.get(i) is None: bad.append(f'{l}: no earlier KDEAD online for {i}')
@@ -285,7 +326,7 @@ def counter_table(t2_lines, meta, ctx):
             if ctx.get('last_seq') is None: exp = 'not computable here (needs poses_all.txt and snaps_all.txt)'
             else:
                 lo, hi, der = ctx['last_seq']; exp = f'{lo} .. {hi} ({der})'
-                st = v.isdigit() and lo is not None and hi is not None and lo <= int(v) <= hi
+                st = bool(re.fullmatch(r'[0-9]+', v)) and lo is not None and hi is not None and lo <= int(v) <= hi
         if st is None:
             rows.append(f'14.{key} = {v}, expected {exp}: NOT JUDGED ({why})'); notj.append(key)
         else:
@@ -328,10 +369,15 @@ def parse_snap(r):
     if not (len(h) == 7 and h[0] == 'seq' and h[1] == r['mseq'] and L[-1] == f'end,{h[1]}' and h[6] == '4'):
         raise ValueError('header/end/version')
     s = {'u': int(r['u']), 'seq': int(h[1]), 'tx': int(h[2]), 't': h[3], 'level': h[4], 'run': h[5], 'a': None,
-         'o': {}, 'r': None, 'k': {}}
+         'o': {}, 'r': None, 'k': {}, 'dup': []}
     for l in L[1:-1]:
         f = l.split(',')
-        if f[0] == 'a' and len(f) == 6: fnum(f[5]); s['a'] = f[5]
+        if f[0] in ('o', 'k') and len(f) > 1 and f[1] in s[f[0]]:   # kj2 fix round 2: a second o/k line for one id never
+            s['dup'].append(f'{f[0]} line for id {f[1]} twice ({l!r} after the first)')   # overwrites the first: FAILS 15
+            if f[0] == 'o' and len(f) == 12: fnum(f[4]); fnum(f[5]); fnum(f[6]); fnum(f[8])
+            elif f[0] == 'k' and (len(f) == 3 or (len(f) == 4 and f[3] in ('dead', 'stale'))): fnum(f[2])
+            else: raise ValueError('line ' + l)
+        elif f[0] == 'a' and len(f) == 6: fnum(f[5]); s['a'] = f[5]
         elif f[0] == 'o' and len(f) == 12:
             s['o'][f[1]] = {'sec': f[2], 'kind': f[3], 'x': fnum(f[4]), 'y': fnum(f[5]), 'z': fnum(f[6]), 'h': fnum(f[8]),
                             'alive': f[9]}
@@ -410,6 +456,8 @@ def counters_only(meta_path, opt):
         snaps, bs = load_snaps(opt['snaps'])
         if bs: out.append(f'UNPARSED snaps file {opt["snaps"]}: {len(bs)} record(s), first {bs[:3]}')
         if poses is not None: ctx['last_seq'] = last_seq_expect(poses, snaps)
+    bc = bad_conf_rows(meta)   # kj2 fix round 2: the same strict parser as the full mode; malformed = input error
+    if bc: out.append(f'UNPARSED meta file {meta_path}: malformed KCONF/KNOCONF row(s) {len(bc)}, first {bc[:3]}')
     t2 = [l for l in meta if l.startswith('T2SUM,')]
     ok, rows, summ = counter_table(t2, meta, ctx)
     out.append(f'14 counters, every key of the last T2SUM judged: {"PASS" if ok else "FAIL"} ({summ})')
@@ -417,7 +465,7 @@ def counters_only(meta_path, opt):
     out.append(f'reported: last T2SUM line: {t2[-1] if t2 else None}')
     bad_input = any(l.startswith('UNPARSED ') for l in out)   # a supplied file that does not parse FAILS, never ignored
     ok = ok and not bad_input
-    if bad_input: out.append('verdict: a supplied poses=/snaps= file does not parse')
+    if bad_input: out.append('verdict: a supplied file (meta, poses=, snaps=) does not parse')
     out.append(f'KJ2 COUNTERS ONLY: {"PASS" if ok else "FAIL"}')
     return out, 0 if ok else 1
 
@@ -468,7 +516,7 @@ def full(run_dir):
 
     # meta events (K lines, G, RESUMED_GAP, P2, T2SUM); index = position in the meta file (execution order)
     ev = {'KAPPLY': [], 'KDEAD': [], 'KWHO': [], 'G': [], 'RG': [], 'P2': [], 'KOTHER': []}
-    bad_m = []
+    bad_m, bad_conf = [], []
     for i, l in enumerate(meta):
         f = l.split(',')
         try:
@@ -480,7 +528,11 @@ def full(run_dir):
                 ev['KDEAD'].append({'i': i, 'T': int(f[1]), 'n': int(f[2]), 'id': f[3], 'kind': f[4], 'line': l})
             elif f[0] == 'KWHO':
                 ev['KWHO'].append({'i': i, 'T': int(f[1]), 'id': f[2], 'killer': f[3], 'line': l})
-            elif f[0] in ('KOWED', 'KSTALE', 'KBACK', 'KREFUSED', 'KTAB', 'KCONF', 'KNOCONF'):   # kj2: KCONF/KNOCONF reported here, judged in 14
+            elif f[0] in ('KCONF', 'KNOCONF'):   # kj2: reported here, judged in 14; fix round 2: one strict parser
+                try: parse_conf(l)
+                except ValueError as e: bad_conf.append(f'{l!r} ({e})'); continue
+                ev['KOTHER'].append({'i': i, 'line': l})
+            elif f[0] in ('KOWED', 'KSTALE', 'KBACK', 'KREFUSED', 'KTAB'):
                 ev['KOTHER'].append({'i': i, 'line': l})
             elif f[0] == 'G':
                 ev['G'].append({'i': i, 'tg': int(f[1]), 'wall': int(f[2])})
@@ -491,6 +543,7 @@ def full(run_dir):
         except (ValueError, IndexError):
             bad_m.append(l)
     if bad_m: unparsed.append(f'UNPARSED boot0/meta_t2.csv: {len(bad_m)} line(s), first {bad_m[:2]}')
+    if bad_conf: unparsed.append(f'UNPARSED boot0/meta_t2.csv: malformed KCONF/KNOCONF row(s) {len(bad_conf)}, first {bad_conf[:2]}')
     t2sum = [l for l in meta if l.startswith('T2SUM,')]
 
     # ---- S and M from the data ---------------------------------------------------------------------------------------
@@ -552,7 +605,7 @@ def full(run_dir):
     if stall_lines:   # exactly the header, then one STOP row, then one CONT row, integer utc; anything else is UNPARSED
         if stall_lines[0] != 'utc_ms,event,seq,track_s': stall_err.append(f'header {stall_lines[0]!r}')
         rows = [l.split(',') for l in stall_lines[1:]]
-        if not (len(rows) == 2 and all(len(r) == 4 and r[0].isdigit() for r in rows) and [r[1] for r in rows] == ['STOP', 'CONT']):
+        if not (len(rows) == 2 and all(len(r) == 4 and re.fullmatch(r'[0-9]+', r[0]) for r in rows) and [r[1] for r in rows] == ['STOP', 'CONT']):
             stall_err.append(f'rows {[",".join(r) for r in rows][:4]} (exactly one STOP row then one CONT row needed)')
         elif int(rows[1][0]) <= int(rows[0][0]): stall_err.append(f'CONT {rows[1][0]} not after STOP {rows[0][0]}')
         if not stall_err: stop, cont = int(rows[0][0]), int(rows[1][0])
@@ -783,15 +836,17 @@ def full(run_dir):
             if j < 0: unanch += 1; continue                                        # the wall mapping needs one
             g = anchors[j]; lo = g['wall'] * 1000 + (e['T'] - g['tg']); hi = lo + WALL_ERR_MS
             if lo > stop + m and hi < cont - m: mapped_in.append(f'{e["line"]} (W {lo}..{hi})')
-        ok = not ins and rg is not None and not rg_in and not mapped_in and not st_in
-        return ok, (f'stop W {stop}..{cont} ({cont - stop} ms; edges +/- {m} ms because the STOP row is stamped before '
+        ln = cont - stop; len_ok = abs(ln - STOP_LEN_MS) <= STOP_LEN_TOL_MS   # kj2 fix round 2: the stop's own length
+        ok = not ins and rg is not None and not rg_in and not mapped_in and not st_in and len_ok
+        return ok, (f'stop length CONT - STOP {ln} ms (registered {STOP_LEN_MS} +/- {STOP_LEN_TOL_MS}: {"ok" if len_ok else "OUT OF BOUND"}); '
+                    f'stop W {stop}..{cont} ({cont - stop} ms; edges +/- {m} ms because the STOP row is stamped before '
                     f'kill -STOP, the CONT row after kill -CONT, and the watcher reads up to ~2 ms late); snapshots read inside {len(ins)} {ins[:4]}; '
                     f'the script\'s own record of the stop (RESUMED_GAP whose gap covers it) '
                     f'{rg["line"] if rg else "NONE"}; RESUMED_GAP lines inside the stop {rg_in[:2]}; KAPPLY/KDEAD with script time '
                     f'inside the stop in script time (between RESUMED_GAP\'s last frame before and first frame after) {st_in[:2]}; '
                     f'KAPPLY/KDEAD whose script time maps wholly inside the stop (via the newest G/RESUMED_GAP line, whole UTC '
                     f'seconds, error 0..+1000 ms) {mapped_in[:2]}; events with no anchor line before them {unanch}')
-    add(9, 'step D: no KAPPLY or KDEAD inside the stop, no snapshot written inside the stop (stall.csv window)', c9,
+    add(9, 'step D: the stop lasted 20.0 s +/- 0.1 s (stall.csv), no KAPPLY or KDEAD inside it, no snapshot written inside it', c9,
         ('stall.csv', SN, ME))
 
     # ---- check 10: M dies after CONT ---------------------------------------------------------------------------------
@@ -852,7 +907,7 @@ def full(run_dir):
             j = bisect.bisect_right(pseqs, q) - 1
             return pu_by_seq[pseqs[j]] if j >= 0 else None
         first_post = next((s for s in snaps if stop is not None and s['u'] >= cont), None)
-        absent, back, slow, ahead, notj, prev, n, minlag = [], [], [], [], 0, None, 0, None
+        absent, back, slow, ahead, notj, prev, n, minlag, inv = [], [], [], [], 0, None, 0, None, []
         for s in snaps:
             if s['tx'] < T0: continue
             n += 1
@@ -862,7 +917,13 @@ def full(run_dir):
             prev = s['r'] if prev is None or (sess == prev[0] and q >= prev[1]) else prev
             if inside(s['u']): notj += 1; continue
             j = bisect.bisect_right(pread, s['u']) - 1
-            if j < 0: slow.append(f'{s["seq"]}:no pose read yet'); continue
+            if j < 0:   # kj2 fix round 2: no pose read yet. Allowed only as the read-order inversion: the watcher read the
+                # very pose this r names (same session and seq) at most EARLY_MS after this snapshot
+                mp = next((p for p in poses if p['sess'] == sess and p['seq'] == q), None)
+                if mp is None: slow.append(f'{s["seq"]}:no pose read yet, and no kept pose {sess},{q}')
+                elif mp['u'] - s['u'] > EARLY_MS: slow.append(f'{s["seq"]}:no pose read yet; pose {q} read {mp["u"] - s["u"]} ms later (> {EARLY_MS})')
+                else: inv.append(f'{s["seq"]}: pose {q} read {mp["u"] - s["u"]} ms after it')
+                continue
             newest = poses[j]
             if newest['sess'] != sess: slow.append(f'{s["seq"]}:session {sess} vs newest pose {newest["sess"]}'); continue
             pq = pu_of(q); lag = newest['pu'] - pq if pq is not None else None
@@ -875,7 +936,8 @@ def full(run_dir):
             f'{n} snapshots written at or after the first pose taken (P2 script time {T0}); r absent {len(absent)} {absent[:5]}; '
             f'back or other session {back[:3]}; lag over the bound {len(slow)} {slow[:4]} (bound {R_LAG_MS} ms in pose time, the '
             f'first snapshot after CONT {R_LAG_MS} + stop length); r names a pose later than the newest kept pose read by the '
-            f'snapshot\'s read by more than {EARLY_MS} ms {len(ahead)} {ahead[:4]}; smallest lag {minlag} ms; inside the stop, not judged here {notj}')
+            f'snapshot\'s read by more than {EARLY_MS} ms {len(ahead)} {ahead[:4]}; smallest lag {minlag} ms; inside the stop, not judged here {notj}; '
+            f'read before any kept pose, its pose read within {EARLY_MS} ms after (allowed) {len(inv)} {inv[:2]}')
     add(13, 'the r line: present after the first pose taken, never back, within 2.0 s of the newest kept pose', c13,
         ('stall.csv', PO, SN, ME))
 
@@ -889,18 +951,20 @@ def full(run_dir):
 
     # ---- check 15 (kj2): the dead line only beside a creature that reads dead; no stale line ---------------------------
     def c15():
-        bad, stale, nd = [], [], 0
+        bad, stale, nd, dup = [], [], 0, []
         for s in snaps:
+            dup += [f'snap {s["seq"]}: {d}' for d in s['dup']]
             for i, (ap, dead, word) in sorted(s['k'].items()):
                 if word == 'stale': stale.append(f'snap {s["seq"]} k,{i},{ap},stale')
                 if dead:
                     nd += 1
                     if i in s['o'] and s['o'][i]['alive'] == '1':
                         bad.append(f'snap {s["seq"]} k,{i},{ap},dead beside o alive 1 (health {s["o"][i]["h"]:.4f})')
-        return bool(snaps) and not bad and not stale, (f'{len(snaps)} snapshots, {nd} dead lines; dead line beside an o line '
-                                                       f'alive 1 for the same id: {len(bad)} {bad[:4]}; stale lines: {len(stale)} {stale[:4]}')
+        return bool(snaps) and not bad and not stale and not dup, (f'{len(snaps)} snapshots, {nd} dead lines; dead line beside an o line '
+                                                       f'alive 1 for the same id: {len(bad)} {bad[:4]}; stale lines: {len(stale)} {stale[:4]}; '
+                                                       f'a second o or k line for one id in one snapshot: {len(dup)} {dup[:4]}')
     add(15, 'the dead line only for a creature that reads dead: no snapshot holds k,<id>,...,dead beside an o line alive 1 '
-            'for that id; no stale line in this run', c15, (SN,))
+            'for that id; no stale line in this run; no id with two o or two k lines in one snapshot', c15, (SN,))
 
     # ---- NO VERDICT rules ---------------------------------------------------------------------------------------------
     nv = []

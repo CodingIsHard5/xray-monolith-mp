@@ -22,6 +22,11 @@
 #    all falls; exemption widened to every fall after the KDEAD) are run on their listed fixtures; each must give at least
 #    one outcome that differs from fixtures.tsv (caught). A mutant not caught makes the selftest FAIL.
 # 5. Refuse-overwrite probe and counters-only mode, as kj1.
+# 6. (kj2 fix round 2, CodeRabbit pass 1) four more checker mutants (duplicate lines overwrite; first r without the read-order
+#    allowance; KCONF/KNOCONF not strictly parsed; no stop-length clause), a counters-only case with a malformed KCONF
+#    (must FAIL by name, not raise), and the fixture maker's guard: a destination equal to or inside a source folder
+#    (directly, or through a symlink) is REFUSED and nothing is created (sources here are scratch folders in the selftest
+#    dir, never the real kj1 folder).
 # Prints one line per folder and a last line `SELFTEST: PASS|FAIL (...)`.
 set -u
 K="$(cd "$(dirname "$0")" && pwd)"
@@ -130,11 +135,18 @@ if diff: bad.append('real_copy')
 # ---- (kj2) checker mutants ------------------------------------------------------------------------------------------------
 MUTS = [
     ('mut_nv3_noexempt', "            ds = death_step(i)\n", "            ds = {'T': None, 'step': None}\n", ['good', 'real_kj1', 'real_kj1_kill5like']),
-    ('mut_no15', "        return bool(snaps) and not bad and not stale, (", "        return True, (", ['m15_dead_beside', 'm15_stale', 'real_kj1']),
+    ('mut_no15', "        return bool(snaps) and not bad and not stale and not dup, (", "        return True, (", ['m15_dead_beside', 'm15_stale', 'real_kj1']),
     ('mut_widen_all', "        return ds['step'] is not None and (p['seq'], q['seq']) == ds['step']\n", "        return True\n",
      ['nv3_fight', 'nv3_nokdead', 'nv3_after_kdead_alive', 'nv2_hurt_before_A']),
     ('mut_widen_after_kdead', "        return ds['step'] is not None and (p['seq'], q['seq']) == ds['step']\n",
      "        return ds['T'] is not None and p['tx'] >= ds['T']\n", ['nv3_after_kdead_alive']),
+    # kj2 fix round 2: each undoes one fix; each must be caught by the fixtures made for it
+    ('mut_dup_overwrite', "        if f[0] in ('o', 'k') and len(f) > 1 and f[1] in s[f[0]]:", "        if False:",
+     ['m15_dup_stale', 'm15_dup_dead', 'm15_dup_o']),
+    ('mut_r_first_strict', "                else: inv.append(", "                else: slow.append(", ['good_r_first_inversion']),
+    ('mut_conf_lax', "                try: parse_conf(l)\n                except ValueError as e: bad_conf.append(f'{l!r} ({e})'); continue\n", "",
+     ['bad_kconf_nv3', 'bad_kconf_text', 'bad_kconf_fields']),
+    ('mut_no_stoplen', "len_ok = abs(ln - STOP_LEN_MS) <= STOP_LEN_TOL_MS", "len_ok = True", ['m09_short16']),
 ]
 byname = {r['name']: r for r in rows}
 src = open(CHK).read(); nm_caught = 0
@@ -174,9 +186,12 @@ for nm, ps, ss, want_rc, musts in (
         ('co_badsnaps', W('good', 'poses_all.txt'), W('bad_snaprecord', 'snaps_all.txt'), 1,
          ['KJ2 COUNTERS ONLY: FAIL', 'UNPARSED snaps file ' + W('bad_snaprecord', 'snaps_all.txt')]),
         ('co_final_nor', W('good', 'poses_all.txt'), W('m14_final_nor', 'snaps_all.txt'), 1,
-         ['KJ2 COUNTERS ONLY: FAIL', 'NONE: the final snapshot has no r line, so the bound FAILS'])):
+         ['KJ2 COUNTERS ONLY: FAIL', 'NONE: the final snapshot has no r line, so the bound FAILS']),
+        ('co_badkconf', W('good', 'poses_all.txt'), W('good', 'snaps_all.txt'), 1,   # kj2 fix round 2: KCONF ms --10, no raise
+         ['KJ2 COUNTERS ONLY: FAIL', 'UNPARSED meta file ' + os.path.join(FX, 'bad_kconf_dash', 'boot0', 'meta_t2.csv') + ': malformed KCONF/KNOCONF row(s) 1'])):
     out = os.path.join(REP, nm + '.txt')
-    p = subprocess.run([sys.executable, '-I', CHK, 'counters-only', META, f'poses={ps}', f'snaps={ss}', f'out={out}'],
+    mf = os.path.join(FX, 'bad_kconf_dash', 'boot0', 'meta_t2.csv') if nm == 'co_badkconf' else META
+    p = subprocess.run([sys.executable, '-I', CHK, 'counters-only', mf, f'poses={ps}', f'snaps={ss}', f'out={out}'],
                        capture_output=True, text=True)
     why = [f'rc {p.returncode} != {want_rc}'] if p.returncode != want_rc else []
     if p.stderr.strip(): why.append('stderr: ' + p.stderr.strip()[-200:])
@@ -185,6 +200,26 @@ for nm, ps, ss, want_rc, musts in (
     print(f'{nm} (counters-only): rc {p.returncode} -> {"OK" if not why else "BAD: " + "; ".join(why)}')
     count['counters-only'] = count.get('counters-only', (0, 0)); count['counters-only'] = (count['counters-only'][0] + (not why), count['counters-only'][1] + 1)
     if why: bad.append(nm)
+# ---- (kj2 fix round 2) the fixture maker refuses a destination equal to or inside a source folder ------------------------------
+# scratch source folders inside the selftest dir (never the real kj1 folder: a maker without the guard would write there)
+GS = os.path.join(D, 'guard_src'); os.mkdir(GS); open(os.path.join(GS, 'keep.txt'), 'x').write('scratch source folder\n')
+GL = os.path.join(D, 'guard_link'); os.symlink(GS, GL)
+MK = os.path.join(K, 't3_kj2_mkfix.py'); gok = 0; GC = []
+for nm, dest, kw1, kj1 in (('guard_inside_kj1', os.path.join(GS, 'fixtures'), '', GS),
+                           ('guard_equal_kj1', GS, '', GS),
+                           ('guard_inside_kw1', os.path.join(GS, 'a', 'b'), GS, REAL),
+                           ('guard_symlink_kj1', os.path.join(GL, 'fixtures'), '', GS),
+                           ('guard_dotdot_kj1', os.path.join(D, 'reports', '..', 'guard_src', 'x'), '', GS)):
+    before = sorted(os.listdir(GS))
+    p = subprocess.run([sys.executable, '-I', MK, dest, kw1, kj1], capture_output=True, text=True)
+    why = [] if p.returncode == 1 else [f'rc {p.returncode}']
+    if 'mkfix: REFUSED' not in p.stderr: why.append(f'no REFUSED message (stderr {p.stderr.strip()[-160:]!r})')
+    if sorted(os.listdir(GS)) != before: why.append(f'the source folder changed: {sorted(os.listdir(GS))}')
+    if nm != 'guard_equal_kj1' and os.path.lexists(dest): why.append(f'{dest} was created')
+    print(f'{nm} (mkfix guard): rc {p.returncode} -> {"OK" if not why else "BAD: " + "; ".join(why)}')
+    gok += not why; GC.append(nm)
+    if why: bad.append(nm)
+count['mkfix-guard'] = (gok, len(GC))
 open(os.path.join(D, 'bad.txt'), 'x').write(' '.join(bad) + '\n')
 summ = '; '.join(f'{k} {a}/{b}' for k, (a, b) in count.items())
 summ = (f'{len(rows)} folders: {summ}; refuse-overwrite {"ok" if "refuse_overwrite" not in bad else "BAD"}; old checker on the real copy '

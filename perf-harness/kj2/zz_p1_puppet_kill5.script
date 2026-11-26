@@ -143,7 +143,7 @@ local function export_b1(now, t, tm)
 	if t2 then local ids = {}; for id in pairs(K) do ids[#ids + 1] = id end; table.sort(ids)   -- kill channel answers
 		for _, id in ipairs(ids) do local r = K[id]; local dn = k_dead_now(id, alv)
 			if r.kt and not r.dd then   -- kill5: an online kill call waiting for its effect
-				if dn then r.dd = now; m(string.format("KCONF,%d,%d,%d", now, id, now - r.kt))
+				if dn and not r.st then r.dd = now; m(string.format("KCONF,%d,%d,%d", now, id, now - r.kt))   -- never on a stale row (id reused)
 				elseif not r.kn and now - r.kt >= K_CONF_MS then r.kn = true; kc.kdead_fail = kc.kdead_fail + 1; m(string.format("KNOCONF,%d,%d,%d", now, id, now - r.kt)) end end
 			if r.st then L[#L + 1] = string.format("k,%d,%.3f,stale", id, r.ap)
 			elseif r.dd and now - r.dd <= K_HOLD and dn then L[#L + 1] = string.format("k,%d,%.3f,dead", id, r.ap)
@@ -323,6 +323,7 @@ local function k_line(a, now, n, line)
 	end
 	local r = K[id] or { ap = 0 }; K[id] = r
 	if not o and not se then   -- released: confirmed dead
+		if r.kt and not r.dd then return end   -- kill5: a pending kill call: the snapshot confirms it (KCONF, dd) as for any other
 		if not r.dd then m(string.format("KDEAD,%d,%d,%d,released", now, n, id)) end; r.dd = now; return end
 	if sec ~= cur or (r.dd and alive and now - r.dd > K_HOLD) then   -- stale: another creature has this id now
 		r.st = true

@@ -13,6 +13,8 @@ A copy of kj1/t3_kj1_mkfix.py whose simulation follows the kill5 reader (joint a
     kill5 would have written (S at snap 804, ms 0; M at snap 964, ms 101). Each one's README is written BESIDE it
     (<name>.README.txt), so the copy holds only the run's own files.
   python3 -I t3_kj2_mkfix.py <dest dir (must not exist)> [<kw1 runner dir, default .../out/kw1/run>] [<kj1 run dir>]
+  (fix round 2) Every path is resolved (os.path.realpath) first; a destination equal to or inside either source folder is
+  REFUSED (exit 1) before anything is created or read.
 Writes one folder per fixture under <dest> (each laid out as the runner's out dir: t2_xray.log, restarts.csv, stall.csv,
 freeze.csv, lost.csv, boot0/meta_t2.csv, boot0/tb/xray.log, boot0/watch/snaps_all.txt, boot0/watch/poses_all.txt,
 README.txt) and <dest>/fixtures.tsv, the expectations the selftest compares against:
@@ -85,6 +87,7 @@ GOOD = {
     'kind': {},                           # id -> kind override
     'kill_lag': {},                       # kj2: id -> ms after the call frame's end until the kill is in effect (None = never); default 0
     'kill_short': {M_ID: 1},              # kj2: id -> thousandths ITR2's kill total falls short of the shown health
+    'stop_ms': CONT_U - STOP_U,           # kj2 fix round 2: the runner's stop length (CONT row - STOP row), default 20.004 s
 }
 
 
@@ -208,7 +211,8 @@ def simulate(R, kn):
 
     # frame times: every 25 ms, none inside the stop except the leak frames
     ft = [u for u in range(UF0, STOP_U, FRAME)] + sorted(kn['leak'])
-    u = CONT_U + kn['cont_delay']
+    cont_u = STOP_U + kn['stop_ms']   # kj2 fix round 2: the stop length is a knob (CONT_U for the default)
+    u = cont_u + kn['cont_delay']
     while u <= UEND: ft.append(u); u += FRAME
     ft.sort()
     next_pose = U0; prev_u = None
@@ -290,13 +294,13 @@ def simulate(R, kn):
     meta += [R.vitals, R.movesum]
     # runner files
     last_pre = [s for s in snaps if s['wu'] < STOP_U][-1]
-    stall = f'utc_ms,event,seq,track_s\n{STOP_U},STOP,{last_pre["lines"][0].split(",")[1]},{last_pre["t"]:.2f}\n{CONT_U},CONT,{last_pre["lines"][0].split(",")[1]},{last_pre["t"]:.2f}\n'
+    stall = f'utc_ms,event,seq,track_s\n{STOP_U},STOP,{last_pre["lines"][0].split(",")[1]},{last_pre["t"]:.2f}\n{cont_u},CONT,{last_pre["lines"][0].split(",")[1]},{last_pre["t"]:.2f}\n'
     rl = [f'{utcstr(UF0 - 26000)} boot 0: run_id {RUN_ID} engine_s 125 load 3.49 5.86 6.33',
           f'{utcstr(UF0 - 25999)} boot 0: wall limit 525 s from launch; over-run limit off',
           f'{utcstr(UF0 + 40)} boot 0: level {LEVEL} (run length counted from here)',
           f'{utcstr(UF0 + 81)} boot 0: first snapshot seq 1 after 26 s; engine 1805655; candidates: 1805478 /usr/lib/wine/wine 18336;1805651 /usr/lib/wine/wine 29280;1805655 /usr/lib/wine/wine64 16883124;',
           f'{utcstr(STOP_U)} STALL start: seq {last_pre["lines"][0].split(",")[1]} track {last_pre["t"]:.2f}s engine 1805655',
-          f'{utcstr(CONT_U)} STALL end: SIGCONT sent',
+          f'{utcstr(cont_u)} STALL end: SIGCONT sent',
           f'{utcstr(UEND + 3000)} boot 0 end: tb_run rc=0 reason=engine run ended',
           f'{utcstr(UEND + 3001)} end: ran to the end; boots 1; unplanned restarts 0; stall 1; planned kill no; rc=0']
     files = {'t2_xray.log': ('\n'.join(rl) + '\n').encode(), 'restarts.csv': R.hdr['restarts.csv'],
@@ -475,6 +479,32 @@ def c14_knoconf_extra(F):
     j = meta_idx(F, lambda f: f[0] == 'SUMMARY'); F['meta'].insert(j, f'KNOCONF,{snap_tx(F["snaps"][-1])},23196,2000')
 
 
+# ---- kj2 fix round 2 (CodeRabbit pass 1) ------------------------------------------------------------------------------
+def m15_dup_stale(F):   # a stale line followed by a plain line for the same id in one snapshot (the later must not hide it)
+    s = mid_snap(F, 60); s['lines'][len(s['lines']) - 1:len(s['lines']) - 1] = ['k,23196,0.000,stale', 'k,23196,0.000']
+def m15_dup_dead(F):   # M's first dead-line snapshot: a plain k line for M after its dead line
+    s = next(s for s in F['snaps'] if has_dead(s, M_ID)); j = next(j for j, l in enumerate(s['lines']) if l.startswith(f'k,{M_ID},'))
+    s['lines'].insert(j + 1, s['lines'][j][:-len(',dead')])
+def m15_dup_o(F):   # a second o line for 23196 (alive 1 first, then the same line with alive 0)
+    s = mid_snap(F, 60); j = o_idx(s, '23196'); f = s['lines'][j].split(','); assert f[9] == '1'; f[9] = '0'
+    s['lines'].insert(j + 1, ','.join(f))
+def first_r_snap(F):   # the first snapshot carrying an r line, and the seq that r names
+    s = next(s for s in F['snaps'] if any(l.startswith('r,') for l in s['lines'])); return s, int(s['lines'][r_idx(s)].split(',')[2])
+def r_first(how):   # check 13, the first r: the pose it names read by the watcher `how` ms after that snapshot (None: never kept)
+    def f(F):
+        s, q = first_r_snap(F); qs = lambda p: int(p['lines'][0].split(',')[1])
+        late = s['u'] + (how if how is not None else 0)
+        F['poses'] = [p for p in F['poses'] if qs(p) > q and p['u'] > late or (how is not None and qs(p) == q)]   # no other pose read before
+        if how is not None: next(p for p in F['poses'] if qs(p) == q)['u'] = s['u'] + how
+        us = [p['u'] for p in F['poses']]; assert us == sorted(us), 'r_first: pose read times out of order'
+        assert not any(p['u'] <= s['u'] for p in F['poses']), 'r_first: a pose read before the first r snapshot'
+    f.__name__ = f'r_first_{how}'; return f
+def conf_edit(field, val):   # S's KCONF line with one field replaced
+    def f(F):
+        j = meta_idx(F, lambda g: g[0] == 'KCONF' and g[2] == S_ID); g = F['meta'][j].split(','); g[field] = val; F['meta'][j] = ','.join(g)
+    f.__name__ = f'conf_edit_{field}_{val}'; return f
+
+
 def real_fixture(W, kj1r, name, kind, verdict, rc, fails, nvs, must, note, edit=None):
     """a byte copy of the real kj1 run folder (read only: copied, never linked, never written), then edit(dir) on the COPY"""
     O = os.path.join(W.dest, name)
@@ -586,9 +616,17 @@ class Writer:
 
 def main():
     if len(sys.argv) < 2: sys.exit('usage: t3_kj2_mkfix.py <dest dir (must not exist)> [<kw1 runner dir>] [<kj1 run dir>]')
-    dest = sys.argv[1]; R = Real(sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else KW1)
+    dest = sys.argv[1]; kw1 = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else KW1
     kj1r = sys.argv[3] if len(sys.argv) > 3 else KJ1R
+    # fix round 2: resolve every path, refuse a destination equal to or inside a source folder, BEFORE anything is made
+    dr = os.path.realpath(dest)
+    for what, src in (('kw1 runner dir', kw1), ('kj1 run dir', kj1r)):
+        sr = os.path.realpath(src)
+        if dr == sr or dr.startswith(sr.rstrip(os.sep) + os.sep):
+            sys.exit(f'mkfix: REFUSED: destination {dest} (resolved {dr}) is {"the" if dr == sr else "inside the"} {what} {src} '
+                     f'(resolved {sr}); the sources are read only')
     if os.path.exists(dest): sys.exit(f'mkfix: {dest} exists')
+    R = Real(kw1)
     os.makedirs(dest); W = Writer(dest)
     good = simulate(R, kn())
     W.write('good', good, 'good', 'PASS', 0, '', '', '', 'the design run: S 0.600 at 30 s, healing, 1.100 at 70 s, dead at 90 s; '
@@ -759,6 +797,28 @@ def main():
     F['readme'].append('MUTANT of good: one snapshot o line health carries a byte that is not UTF-8 (0.5<ff>1)')
     W.write('bad_utf8_health', F, 'unparsed', 'FAIL', 1, '*', '', 'UNPARSED boot0/watch/snaps_all.txt',
             'one snapshot o line health with an undecodable byte (decoded with errors=replace, the number then does not parse)')
+    # ---- kj2 fix round 2 (CodeRabbit pass 1; kj2/coderabbit-triage-2026-11-26.md items 3-6) ---------------------------
+    mut('m15_dup_stale', 15, m15_dup_stale, 'one snapshot: k,23196,0.000,stale then k,23196,0.000 (the plain line must not hide the stale one)')
+    mut('m15_dup_dead', 15, m15_dup_dead, 'M\'s first dead-line snapshot: a plain k line for M after the dead line (duplicate k line)')
+    mut('m15_dup_o', 15, m15_dup_o, 'one snapshot: a second o line for 23196 with alive 0 after its alive 1 line (duplicate o line)')
+    F = copy.deepcopy(good); r_first(1)(F); F['readme'].append('MUTANT of good: the pose the first r names read 1 ms AFTER that snapshot (no pose read before it)')
+    W.write('good_r_first_inversion', F, 'good', 'PASS', 0, '', '', 'read before any kept pose, its pose read within 50 ms after (allowed) 1 ',
+            'check 13, the first r: the watcher read the first r snapshot 1 ms before the pose that r names (the read-order inversion): PASS')
+    F = copy.deepcopy(good); r_first(60)(F); F['readme'].append('MUTANT of good: the pose the first r names read 60 ms after that snapshot')
+    W.write('m13_r_first_late', F, 'mutant', 'FAIL', 1, '13', '', 'read 60 ms later (> 50)', 'check 13, the first r: its pose read 60 ms after the snapshot (over the 50 ms allowance)')
+    F = copy.deepcopy(good); r_first(None)(F); F['readme'].append('MUTANT of good: the pose the first r names is not kept, and no pose was read before it')
+    W.write('m13_r_first_nopose', F, 'mutant', 'FAIL', 1, '13', '', 'no pose read yet, and no kept pose', 'check 13, the first r: no kept pose matches it')
+    for nm, fe, note in (('bad_kconf_text', conf_edit(1, 'abc'), 'S\'s KCONF time field abc'),
+                         ('bad_kconf_dash', conf_edit(3, '--10'), 'S\'s KCONF ms field --10 (passed the old digit test, then raised in int())'),
+                         ('bad_kconf_fields', lambda F: (lambda j: F['meta'].__setitem__(j, F['meta'][j] + ',0'))(meta_idx(F, lambda g: g[0] == 'KCONF' and g[2] == S_ID)), 'S\'s KCONF line with a 5th field')):
+        F = copy.deepcopy(good); fe(F); F['readme'].append(f'MUTANT of good: {note}')
+        W.write(nm, F, 'unparsed', 'FAIL', 1, '*', '', 'UNPARSED boot0/meta_t2.csv: malformed KCONF/KNOCONF row(s) 1', note + ': an input error, FAIL')
+    sim('bad_kconf_nv3', kn(world=GOOD['world'] + [(50.0, S_ID, 0.1)]), 'as nv3_fight (NV3 fires) and S\'s KCONF ms field --10: the malformed '
+        'row is an input error, so the verdict is FAIL, not NO VERDICT', '*', 'unparsed', 'FAIL', 1, '',
+        'UNPARSED boot0/meta_t2.csv: malformed KCONF/KNOCONF row(s) 1|at health <= 0: FIRED|verdict: missing, empty, unreadable or unparsable input',
+        post=conf_edit(3, '--10'))
+    sim('m09_short16', kn(stop_ms=16004), 'the runner\'s stop lasts 16.004 s (CONT 4 s early), RESUMED_GAP matching it: the stop is not the '
+        'registered 20 s, check 9 FAILS', '9', must='stop length CONT - STOP 16004 ms (registered 20000 +/- 100: OUT OF BOUND)')
     # ---- REAL: the kj1 run ---------------------------------------------------------------------------------------------
     real_fixture(W, kj1r, 'real_kj1', 'real', 'FAIL', 1, '14,15', '', 'snap 963 k,23183,1.027,dead beside o alive 1|exempt death steps: '
                  'S 19425 snap 804->805|M 23183 snap 963->964|14.log.KCONF lines = 0',

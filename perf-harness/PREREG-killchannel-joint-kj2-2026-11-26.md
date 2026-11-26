@@ -17,6 +17,9 @@ Limits first:
   changed (line 54: kill5 instead of kill4; `diff` shows nothing else). It has had `bash -n` only; its other lines ran in kj1.
 - A kill pending at a level crossing is not saved (no crossing in this run). A creature that reads alive again inside the
   10 s hold gets the plain line. Both are kill5's choices, tested offline only or not at all.
+- Fix round 2 (section 9.1) closes a pending kill being confirmed on a row marked stale, but the stale mark comes from a
+  pose: if an id is reused by a dead creature of another section and no pose lists the id before the next snapshot, kill5
+  can still confirm the kill on the replacement (KCONF, dead line). Not in kj2 (no id reuse); tested offline only.
 - Nothing here tells how the channel behaves on a story character (section 10.2, unchanged from kj1).
 
 ## 1. What it is for, and what changed since kj1
@@ -32,7 +35,9 @@ amendment 138 (version stays 4):
    exists for the id. A kill call not yet in effect gives the plain `k,<id>,<applied>`. A dead line and an alive-1 o line
    for one id never stand in one snapshot.
 2. New word `k,<id>,<applied>,stale` for an id listed that is not the creature of the line (another section, or alive again
-   more than 10 s after its CONFIRMED death). kill4 answered those with `dead`. An id with no object keeps `k,<id>,0.000,dead`.
+   more than 10 s after its CONFIRMED death). kill4 answered those with `dead`. An id with no object is answered as in
+   amendment 134, unchanged: a `dead` line carrying the applied total X-Ray holds for it (for example `k,106,0.300,dead`),
+   and `0.000` only when X-Ray holds nothing for the id at all.
 3. The `r` line is unchanged: it advances when the pose is processed, before the kill is in effect.
 4. An online kill whose creature still reads alive 2.0 s after the call: logged `KNOCONF,<t>,<id>,<ms>`, counted in
    `kdead_fail`, not retried. The 10 s dead hold runs from the confirmation; the confirmation is logged `KCONF,<t>,<id>,<ms
@@ -40,10 +45,10 @@ amendment 138 (version stays 4):
 What changed on my side and why:
 | file | change | why |
 |---|---|---|
-| reader `harness/zz_p1_puppet_kill5.script` (copy of kill4) | points 1-4 above; nothing else | kj1's defect; amendment 138 |
-| checker `tools/t3_kj2_check.py` (copy of the kj1 checker) | (i) NV3 exempts one death step per id; (ii) new check 15; (iii) wording of 7 and 10; (iv) KCONF/KNOCONF rows in check 14's table | kj1's NV3 fired on the death itself; 15 judges point 1 and 2 directly; the dead line can now come one snapshot later |
-| reader tests `kj2/kill5h_stub.lua`, `kj2/kill5h_test.sh` | fake kill that can take effect later; 8 new checks, 15 new mutants; `stale_section` expects `stale` | test the new behaviour on outcomes |
-| fixtures and selftest `kj2/t3_kj2_mkfix.py`, `kj2/t3_kj2_selftest.sh` | simulation follows kill5; copies of the REAL kj1 folder; checker mutants | prove the checker fix on the bytes that showed the defect |
+| reader `harness/zz_p1_puppet_kill5.script` (copy of kill4) | points 1-4 above; fix round 2: a pending kill is never confirmed (no KCONF, no hold) on a row marked stale; a target released between the kill call and the next snapshot is left to the snapshot, which confirms it (KCONF, dead line), instead of `KDEAD,…,released`; nothing else | kj1's defect; amendment 138; review (9.1) |
+| checker `tools/t3_kj2_check.py` (copy of the kj1 checker) | (i) NV3 exempts one death step per id; (ii) new check 15; (iii) wording of 7 and 10; (iv) KCONF/KNOCONF rows in check 14's table; fix round 2: (v) a second o or k line for one id in one snapshot FAILS 15 (the first is kept); (vi) 13 allows the read-order inversion for the first r too; (vii) one strict parser for KCONF/KNOCONF, a malformed row is an input error; (viii) 9 judges the stop's measured length | kj1's NV3 fired on the death itself; 15 judges point 1 and 2 directly; the dead line can now come one snapshot later; review (9.1) |
+| reader tests `kj2/kill5h_stub.lua`, `kj2/kill5h_test.sh` | fake kill that can take effect later; 10 new checks, 17 new mutants (fix round 2: `pending_stale_noconf`, `pending_released`); `stale_section` expects `stale` | test the new behaviour on outcomes |
+| fixtures and selftest `kj2/t3_kj2_mkfix.py`, `kj2/t3_kj2_selftest.sh` | simulation follows kill5; copies of the REAL kj1 folder; checker mutants; fix round 2: 11 more fixtures, 4 more checker mutants, a counters-only case, the fixture maker refuses a destination inside a source folder | prove the checker fix on the bytes that showed the defect |
 | runner `tools/t2_xray_kj2.sh` (copy of the kj1 runner) | line 54 installs kill5 | the kj1 runner installs kill4 by a fixed path |
 Caden's rulings behind the channel are kj1's (2026-11-26 16:50 and 18:56 UTC), unchanged.
 
@@ -83,13 +88,13 @@ S and M are found in the data as in kj1. Every expected total comes from the kep
 | 6 | no other creature within 10 m of S or M loses more than the bound across a KAPPLY or KDEAD | 0.02 | as 4 |
 | 7 | S's death: one `KDEAD,…,online`; S's `dead` line (now written once S READS dead) read within the bound of the watcher's first read of the pose with dead = 1 | -0.05 to 2.0 s | chain: pose 0.05 s + one frame + the kill taking effect, up to one more snapshot 0.10 s + snapshot 0.10 s + watcher = about 0.25 s plus frames; 2.0 s leaves a stall of over 1.5 s. -0.05: the watcher may read the snapshot before the pose in one 2 ms poll |
 | 8 | the kills are the actor's: one KWHO with killer 0 for S and for M | exact | the death callback |
-| 9 | the stop held: no snapshot read inside it; the script's RESUMED_GAP matches it (edges 1.1 s; first frame after CONT not later than CONT + 5 s + 1 s); no KAPPLY or KDEAD with a script time inside the gap | +/- 0.1 s; 1.1 s; 6 s | as kj1 (unchanged) |
+| 9 | the stop held: its measured length CONT - STOP (stall.csv) is 20.0 s; no snapshot read inside it; the script's RESUMED_GAP matches it (edges 1.1 s; first frame after CONT not later than CONT + 5 s + 1 s); no KAPPLY or KDEAD with a script time inside the gap | length +/- 0.1 s; +/- 0.1 s; 1.1 s; 6 s | length: the runner stamps STOP, sends SIGSTOP, runs `sleep 20`, sends SIGCONT, stamps CONT (`tools/t2_xray_kj2.sh` lines 121-123), so the length is 20 s plus process starts (kj1: 2 ms), shorter only if the sleep is cut short or the clock is stepped; 0.1 s = 50 times kj1's 2 ms (section 10.1). The rest as kj1 (unchanged) |
 | 10 | M's death after the stop: one `KDEAD,…,online` at or after the first frame after the gap; M's `dead` line (written once M reads dead) in no snapshot read before CONT, and read within the bound of the first kept snapshot read at or after CONT | 2.0 s | after CONT: one script read, the kill taking effect (kj1: one snapshot), one snapshot write; as 7 |
 | 11 | dead in X-Ray: from the bound after each `dead` line the id is alive 0 or not listed, to the end | 2.0 s | kept from kj1 (not tightened; 15 judges the same snapshot) |
 | 12 | the actor is unhurt: actor health in every snapshot = the first | exact | standing rule |
-| 13 | the `r` line: present after the first pose taken; never back; within the bound of the newest kept pose; the first snapshot at or after CONT is allowed the stop's length more; not more than 0.05 s ahead | 2.0 s; -0.05 s | as kj1 |
+| 13 | the `r` line: present after the first pose taken; never back; within the bound of the newest kept pose; the first snapshot at or after CONT is allowed the stop's length more; not more than 0.05 s ahead (also for the first `r`: read before any kept pose, it passes only if the watcher read the very pose it names within 0.05 s after it) | 2.0 s; -0.05 s | as kj1 |
 | 14 | counters: EVERY key of the last T2SUM judged against one table (as kj1: torn 0, lost 0, epochs 0, paused false, kdead_online 2, kdead_offline 0, kdead_fail 0, krefused 0, kstale 0, kback 0, kclamped 0, kver 0, kowed 0, ktabfail 0, khits from the poses, last_seq between the last r and the highest pose seq, holds/near/guards = their own lines); plus two rows in the same table for kill5's new lines: exactly 2 KCONF lines, one per KDEAD online id, each later than its KDEAD, ms = its time - the KDEAD time, 0 <= ms <= 2.0 s; 0 KNOCONF lines | exact; 2.0 s | KCONF's 2.0 s: kill5's own KNOCONF limit, and 7/10's bound |
-| 15 | NEW: no kept snapshot holds `k,<id>,…,dead` beside an o line alive 1 for the same id; no `stale` line in any kept snapshot | 0; 0 | amendment 138 points 1 and 2; this run has no stale case by design |
+| 15 | NEW: no kept snapshot holds `k,<id>,…,dead` beside an o line alive 1 for the same id; no `stale` line in any kept snapshot; no snapshot with two o lines or two k lines for one id (named with seq and id; the first is the one read) | 0; 0; 0 | amendment 138 points 1 and 2; this run has no stale case by design; a later line must not hide an earlier one |
 No T2SUM key was added. `kdead_fail` now also counts an online kill still alive 2.0 s after the call.
 What a `dead` line means now: the creature read dead in that snapshot (or has no object). That it stays dead is 11's.
 
@@ -110,7 +115,9 @@ KDEAD; a fall on a creature with no KDEAD; a fall after the kill call while the 
 hurting it before the kill takes effect), and then on the death step after it as well. kj1's two death steps (S 804 -> 805,
 M 963 -> 964) are exactly what it exempts.
 A NO VERDICT never hides a failure it does not explain: a failing check outside the fired rules' sets makes the run a FAIL,
-named. Checks 1, 12, 13 and 15 are always judged. A missing, empty, unreadable or unparsable required file is a FAIL by name.
+named. Checks 1, 12, 13 and 15 are always judged. A missing, empty, unreadable or unparsable required file is a FAIL by name; a
+malformed KCONF or KNOCONF row (field count, integer syntax) makes the meta file unparsable (both checker modes), so no
+NO VERDICT rule can excuse it. Well-formed rows with a wrong count, order or delay fail check 14.
 2.0 s in NV4: the same chain bound as 7. One retry needs the Overseer's GO. itrzone's side is not scored when mine is NO
 VERDICT for S or M, and the reverse.
 
@@ -139,36 +146,55 @@ preflight; no second boot without the Overseer.
 |---|---|---|
 | tools/t2_xray_kj2.sh (runner) | f52da5c08e2852410f44307b9bc75a796db57832ce7a20d463c2d122c4d6a7ad | new: kj1's runner (870d854f…) with line 54 pointing at kill5, nothing else |
 | tools/t1_watch_keep.py (watcher) | 9df9c8e4eb2a34ec5b9059c0b26569b7d9e2e2886cc847c9630a8451e8240393 | kj1 |
-| tools/t3_kj2_check.py (checker) | 2a41b09c1c20eb181ad8c670aa061e882ee2e85e93f7deb39ad0035c34afb881 | new |
-| kj2/t3_kj2_mkfix.py (fixture maker) | b5abbcd65ae29fce426de20241ecb8acecd1b7949506dc836874ddf15dd26f57 | new |
-| kj2/t3_kj2_selftest.sh | a5e8b4685bde46e6c08fafccd5f9c92725a599a469bf91252896bab2ffc4e117 | new |
+| tools/t3_kj2_check.py (checker) | cf69899bf66e92a7a0502e285a72d061c53854c129b372d56f7353ae3046e9c9 | new |
+| kj2/t3_kj2_mkfix.py (fixture maker) | 5782c5465e19fbefed62b34c6ea7b31685bd734ee2d96add94d74654a868328a | new |
+| kj2/t3_kj2_selftest.sh | 2b5c013cd4e5b3be4288c5694a9b2b227903807eb16b894a9e19f6f43039baaf | new |
 | tools/t3_kj1_check.py (old checker, run by the selftest for the proof) | 4b8388505fa5847e5b4de27d70904027456843b0310979ef5b1a7944b09027ee | kj1 |
 | tools/lib_engine_pids.sh | cb183b7b894eab3edb200e2c03a3a96f2e935cd2d1e1f402f48be7aad238ed6e | kj1 |
 | tools/tb_run.sh | 1b8d103f2208befc554c48cf0b628830e67e0223cbe5c99ab1fcc34205363953 | kj1 |
 | tools/run_noguard.sh | 92729abc420784053cee4b1b1832f5d112f74979a4760e2173d45578358455d5 | kj1 |
 | harness/zz_eperf_dump.script | 2b79a817a08a1e7ff4e29007f76677dba698a2a5945374331dcc2ae2de874b45 | kj1 |
 | out/user.ltx.orig | 3efd38eecbca504001cf03bd4c60bc6e837a3c3284e8517979a1bd9e1526de78 | kj1 |
-| harness/zz_p1_puppet_kill5.script (the reader) | f010a341db6a7b889c348db551d48bad33ae82a633927c21624f4b48b7ed70b9 | new (kill4 was f19b28c0…) |
+| harness/zz_p1_puppet_kill5.script (the reader) | c01f0f2031091bbcd7fa36212cb7a19481fbc46cb6fbe35b825c2c93df653328 | new (kill4 was f19b28c0…) |
 | run/bin/Stance14.exe | b4ce9c772ae5fa4bf5ddb955f2dfcb943627d6c2b2e4ce66e21eac1168646cbe | kj1 |
 | run/appdata/savedgames/cordon1.scop | 6dea752bc652a45c748e1438e3bc8ffd2d8d89f24730177c792328aeb5d13f3e | kj1 |
-| kj2/kill5h_stub.lua, kj2/kill5h_test.sh (reader's offline tests) | 75f31bdc276355c0994966ca54a971b46903b5b58b12e30ed1ef1f3e1553a3e9, aed7e73de401cc5ddad0bb4b5d37e3f7dfa3c17e103ed5295dc84ddffdf7de01 | new |
+| kj2/kill5h_stub.lua, kj2/kill5h_test.sh (reader's offline tests) | 4ee4d549d656f6255487676291003541386710de8178178e4af51e66ffc4b665, aed7e73de401cc5ddad0bb4b5d37e3f7dfa3c17e103ed5295dc84ddffdf7de01 (unchanged in fix round 2) | new |
 | harness/zz_p1_puppet_lost3.script (the reader tests' v3 reference) | 5bf69e5ce0ed7d775efe2ab9755826dca43152e093f6fbc5b9909416f12641cb | not pinned in kj1 |
 The boot script is itrzone's and checks these hashes before the claim. I score from the X out dir it sends me.
 
 Tests on these bytes (2026-11-26; run by the sub-worker and run again by me with the same final lines):
-- Reader offline tests: `== checks: 42 pass, 0 fail; mutants: 55 caught, 0 not caught or missing` / `RESULT: PASS`. 34 of
+- Reader offline tests: `== checks: 44 pass, 0 fail; mutants: 57 caught, 0 not caught or missing` / `RESULT: PASS`. 34 of
   them are kj1's; one (`stale_section`) now expects `stale` where kj1 expected `dead` (amendment 138 point 2), and two kj1
   mutants (`m_death_online`, `m_snap_hold`) anchor on kill5's changed text. kj1's stub run unmodified against kill5 fails
-  only `stale_section`.
-- Checker selftest: `SELFTEST: PASS (123 folders: good 5/5; mutant 45/45; nv 15/15; counter 24/24; nvfail 2/2; missing 7/7;
-  empty 7/7; unreadable 7/7; unparsed 8/8; real 3/3; checker-mutant 4/4; counters-only 4/4; refuse-overwrite ok; old checker
-  on the real copy NO VERDICT via NV3 (ok); real folder unchanged ok; ...)`. In it: on a byte copy of the real kj1 folder the
+  only `stale_section`. Fix round 2 added `pending_stale_noconf` and `pending_released` (mutants `m_conf_on_stale`,
+  `m_released_pending`: each undoes one fix and is caught) and moved the anchors of `m_conf_never` and `m_hold_from_call`
+  to the changed KCONF line (same mutation).
+- Checker selftest: `SELFTEST: PASS (134 folders: good 6/6; mutant 51/51; nv 15/15; counter 24/24; nvfail 2/2; missing 7/7;
+  empty 7/7; unreadable 7/7; unparsed 12/12; real 3/3; checker-mutant 8/8; counters-only 5/5; mkfix-guard 5/5;
+  refuse-overwrite ok; old checker on the real copy NO VERDICT via NV3 (ok); real folder unchanged ok; ...)`. In it: on a byte copy of the real kj1 folder the
   OLD checker gives NO VERDICT via NV3 on S 804->805 and M 963->964 and the NEW one gives NV3 clear with those two steps
   exempt, FAIL on 15 (snap 963: dead beside alive 1, health 0.0008) and on 14.log.KCONF (kill4 wrote none); with 963's dead
   line made plain, only 14.log.KCONF fails; with the two KCONF lines kill5 would have written added, PASS. Four checker
   mutants (exemption removed; 15 removed; exemption widened to all falls; widened to every fall after the KDEAD) each caught.
+  Fix round 2: fixtures `m15_dup_stale`, `m15_dup_dead`, `m15_dup_o` (FAIL 15), `good_r_first_inversion` (PASS),
+  `m13_r_first_late`, `m13_r_first_nopose` (FAIL 13), `bad_kconf_text`, `bad_kconf_dash`, `bad_kconf_fields`, `bad_kconf_nv3`
+  (FAIL as unparsable input; the last with NV3 FIRED, still FAIL), `m09_short16` (FAIL 9); counters-only `co_badkconf` (FAIL
+  by name, no exception); four checker mutants, each undoing one fix, each caught; the fixture maker refuses a destination
+  equal to or inside a source folder (five cases, incl. a symlink and a `..` path; nothing created).
 Not tested: kill5 in the engine; a kill that stays pending in the real engine for more than one frame; KCONF/KNOCONF and the
 `stale` word in bytes the engine wrote; bounds exactly at their edges; the kj2 runner's changed line (bash -n only).
+
+### 9.1 Review
+CodeRabbit pass 1 on these files (20 findings, all "major"); my triage is `kj2/coderabbit-triage-2026-11-26.md`. Fixed:
+its items 1-8 (fix round 2: the reader's two changes, the checker's four, the fixture maker's guard, the no-object
+sentence in section 1 point 2). Declined, one line each (from the triage):
+- 10 s hold refreshed by a repeated dead observation: registered behaviour (amendment 134, "refreshes the 10 s hold").
+- pending kill not carried over a crossing; hit log truncated at a crossing; older ktab after a failed save; first-read
+  guard with both LOST limits 0: no crossing in kj2; the last three are kill4's bytes, unchanged. Limits in the text.
+- runner: non-atomic install, claim grep: kj1's runner bytes (one line changed), ran in kw1 and kj1; not touched before kj2.
+- files under kj2/ versus tools/ and harness/: the kj2/ files are copies for the record; the pinned paths are tools/ and
+  harness/ in the main project folder, hash-checked by itrzone's boot script.
+- "can ITR2 take a plain k line as confirmation": itrzone's side; their unit case 20 covers it. Passed on.
 
 ## 10. Margins and the story-character rule
 ### 10.1 Margins: what I expect next to each bound (each bound derived for this run; kj1 = measured in the kj1 run)
@@ -181,6 +207,7 @@ Not tested: kill5 in the engine; a kill that stays pending in the real engine fo
 | 5 S's health after the second hit | > 0.02 | above the 0.01 stop | 0.257 | 13 times | kj1: 0.2571 |
 | 6 fall of a neighbour | 0.02 | as 4 | 0 | all of it | kj1: none in 7 events |
 | 7 S's dead line after its pose | -0.05 to 2.0 s | chain about 0.25 s plus frames (section 4) | 0.011 s if S reads dead in the call frame (kj1: the 0.411 hit took S to 0.0000, alive 0 at once); about 0.11 s if one snapshot later | 18 times above; 61 ms to the lower edge | kj1: 11 ms; the one-snapshot case: kj1's M (101 ms KCONF) |
+| 9 the stop's measured length (CONT - STOP) | 20.0 s +/- 0.1 s | `sleep 20` between the two stamps plus process starts; shorter only if the sleep is cut short or the clock stepped | 20.002 s | 0.1 s against kj1's 2 ms overrun: 50 times; leaves room for clock slewing (<= 10 ms) and scheduling on a loaded box | kj1: stall.csv 1795725134795 -> 1795725154797 |
 | 9 RESUMED_GAP's last frame before the gap vs STOP | 1.1 s | the 0.1 s stamp edge + 1 s of whole-second stamps | 0.795 s (kj1: whole second ...134 vs STOP ...134.795) | 1.4 times: FLAGGED | the method's own error (whole seconds), not X-Ray's |
 | 9 RESUMED_GAP's first frame after vs CONT, lower side | CONT - 1.1 s | as above | -0.797 s (kj1: whole second ...154 vs CONT ...154.797) | 1.4 times: FLAGGED (not in kj1's table) | as above |
 | 9 first frame after CONT, upper side | 5 s + 1 s | the bridge's T2_LOST_MS; + whole seconds | 0.026 s to the first new frame's snapshot (kj1, snap 963) | over 200 times | kj1 (see NOTES: the snapshot read 1 ms after CONT was the frame cut by the stop) |

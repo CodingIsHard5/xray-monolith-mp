@@ -112,3 +112,54 @@ T2SUM: unchanged, the same 19 keys in the same order. New meta lines: KCONF, KNO
   missing 7/7; empty 7/7; unreadable 7/7; unparsed 8/8; real 3/3; checker-mutant 4/4; counters-only 4/4; refuse-overwrite ok;
   old checker on the real copy NO VERDICT via NV3 (ok); real folder unchanged ok; reports in .../selftest-runs/...)`.
 - Earlier failed selftest and test run folders are kept under kj2/selftest-runs and kj2/runs (nothing deleted).
+
+## Fix round 2 (2026-11-26, CodeRabbit pass 1; triage in coderabbit-triage-2026-11-26.md, items 1-8)
+Desk only, as before. Edited: harness/zz_p1_puppet_kill5.script, tools/t3_kj2_check.py, kj2/kill5h_stub.lua,
+kj2/t3_kj2_mkfix.py, kj2/t3_kj2_selftest.sh, the registration text; kj2/ copies of the reader and checker re-made by cp.
+kill5h_test.sh and t2_xray_kj2.sh unchanged.
+1. Reader, export: the KCONF branch is `if dn and not r.st then` (a pending kill on a row marked stale is not confirmed;
+   KNOCONF still comes after 2.0 s). Test `pending_stale_noconf` (id 101 reused by a DEAD boar after the kill call: every
+   snapshot `k,101,0.250,stale`, no KCONF); mutant `m_conf_on_stale`.
+   Left open: the stale mark comes from a pose. If no pose lists the id between the reuse and the next snapshot, the
+   replacement can still confirm the kill. CodeRabbit's fuller fix (keep the section with the pending call) was not in
+   the brief.
+2. Reader, k_line, no object: `if r.kt and not r.dd then return end` before the released handling; the snapshot then
+   confirms (k_dead_now: no object = dead): KCONF, dd, dead line. Test `pending_released` (101 released after its kill
+   call: one KDEAD (online), one KCONF in the first snapshot after, dead lines; 105 with no pending kill: KDEAD released
+   once, no KCONF, `k,105,0.200,dead`, as before); mutant `m_released_pending`.
+3. Checker parse_snap: a second o or k line for an id keeps the first and is listed in s['dup']; check 15 FAILS on any
+   (`snap <seq>: o|k line for id <id> twice`). Fixtures m15_dup_stale (the CodeRabbit case: stale then plain),
+   m15_dup_dead (M's dead line then a plain line), m15_dup_o (alive 1 then alive 0); checker mutant mut_dup_overwrite.
+4. Checker check 13: a snapshot read before any kept pose passes only if a kept pose with r's session and seq was read
+   at most EARLY_MS (50 ms) after it; else FAIL (`no kept pose`, or `read N ms later`). Fixtures good_r_first_inversion
+   (1 ms: PASS), m13_r_first_late (60 ms), m13_r_first_nopose; checker mutant mut_r_first_strict.
+5. Checker: parse_conf() (4 fields, ASCII integers, at most one leading minus) is the one parser for KCONF/KNOCONF in
+   both modes; malformed = `UNPARSED ... malformed KCONF/KNOCONF row(s)` = input-error FAIL (never NO VERDICT).
+   log_rows uses it too, and its KDEAD time read no longer raises on `--10`. Fixtures bad_kconf_text, bad_kconf_dash,
+   bad_kconf_fields, bad_kconf_nv3 (NV3 FIRED, verdict FAIL); counters-only co_badkconf; checker mutant mut_conf_lax.
+   Proof without the fix: the pre-fix checker on bad_kconf_dash's meta in counters-only mode raised
+   `ValueError: invalid literal for int() with base 10: '--10'`.
+   The same kind of edge, fixed while there: stall.csv's utc and T2SUM last_seq used str.isdigit() (true for '²', which
+   int() refuses); now ASCII-digit regexes.
+6. Checker check 9: |CONT - STOP - 20000| <= 100 ms (STOP_LEN_MS, STOP_LEN_TOL_MS). Derivation (runner lines 121-123):
+   `$(utc)` STOP, `kill -STOP`, `sleep 20`, `kill -CONT`, `$(utc)` CONT, so the length = 20 s + the fork/exec of sleep and
+   date (kj1: 20.002 s, so 2 ms); it can be shorter only if the sleep is cut short (a signal) or the wall clock is stepped.
+   0.1 s = 50 times the measured 2 ms; room for NTP slewing (<= 500 ppm = 10 ms) and scheduling on a loaded box. Fixture
+   m09_short16 (mkfix knob stop_ms = 16004, RESUMED_GAP matching): FAIL 9; checker mutant mut_no_stoplen.
+7. Fixture maker: realpath of dest and both sources first; equal or inside = `mkfix: REFUSED`, exit 1, before anything is
+   created or read. Selftest: five cases (inside, equal, inside kw1, through a symlink, through `..`) on scratch source
+   folders in the selftest dir (never the real kj1 folder). Proof without the guard: a guard-stripped copy run in my
+   scratch made `<src>/fixtures` inside the source, then copytree copied the source into itself until /tmp filled (the
+   scratch folder was removed by its literal path; 56 GB free after). This is the failure the guard prevents.
+8. Text, section 1 point 2: the sentence replaced as the brief gave it. Reader and tests agree: a released id with a row
+   writes `k,<id>,<applied>,dead` (no_object_dead: 106 -> 0.300, 105 -> 0.000; death_already_dead: 105 -> 0.000;
+   pending_released: 101 -> 0.250, 105 -> 0.200). Exactly: 0.000 is written when the row's applied total is 0. The row
+   is created by the pose's own k line, so an id X-Ray holds nothing for gets 0.000. An id never named in a pose gets no
+   k line at all.
+Existing tests changed: stub mutants m_conf_never and m_hold_from_call now anchor on `if dn and not r.st then r.dd = now;
+m(` (same mutation); the stub comment of no_object_dead reworded; selftest mutant mut_no15 anchors on the changed return
+line of check 15 (same mutation). No expectation of an existing check or fixture changed.
+Results: `bash kill5h_test.sh`: `== checks: 44 pass, 0 fail; mutants: 57 caught, 0 not caught or missing` / `RESULT:
+PASS`. `bash t3_kj2_selftest.sh`: `SELFTEST: PASS (134 folders: good 6/6; mutant 51/51; nv 15/15; counter 24/24; nvfail
+2/2; missing 7/7; empty 7/7; unreadable 7/7; unparsed 12/12; real 3/3; checker-mutant 8/8; counters-only 5/5; mkfix-guard
+5/5; refuse-overwrite ok; old checker on the real copy NO VERDICT via NV3 (ok); real folder unchanged ok; ...)`.
