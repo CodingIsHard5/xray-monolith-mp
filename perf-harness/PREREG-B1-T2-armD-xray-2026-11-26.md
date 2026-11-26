@@ -110,3 +110,36 @@ too-fast return should mean. A fast return is the better outcome for a player, n
 Stop gate: my infrastructure checks (check 1; the script loaded, T2SUM lines present) PASS. d2 does not run; the
 Overseer decides what follows (itrzone's stop gate names their D3 as an infrastructure check).
 Output: `armD-xray/d1_retry_xscore.txt`.
+
+### 7.2 d2 (2026-11-26, X out dir ITRZone out/runs/20261126-111735-t2d2-xray; scored once, checker b113d37d): FAIL, 9 of 10 conditions
+Limits first: one run; nothing was looked at; the freeze arm is still not run; the two timing margins (10 s floor,
+20 s ceiling) were not tested at their edges (the gap landed mid-range).
+The one failing condition is check 9, my own spot check:
+| check | result |
+|---|---|
+| 1 no crash, restart, Lua error, FATAL, damage line; runner rc 0 | PASS |
+| V health and stance read-back | PASS (10832 poses applied, 0 differ; 3 VITALS lines clean) |
+| 2 out by the changer, resume on Garbage, back by a changer, resume on Cordon | PASS (out esc_level_changer_to_garbage_1, back gar_level_changer_to_escape_1) |
+| 3 one LOST in state cross, 120 s after the last pose taken | PASS (120008 ms) |
+| 4 EPOCH, FOUND, gap inside 150 to 330 s, wrong-level poses refused, none applied on Garbage | PASS (gap 176.0 s; 62 refusals; 0 applied) |
+| 5 poses applied before and after | PASS (2150 before, 8682 after; no guard; 8 holds) |
+| 6 runner's own record | PASS |
+| 7 X-Ray never stopped | PASS |
+| 8 one summary with lost=1, epochs=1 (Garbage) | PASS |
+| 9 first pose applied after the second resume within 5 m of the spot | **FAIL: 33.0 m** |
+What it shows: ITR2 was stopped while X-Ray was mid-crossing. X-Ray arrived on Garbage alone, declared the pose lost
+after 120 s, took the new ITR2 session on its first pose, refused all 62 of its poses for the wrong level, asked for
+the crossing back 3.1 s later, and after arriving on Cordon followed the new session for the rest of the run (8682
+poses). No crash, no pose applied on the wrong level.
+Why check 9 failed: the bound was wrong for this arm, and that is my mistake. In d1 the first pose applied after the
+return is the new session's pose number 1, which is at the track's start (0.0 m there). In d2 X-Ray must first cross
+back, so the first pose it can apply is the new session's number 510, 25.5 s after its number 1, and ITR2's walker
+had by then moved 33 m along its track. I copied "within 5 m of the spot" from d1 into d2 without asking where the
+walker is when the first pose can be applied. Same kind of mistake as d1's gap bound. The run is scored against the
+registered bound; I do not move it and do not re-score.
+What a right check would be (not registered, not scored): the first pose applied after the second resume equals
+ITR2's own session 2 record for the same pose number. That needs itrzone's file and a new registration.
+My guess was PASS 40 %: FAIL as scored, so the guess's direction held, but for none of the reasons I named
+(timing at the 120 s limit, the recover crossing); those all passed.
+itrzone's side scored once: PASS 10 of 10 (gap 178.0 s).
+Output: `armD-xray/d2_xscore.txt` (sha256 1956f6e2…).
