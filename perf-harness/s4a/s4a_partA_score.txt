@@ -1,0 +1,5 @@
+R1 stock runs agree (C = 0): PASS ({'s4a_s2': {1: 0, 2: 0, 3: 0}, 's4a_s3': {1: 0, 2: 0, 3: 0}})
+R2 switch-off runs agree with stock (C = 0): PASS ({'s4a_o1': {1: 0, 2: 0, 3: 0}, 's4a_o2': {1: 0, 2: 0, 3: 0}, 's4a_o3': {1: 0, 2: 0, 3: 0}})
+R3 frame at checkpoint 1, off mean minus stock mean within 8: PASS (cp1 -0.7, reported cp2 -3.3, cp3 -1.7; stock [{1: 1722, 2: 3431, 3: 5477}, {1: 1718, 2: 3429, 3: 5477}, {1: 1718, 2: 3420, 3: 5470}]; off [{1: 1720, 2: 3427, 3: 5480}, {1: 1717, 2: 3423, 3: 5474}, {1: 1719, 2: 3420, 3: 5465}])
+R4 A-Life call spacing to checkpoint 1 (first frame equal, gaps 16/17/18, one 16): PASS (calls [100, 100, 100, 100, 100, 100], last frames [1721, 1717, 1717, 1719, 1716, 1718]; bad [])
+S2 PART A2: PASS

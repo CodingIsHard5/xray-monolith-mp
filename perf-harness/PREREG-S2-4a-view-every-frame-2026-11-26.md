@@ -63,4 +63,14 @@ Part A is not affected (its harness has no re-run rule).
   effect lifetimes, the camera used as fire origin) are not checked here.
 
 ## 5. Result
+### 5.1 Part A (run 2026-11-25, ended 20:56 EST; six runs, both preflights ok; scored once): PASS 4 of 4
+- R1 stock agrees with stock: C = 0 at all three checkpoints, both pairs.
+- R2 switch-off (SimTick15) agrees with stock: C = 0 at all three checkpoints, all three runs.
+- R3 frame at checkpoint 1: off mean minus stock mean -0.7 frames (limit 8); reported checkpoint 2 -3.3, 3 -1.7.
+- R4 A-Life call spacing: 100 calls in every run, first call on the same frame, gaps 16/17/18 only.
+My guess was 75 % for all four: it held. Output: `s4a/s4a_partA_score.txt`.
+Limit, as registered: serial test mode, first 320 A-Life passes; it shows the new code is inert when off, nothing
+about gated mode.
+
+### 5.2 Part B
 (empty until scored)
