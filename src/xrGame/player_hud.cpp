@@ -5169,6 +5169,12 @@ struct vr_bpo_panel
 static vr_bpo_panel s_vr_bpo[5] = {};
 static bool s_vr_bpo_tried = false;
 static Fvector s_vr_bpo_c, s_vr_bpo_e; // the crate model's own box: centre and extents, measured once
+// The real bag model (SPIKE_PLAN Amendment 41 note 18): one model of our own, authored in the held prop's frame, drawn at
+// the prop's matrix with no scale. Used when its file is there; the five panels are the fallback and -vr_bp_panels (TEST ONLY).
+static const char* VR_BPO_BAG = "gvr\\gvr_bag";
+static IRenderVisual* s_vr_bpo_bag = nullptr;
+static IKinematics* s_vr_bpo_bag_K = nullptr;
+static Fmatrix s_vr_bpo_bag_xf;
 static void vr_bpo_reset()
 {
 	for (vr_bpo_panel& P : s_vr_bpo)
@@ -5178,6 +5184,10 @@ static void vr_bpo_reset()
 		P.vis = nullptr;
 		P.K = nullptr;
 	}
+	if (s_vr_bpo_bag)
+		::Render->model_Delete(s_vr_bpo_bag);
+	s_vr_bpo_bag = nullptr;
+	s_vr_bpo_bag_K = nullptr;
 	s_vr_bpo_tried = false;
 }
 static bool vr_bpo_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& bag_xf)
@@ -5190,7 +5200,23 @@ static bool vr_bpo_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 		s_vr_bpo_tried = true;
 		LPCSTR name = VR_BPI_BOXES[0];
 		int made = 0;
-		if (vr_bpi_file(name))
+		const bool want_bag = !strstr(Core.Params, "-vr_bp_panels");
+		if (want_bag && vr_bpi_file(VR_BPO_BAG))
+		{
+			::Render->hud_loading = true;
+			s_vr_bpo_bag = ::Render->model_Create(VR_BPO_BAG);
+			::Render->hud_loading = false;
+			s_vr_bpo_bag_K = s_vr_bpo_bag ? s_vr_bpo_bag->dcast_PKinematics() : nullptr;
+		}
+		if (s_vr_bpo_bag)
+		{
+			const Fbox& gb = s_vr_bpo_bag->getVisData().box;
+			Msg("* [vr13o] frame %u open bag: own model '%s' made; its box %.3f x %.3f x %.3f (min %.3f %.3f %.3f)", f, VR_BPO_BAG, gb.max.x - gb.min.x, gb.max.y - gb.min.y,
+				gb.max.z - gb.min.z, gb.min.x, gb.min.y, gb.min.z);
+		}
+		else
+			Msg("* [vr13o] frame %u open bag: own model '%s' not used (%s); the five panels instead", f, VR_BPO_BAG, want_bag ? "no such file, or it could not be made" : "-vr_bp_panels");
+		if (!s_vr_bpo_bag && vr_bpi_file(name))
 			for (vr_bpo_panel& P : s_vr_bpo)
 			{
 				::Render->hud_loading = true;
@@ -5232,9 +5258,31 @@ static bool vr_bpo_draw(IDSGraphManager* DM, IRenderVisual* bag, const Fmatrix& 
 					++swapped;
 				}
 			}
-		Msg("* [vr13o] frame %u open bag: texture '%s' set on %d panel surfaces", f, canvas ? canvas : "(the crate's own)", swapped);
-		Msg("* [vr13o] frame %u open bag: panel model '%s', %d of 5 made; its box %.3f x %.3f x %.3f; wall %.3f m, depth %.3f m", f, name, made, s_vr_bpo_e.x, s_vr_bpo_e.y,
+		if (!s_vr_bpo_bag)
+			Msg("* [vr13o] frame %u open bag: texture '%s' set on %d panel surfaces", f, canvas ? canvas : "(the crate's own)", swapped);
+		if (!s_vr_bpo_bag)
+			Msg("* [vr13o] frame %u open bag: panel model '%s', %d of 5 made; its box %.3f x %.3f x %.3f; wall %.3f m, depth %.3f m", f, name, made, s_vr_bpo_e.x, s_vr_bpo_e.y,
 			s_vr_bpo_e.z, VR_BPO_WALL, VR_BPO_DEPTH);
+	}
+	if (s_vr_bpo_bag)
+	{
+		s_vr_bpo_bag_xf.set(bag_xf);
+		if (s_vr_bpo_bag_K)
+		{
+			s_vr_bpo_bag_K->CalculateBones_Invalidate();
+			s_vr_bpo_bag_K->CalculateBones(TRUE);
+		}
+		DM->add_Dynamic(s_vr_bpo_bag, &s_vr_bpo_bag_xf);
+		if (!s_vr_bpi.quiet)
+		{
+			// the same floor point as the panel line: the bag frame's point (cx, y0 + wall / 2, cz) of the prop's box
+			const Fbox& pb = bag->getVisData().box;
+			Fvector fc, fw;
+			fc.set(0.5f * (pb.min.x + pb.max.x), pb.min.y + 0.5f * VR_BPO_WALL, 0.5f * (pb.min.z + pb.max.z));
+			bag_xf.transform_tiny(fw, fc);
+			Msg("* [vr13o] frame %u bag 1 floor %.4f %.4f %.4f", f, fw.x, fw.y, fw.z);
+		}
+		return true;
 	}
 	for (const vr_bpo_panel& P : s_vr_bpo)
 		if (!P.vis)
