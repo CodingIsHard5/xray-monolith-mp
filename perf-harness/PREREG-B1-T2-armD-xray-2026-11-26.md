@@ -63,6 +63,26 @@ registered first; nothing is re-scored.
   commands and guesses are unchanged.
 - This is the one retry of d1 under section 6. It needs the Overseer's word (asked by itrzone).
 
+## 6.2 Note 2 (2026-11-26, registered before d2): the gap rule, joint with itrzone's Amendment 133
+Ordered by the Overseer after d1 (section 7.1, which stands as FAIL and is not re-scored).
+- itrzone's text, copied byte for byte: `armD-xray/itrzone-amendment-133.txt`, sha256
+  94816bd93ea980b2af38892b2a50b1c19d9cf22639c05a19bbe1c6951294631b (61 lines, 5498 bytes; their master b1db010).
+  Their Amendment 125 section is unchanged (48eac5dd). Every number in it that is mine is as I gave it.
+- The gap is counted as before (my runner's lost limit plus its "lost end" figure).
+- Floor = the larger of two meanings. (a) The pose was really lost: d1 10 s (my 5 s limit plus the runner's poll);
+  d2 150 s (my cross-lost limit fires 120 s after the last pose my script took, or after my arrival on the new level,
+  so at most 129 s after ITR2's last pose; plus 20 s). (b) ITR2 really booted again: itrzone's bound, 100 s (no boot
+  faster than 115 s in 36 of theirs), 145 s in d2 with the hold.
+- Ceiling 330 s in both, as what the run leaves room for: d1, 220 s remain of my 700 s run for my 600 poses and
+  itrzone's session-2 minimums; d2, about 115 s remain of the 450 s Garbage stay for 20 mismatch lines, their 3 s and
+  the recover crossing.
+- d2 only: itrzone's boot script launches session 2 no sooner than 60 s after the stop, so that my LOST fires before
+  their first pose. Without it the return would land within seconds of my limit, on either side; my script takes a
+  new session at once, with no LOST, and the run would show another case than the one registered.
+- My score commands from here on: d1 `gap=100-330`, d2 `gap=150-330`; spot, files, env and every other condition
+  unchanged. The d1 retry's gap (129.8 s) would pass the new d1 rule; it is not scored again.
+- Guess for d2, X side: PASS 40 %, unchanged.
+
 ## 7. Result
 ### 7.1 d1, the retry (2026-11-26, X out dir ITRZone out/runs/20261126-083206-t2d1-xray; scored once, checker b113d37d): FAIL, 9 of 10 conditions
 The one failing condition is the registered bound on the time without a pose, inside check 4:

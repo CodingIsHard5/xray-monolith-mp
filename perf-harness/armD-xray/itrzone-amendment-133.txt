@@ -1,0 +1,61 @@
+## Amendment 133 (REGISTERED 2026-11-26): arm D's gap rule, derived (replaces D3's 150 to 330 s); d2's launch held 60 s
+Ordered by the Overseer after d1 (amendment 125 and its note 1): d1 stands as FAIL 8 of 9 on D3, with the restart itself
+shown working. Joint with EnginePerf: their check on the gap uses the same numbers. d1 is not run again.
+
+**What was wrong with the old bound.** D3 asked for a gap of 150 to 330 s between session 1's last pose and session
+2's first. I had predicted 200 s (180 to 240) and set the floor 30 s below that. The prediction was a guess at "stop,
+teardown and a boot". The boot time was known: this boot script's own log shows the reader's first poll 125 s after
+the claim in 27 earlier boots, and in the other 9 at the script's next look (185 to 191 s). I did not use it because
+the margin table compared each prediction with its bound, and nothing in it compared a prediction with the measured
+parts it is made of. The checklist now has that line: every timing bound is checked against each known component time.
+
+**The gap, as before:** from session 1's last pose to session 2's first pose. Ours by the mod's log stamps;
+EnginePerf's by their runner's clock (its lost limit plus its "lost end" figure; 2 s apart in d1's retry).
+
+**The parts, and where each number comes from:**
+- Last pose to the launch of session 2. The stop file is polled every 5 s and the teardown takes about 5 s more; poses
+  go on until the teardown. d1's two boots: stop file to launch 9 and 11 s; last pose to launch 3.1 s (retry). Without a
+  hold: 0 to 15 s. With d2's hold (below): the launch comes 60 s after the stop file, so 45 to 60 s after the last pose.
+- Waiting for the arm lock (note 1): 0 s in the retry; at most 60 s by the script.
+- Launch to the first pose (ITR2's boot): 128.8 s in d1's retry, by the log stamps. From 36 earlier boots: at most
+  125 s after the claim in 27, between 125 and 191 s in 9. Taken as 115 to 190 s. A pose follows the first poll at once.
+- Sum without a hold: 115 to 265 s, expected 132. With the 60 s hold: 160 to 310 s, expected 183.
+
+**The rule: floor = the larger of two meanings; ceiling = what the harness leaves room for.**
+- Floor (a), the pose was really lost. d1: X-Ray's lost limit is 5 s and its runner looks about once a second: 10 s.
+  d2: X-Ray's cross-lost limit (120 s) fires at most 129 s after our last pose (EnginePerf: 120 s after the last pose
+  it took, or after its arrival on the new level about 18 s after the cross start; our last pose comes 9 to 17 s after
+  the cross start). Our first pose must come at least 20 s after that: 150 s.
+- Floor (b), ITR2 really booted again: a stated lower bound on the stop-to-first-pose time. No boot faster than 115 s
+  is in hand; with 15 s of margin the bound is 100 s. In d2 the hold adds at least 45 s: 145 s.
+- Ceiling, 330 s in both arms. d1: X-Ray's run is 700 s from its level load and our stop comes about 150 s in; 330 s
+  leaves 220 s for EnginePerf's 600 poses after the return and for session 2's own minimums (60 s of play, 600
+  snapshots). d2: X-Ray's Garbage stay is 450 s from its load; after our return it still needs 20 mismatch lines, our
+  3 s and the recover crossing (15 to 26 s); 330 s leaves about 115 s.
+
+| Arm | Floor (a) | Floor (b) | Floor | Ceiling | Expected gap (range) | Margin to the floor | Margin to the ceiling |
+|---|---|---|---|---|---|---|---|
+| d1 | 10 s | 100 s | 100 s | 330 s | 132 s (115 to 265) | 15 s | 65 s |
+| d2 | 150 s | 145 s | 150 s | 330 s | 183 s (160 to 310) | 10 s | 20 s |
+
+- The margins at the range ends are small on purpose-built worst cases (a 191 s boot together with a 60 s lock wait,
+  neither seen together). At the expected values they are 32 and 33 s to the floors, 198 and 147 s to the ceiling.
+- d1's retry gap (131.9 s ours, 129.8 s theirs) would pass this rule. It is not re-scored: d1 stays FAIL as registered.
+
+**Changes:**
+- `tools/r3d_check.py`: D3 reads the floor by arm (d1 100, d2 150) and the ceiling 330. No other check changes.
+- `scripts/boot_t2.sh`, d2 only: session 2 is launched no sooner than 60 s after the stop file was written (a player who
+  takes a minute to start the game again), and the wait is logged. Reason: with a 130 s boot and no hold our first pose
+  would come within seconds of X-Ray's cross-lost limit, on either side; before it, X-Ray takes the new session at once
+  and d2 would show another case than the registered one (a return after a lost crossing).
+- EnginePerf's score commands: d1 `gap=100-330`, d2 `gap=150-330`; spot, files and env unchanged.
+- The mod is unchanged (blob 2c8ad852).
+- Self-test `python3 tools/r3d_selftest.py`: PASS (360 jittered log pairs at the new expected values and range ends;
+  gaps of 101, 151, 329 and d1's 131.9 s pass; 99 s in d1, 149 s in d2 and 331 s in both fail; the other mutants as before).
+
+**d2's other predictions (amendment 125's table) checked against the same parts:** unchanged. X-Ray's run length counts
+from each level load, so session 2's play after the recover crossing (440 s, 400 to 455) does not depend on the gap.
+The poses during the mismatch and the recover timings do not depend on it either.
+**Stop gate (Overseer):** d1's infrastructure checks other than D3 passed on both sides, and D3 failed on the bound
+replaced here. Whether d2 may run on that is the Overseer's decision with the GO.
+**Guess:** d2 our side PASS 40 % (unchanged; the recover crossing as a session's first crossing has never run live).
