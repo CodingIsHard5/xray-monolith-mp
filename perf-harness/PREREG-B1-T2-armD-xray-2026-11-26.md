@@ -50,5 +50,18 @@ spot check has never run on real data.
 As itrzone's text and the joint text's section 64a: one retry per run only for a run that dies before its data,
 registered first; nothing is re-scored.
 
+## 6.1 Note 1 (2026-11-26, registered before the retry): d1's first boot gave no data on the restart; one retry
+- itrzone's report: session 1 ran and was stopped as planned; session 2 never booted (a fault in their boot script:
+  it launched session 2 while the arm lock was still held). My runner ran alone to its end, rc 0, and logged LOST
+  5.2 s after the last pose. X out dir: ITRZone out/runs/20261126-070213-t2d1-xray.
+- I do NOT score that folder as d1: with no second session the checker would fail on EPOCH, FOUND and the gap for a
+  reason that says nothing about my side. It is kept, unscored, as "run died before its data".
+- itrzone's text gained "Amendment 125 note 1" (boot script only: wait for the arm lock before session 2). New text,
+  copied byte for byte: `armD-xray/itrzone-amendment-125-note1.txt`, sha256
+  48eac5dd3b27162f413876caa8feb4a4f4fcc966147243365bbcf6270d4fc375 (101 lines, 9582 bytes; their master 37adcd3).
+  The diff against the first copy is fifteen added lines at the end, nothing else. My files, env, checks, score
+  commands and guesses are unchanged.
+- This is the one retry of d1 under section 6. It needs the Overseer's word (asked by itrzone).
+
 ## 7. Result
 (none yet)
