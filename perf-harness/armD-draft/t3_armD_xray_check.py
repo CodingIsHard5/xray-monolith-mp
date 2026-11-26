@@ -27,7 +27,7 @@ v2: (2) every row of the writer's own record pose_written.csv has session `none`
  (8) the last T2SUM says lost=1, epochs=0.
 cross: (2) CROSS_REQ, CROSS_RESUME, CROSS_REQ, CROSS_RESUME in this order: out by esc_level_changer_to_garbage_1, back
  by gar_level_changer_to_escape_1 or _2, each with its table values; no CROSS_NOCHANGER / CROSS_ERROR; (3) exactly one
- LOST, state cross, 120000..122500 ms of game time after the first resume; (4) THE WRITER RETURNS AFTER A LOST
+ LOST, state cross, its age (since the last pose taken) 120000..122500 ms, 120000..137500 ms of game time after the first resume; (4) THE WRITER RETURNS AFTER A LOST
  CROSSING: exactly one EPOCH (new seq <= 200) and one FOUND, after LOST and before the second request, the runner's gap
  inside gap; at least 20 ZONE_MISMATCH lines naming home between FOUND and the second request, none anywhere else;
  no P2 between the first request and the second resume; (5) P2 >= 400 before the first request, >= 600 after the
@@ -109,7 +109,8 @@ else:
     ok2 = order and not bad and req_ok(RQ[0], HOME, DEST, (C1,)) and req_ok(RQ[1], DEST, HOME, BACK) and F(RSM[0])[2] == DEST and F(RSM[1])[2] == HOME
     res.append(('2 out by the changer, resume on dest, recover by a changer back, resume on home; table values; no NOCHANGER/ERROR', ok2, '; '.join(','.join(F(i)[:6]) for i in sorted(RQ + RSM)) + f'; {len(bad)} bad'))
     d = int(L[2]) - int(F(RSM[0])[1]) if one and order else None
-    res.append(('3 one LOST, state cross, 120000..122500 ms after the first resume', d is not None and L[5] == 'cross' and 120000 <= d <= 122500 and RSM[0] < lo < RQ[1], f'{[M[i] for i in LO]}; game ms after the resume {d}'))
+    # the limit runs from the LAST pose taken (the LOST line's own age field); a writer stopped up to 15 s after the resume is still "during the crossing"
+    res.append(('3 one LOST, state cross, age 120000..122500 ms, 120000..137500 ms after the first resume', d is not None and L[5] == 'cross' and 120000 <= int(L[4]) <= 122500 and 120000 <= d <= 137500 and RSM[0] < lo < RQ[1], f'{[M[i] for i in LO]}; game ms after the resume {d}'))
     ZM = idx('ZONE_MISMATCH'); zin = [i for i in ZM if order and fo is not None and fo < i < RQ[1] and F(i)[3] == HOME]
     mid = sum(1 for i in P2i if order and RQ[0] < i < RSM[1])
     ok4 = ep_ok and gap_ok and order and fo < RQ[1] and len(zin) >= 20 and len(zin) == len(ZM) and mid == 0

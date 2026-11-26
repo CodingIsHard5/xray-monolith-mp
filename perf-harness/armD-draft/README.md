@@ -198,3 +198,25 @@ The cut-file witness above was run on b048dbcf and not repeated: the fix touches
 **Cut-file witness repeated on 5bf69e5c (Overseer's order, 2026-11-25).** Same result: v3 writer 1,800 applied, 160
 TORN, no CROSS_REQ, EPOCH or RESET; v2 writer 1,800 applied, none of the three; no marker file written; control without
 cut files 2,000 applied. The masked logs of both cut runs are identical to the b048dbcf runs.
+
+## 2026-11-26: checker change committed, tests re-run, review of the runner and script drafts
+
+- Checker `t3_armD_xray_check.py` b113d37d: cross check 3 now reads the LOST line's own age (120000..122500 ms since
+  the last pose taken) and allows 120000..137500 ms after the first resume (a writer stopped up to 15 s after the
+  resume is still "during the crossing"; agreed with itrzone: ITR2 is stopped 4 s after its cross start).
+- Tests re-run today with this checker:
+  - play arm on real pre-flight L data (gap=20-40): keep as keep PASS, freeze as freeze PASS; mut_sess FAIL,
+    mut_off FAIL, keep scored as freeze FAIL, freeze scored as keep FAIL.
+  - cross arm on the spliced run (second argument out/t3pfD/run/boot0/meta_t2.csv, c1=esc_level_changer_to_garbage_2):
+    good PASS; six of the seven old mutants still FAIL. The seventh, "LOST at 135 s" (age 120004 ms), now PASSES,
+    which is the intended effect of the change. Check 3 therefore got two new mutants made from the good run:
+    age 126000 ms FAILS on 3; LOST 140 s after the resume with age 120000 FAILS on 3.
+  - The fixtures are in my scratchpad, not in the repo (about 0.5 MB each).
+- CodeRabbit on the two drafts against b31879be / b6be10b4 (2026-11-26), two questions, no change made:
+  1. "Under freeze, is X-Ray continued when a restarted v2 writer sends a lower seq?" The runner continues X-Ray on
+     any complete new pose that says play; the script then takes the reset. This path (freeze + a v2 writer) is NOT
+     run in any arm D boot; it stays named as untested.
+  2. "Does harness/zz_p1_puppet_lost3.script hold the reviewed changes?" An artefact of the review layout. At
+     registration the draft is installed under that name with its hash pinned; the runner refuses if it is missing
+     or the copy differs.
+- Still drafts: runner 71d070e5, script 5bf69e5c. Not installed in tools/ and harness/, never run in the engine.
