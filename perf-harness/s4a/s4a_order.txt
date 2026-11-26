@@ -1,0 +1,12 @@
+# S2 stage 4a (PREREG-S2-4a): new build (SimTick15, view every frame) against the old (SimTick14), tick 30 and 60, and off. Mirrored.
+# tag|exe|save|lowend|warm|frames|fixed|cfg   -- all-lowercase tags, as the bench names its folders
+s4a_n30_1|SimTick15.exe|bench1|0|3000|12000|0|sim_tick=30
+s4a_p30_1|SimTick14.exe|bench1|0|3000|12000|0|sim_tick=30
+s4a_p60_1|SimTick14.exe|bench1|0|3000|12000|0|sim_tick=60
+s4a_n60_1|SimTick15.exe|bench1|0|3000|12000|0|sim_tick=60
+s4a_noff_1|SimTick15.exe|bench1|0|3000|12000|0|
+s4a_poff_1|SimTick14.exe|bench1|0|3000|12000|0|
+s4a_n60_2|SimTick15.exe|bench1|0|3000|12000|0|sim_tick=60
+s4a_p60_2|SimTick14.exe|bench1|0|3000|12000|0|sim_tick=60
+s4a_p30_2|SimTick14.exe|bench1|0|3000|12000|0|sim_tick=30
+s4a_n30_2|SimTick15.exe|bench1|0|3000|12000|0|sim_tick=30
