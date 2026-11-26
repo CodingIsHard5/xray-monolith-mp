@@ -17,8 +17,9 @@ import re
 import sys
 
 # ---- registered constants (prereg section 6, derivation beside each there) ----
-WINDOW_MS = 15000.0       # headline window: first 15 s of play after the loading screen
-WINDOW2_MS = 30000.0      # secondary window (reported only): covers stock's whole in-play train
+WINDOW_MS = 30000.0       # headline window: first 30 s of play after the loading screen (Revision 2: widened from
+                          #   the supervisor's ~15 s so it holds stock's hitch (6.5-7.8 s) AND its whole train (to ~22 s))
+WINDOW2_MS = 15000.0      # the supervisor's ~15 s window, reported only beside the headline (sees the train's start only)
 SLOW1_MS = 20.0           # "slow frame" for the train count
 SLOW2_MS = 33.3           # "slow frame" at 30 fps
 SLOW_HEADER_MS = 20.0     # -perf_slow value the driver passes (perf_slow threshold header)
@@ -31,13 +32,14 @@ N_M_MIN = 0.9             # forced pass must update N >= 0.9 * M objects
 HOLD_CAP = 300            # device.cpp alife_warmup_hold_cap (reported against)
 MIN_ON = 8                # valid ON loads needed
 MIN_OFFP = 3              # valid OFF-IN-PLAY loads needed
-STOCK_HITCH_MIN = 150.0   # median OFF-IN-PLAY worst frame (15 s) must reach this, else the window missed stock's hitch
-STOCK_TRAIN_MIN = 3       # median OFF-IN-PLAY frames > 20 ms (15 s) must reach this, else the window missed the train
+STOCK_HITCH_MIN = 150.0   # median OFF-IN-PLAY worst frame (30 s) must reach this, else the window missed stock's hitch
+STOCK_TRAIN_MIN = 7       # median OFF-IN-PLAY frames > 20 ms (30 s) must reach this, else the window missed the train
+                          #   (expected 16-19, prereg 6; = N20_DROP so H2 stays decidable)
 WORST_RATIO = 0.5         # H1: median ON worst <= 0.5 x median OFF-IN-PLAY worst ...
 WORST_STRAY = 1           #     ... and at most 1 ON load with worst >= median OFF-IN-PLAY worst
-N20_DROP = 3              # H2: median OFF-IN-PLAY frames > 20 ms - median ON frames > 20 ms >= 3
+N20_DROP = 7              # H2: median OFF-IN-PLAY frames > 20 ms - median ON frames > 20 ms >= 7 (30 s; expected 14-19)
 ALIKE_MIN_OFFL = 2        # stock's two orders must differ in the window (checked when >= 2 OFF-IN-LOADING loads):
-                          #   median OFF-IN-LOADING worst <= 0.5 x median OFF-IN-PLAY worst and n20 differ by >= 3
+                          #   median OFF-IN-LOADING worst <= 0.5 x median OFF-IN-PLAY worst and n20 differ by >= 7
 PRICE_MAX_S = 2.0         # H3: median ON load time - median OFF-IN-PLAY load time <= 2.0 s
 LOADTIME_MIN_ON = 8       # load time must be measurable in this many ON loads ...
 LOADTIME_MIN_OFFP = 3     # ... and this many OFF-IN-PLAY loads, else NO VERDICT on the price
@@ -46,6 +48,8 @@ SAME_WORST_ADD = 10.0     #   <= 1.25 x median OFF-IN-LOADING worst + 10 ms,
 SAME_N20_ADD = 2          #   median ON n20 <= median OFF-IN-LOADING n20 + 2,
 SAME_PRICE_S = 1.0        #   and |median ON load - median OFF-IN-LOADING load| <= 1.0 s
 SAME_MIN_OFFL = 2
+SLOW_CAP_ROWS = 600 * 14 - 14   # profiler_agg.cpp:42-43, 190: a slow frame is kept only while rows + 14 <= 8400, so a file
+                                #   with more than 8386 rows may have lost slow frames: VOID slow_cap (Revision 2)
 SAVE_ZONES = ("CALifeStorageManager::save", "CALifeStorageManager::prepare_objects_for_save")
 ARMS = ("on", "off", "prime")
 
@@ -418,6 +422,9 @@ def score_load(root, s):
     if on("threshold") and abs(thr - SLOW_HEADER_MS) > 0.0005:
         R["void"].append("threshold_header: perf_slow threshold %.3f, registered %.3f" % (thr, SLOW_HEADER_MS))
     # ---- the scripted save (cordon1's start-of-game autosave) is excluded from the frame numbers ----
+    if on("slow_cap") and len(rows) > SLOW_CAP_ROWS:
+        R["void"].append("slow_cap: perf_slow has %d rows > %d: the profiler's 600-frame slow dump may be full, a save "
+                         "frame could be missing from it" % (len(rows), SLOW_CAP_ROWS))
     save_frames = sorted(set(r[0] for r in rows if r[4] in SAVE_ZONES and 0 <= r[0] < len(ms)))
     save_calls = sum(calls.get(z, [0, 0])[1] for z in SAVE_ZONES)
     if on("save_unlocated") and save_calls and not save_frames:
@@ -502,9 +509,9 @@ def main(argv):
     P("scorer %s sha256 %s" % (os.path.abspath(__file__), sha(os.path.abspath(__file__))))
     P("order  %s sha256 %s" % (os.path.abspath(args["order"]), sha(args["order"])))
     P("root   %s" % os.path.abspath(args["root"]))
-    P("constants window %.0f s, slow %.1f/%.1f ms, H1 worst ratio %.2f, H2 n20 drop >= %d, H3 price <= %.1f s, "
+    P("constants window %.0f s (headline; %.0f s reported only), slow %.1f/%.1f ms, H1 worst ratio %.2f, H2 n20 drop >= %d, H3 price <= %.1f s, "
       "min ON %d, min OFF-IN-PLAY %d, stock hitch >= %.0f ms, stock train >= %d, legacy wide %d, N/M >= %.2f, P >= %d"
-      % (WINDOW_MS / 1000, SLOW1_MS, SLOW2_MS, WORST_RATIO, N20_DROP, PRICE_MAX_S, MIN_ON, MIN_OFFP, STOCK_HITCH_MIN,
+      % (WINDOW_MS / 1000, WINDOW2_MS / 1000, SLOW1_MS, SLOW2_MS, WORST_RATIO, N20_DROP, PRICE_MAX_S, MIN_ON, MIN_OFFP, STOCK_HITCH_MIN,
          STOCK_TRAIN_MIN, LEGACY_WIDE, N_M_MIN, P_MIN))
     P("")
     loads = []
@@ -519,7 +526,7 @@ def main(argv):
         head = "LOAD %s %s %s%s" % (s["tag"], s["arm"].upper(), state, (" [" + "] [".join(reasons) + "]") if reasons else "")
         if "w1" in R:
             w, w2 = R["w1"], R["w2"]
-            head += (" group=%s worst=%.1f n20=%d n33=%d span=%.2fs worst_incl_save=%.1f save=%s | 30s: worst=%s n20=%s "
+            head += (" group=%s worst=%.1f n20=%d n33=%d span=%.2fs worst_incl_save=%.1f save=%s | 15s: worst=%s n20=%s "
                      "n33=%s span=%s | load=%s s" % (R["group"], w["worst"], w["n20"], w["n33"], w["span"], w["worst_all"],
                                                     R["save"], fmt(w2["worst"]) if w2["covered"] else "n/a",
                                                     w2["n20"] if w2["covered"] else "n/a",
@@ -561,8 +568,9 @@ def main(argv):
         for k, f in (("worst_ms", lambda R: R["w1"]["worst"]), ("n20", lambda R: R["w1"]["n20"]),
                      ("n33", lambda R: R["w1"]["n33"]), ("train_span_s", lambda R: R["w1"]["span"]),
                      ("worst_incl_save_ms", lambda R: R["w1"]["worst_all"]),
-                     ("worst30_ms", lambda R: R["w2"]["worst"] if R["w2"]["covered"] else None),
-                     ("n20_30", lambda R: R["w2"]["n20"] if R["w2"]["covered"] else None),
+                     ("worst15_ms", lambda R: R["w2"]["worst"] if R["w2"]["covered"] else None),
+                     ("n20_15", lambda R: R["w2"]["n20"] if R["w2"]["covered"] else None),
+                     ("n33_15", lambda R: R["w2"]["n33"] if R["w2"]["covered"] else None),
                      ("load_s", lambda R: R["lt"]), ("pass_ms", lambda R: R.get("pass_ms")),
                      ("held_frames", lambda R: R.get("held"))):
             M[(name, k)], txt = stats(G, f)
@@ -583,17 +591,17 @@ def main(argv):
             nv.append("few_inplay: %d valid OFF-IN-PLAY loads < %d (stock took the in-play order too rarely)" % (len(offP), MIN_OFFP))
         if offP:
             if on("nv_no_hitch") and M[("OFF-IN-PLAY", "worst_ms")] < STOCK_HITCH_MIN:
-                nv.append("no_stock_hitch: median OFF-IN-PLAY worst frame %.1f ms < %.0f ms: the 15 s window did not catch "
-                          "stock's in-play hitch" % (M[("OFF-IN-PLAY", "worst_ms")], STOCK_HITCH_MIN))
+                nv.append("no_stock_hitch: median OFF-IN-PLAY worst frame %.1f ms < %.0f ms: the %.0f s window did not catch "
+                          "stock's in-play hitch" % (M[("OFF-IN-PLAY", "worst_ms")], STOCK_HITCH_MIN, WINDOW_MS / 1000))
             if on("nv_no_train") and M[("OFF-IN-PLAY", "n20")] < STOCK_TRAIN_MIN:
-                nv.append("no_stock_train: median OFF-IN-PLAY frames > 20 ms %.1f < %d: the 15 s window did not catch "
-                          "stock's train" % (M[("OFF-IN-PLAY", "n20")], STOCK_TRAIN_MIN))
+                nv.append("no_stock_train: median OFF-IN-PLAY frames > 20 ms %.1f < %d: the %.0f s window did not catch "
+                          "stock's train" % (M[("OFF-IN-PLAY", "n20")], STOCK_TRAIN_MIN, WINDOW_MS / 1000))
         if offP and len(offL) >= ALIKE_MIN_OFFL and on("nv_alike"):
             wl, nl = M[("OFF-IN-LOADING", "worst_ms")], M[("OFF-IN-LOADING", "n20")]
             if wl > WORST_RATIO * M[("OFF-IN-PLAY", "worst_ms")] or M[("OFF-IN-PLAY", "n20")] - nl < N20_DROP:
-                nv.append("stock_orders_alike: in the 15 s window stock's good order (OFF-IN-LOADING worst %.1f ms, n20 %.1f) is "
+                nv.append("stock_orders_alike: in the %.0f s window stock's good order (OFF-IN-LOADING worst %.1f ms, n20 %.1f) is "
                           "not told apart from its in-play order (worst %.1f ms, n20 %.1f): the window cannot show the lever"
-                          % (wl, nl, M[("OFF-IN-PLAY", "worst_ms")], M[("OFF-IN-PLAY", "n20")]))
+                          % (WINDOW_MS / 1000, wl, nl, M[("OFF-IN-PLAY", "worst_ms")], M[("OFF-IN-PLAY", "n20")]))
         lt_on = sum(1 for R in on_v if R["lt"] is not None)
         lt_p = sum(1 for R in offP if R["lt"] is not None)
         if on("nv_loadtime") and (lt_on < LOADTIME_MIN_ON or lt_p < LOADTIME_MIN_OFFP):
@@ -616,11 +624,11 @@ def main(argv):
             h3 = price <= PRICE_MAX_S
             h2 = h2 or not on("h2")
             h3 = h3 or not on("h3")
-            P("H1 worst frame (15 s): median ON %.1f ms <= %.2f x median OFF-IN-PLAY %.1f ms = %.1f (%s), and ON loads with "
-              "worst >= %.1f ms: %d <= %d (%s) -> %s" % (wo, WORST_RATIO, wp, WORST_RATIO * wp, "ok" if h1a else "FAIL", wp,
+            P("H1 worst frame (%.0f s): median ON %.1f ms <= %.2f x median OFF-IN-PLAY %.1f ms = %.1f (%s), and ON loads with "
+              "worst >= %.1f ms: %d <= %d (%s) -> %s" % (WINDOW_MS / 1000, wo, WORST_RATIO, wp, WORST_RATIO * wp, "ok" if h1a else "FAIL", wp,
                                                        stray, WORST_STRAY, "ok" if h1b else "FAIL", "ok" if h1 else "FAIL"))
-            P("H2 frames > 20 ms (15 s): median OFF-IN-PLAY %.1f - median ON %.1f = %.1f >= %d -> %s"
-              % (np_, no, np_ - no, N20_DROP, "ok" if h2 else "FAIL"))
+            P("H2 frames > 20 ms (%.0f s): median OFF-IN-PLAY %.1f - median ON %.1f = %.1f >= %d -> %s"
+              % (WINDOW_MS / 1000, np_, no, np_ - no, N20_DROP, "ok" if h2 else "FAIL"))
             P("H3 load-time price: median ON %.2f s - median OFF-IN-PLAY %.2f s = %+.2f s <= %.1f s -> %s"
               % (M[("ON", "load_s")], M[("OFF-IN-PLAY", "load_s")], price, PRICE_MAX_S, "ok" if h3 else "FAIL"))
             if h1 and h2 and h3:

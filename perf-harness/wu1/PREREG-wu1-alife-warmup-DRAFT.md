@@ -6,6 +6,15 @@ Overseer's prereg requirements), B2b-desk-read-2026-11-26.md, B2b-patch-notes-20
 perf-harness/sf1. Labels: MEASURED (a number in a file, cited), DESK (my count or reading of existing files or code),
 GUESS. "Load" = one engine start that loads cordon1 and captures the first seconds of play.
 
+**Revision 2 (2026-11-26, decided by the experiment's owner): the HEADLINE window is 30 s, not 15 s.** The supervisor
+asked for "~15 s". By the numbers in this draft stock's ~300 ms hitch comes 6.5-7.8 s after loading and its slow train
+(27 passes 452 ms apart) runs to about 21-22 s, so a 15 s window sees the hitch and only the train's start: in the real
+captures it holds a median of 3-4 frames > 20 ms (2-6), which is under 2x of any useful bound (section 6). The headline
+is therefore widened to 30 s, which holds the hitch and the whole train. The 15 s numbers are still computed and
+reported beside the headline, deciding nothing. Every number that depends on the window is re-derived in sections 3.3,
+5.3, 6, 6.1 and 9, each labelled MEASURED / DESK / GUESS. Arms, grouping rule, lever checks, exe, flags other than the
+frame count, verdict structure and exit codes are unchanged.
+
 ## 0. Limits first
 - One box (Ryzen 9800X3D, Wine + DXVK, headless Xvfb 1280x720), no Present (`-perf_nopresent`), no input
   (`-perf_noinput`), uncapped frame rate. Nothing about the 2012 reference machine, native Windows, vsync or 4 cores.
@@ -21,6 +30,13 @@ GUESS. "Load" = one engine start that loads cordon1 and captures the first secon
   every bench log). It is in both arms, it is a property of this test save (a player's own save has the info
   `start_equippment_handled` and does not do it), and its cost has never been captured (every past capture started
   600+ frames later). Its frame is excluded from the headline numbers by a fixed rule (section 5.5) and reported apart.
+- No second save falls inside 30 s (Revision 2 check, DESK): itms_manager.script:245-246 makes the scripted save ONCE
+  (4 s after the actor's first update, then the info is given, 698-712); game_autosave.script has its whole body
+  commented out (stock copy plan-facts/stock_scripts/_unpacked/scripts/game_autosave.script:21-65);
+  game_autosave_new.script first checks 60 s after the actor's first update and saves only when "autosave_timer_new"
+  minutes (>= 1) have passed (lines 7-8, 17-27). MEASURED: every one of the 22 past Cordon logs has exactly one
+  "is successfully saved" line, including cpl1's 60,000-frame capture. If a second save did happen, the rule in 5.5
+  excludes every frame its zones name, not only the first.
 - Warm18.exe is a profiler build (all probes, about 0.7 ms per frame of probe cost, as the SimTick builds: sf1 NOTES 6).
   Absolute frame times are a little high; both arms carry the same cost.
 - The load time is measured on the engine's own clock from device start-up (section 5.4), not from process start: it
@@ -31,8 +47,10 @@ GUESS. "Load" = one engine start that loads cordon1 and captures the first secon
 ## 1. Question
 On cordon1 in real time, with the lever ON (`-alife_warmup`) against lever OFF (stock), in ABBA order:
 (a) does every ON load show that the one full A-Life pass ran behind the loading screen;
-(b) in the first 15 s of play after the loading screen, are the worst frame and the number of slow frames of ON loads
-    much smaller than those of the stock loads that took the IN-PLAY order;
+(b) in the first 30 s of play after the loading screen (HEADLINE window, widened in Revision 2 from the supervisor's
+    ~15 s so that it holds stock's hitch and its whole slow train; the 15 s numbers are reported beside it), are the
+    worst frame and the number of slow frames of ON loads much smaller than those of the stock loads that took the
+    IN-PLAY order;
 (c) what does it cost in load time;
 (d) (secondary) do ON loads look like the stock loads that took the good IN-LOADING order.
 
@@ -46,7 +64,7 @@ Settings: run/appdata/user.ltx as is, checked read-only before every load: r__fr
 |---|---|---|---|
 | bench | tools/s2_bench.sh 072af8ed | sf1_run.sh:29 (COPIED) | out/<tag>/: conditions.txt (VERDICT clean/CONFOUNDED), xray.log, perf_*.csv |
 | BENCH_FIXED | 0 (real time, no `-perf_fixed_dt`) | s2_bench.sh:11, sf1 (COPIED) | dwTimeGlobal = wall clock (device.cpp:1110-1113) |
-| `-perf_capture W,N,tag` | **W = 0 (CHANGED)**, N = 10000 (derived 5.3) | s2_bench.sh:56 | capture from the first frame after the loading screen (5.1) |
+| `-perf_capture W,N,tag` | **W = 0 (CHANGED)**, **N = 20000 (Revision 2, was 10000; derived 5.3)** | s2_bench.sh:56 | capture from the first frame after the loading screen (5.1) |
 | `-perf_quit -nointro -dbg -start server(cordon1/single/alife/load) client(localhost)` | | s2_bench.sh:55-56 | no key prompt with -nointro (GamePersistent.cpp:504-509, 590-615) |
 | `-perf_noinput -perf_nopresent` | | sf1 (COPIED) | the bench's space-key nudges (s2_bench.sh:66-68) are not read (Xr_input.cpp:735-736) |
 | `-perf_slow` | **20 (CHANGED from sf1's 6/9)** | profiler_agg.cpp:79-80 | perf_slow_<tag>.csv: per frame > 20 ms, the 14 largest self times; used only to find the save frame (5.5) |
@@ -79,12 +97,15 @@ Probability of fewer than 3 in-play loads among n OFF loads (binomial):
 2 OFF-IN-LOADING loads likely for the secondary comparison: P(fewer than 2 of 16) = 0.019 at q = 7/22. Equal ON count:
 16 lever checks (a lever that fails 1 load in 10 is caught with probability 0.81).
 
-### 3.3 Box time
+### 3.3 Box time (Revision 2: re-derived for 20,000 frames)
 Per load: Wine start about 9 s (MEASURED cp1: bench "start 09:57:04", engine "Game started 09:57:13"), engine clock to the
 end of loading 19-23 s (MEASURED: "Time continual is:" stamps right after intro_start in 22 past Cordon logs, 18.97-23.02 s),
-capture 10,000 frames at about 5 ms = about 50 s, dump, quit and the bench's 8 s wait about 10-15 s: bench about 90-110 s.
-Driver overhead per load: settle (1-min load < 2) about 20-60 s after an engine run, display grace 0-20 s.
-Estimate: 33 x 2.2-3.0 min = **73-100 min**, under the 3 h slice (the driver stops with < 15 min left).
+capture 20,000 frames at the expected real-time 4.1-5.0 ms = 82-100 s (5.3), dump, quit and the bench's 8 s wait about
+10-15 s: bench about 120-147 s. Driver overhead per load: settle (1-min load < 2) about 20-60 s after an engine run, display
+grace 0-20 s. Per load 140-227 s = 2.3-3.8 min. Estimate: 33 x 2.3-3.8 min = **77-125 min** (if every frame took 6 ms,
+the low-end level, the capture is 120 s and the series about 136 min). Under the 3 h slice (the driver stops with
+< 15 min left, so 165 min are usable: 1.3-2.1x). The number of loads is unchanged (33), so the probability table of 3.2
+stands as it is.
 
 ## 4. Per-load checks (all fixed now)
 ### 4.1 ON loads: the full pass ran behind the loading screen (a failure is a FAIL of the lever, never dropped)
@@ -128,13 +149,15 @@ cp3, uc1, lc1-3, cpl1 P (self-test cases real_parse_*).
 - `missing` / `empty` / `unparsable` file (perf_frames, perf_sites, perf_slow, conditions.txt, xray.log; a malformed
   alife_pass / alife_opu / alife_slow / [alife_warmup] line; no command line / intro_start / textures-handled line):
   **FAIL, by name** (supervisor rule).
-- `arm_mismatch` (**FAIL**): the logged command line must name Warm18.exe, cordon1, `-perf_capture 0,10000,<tag>`, no
+- `arm_mismatch` (**FAIL**): the logged command line must name Warm18.exe, cordon1, `-perf_capture 0,20000,<tag>`, no
   `-perf_fixed_dt` / `-det_mode` / `-sim_tick`, and `-alife_warmup` present exactly on ON loads.
 - `off_not_stock` (**FAIL**): any `[alife_warmup]` line in an OFF load.
-- VOID: `not_clean` (bench VERDICT not clean), `framecount` (frames rows = sites header = 10000), `capture_lines`
-  (xrprof started/finished lines with 10000 frames, started after loading), `stock_loop` ("Process seqFrame" main calls =
+- VOID: `not_clean` (bench VERDICT not clean), `framecount` (frames rows = sites header = 20000), `capture_lines`
+  (xrprof started/finished lines with 20000 frames, started after loading), `stock_loop` ("Process seqFrame" main calls =
   frames, "Sim tick" 0 calls), `frame_limiter` ("Eco Render" 0 calls), `threshold_header` (perf_slow 20.000),
-  `window_short` (capture shorter than 15 s), `save_unlocated` (save calls in the capture but no slow row names them).
+  `window_short` (capture shorter than the 30 s headline window; Revision 2, was 15 s), `save_unlocated` (save calls in
+  the capture but no slow row names them), `slow_cap` (Revision 2: perf_slow has more than 8386 rows, so the profiler's
+  600-frame slow dump may be full and a save frame may be missing from it; 5.3).
 
 ## 5. Measures in player units
 ### 5.1 The capture starts at the end of loading (code)
@@ -147,14 +170,32 @@ that moment the capture would start later; nothing in the -nointro path pauses i
 ### 5.2 Frames file
 `perf_frames_<tag>.csv`: line 1 `frame,ms`, then one line `i,ms` per captured frame, i from 0, ms = wall time from one
 PROF_FRAME to the next (rdtsc scaled by QPC at dump, profiler_agg.cpp:147-155, 181-187). Time since the end of loading
-of frame i = sum of ms[0..i-1]. The 15 s window = frames starting before 15,000 ms.
-### 5.3 Capture length and the frame limiter (decisions)
-- The profiler has NO cap on recorded frame times (a vector of `frames` entries, profiler_agg.cpp:94-96, 187). Its only cap
-  is on the slow-frame dump: 600 frames x 14 rows (profiler_agg.cpp:42-43, 190). wu1 expects < 40 frames over 20 ms
-  per capture (DESK: 18 in cp1's whole fixed-step capture), so the cap is 15x away.
-- N = 10,000: 15 s must be covered at the fastest frames seen. Fastest Cordon frame in any capture 3.22 ms (sf1 3.2,
-  DESK) -> 3.0 ms: 10,000 x 3.0 ms = 30 s = 2x the window, and covers the 30 s secondary window at that worst case.
-  At the expected ~5 ms it is about 50 s of capture.
+of frame i = sum of ms[0..i-1]. The 30 s headline window = frames starting before 30,000 ms; the reported-only 15 s
+window = frames starting before 15,000 ms.
+### 5.3 Capture length, the slow-dump cap and the frame limiter (decisions; Revision 2)
+- Cost per frame (DESK, profiler_agg.cpp on perf/alife-warmup d77d70b5c): one float per frame in a vector reserved at
+  start (`g_frame_ms.reserve(frames)`, lines 20, 94-95, 187): 20,000 frames = 80 KB. The frames CSV is about 13 bytes a
+  frame (MEASURED: 157 KB for 12,000 frames, out/s2_off_1): about 260 KB. The per-frame work (`frame()`, 181-220: one
+  push_back and, with -perf_slow, one walk of all sites) does not depend on N; the dump writes N short lines once,
+  after the capture. No cap on recorded frame times exists. A load folder is about 1 MB (MEASURED 780-812 KB for
+  3,000-12,000 frames), so the series writes about 35 MB.
+- N = 20,000 (Revision 2, was 10,000): the 30 s headline window must be covered with 2x margin at the fastest frames
+  seen. Fastest Cordon frame in any capture 3.21 ms (MEASURED, out/r1a_cor_1; 3.22 in the r1a_cor_k0 and r1_cor_k
+  series). Those are fixed-step captures; on bench1 the real-time stock captures are about 10 % faster on the mean
+  (MEASURED 5.85-5.98 ms against 6.60-6.63 ms fixed-step) and 3-4 % faster on the minimum (4.92-5.00 against
+  5.11-5.18 ms), so the real-time Cordon minimum is about 3.1 ms (DESK). Floor 3.0 ms: 20,000 x 3.0 ms = 60 s = 2.0x the
+  30 s window (4x the reported 15 s). At the expected real-time mean 4.1-5.0 ms (fixed-step Cordon means 4.5-5.05 ms
+  less up to 10 %) it is 82-100 s, 2.7-3.3x. A capture shorter than 30 s is VOID `window_short` (kept, now at 30 s).
+- The -perf_slow dump cap (profiler_agg.cpp:42-43, 190): a slow frame's rows are kept only while rows + 14 <= 8400,
+  so at least 600 slow frames always fit. Expected frames > 20 ms in a whole 20,000-frame capture: MEASURED 16-19
+  (in-play) and 0-2 (in-loading) over the 3,000-frame fixed-step captures, which span 99 s of time_global, about the
+  82-100 s of time a 20,000-frame real-time capture spans; plus the save frame; plus the first seconds after loading
+  that no past capture saw (GUESS <= 20): under about 45 in either arm, 13x below 600. Bound by arithmetic: 600 frames
+  > 20 ms take more than 12 s, so the cap cannot be reached before 12 s after loading, and the cordon1 save (in the
+  first 1-2 s, stamps in 5.4) can never lose its rows. It CAN in principle be reached within 30 s (30 s holds up to
+  1,500 frames > 20 ms), so a registered rule handles it: VOID `slow_cap` if perf_slow has more than 8386 rows (600 x
+  14 - 14, the largest count at which the profiler still accepts a frame). The frame numbers themselves come from the
+  frames file and are never capped.
 - Uncapped, as sf1 and every real-time stock-loop run on this harness: (1) user.ltx has r__framelimit 0 and the driver
   does not edit it; a cap would need a new switch never used in a prereg here; (2) the A-Life pass runs on the game
   thread and the main thread waits for it (secondary_tasks.wait), so a pass of 22-52 ms makes a frame of about that
@@ -179,15 +220,16 @@ Save frames = capture frames whose perf_slow rows name `CALifeStorageManager::sa
 237, 247; the site name is __FUNCTION__, profiler.h:124-126). Excluded from worst / n20 / n33 / span; reported apart as
 "worst_incl_save". If perf_sites shows calls of those zones but no slow row names them: VOID `save_unlocated`.
 CScriptBinder::save is NOT used: objects going offline also call it (it could hide a train frame).
-### 5.6 Headline numbers per load (15 s window, save frame excluded)
+### 5.6 Headline numbers per load (30 s window, save frame excluded; Revision 2, was 15 s)
 worst frame (ms); n20 = frames > 20 ms; n33 = frames > 33.3 ms; train span = from the start of the first to the end of
-the last frame > 20 ms (s); load time (s, engine clock). Secondary, reported: the same in a 30 s window; worst including
-the save frame; for ON the pass's X ms and held frames.
+the last frame > 20 ms (s); load time (s, engine clock). These are taken in the **30 s window** (Revision 2).
+Secondary, reported only: the same in the supervisor's 15 s window; worst including the save frame; for ON the pass's
+X ms and held frames.
 
 ## 6. Constants, each with its derivation (all derived for wu1; none copied from another arm's bound)
 | constant | value | derivation |
 |---|---|---|
-| WINDOW | 15 s | supervisor's player window. Stock's hitch is expected at about 7.4-8.6 s after loading (DESK: in-play logs put it at engine frame 791-800 = about 132 fixed-step frames (4.4 s) after a 600-frame real-time warm-up (about 3-4.2 s at 5-7 ms); time_global decides when passes run). Train starts about 2.7 s later, ends about 12 s after that, so 15 s sees the hitch and roughly the first 8-11 of 27 passes |
+| WINDOW (headline) | **30 s** (Revision 2, was 15 s) | DESK from MEASURED, re-derived for Revision 2 from the 14 in-play fixed-step captures with frame files (cp1, cp3, lc1-3, uc1, r1a_cor_1-3, r1a_cor_k0_1, r1_cor_f2-3, r1_cor_k1, r1_cor_k1_rr). Hitch = capture frame k_h 99-122 (MEASURED); its time after loading C = W + 33 ms x k_h (time_global moves 33 ms a fixed-step frame, device.cpp:1063-1074; it is wall time in the 600 real-time warm-up frames). W is bounded below by 600 x the capture's mean frame (no save cost) and above by the mcm_log "Time continual is:" wall stamps (mcm_log.script:201-207, dwTimeContinual = TimerMM, device.cpp:1050) from before intro_start to after the capture start. Result: **hitch 6.5-7.8 s** after loading (the earlier 7.4-8.6 s was an estimate of W; the stamps put it lower); the train's passes follow 14 frames (462 ms) apart from hitch + 2.8 s to hitch + 14.8 s; the last frame > 20 ms inside 30 s lies at 20.8-22.1 s (12 of 14), with a non-train straggler at 25.6-28.3 s in 2. So 30 s holds the hitch (3.8x) and the whole train (1.36x on its end, UNDER 2x: flagged in 6.1). The supervisor's ~15 s is kept as a reported-only window |
 | SLOW1 / SLOW2 | 20 / 33.3 ms | supervisor; 33.3 ms = one frame at 30 fps |
 | LEGACY_WIDE | 50 lines in one frame | 20-per-pass can log at most 20 lines per pass; in-play logs peak at 16-19, wide passes log 128-185 (DESK, 22 logs). 50 is 2.6x above 19 and 2.6x below 128 |
 | WIDE | n > 20 | stock limits are 3 (alife.ltx) and 20 (script reset); n <= limit (CUpdatePredicate) |
@@ -195,66 +237,76 @@ the save frame; for ON the pass's X ms and held frames.
 | N_M_MIN | 0.9 | 4.1 L5: churn of a few squads during one pass versus a count-limited pass at 3 or 20 of ~thousands |
 | MIN_ON | 8 of 16 | half the registered ON loads; below it the ON median rests on a minority of what was planned |
 | MIN_OFFP | 3 | smallest group with a median that is not one load and with a stray rule that means something; 3.2 sizes the run for it |
-| STOCK_HITCH_MIN | 150 ms | half of the smallest MEASURED first-update cost of zat_b106 (287 ms over 22 logs: 270-352 ms); below it the 15 s window did not catch stock's hitch: nothing to remove, NO VERDICT |
-| STOCK_TRAIN_MIN | 3 frames > 20 ms | DESK expectation 4-9 in the window (cp1's full fixed-step capture: 18 frames > 20 ms for the hitch plus 27 passes, about 0.65 per pass; 8-11 passes in 15 s plus the hitch); 3 = the H2 drop, so H2 is decidable |
+| STOCK_HITCH_MIN | 150 ms (unchanged) | half of the smallest MEASURED first-update cost of zat_b106 (287 ms over 22 logs: 270-352 ms); MEASURED worst frame of the 14 in-play captures inside the 30 s window 293-361 ms (median 323). Below it the 30 s window did not catch stock's hitch: nothing to remove, NO VERDICT. The longer window does not change what the hitch costs, so the value stays |
+| STOCK_TRAIN_MIN | **7 frames > 20 ms** (Revision 2, was 3) | DESK from MEASURED: frames > 20 ms in the 30 s window of the 14 in-play captures 16-19, median 17 (with W at either bound). Robust to real-time frames being faster: counted above 22 ms 15-18, above 25 ms 11-18. 7 is under half of the smallest (16/7 = 2.3x, median 2.4x) and = N20_DROP, so H2 is decidable whenever this guard passes. For comparison the 15 s window holds 2-6 (median 3-4): this is why the headline was widened |
 | WORST_RATIO (H1) | 0.5 | "removes the hitch": ON's typical worst at most half of stock in-play's (~310 ms -> 155 ms); an ON worst made of ordinary first-seconds frames (GUESS 20-80 ms) clears it, a hitch of the same kind (> 155 ms) does not |
 | WORST_STRAY (H1) | 1 ON load may reach the in-play median | one stray hitch unrelated to A-Life in 16 loads (Wine/DXVK stall) should not decide; two may not be chance |
-| N20_DROP (H2) | 3 | stock in-play adds about 7 frames > 20 ms in the window (hitch + about 6 train frames, DESK above); a DIFFERENCE, so slow frames unrelated to A-Life that both arms share (shader compile, GC) cancel; 3 is under half the expected 7 |
+| N20_DROP (H2) | **7** (Revision 2, was 3) | DESK from MEASURED: in-play 16-19 frames > 20 ms in 30 s, in-loading 0-2 (MEASURED, the 7 in-loading captures, standing in for ON; GUESS for the first 3-4 s after loading that no past capture saw: frames there are in both arms and cancel in a DIFFERENCE). Expected drop 14-19, median about 17; 7 is half of the low end (14/7 = 2.0x, 17/7 = 2.4x). A DIFFERENCE, not a ratio, so slow frames unrelated to A-Life that both arms share (shader compile, GC) cancel |
 | PRICE_MAX (H3) | 2.0 s | a full pass costs 0.5-0.75 s (DESK: alife_slow sum of the wide loading pass 506-573 ms over objects >= 1 ms in 7 in-loading logs, plus objects under 1 ms); 2.0 = 2x the 1.0 s upper end: more than the moved work itself means something else (held frames, a second pass) was added. Load-to-load spread in one series about 0.2-0.4 s (MEASURED stamps, 5.4) |
-| stock_orders_alike (NV) | OFF-IN-LOADING median worst > 0.5 x OFF-IN-PLAY median worst, or n20 differs by < 3 | the same bounds as H1/H2 applied to stock's own two orders: if stock's good order cannot be told from its bad order in the window, the window cannot show the lever. Checked only with >= 2 OFF-IN-LOADING loads |
+| stock_orders_alike (NV) | OFF-IN-LOADING median worst > 0.5 x OFF-IN-PLAY median worst, or n20 differs by < 7 (Revision 2: the H2 bound, was 3) | the same bounds as H1/H2 applied to stock's own two orders in the 30 s window: if stock's good order cannot be told from its bad order there, the window cannot show the lever. MEASURED in the 30 s window: in-loading worst 13-23 ms, n20 0-2; in-play worst 293-361 ms, n20 16-19 (difference 14-19). Checked only with >= 2 OFF-IN-LOADING loads |
 | LOADTIME_MIN | 8 ON and 3 OFF-IN-PLAY measurable | as MIN_ON / MIN_OFFP |
 | SAME_* (secondary) | worst <= 1.25 x OFF-IN-LOADING + 10 ms; n20 <= +2; load within 1.0 s | GUESS: no real-time post-load Cordon data exists; reported only, decides nothing. Flagged |
 | MAX_CONFOUNDED (driver) | stop at the 3rd CONFOUNDED load | GUESS: one or two transient heavy processes are tolerable; three means the box is not quiet |
-| N capture frames | 10,000 | 5.3 |
+| N capture frames | **20,000** (Revision 2, was 10,000) | 5.3: 30 s at the 3.0 ms floor = 60 s = 2.0x; 82-100 s at the expected 4.1-5.0 ms |
+| SLOW_CAP_ROWS (new, VOID slow_cap) | 8386 rows | 5.3: 600 x 14 - 14, the largest row count at which profiler_agg.cpp:190 still accepts a slow frame; more rows = the slow dump may be full |
 | HOLD_CAP | 300 | COPIED from the patch (device.cpp:128), reported against only |
 
-### 6.1 Margin table (expected vs bound; UNDER 2x flagged; COPIED = not derived for wu1, flagged)
-| item | expected | bound | margin | status |
+### 6.1 Margin table (Revision 2, redone in full for the 30 s headline; expected vs bound; UNDER 2x flagged; COPIED = not derived for wu1, flagged)
+| item | expected | bound | margin | label / status |
 |---|---|---|---|---|
-| valid OFF-IN-PLAY loads | ~11 of 16 (p 0.68) | >= 3 | 3.7x | derived (3.2) |
-| stock hitch time after loading | 7.4-8.6 s (DESK) | inside 15 s | 1.7-2.0x | **UNDER 2x** (NO VERDICT no_stock_hitch if it lands late) |
-| median OFF-IN-PLAY worst | 290-360 ms (MEASURED first-update cost 287-352 + frame) | >= 150 ms | 1.9-2.4x | **UNDER 2x at the low end** |
-| median OFF-IN-PLAY n20 (15 s) | 4-9 (DESK) | >= 3 | 1.3-3x | **UNDER 2x** (THIN: the window sees only the train's start) |
-| H1 ON worst vs 0.5 x in-play | 20-80 ms (GUESS) vs ~155 ms | <= 0.5 x | 1.9-7.8x | **UNDER 2x at the high GUESS** |
-| H1 strays | 0 | <= 1 | - | derived |
-| H2 drop in n20 | ~7 (4-9) | >= 3 | 1.3-3x | **UNDER 2x** |
-| H3 price | -0.3 to +0.8 s | <= 2.0 s | 2.5x | derived; load spread 0.2-0.4 s MEASURED-ish |
-| stock_orders_alike: OFF-IN-LOADING worst | as ON (20-80 ms) | <= 155 ms | 1.9-7.8x | **UNDER 2x at the high GUESS** |
-| L3 precache_left | ~25-35 (DESK: wide pass at frame 32 of 60 in L logs) | >= 3 | 8x | derived |
-| L5 N/M | 1.0 (DESK) | >= 0.9 | 1.1x on the ratio, 40x against a count-limited pass | derived (the bound is about failure modes, not noise) |
-| LEGACY_WIDE | 16-19 (P) / 128-185 (L) lines | 50 | 2.6x both sides | derived from MEASURED |
+| valid OFF-IN-PLAY loads | ~11 of 16 (p 0.68) | >= 3 | 3.7x | DESK (3.2); unchanged |
+| stock hitch time after loading | 6.5-7.8 s | inside 30 s | 3.8-4.6x | DESK from MEASURED (6, WINDOW) |
+| stock train end (last frame > 20 ms) | 20.8-22.1 s (12 of 14); stragglers to 28.3 s (2 of 14) | inside 30 s | 1.36-1.44x (1.06x for the straggler) | DESK from MEASURED; **UNDER 2x**: a train ending late loses frames from n20; backed by no_stock_train (7 of 16-19) |
+| median OFF-IN-PLAY worst (30 s) | 293-361 ms, median 323 (MEASURED captures) | >= 150 ms | 1.95-2.4x | MEASURED; **UNDER 2x at the low end** (293/150) |
+| median OFF-IN-PLAY n20 (30 s) | 16-19, median 17 | >= 7 (STOCK_TRAIN_MIN) | 2.3-2.7x | DESK from MEASURED; at a 25 ms cut 11-18 (1.6x): flagged if real-time frames run much faster |
+| H1 ON worst vs 0.5 x in-play | 13-23 ms after 3 s (MEASURED in-loading captures) + first 3-4 s (GUESS 20-80 ms) vs ~160 ms | <= 0.5 x | 2.0-7x (12x on the MEASURED part) | **UNDER 2x at the high GUESS (80 ms)**; unchanged by the window except that 30 s also holds 15 s more of ordinary play (MEASURED quiet: in-loading worst 13-23 ms) |
+| H1 strays | 0 | <= 1 | - | derived; unchanged |
+| H2 drop in n20 (30 s) | 14-19, median ~17 | >= 7 (N20_DROP) | 2.0-2.7x | DESK from MEASURED |
+| H3 price | -0.3 to +0.8 s | <= 2.0 s | 2.5x | derived; window-independent; unchanged |
+| stock_orders_alike: OFF-IN-LOADING worst (30 s) | 13-23 ms MEASURED + first seconds GUESS 20-80 ms | <= 0.5 x in-play (~160 ms) | 2.0-7x | **UNDER 2x at the high GUESS** |
+| stock_orders_alike: n20 difference (30 s) | 14-19 (in-play 16-19 minus in-loading 0-2) | >= 7 | 2.0-2.7x | DESK from MEASURED |
+| L3 precache_left | ~25-35 (DESK: wide pass at frame 32 of 60 in L logs) | >= 3 | 8x | unchanged |
+| L5 N/M | 1.0 (DESK) | >= 0.9 | 1.1x on the ratio, 40x against a count-limited pass | unchanged (the bound is about failure modes, not noise) |
+| LEGACY_WIDE | 16-19 (P) / 128-185 (L) lines | 50 | 2.6x both sides | unchanged, derived from MEASURED |
 | held frames | 0 (DESK) | cap 300 | - | COPIED (patch), reported only |
-| capture covers 15 s | 30 s at 3.0 ms, ~50 s at 5 ms | 15 s | 2-3.3x | derived |
-| capture covers 30 s (secondary) | 30-50 s | 30 s | 1.0-1.7x | **UNDER 2x** (reported only; n/a if not covered) |
-| slow-dump cap | < 40 frames > 20 ms | 600 frames | 15x | derived |
-| load time measurable | in-play lines exist if the precache phase < 10 s (GUESS 1-6 s) | 10 s window | 1.7-10x | **UNDER 2x at the slow end** (NO VERDICT loadtime) |
-| load duration (bench) | 90-110 s | BENCH_TIMEOUT 900 s | 8x | COPIED (bench default) |
-| series duration | 73-100 min | 3 h slice, stop at < 15 min left | 1.6-2.2x | **UNDER 2x at the slow end**; box rule COPIED |
+| capture covers 30 s (headline) | 60 s at the 3.0 ms floor; 82-100 s at 4.1-5.0 ms | 30 s | 2.0x at the floor, 2.7-3.3x expected | DESK from MEASURED frame times; VOID window_short below 30 s |
+| capture covers 15 s (reported only) | 60-100 s | 15 s | 4-6.7x | derived |
+| slow-dump cap | < 45 frames > 20 ms per capture (16-19 / 0-2 MEASURED + save + GUESS <= 20 for the first seconds) | 600 frames (8386 rows) | 13x; cannot be reached before 12 s | derived; VOID slow_cap if reached (new rule, 5.3) |
+| second save inside 30 s | none (scripts, 0.1) | excluded by the zone rule if it happens | - | DESK; MEASURED 1 save per log in 22 logs |
+| load time measurable | in-play lines exist if the precache phase < 10 s (GUESS 1-6 s) | 10 s window | 1.7-10x | **UNDER 2x at the slow end** (NO VERDICT loadtime); unchanged |
+| load duration (bench) | 120-147 s | BENCH_TIMEOUT 900 s | 6.1-7.5x | COPIED (bench default) |
+| series duration | 77-125 min (136 min at 6 ms frames) | 3 h slice, stop at < 15 min left (165 min usable) | 1.3-2.1x | **UNDER 2x at the slow end**; box rule COPIED; a stopped series is FAIL [missing] and needs a new registration |
 | settle | load < 2, no other >= 100 % process | 5 min cap | - | COPIED (s4c_series.sh) |
 | CONFOUNDED loads | 0-1 | stop at 3rd | - | GUESS |
-| SAME_* secondary | ON = OFF-IN-LOADING | 1.25x + 10 ms, +2, 1.0 s | - | GUESS, reported only |
+| SAME_* secondary | ON = OFF-IN-LOADING | 1.25x + 10 ms, +2, 1.0 s | - | GUESS, reported only; now in the 30 s window, still deciding nothing |
 
 ## 7. Verdict rules (implemented exactly in wu1_score.py)
 1. **FAIL** (exit 1) if any scored load has: a missing/empty/unparsable file (named), arm_mismatch, off_not_stock, or any
    ON lever check L1-L5 failing. A failing ON load is never dropped.
 2. Else **NO VERDICT** (exit 3) if any of: `few_on` (< 8 valid ON), `few_inplay` (< 3 valid OFF-IN-PLAY),
-   `no_stock_hitch` (median OFF-IN-PLAY worst < 150 ms), `no_stock_train` (median OFF-IN-PLAY n20 < 3),
+   `no_stock_hitch` (median OFF-IN-PLAY worst < 150 ms), `no_stock_train` (median OFF-IN-PLAY n20 < 7),
    `stock_orders_alike` (6), `loadtime` (load time measurable in < 8 ON or < 3 OFF-IN-PLAY). All that apply are listed.
-3. Else **PASS** (exit 0) if all of:
+3. Else **PASS** (exit 0) if all of (worst and n20 in the 30 s headline window):
    - H1: median ON worst <= 0.5 x median OFF-IN-PLAY worst, and at most 1 ON load has worst >= median OFF-IN-PLAY worst;
-   - H2: median OFF-IN-PLAY n20 - median ON n20 >= 3;
+   - H2: median OFF-IN-PLAY n20 - median ON n20 >= 7;
    - H3: median ON load time - median OFF-IN-PLAY load time <= 2.0 s.
    Otherwise **FAIL** naming H1/H2/H3.
 4. Secondary, reported only: "SAME AS GOOD ORDER" ON versus OFF-IN-LOADING (SAME / DIFFERENT / NO VERDICT with < 2).
-5. n33, train span, the 30 s window, worst including the save, X ms, held frames, OFF-OTHER: reported only.
+5. n33, train span, the 15 s window (Revision 2: reported only, it was the headline in the first draft), worst
+   including the save, X ms, held frames, OFF-OTHER: reported only.
 The headline comparison is ON versus OFF-IN-PLAY. ON versus OFF-IN-LOADING is the "is ON the same as stock's own good
 order" comparison. The groups are never pooled; a self-test mutant that pools them is caught (section 8).
 
 ## 8. Scorer, self-test, driver
 `wu1_score.py` (stdlib, `python3 -I`), `wu1_selftest.sh`, `wu1_run.sh` (bash -n only), `wu1_order.txt`; hashes in
 NOTES.md and in the final message (they are pinned into the driver at registration; until then the driver refuses).
-Self-test 2026-11-26: `WU1 SELFTEST PASS 101/101 (11 real cases, 53 made cases, 35 mutants caught, 1 hook-coverage
-check, 1 untouched check)`. Real: the log parser on 9 real Cordon logs (CRLF), 4 real run folders scored as loads
+Self-test 2026-11-26 Revision 2: `WU1 SELFTEST PASS 118/118 (11 real cases, 61 made cases, 36 hook mutants caught, 8 constant mutants caught, 1 hook-coverage check, 1 untouched check)` (folder selftest-runs/20261126-170026-3025479). (First draft: 101/101.) Revision 2 added: made
+in-play loads shaped from the real captures (hitch at 7 s; 16 of 27 passes over 20 ms, from 9.8 s to 21.1 s: 17 frames
+> 20 ms in 30 s, 3 in 15 s), FR 7000 frames per made load (~35 s), edge cases on both sides of every changed bound
+(n20 6/7 for STOCK_TRAIN_MIN, drop 6/7 for H2 and for stock_orders_alike, a hitch at 20 s (in) and 31 s (out) for
+the window, capture 21 s for window_short, 8414 slow rows for slow_cap), a hook mutant for slow_cap and 8 constant
+mutants (window 15 s, windows swapped, window 45 s, STOCK_TRAIN_MIN 6 and 8, N20_DROP 6 and 8, SLOW_CAP_ROWS raised),
+each caught. Real: the log parser on 9 real Cordon logs (CRLF), 4 real run folders scored as loads
 (wrong exe, fixed step, missing slow file: FAIL by name), made loads spliced into 4 real logs (real alife_slow lines,
 real intro_start). Made: a fixture for every check, every NO VERDICT rule, each H rule, refusals. Mutants: every check
 switched off one at a time (35 hooks, including "the two OFF groups pooled" and "the before-intro_start test removed");
@@ -272,17 +324,17 @@ same checks as 4.1-4.3 in bash, stop on crash / timeout / failed check / refused
 | P1 | every ON load passes L1-L5 | 90 % |
 | P2 | no ON load logs "precache held" (the pass is claimed before the countdown reaches 3) | 85 % |
 | P3 | OFF-IN-PLAY 8-14 of 16; OFF-IN-LOADING 2-8 | 75 % |
-| P4 | median OFF-IN-PLAY worst (15 s) 280-370 ms | 70 % |
-| P5 | median ON worst (15 s, save excluded) <= 100 ms | 75 % |
-| P6 | median OFF-IN-PLAY n20 (15 s) 4-10; n33 1-4; train span 3-7 s | 55 % |
-| P7 | median ON n20 (15 s) <= 3; n33 <= 1 | 75 % |
-| P8 | 30 s window: median OFF-IN-PLAY n20 12-22, median ON <= 4 | 60 % |
+| P4 | median OFF-IN-PLAY worst (30 s) 280-370 ms (DESK from MEASURED 293-361) | 70 % |
+| P5 | median ON worst (30 s, save excluded) <= 100 ms (MEASURED in-loading 13-23 ms after 3 s; first seconds GUESS) | 70 % |
+| P6 | median OFF-IN-PLAY n20 (30 s) 13-21 (MEASURED 16-19); n33 3-13 (MEASURED 1-12, median 10); train span 12-22 s (MEASURED hitch-to-last 13.9-21.1 s; may start earlier on early frames, GUESS) | 60 % |
+| P7 | median ON n20 (30 s) <= 4; n33 <= 1 (MEASURED in-loading 0-2 / 0; GUESS first seconds) | 70 % |
+| P8 | 15 s window (reported only): median OFF-IN-PLAY n20 2-6 (MEASURED 2-6), median ON <= 3 | 65 % |
 | P9 | load-time price, median ON - median OFF-IN-PLAY: -0.3 to +0.8 s (brief: +0.3 to +0.7; past stamps show in-play loads already pay a long loading frame, 5.4) | 65 % |
 | P10 | median forced-pass X 450-900 ms; N = M in every ON load | 70 % |
 | P11 | load time (engine clock) 18-25 s in every load | 85 % |
 | P12 | a save frame found in every capture, 300-1500 ms | 70 % |
 | P13 | SAME AS GOOD ORDER: SAME | 65 % |
-| P14 | result PASS 60 %, NO VERDICT 25 % (most likely no_stock_train or stock_orders_alike), FAIL 15 % | - |
+| P14 | result PASS 65 %, NO VERDICT 20 % (most likely loadtime, or stock_orders_alike if the first seconds after loading are slow in OFF-IN-LOADING), FAIL 15 % (Revision 2: no_stock_train is now unlikely, 16-19 against 7) | - |
 
 ## 10. Rule One (the lever must not change the simulation beyond picking stock's in-loading order)
 New versus stock, and nothing else intended:

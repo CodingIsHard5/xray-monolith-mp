@@ -3,7 +3,7 @@
 #   wt-render-split/perf-harness/wu1/wu1_run.sh [--preflight-only]
 # 33 EXCLUSIVE loads (1 prime + 16 lever ON + 16 lever OFF, ABBA) in ONE WANT slice (at most 3 h), in the order of
 # wu1_order.txt (one source with the scorer): Warm18.exe, cordon1, real time (BENCH_FIXED=0), uncapped, capture from the
-# first frame after the loading screen (-perf_capture 0,<frames>,<tag>), headless on its own display :141.
+# first frame after the loading screen (-perf_capture 0,20000,<tag>: Revision 2, was 10000), headless on its own display :141.
 # Bench and flags as sf1 (tools/s2_bench.sh, -perf_noinput -perf_nopresent -perf_slow 20); ON loads add -alife_warmup.
 # Box rules: hash preflight of every pinned file (missing = refused by name; PIN_ME_* = refused until registered);
 # display :141 refused if /tmp/.X11-unix/X141 or /tmp/.X141-lock exists (preflight, slice grant, before every load);
@@ -62,7 +62,7 @@ lines=$(grep -v '^#' "$ORDER" 2>/dev/null | grep .)
 [ "$(echo "$lines" | grep -c .)" = $NLOADS ] || { echo "REFUSED: $ORDER does not list $NLOADS loads"; bad=1; }
 [ "$(echo "$lines" | grep -c '|on$')" = $NON ] && [ "$(echo "$lines" | grep -c '|off$')" = $NOFF ] && \
   [ "$(echo "$lines" | grep -c '|prime$')" = 1 ] || { echo "REFUSED: $ORDER is not 1 prime + $NON on + $NOFF off"; bad=1; }
-echo "$lines" | awk -F'|' -v e=$EXE 'NF!=7 || $2!=e || $3!="cordon1" || $4!="0" || $5!="10000" || $6!="20" || $7!~/^(on|off|prime)$/ {print "REFUSED: order line " $0 " is not <tag>|" e "|cordon1|0|10000|20|on/off/prime"; f=1} END{exit f}' || bad=1
+echo "$lines" | awk -F'|' -v e=$EXE 'NF!=7 || $2!=e || $3!="cordon1" || $4!="0" || $5!="20000" || $6!="20" || $7!~/^(on|off|prime)$/ {print "REFUSED: order line " $0 " is not <tag>|" e "|cordon1|0|20000|20|on/off/prime"; f=1} END{exit f}' || bad=1
 for t in $(echo "$lines" | cut -d'|' -f1); do
   [ "$t" = "${t,,}" ] || { echo "REFUSED: tag $t is not lowercase"; bad=1; }
   [ -e out/$t ] && { echo "REFUSED: out/$t exists"; bad=1; }

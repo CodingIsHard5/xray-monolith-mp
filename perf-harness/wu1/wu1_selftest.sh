@@ -23,7 +23,8 @@ python3 -I - "$ST" "$REAL" "$SC" <<'PYEOF' 2>&1 | tee -a "$LOG"
 import os, re, subprocess, sys
 ST, REAL, SC = sys.argv[1], sys.argv[2], sys.argv[3]
 POOL = os.path.join(ST, "pool")
-FR = 4000                      # frames per made load (registered per line in the case order files)
+FR = 7000                      # frames per made load (registered per line in the case order files); ~35 s at 5 ms, so
+                               # the 30 s headline window is covered (Revision 2; was 4000 = 20 s for the 15 s window)
 F0 = 64                        # engine frame of the first frame after the loading screen in made logs
 LIMIT_FULL, LIMIT_WIDE = 4294967295, 65534
 
@@ -34,11 +35,16 @@ def frames_for(kind, o):
     ev = []                                            # (time ms, frame ms, zone)
     if o.get("save", True):
         ev.append((2000.0, o.get("save_ms", 900.0), "CALifeStorageManager::save" if o.get("save_row", True) else "Device: other work"))
+    # stock in-play shape from the real fixed-step captures (prereg 6, Revision 2): hitch ~7 s after loading, then 27
+    # passes 452 ms apart from ~9.8 s; the passes over 20 ms are pass 1 and the late passes 11.. (MEASURED: 16-19 frames
+    # > 20 ms in 30 s, 2-6 in 15 s). Default: hitch + 16 slow passes = 17 in 30 s, 3 in 15 s; other passes 15 ms.
     if kind == "offP" and o.get("hitch", True):
-        ev.append((8000.0, 310.0, "ALife/scheduled/update"))
+        ev.append((7000.0, 320.0, "ALife/scheduled/update"))
     if kind == "offP" and o.get("train", True):
+        slow = set(o.get("train_slow", [1] + list(range(11, 26))))
         for j in range(27):
-            ev.append((10500.0 + 452.0 * j, 40.0 if j % 3 == 0 else 30.0, "ALife/scheduled/update"))
+            v = (40.0 if j % 2 else 30.0) if j in slow else 15.0
+            ev.append((9800.0 + 452.0 * j, v, "ALife/scheduled/update"))
     for t, v in o.get("extra", ()):
         ev.append((t, v, "CDetailManager::cache_Update"))
     zone = {}
@@ -165,6 +171,8 @@ def make(tag, kind, real=None, **o):
             th = "other" if z.startswith("ALife") else "main"
             rows.append("%d,%.4f,%s,%.4f,1,%s,z:\\src\\x.cpp,1" % (i, v, th, v * 0.8, z))
             rows.append("%d,%.4f,main,%.4f,1,bench: wait for GPU (no present),z:\\src\\y.cpp,2" % (i, v, 1.5))
+            for k in range(o.get("rows_per", 2) - 2):
+                rows.append("%d,%.4f,main,%.4f,1,filler site %d,z:\\src\\f.cpp,%d" % (i, v, 0.1, k, k))
     if "slow" not in skip: write(os.path.join(d, "perf_slow_%s.csv" % tag), rows, crlf)
     cond = ["start 2026-11-27 10:00:00 kind=EXCLUSIVE timing loadavg=0.30 0.40 0.50 heavy_others=[]",
             "end   2026-11-27 10:02:00 loadavg=1.10 0.60 0.55 heavy_others=[]", o.get("verdict", "VERDICT: clean")]
@@ -225,6 +233,7 @@ var("not_clean", "on", verdict="VERDICT: CONFOUNDED (other heavy process present
 var("framecount", "offP", drop_last=True); var("seqframe", "on", seq_delta=-3); var("simtick", "on", simtick=True)
 var("limiter", "offL", eco=True); var("threshold", "on", thr=9.0); var("window_short", "on", base=3.0)
 var("save_unlocated", "on", save_row=False); var("no_cap_lines", "on", no_cap_lines=True)
+var("slow_cap", "on", extra=tuple((3000.0 + 30.0 * k, 21.0) for k in range(600)), rows_per=14)   # 601 slow frames x 14 rows
 var("on_noflag", "on", flip_flag=True); var("off_flag", "offP", flip_flag=True); var("fixed_dt", "on", fixed_dt=True)
 var("warm600", "offL", warm=600); var("off_warm", "offP", off_warm=True)
 for lv in ("none", "two", "after_intro", "p2", "cap", "partial", "held"):
@@ -235,10 +244,16 @@ QUIET = [make("v_quiet_%d" % i, "offP", hitch=False) or "v_quiet_%d" % i for i i
 NOTRAIN = [make("v_notrain_%d" % i, "offP", train=False) or "v_notrain_%d" % i for i in range(3)]
 NOPLAY = [make("v_noplay_%d" % i, "on", no_play_lines=True) or "v_noplay_%d" % i for i in range(9)]
 WORSE = [make("v_worse_%d" % i, "on", extra=((6000.0, 200.0),)) or "v_worse_%d" % i for i in range(9)]
-TRAIN = [make("v_train_%d" % i, "on", extra=tuple((3000.0 + 500.0 * k, 25.0) for k in range(12))) or "v_train_%d" % i for i in range(9)]
+TRAIN = [make("v_train_%d" % i, "on", extra=tuple((3000.0 + 500.0 * k, 25.0) for k in range(11))) or "v_train_%d" % i for i in range(9)]
+TRAIN10 = [make("v_train10_%d" % i, "on", extra=tuple((3000.0 + 500.0 * k, 25.0) for k in range(10))) or "v_train10_%d" % i for i in range(9)]
+P7 = [make("v_p7_%d" % i, "offP", train_slow=[1, 11, 12, 13, 14, 15]) or "v_p7_%d" % i for i in range(11)]
+P6 = [make("v_p6_%d" % i, "offP", train_slow=[1, 11, 12, 13, 14]) or "v_p6_%d" % i for i in range(11)]
+WIN_IN = [make("v_winin_%d" % i, "on", extra=((20000.0, 200.0),)) or "v_winin_%d" % i for i in range(9)]
+WIN_OUT = [make("v_winout_%d" % i, "on", extra=((31000.0, 200.0),)) or "v_winout_%d" % i for i in range(9)]
 STRAY = [make("v_stray_%d" % i, "on", extra=((6000.0, 400.0),)) or "v_stray_%d" % i for i in range(2)]
 LHITCH = [make("v_lhitch_%d" % i, "offL", extra=((6000.0, 200.0),)) or "v_lhitch_%d" % i for i in range(5)]
-LTRAIN = [make("v_ltrain_%d" % i, "offL", extra=tuple((3000.0 + 500.0 * k, 25.0) for k in range(10))) or "v_ltrain_%d" % i for i in range(5)]
+LTRAIN = [make("v_ltrain_%d" % i, "offL", extra=tuple((3000.0 + 500.0 * k, 25.0) for k in range(11))) or "v_ltrain_%d" % i for i in range(5)]
+LTRAIN10 = [make("v_ltrain10_%d" % i, "offL", extra=tuple((3000.0 + 500.0 * k, 25.0) for k in range(10))) or "v_ltrain10_%d" % i for i in range(5)]
 PRICE = [make("v_price_%d" % i, "on", t_end=36700 + i * 11) or "v_price_%d" % i for i in range(9)]
 REALSRC = {"r_cp2": ("offL", REAL + "/cp2/xray.log"), "r_cp1": ("offP", REAL + "/cp1/xray.log"),
            "r_cp4": ("offL", REAL + "/cp4/xray.log"), "r_uc1": ("offP", REAL + "/uc1/xray.log")}
@@ -296,12 +311,13 @@ for nm, slot, pat in (("miss_xray", "on", r"MISSING .*/v_miss_xray/xray\.log"), 
 case("f_missing_folder", 1, [r"MISSING folder .*/v_absent$", r"^WU1 RESULT: FAIL"], on_tags=sub(GON, GON[5], "v_absent"))
 for nm, slot, code in (("not_clean", "on", "not_clean"), ("framecount", "offp", "framecount"), ("seqframe", "on", "stock_loop"),
                        ("simtick", "on", "stock_loop"), ("limiter", "offl", "frame_limiter"), ("threshold", "on", "threshold_header"),
-                       ("window_short", "on", "window_short"), ("save_unlocated", "on", "save_unlocated"), ("no_cap_lines", "on", "capture_lines")):
+                       ("window_short", "on", "window_short"), ("save_unlocated", "on", "save_unlocated"), ("no_cap_lines", "on", "capture_lines"),
+                       ("slow_cap", "on", "slow_cap")):
     ot = sub(GON, GON[3], V[nm]) if slot == "on" else GON
     ft = OFF_GOOD if slot == "on" else sub(OFF_GOOD, GP[3] if slot == "offp" else GL[3], V[nm])
     case("v_" + nm, 0, [r"LOAD %s \S+ VOID \[%s\]" % (V[nm], code), r"^WU1 RESULT: PASS$"], on_tags=ot, off_tags=ft)
 for nm, slot, pat in (("on_noflag", "on", r"-alife_warmup absent on an ON load"), ("off_flag", "offp", r"-alife_warmup present on an OFF load"),
-                      ("fixed_dt", "on", r"-perf_fixed_dt present"), ("warm600", "offl", r"-perf_capture is not 0,4000,v_warm600")):
+                      ("fixed_dt", "on", r"-perf_fixed_dt present"), ("warm600", "offl", r"-perf_capture is not 0,%d,v_warm600" % FR)):
     ot = sub(GON, GON[4], V[nm]) if slot == "on" else GON
     ft = OFF_GOOD if slot == "on" else sub(OFF_GOOD, GP[4] if slot == "offp" else GL[4], V[nm])
     case("a_" + nm, 1, [r"LOAD %s \S+ FAIL .*\[arm_mismatch\]" % V[nm], pat, r"^WU1 RESULT: FAIL"], on_tags=ot, off_tags=ft)
@@ -329,7 +345,17 @@ case("nv_alike_worst", 3, [r"NO VERDICT \[stock_orders_alike", r"^WU1 RESULT: NO
      off_tags=GP[:11] + LHITCH)
 case("nv_alike_train", 3, [r"NO VERDICT \[stock_orders_alike", r"^WU1 RESULT: NO VERDICT \(stock_orders_alike\)$"],
      off_tags=GP[:11] + LTRAIN)
-case("h_train", 1, [r"H2 .* -> FAIL", r"^WU1 RESULT: FAIL \(H2\)$"], on_tags=TRAIN + GON[:7])
+case("h_train", 1, [r"H2 .* = 6\.0 >= 7 -> FAIL", r"^WU1 RESULT: FAIL \(H2\)$"], on_tags=TRAIN + GON[:7])
+# Revision 2 edges, each constant on both sides of its bound (median OFF-IN-PLAY n20 in 30 s is 17 in the good pool)
+case("h_train_edge_ok", 0, [r"H2 .* = 7\.0 >= 7 -> ok", r"^WU1 RESULT: PASS$"], on_tags=TRAIN10 + GON[:7])
+case("nv_alike_edge_ok", 0, [r"GROUPS .*OFF-IN-LOADING 5", r"^WU1 RESULT: PASS$"], off_tags=GP[:11] + LTRAIN10)
+case("train_edge_ok", 0, [r"OFF-IN-PLAY +n20 +median 7\.00", r"H2 .* = 7\.0 >= 7 -> ok", r"^WU1 RESULT: PASS$"], off_tags=P7 + GL[:5])
+case("nv_train_edge", 3, [r"NO VERDICT \[no_stock_train: median OFF-IN-PLAY frames > 20 ms 6\.0 < 7",
+                          r"^WU1 RESULT: NO VERDICT \(no_stock_train, stock_orders_alike\)$"], off_tags=P6 + GL[:5])
+case("win_in", 1, [r"H1 .*\(FAIL\), and .*\(ok\) -> FAIL", r"^WU1 RESULT: FAIL \(H1\)$"], on_tags=WIN_IN + GON[:7])
+case("win_out", 0, [r"LOAD v_winout_0 ON VALID group=ON worst=5\.\d n20=0 ", r"^WU1 RESULT: PASS$"], on_tags=WIN_OUT + GON[:7])
+case("good_15s_reported", 0, [r"LOAD g_offp_01 OFF VALID group=OFF-IN-PLAY worst=320\.0 n20=17 n33=10 .*\| 15s: worst=320\.0 n20=3 n33=3 ",
+                              r"OFF-IN-PLAY +n20_15 +median 3\.00", r"^WU1 RESULT: PASS$"])
 case("h_price", 1, [r"H3 .* -> FAIL", r"SAME AS GOOD ORDER .* -> DIFFERENT", r"^WU1 RESULT: FAIL \(H3\)$"], on_tags=PRICE + GON[:7])
 G = order_lines(GON, OFF_GOOD)
 case("r_out_exists", 2, [r"REFUSED: .*score\.txt exists, not overwriting"], pre_out=True)
@@ -376,7 +402,7 @@ for c in CASES:
 # ---------------- mutants: one check switched off each; every one must be caught ----------------
 MUT = {"missing_fail": ["f_miss_xray"], "cr_strip": ["good_crlf"], "not_clean": ["v_not_clean"], "framecount": ["v_framecount"],
        "stock_loop": ["v_seqframe", "v_simtick"], "frame_limiter": ["v_limiter"], "threshold": ["v_threshold"],
-       "capture_lines": ["v_no_cap_lines"], "window_short": ["v_window_short"], "save_exclude": ["good"],
+       "capture_lines": ["v_no_cap_lines"], "slow_cap": ["v_slow_cap"], "window_short": ["v_window_short"], "save_exclude": ["good"],
        "save_unlocated": ["v_save_unlocated"], "arm_cmdline": ["a_on_noflag"], "off_not_stock": ["a_off_not_stock"],
        "lever_count": ["l_none"], "lever_before_intro": ["l_after_intro"], "lever_precache": ["l_p2"], "lever_cap": ["l_cap"],
        "lever_partial": ["l_partial"], "grouping": ["grouping"], "legacy_agree": ["c_legacy_disagree"], "cover": ["c_reset_late"],
@@ -410,11 +436,44 @@ else:
             npass += 1; print("ok   mutant %-18s caught by %s" % (m, caught))
         else:
             nfail += 1; print("FAIL mutant %s survived every case" % m)
+# ---------------- constant mutants (Revision 2): every changed or new constant moved off its registered value ----------------
+# Each must be caught by some case (the edge cases above sit on both sides of each bound).
+CMUT = {"window_15_headline": ("WINDOW_MS = 30000.0 ", "WINDOW_MS = 15000.0 ", ["good", "win_in", "v_window_short"]),
+        "windows_swapped": ("WINDOW_MS = 30000.0 ", "WINDOW_MS = 15000.0 ", ["good"], ("WINDOW2_MS = 15000.0 ", "WINDOW2_MS = 30000.0 ")),
+        "window_45": ("WINDOW_MS = 30000.0 ", "WINDOW_MS = 45000.0 ", ["good", "win_out"]),
+        "train_min_6": ("STOCK_TRAIN_MIN = 7 ", "STOCK_TRAIN_MIN = 6 ", ["nv_train_edge"]),
+        "train_min_8": ("STOCK_TRAIN_MIN = 7 ", "STOCK_TRAIN_MIN = 8 ", ["train_edge_ok"]),
+        "n20_drop_6": ("N20_DROP = 7 ", "N20_DROP = 6 ", ["h_train", "nv_alike_train"]),
+        "n20_drop_8": ("N20_DROP = 7 ", "N20_DROP = 8 ", ["h_train_edge_ok", "nv_alike_edge_ok", "train_edge_ok"]),
+        "slow_cap_rows_up": ("SLOW_CAP_ROWS = 600 * 14 - 14 ", "SLOW_CAP_ROWS = 600 * 14 + 14 ", ["v_slow_cap"])}
+ncm = 0
+for m, spec in sorted(CMUT.items()):
+    old, new, targets = spec[0], spec[1], spec[2]
+    msrc = src
+    for a, b in [(old, new)] + list(spec[3:]):
+        if msrc.count(a) != 1:
+            print("FAIL constant mutant %s: %r not found exactly once in the scorer" % (m, a)); nfail += 1; msrc = None; break
+        msrc = msrc.replace(a, b)
+    if msrc is None:
+        continue
+    md = os.path.join(ST, "mutants", "const_" + m); os.makedirs(md)
+    ms = os.path.join(md, "wu1_score.py")
+    with open(ms, "w") as f:
+        f.write(msrc)
+    caught = None
+    for cn in targets + [c["name"] for c in CASES if c["name"] not in targets]:
+        cd = os.path.join(md, cn); os.makedirs(cd)
+        if run(ms, byname[cn], cd):
+            caught = cn; break
+    if caught:
+        npass += 1; ncm += 1; print("ok   constant mutant %-18s caught by %s" % (m, caught))
+    else:
+        nfail += 1; print("FAIL constant mutant %s survived every case" % m)
 with open(os.path.join(ST, "counts.txt"), "w") as f:
-    f.write("%d %d %d %d %d\n" % (npass, nfail, nreal, nmade, len(MUT)))
+    f.write("%d %d %d %d %d %d\n" % (npass, nfail, nreal, nmade, len(MUT), ncm))
 PYEOF
 [ -s "$ST/counts.txt" ] || { echo "WU1 SELFTEST FAIL: case runner did not finish" | tee -a "$LOG"; exit 1; }
-read -r pass fail nreal nmade nmut < "$ST/counts.txt"
+read -r pass fail nreal nmade nmut ncm < "$ST/counts.txt"
 # the real fixture folders must be untouched: nothing in them newer than the start of this self-test
 touched=0
 for t in cp1 cp2 cp3 cp4 uc1 lc1 lc2 lc3 cpl1 r1a_cor_1; do
@@ -423,5 +482,5 @@ done
 if [ "$touched" != 0 ]; then fail=$((fail+1)); echo "FAIL real fixture folders changed during the self-test ($touched paths)" | tee -a "$LOG"
 else pass=$((pass+1)); echo "ok   real fixture folders unchanged" | tee -a "$LOG"; fi
 tot=$((pass+fail))
-if [ "$fail" = 0 ]; then echo "WU1 SELFTEST PASS $pass/$tot ($nreal real cases, $nmade made cases, $nmut mutants caught, 1 hook-coverage check, 1 untouched check) in $ST" | tee -a "$LOG"; exit 0
+if [ "$fail" = 0 ]; then echo "WU1 SELFTEST PASS $pass/$tot ($nreal real cases, $nmade made cases, $nmut hook mutants caught, $ncm constant mutants caught, 1 hook-coverage check, 1 untouched check) in $ST" | tee -a "$LOG"; exit 0
 else echo "WU1 SELFTEST FAIL $fail of $tot in $ST" | tee -a "$LOG"; exit 1; fi
