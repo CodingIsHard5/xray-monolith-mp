@@ -1,0 +1,18 @@
+1 rc 0, engine log present, no restart, no Lua error, no FATAL, no DMG line: PASS (rc0 True, engine log lines 11156, restart rows 0, lua errors 0, fatal 0, DMG lines 0)
+V 1 VITALS line(s), clean, no refill; stance, state and height on every P2: PASS (1 VITALS lines, clean and counted True, REFILL 0; P2 1873: stance differ 0, unread 0, height off 0)
+2 the writer sent pose version 2: session `none` on every row of its record: PASS (3255 rows, 0 with a session)
+3 one LOST, age 5000..5600 ms, state play, policy keep: PASS (['LOST,65.52,97903,1137,5012,play,keep'])
+4 no EPOCH, no RESET; one FOUND after LOST, its seq 1..3 above the old one, age 60..120 s: PASS (EPOCH 0; FOUND ['FOUND,147.70,180076,1138,87185']; seq above the old one 1; age 87.185 s)
+5 nothing applied between LOST and FOUND; P2 >= 400 before and >= 400 after; no GUARD; HOLD <= 15: PASS (between 0; P2 1137 before, 736 after; GUARD 0, HOLD 8)
+6 runner: one lost.csv row with policy keep; one "lost end" line: PASS (lost.csv [['1795690804464', '5134', 'play', 'keep']]; "lost end" lines 1; the runner saw a pose again after 30.764 s (reported: it takes any new pose, the script waits for the seq))
+7 no STOP row, no ABSORB_ARM: PASS (STOP 0, ABSORB_ARM 0)
+8 last T2SUM: lost=1, epochs=0: PASS ({'last_seq': '1886', 'torn': '0', 'holds': '8', 'paused': 'false', 'near': '150', 'guards': '0', 'lost': '1', 'epochs': '0'})
+reported: LOST,65.52,97903,1137,5012,play,keep
+reported: FOUND,147.70,180076,1138,87185
+reported: T2SUM,last_seq=1886,torn=0,holds=8,paused=false,near=150,guards=0,lost=1,epochs=0
+reported: VITALS,min_health=1.000,max_radiation=0.0000,max_bleeding=0.0000,unread=0
+reported: runner 2026-11-26 11:00:04.464Z LOST: no new pose for 5134 ms (limit 5000; last state play, policy keep)
+reported: runner 2026-11-26 11:00:30.095Z lost end: new pose (state play) after 25630 ms
+reported: runner 2026-11-26 11:02:15.474Z boot 0 end: tb_run rc=0 reason=engine run ended
+reported: runner 2026-11-26 11:02:15.475Z end: ran to the end; boots 1; unplanned restarts 0; stall no; planned kill no; rc=0
+R3 arm D (v2, keep) X SIDE: PASS

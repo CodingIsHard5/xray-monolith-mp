@@ -1,0 +1,19 @@
+1 rc 0, engine log present, no restart, no Lua error, no FATAL, no DMG line: PASS (rc0 True, engine log lines 11042, restart rows 0, lua errors 0, fatal 0, DMG lines 0)
+V 1 VITALS line(s), clean, no refill; stance, state and height on every P2: PASS (1 VITALS lines, clean and counted True, REFILL 0; P2 3014: stance differ 0, unread 0, height off 0)
+2 the writer sent pose version 2: session `none` on every row of its record: PASS (3229 rows, 0 with a session)
+3 one LOST, age 5000..5600 ms, state play, policy keep: PASS (['LOST,65.41,99048,1139,5007,play,keep'])
+4 no EPOCH; one RESET after LOST (old seq, new seq <= 200), then one FOUND, seq <= 200, age 25..45 s: PASS (EPOCH 0; RESET ['RESET,90.49,124122,1139,1']; FOUND ['FOUND,90.49,124122,1,30081']; age 30.081 s)
+5 nothing applied between LOST and FOUND; P2 >= 400 before and >= 400 after; no GUARD; HOLD <= 15: PASS (between 0; P2 1139 before, 1875 after; GUARD 0, HOLD 7)
+6 runner: one lost.csv row with policy keep; one "lost end" line: PASS (lost.csv [['1795691655903', '5147', 'play', 'keep']]; "lost end" lines 1; the runner saw a pose again after 29.822 s (reported: it takes any new pose, the script waits for the seq))
+7 no STOP row, no ABSORB_ARM: PASS (STOP 0, ABSORB_ARM 0)
+8 last T2SUM: lost=1, epochs=1: PASS ({'last_seq': '1887', 'torn': '0', 'holds': '7', 'paused': 'false', 'near': '265', 'guards': '0', 'lost': '1', 'epochs': '1'})
+reported: LOST,65.41,99048,1139,5007,play,keep
+reported: FOUND,90.49,124122,1,30081
+reported: RESET,90.49,124122,1139,1
+reported: T2SUM,last_seq=1887,torn=0,holds=7,paused=false,near=265,guards=0,lost=1,epochs=1
+reported: VITALS,min_health=1.000,max_radiation=0.0000,max_bleeding=0.0000,unread=0
+reported: runner 2026-11-26 11:14:15.904Z LOST: no new pose for 5147 ms (limit 5000; last state play, policy keep)
+reported: runner 2026-11-26 11:14:40.579Z lost end: new pose (state play) after 24675 ms
+reported: runner 2026-11-26 11:16:25.596Z boot 0 end: tb_run rc=0 reason=engine run ended
+reported: runner 2026-11-26 11:16:25.597Z end: ran to the end; boots 1; unplanned restarts 0; stall no; planned kill no; rc=0
+R3 arm D (v2r, keep) X SIDE: PASS

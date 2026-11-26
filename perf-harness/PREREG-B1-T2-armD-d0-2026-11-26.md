@@ -53,5 +53,24 @@ RESET and FOUND 30 s after the last pose at seq 1.
 One retry per run, only for a run that dies before its data, registered here first. A protected-title abort is judged
 by the timestamp rule of section 64a of the joint text.
 
-## 7. Result
-(none yet)
+## 7. Result (2026-11-26, Overseer's GO; each boot its own EXCLUSIVE slice, each scored once): both PASS
+One thing not in the registration: the display. Both boots ran with BENCH_DISPLAY=:141 (the run tool's own setting)
+after a refusal check that :141 did not exist, on the Overseer's order after my :78 mistake. No pinned file changed.
+| | d0a, control (fix off) | d0b (fix on) |
+|---|---|---|
+| slice | 05:58 EST | 06:12 to 06:16 EST |
+| LOST after the kill | 5012 ms | 5007 ms |
+| RESET line | none | one, old seq 1139, new seq 1 |
+| pose taken again | 87.2 s after the last old pose, at seq 1138 (old 1137 + 1) | 30.1 s after, at seq 1 |
+| applied while lost | 0 | 0 |
+| poses applied after | 736 | 1875 |
+| last summary | lost=1, epochs=0 | lost=1, epochs=1 |
+| crash, restart, Lua error, damage line | none | none |
+| checker | PASS 9 of 9 (`v2`) | PASS 9 of 9 (`v2r`) |
+Guesses 70 % and 65 %, both 50 %: both held. The engine figures match the desk run in the stub (87 s and 30 s).
+What it shows: with an old pose-v2 writer, the new reader loses the pose after 5 s, and with the reset on takes the
+restarted writer on its first pose instead of waiting until its seq has passed the old one.
+What it does not show (section 5 stands): a real ITR2; freeze with a v2 writer; the long wait after a long session.
+The d0a score text was saved by a second run of the checker on the same data after the verdict was read (the checker
+is deterministic; the saved text ends with the same PASS line). Output: `armD-d0/t3pfD0a_score.txt`, `t3pfD0b_score.txt`.
+Runner 71d070e5 and reader 5bf69e5c have now each run twice in the engine, X only. They are the X-side pins for arm D.
