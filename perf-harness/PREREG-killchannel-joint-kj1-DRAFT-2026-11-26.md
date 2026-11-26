@@ -34,6 +34,9 @@ The watcher writes every COMPLETE snapshot, whole, to `snaps_all.txt` and every 
 `poses_all.txt`, each with its own read time. The checker reads these two files and the script's meta lines; it does
 not need ITR2's log. Size: about 20 snapshots a second; at kw1's listing (to be measured from the first file) it is
 tens of MB for the run. A missing or empty file fails by name.
+Built and tried on made-up files (draft 2): `kj1/t1_watch_keep.py` (sha256 9df9c8e4…; = t1_watch.py plus the two
+kept files; pose file named by env T1_KEEP_POSE). 5 snapshots kept of 5, a torn one not kept, CR stripped, a pose of
+a new session with seq back at 1 kept. Not yet wired into the runner; not reviewed.
 
 ## 3. Regeneration: PROPOSED mechanism, the ceiling (X side only, no format change)
 For every row with `applied` > 0 whose creature is online and alive: in the SAME script step that writes the
@@ -45,6 +48,9 @@ snapshot, before the `o` lines are built, if health > 1 - applied then `set_heal
   health in the pose (a format change) and would also erase X-Ray's own damage. Why not "switch regeneration off":
   there is no script switch for it per creature that I have found; the ceiling needs none.
 - Not covered: an offline creature (no health can be set offline); it is clamped at its first snapshot online.
+- itrzone (no objection, 2026-11-26) asked what happens when THEIR row is retired without a new session (their 60 s
+  unlisted rule, a section change): my row and its `applied` stay, so the ceiling stays, until a new ITR2 session or
+  an X-Ray restart. A creature the player wounded stays under its ceiling even after ITR2 has forgotten it.
 Bound for check 4: snapshot health <= 1 - applied + 0.0001. Derivation: the clamp and the snapshot's health read
 are in one script step with no engine update between, so the only error is the two 4-decimal roundings (0.00005
 each). A value above it means the clamp did not run or something raised health inside the step.
