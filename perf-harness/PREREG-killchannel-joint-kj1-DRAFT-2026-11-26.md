@@ -91,6 +91,11 @@ that falls as the creature heals): X-Ray would have to send the lowered figure b
 two writers, and the player gains nothing because the shown health already follows the snapshot.
 itrzone's side, theirs to register: the cap at 1.0 in the mod is removed; a healing puppet's health is rewritten
 about once a second (an upward change is written from 1 % of full; damage is shown at once as now).
+Offline, done (2026-11-26): `kj1/kill4h_stub.lua` (15e43dab…) and `kj1/kill4h_test.sh` (3909030d…) = the kill4
+tests plus the check `total_above_one` (0.600, health set from 0.4 to 0.8 as healing, then a total of 1.100: applied
+as 0.500, health 0.3, alive, not refused, not counted as cut) with two mutants (total capped at 1; total above 1
+refused). Run on the REGISTERED reader kill4 (f19b28c0…, unchanged): 34 checks pass, 40 mutants caught. So the
+reader for kj1 is kill4 as it is; no kill5.
 From their lever (`kcj`, built, not merged): if the picked creature's snapshot health is below 1 (say 0.95), a
 later kill reports total = the part hits + what was left, not a round number. So no check here names a death total.
 Proposed for the run, so both are judged in the engine: S gets 0.6 at 30 s and 0.5 at 70 s (total 1.100), kill at
