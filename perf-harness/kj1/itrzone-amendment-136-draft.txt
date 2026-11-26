@@ -1,0 +1,64 @@
+## Amendment 136 (DRAFT 2026-11-26): the kill channel with healing; the total has no upper limit (joint with EnginePerf; no run)
+Ruled by Caden (Discord 2026-11-26 18:56 UTC, relayed by the Overseer): "Heal like stalker unless it's hard to
+implement". A creature the player wounded heals in X-Ray at X-Ray's own rates, and the ITR2 puppet follows the healed
+health. This amendment changes one line of amendment 134's format and two rules of the ITR2 side. It registers no run.
+EnginePerf holds the same text and matches it byte for byte. Everything of amendment 134 not named here stands.
+
+**Why almost nothing changes.** The total is a count of damage dealt, X-Ray applies each new piece once
+(`total - applied`), X-Ray's health then regenerates by its own rules, and the puppet shows the snapshot's health
+minus `total - applied`. So healing already passes through. Two things were in its way, both on the ITR2 side.
+
+### 1. The pose file (replaces two lines of amendment 134, section 1)
+- `<total>`: all damage ITR2 has dealt to this creature in this ITR2 session, as a share of full health, 3 decimals,
+  0.000 upward with no upper limit. It never falls within a session.
+- A creature that heals can take more than its full health in sum and live (a hit of 0.600, healing, a hit of 0.500:
+  total 1.100, `dead` 0). A total of 1.000 or more says nothing about death; only `dead` = 1 does.
+- The version stays 4. No field is added or removed. The snapshot file is unchanged.
+
+### 2. ITR2's rules (replace the matching rules of amendment 134, section 3)
+- The total is the plain sum of the damage read; the cap at 1.000 is removed, for a hit and for a death alike.
+- Shown health is still full health times (the snapshot's health minus `total - applied`), never below 1 %. It is
+  written DOWN at once (within one 50 ms pass). It is written UP at most once a second per puppet, to the exact wanted
+  value. So while X-Ray heals a creature its puppet may stand below the wanted value by at most one second of X-Ray's
+  healing (about 0.01 of full health for a stalker, measured in EnginePerf's kw1).
+- Damage is still measured from the value the mod last wrote or read on that puppet, so the share of a hit on a puppet
+  standing a little under the wanted value is right.
+- Unchanged: the death rule, the 10 s rule, the 60 s rule, the reopened row seeded from X-Ray's applied count.
+
+### 3. X-Ray's rules (EnginePerf's; unchanged, restated because they now matter)
+- A total above 1.000 on a live creature is applied like any other: the difference to `applied` is applied, then
+  `applied = total`. It is not refused and not capped.
+- Only a single DIFFERENCE above 1.0 is cut to 1.0 and counted (`kclamped`).
+- No ceiling on X-Ray's health: it regenerates by X-Ray's rules. The ceiling proposed earlier today is withdrawn.
+
+### 4. What is built for it (ITR2 side), all behind levers that default to off
+Mod blob ad3ca78d0a0a678a20dc3d4beeca403c6735212e (`mod/ITRZone/Scripts/main.lua`).
+- Under `t2v=4`: the two caps removed; the upward write limited to one a second per puppet.
+- Rig lever for the joint run, `kcj=<s of play clock>` (default 0 = off): at that time the nearest stalker (ITR2 class
+  Mimic*) and the nearest other creature are picked among live puppets whose full health was read and whose snapshot
+  health is at least 0.9. The pick is tried every pass for 10 s and logged (`KC joint pick stalker|monster id= sec=
+  cls= hp= dist_cm= clk=`, or `KC joint pick FAILED`). The stalker takes a hit of `kcjs` (default 0.3) of full health,
+  the other creature 0.3. Counted from `kcj`: after `kcjb` s (40) the stalker takes `kcjt` (0.2), after `kcjc` s (60)
+  the stalker is killed, after `kcjd` s (85) the other creature is killed. Fixed times. The rig deals engine damage
+  and does not tell the mod's bookkeeping, as `kcrig` does (one shared routine).
+- Known consequence, stated for the joint run: the rig's hit is a share of FULL health dealt to the puppet's CURRENT
+  health. If X-Ray has not healed the creature enough, a second hit can take the puppet to 0, and that is then a death
+  by the registered rule (reported with `dead` = 1), not a part hit.
+
+### 5. Offline tests (all PASS on this tree)
+- `tools/kc_selftest.sh`: the mod's test with 42 mutants. New: case 18 (the joint rig: pick, shares, order, times, a
+  failed pick; 8 mutants), case 19 (healing: 0.6, X-Ray heals 0.4 over 2 s, 0.5 more gives total 1.100 on a live
+  creature, the death's total 1.400; upward writes 2 or 3 in 2 s; 4 mutants: each cap put back, upward writes
+  unlimited, upward writes off). Case 2 now wants the plain sum 1.250 where it wanted 1.000.
+- `tools/kc1_selftest.py` (kc1's scorer on the offline loop) and `tools/kc_feed_selftest.py`: PASS unchanged.
+- With every lever off the existing offline tests pass and the arm C, arm D and finer-clock witness logs are
+  byte-identical to master's (c415ffc).
+- EnginePerf's side: an offline check with a mutant that a total of 1.100 on a live creature with 0.600 applied is
+  applied as 0.500, not refused, not capped, not counted in `kclamped`.
+
+### 6. Limits
+- Not shown in a game yet: that a puppet's health written upward about once a second under ITR2's AI disturbs nothing
+  (kc1 showed single writes are kept exactly and the AI goes on). The joint run is the first to show it.
+- X-Ray's healing rates are X-Ray's; ITR2's own classes do not heal by themselves (none seen in kc1's 215 s).
+- kc1 (amendment 135) was run with the cap in place; none of its events reached a total above 1.000, so its result
+  stands for everything but the cap.

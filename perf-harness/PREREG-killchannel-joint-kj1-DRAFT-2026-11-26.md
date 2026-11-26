@@ -1,4 +1,4 @@
-# Kill channel, joint run "kj1", X side: DRAFT 5 (2026-11-26). NOT registered, nothing built, nothing run.
+# Kill channel, joint run "kj1", X side: DRAFT 6 (2026-11-26). NOT registered, nothing built, nothing run.
 
 Ordered by the Overseer after kw1 (PASS 12/12). No boot until the Overseer has reviewed the registered text.
 Limits first: a rig, not a player (itrzone's lever `kcrig` deals the damage); nobody looks; one stalker and one
@@ -96,6 +96,19 @@ tests plus the check `total_above_one` (0.600, health set from 0.4 to 0.8 as hea
 as 0.500, health 0.3, alive, not refused, not counted as cut) with two mutants (total capped at 1; total above 1
 refused). Run on the REGISTERED reader kill4 (f19b28c0…, unchanged): 34 checks pass, 40 mutants caught. So the
 reader for kj1 is kill4 as it is; no kill5.
+itrzone's amendment 136 DRAFT (their desk-armd d8e6814): my byte copy `kj1/itrzone-amendment-136-draft.txt`, sha256
+9f56a56f…, 64 lines, 5596 bytes: MATCH with what I agreed; its section 3 (my rules) is mine word for word in
+meaning. The second match is on the REGISTERED text.
+Correction to draft 5's derivation, from itrzone: the rig's hit is a share of FULL health dealt to the puppet's
+CURRENT health, and the puppet dying is ITR2's death. So if S has not healed from 0.4 to above 0.5 in the 40 s, the
+0.5 hit kills the puppet and the pose says dead = 1 at 70 s; my 0.01 stop never comes into it. I keep 0.6 and 0.5
+and register that outcome as: check 5 FAILS by name ("S did not heal enough: dead at the second hit"), the later
+steps for S are then not judged, M's are. Margin: needs a rise above 0.10 in 40 s; kw1 measured 0.40 in 40 s (0.05
+in 5 s). The puppet can also stand up to about 0.01 under X-Ray's health (their one-a-second upward write).
+Built (draft 6): `kj1/t2_xray_kj.sh` = the kw runner plus the keep watcher and `T2_STALL_PLAY=<s>` (stop the engine
+once, <s> seconds after the utc_ms of the first new play pose the runner read; rows in `stall.csv`). Syntax
+checked only; never run. Open with itrzone: whether their play clock can start before my runner is up (then the
+first play pose I read is not their first).
 From their lever (`kcj`, built, not merged): if the picked creature's snapshot health is below 1 (say 0.95), a
 later kill reports total = the part hits + what was left, not a round number. So no check here names a death total.
 Proposed for the run, so both are judged in the engine: S gets 0.6 at 30 s and 0.5 at 70 s (total 1.100), kill at
