@@ -4425,11 +4425,22 @@ struct vr_bph_state
 	int drop_set;       // frames on which it was placed and stopped
 	Fmatrix drop_xf;
 	Fvector drop_bc;
+	// B2c (Amendment 41 part 3): a released item keeps the hand's velocity
+	bool vel_off;       // -vr_bp_vel_off (TEST ONLY): B2b's at-rest start
+	u32 vf[16];         // the last update frames with an item in the hand, newest first
+	bool vok[16];
+	float vdt[16];
+	Fvector vc[16];     // its box centre (world)
+	Fmatrix vh[16];     // the hand
+	bool drop_vel;
+	Fvector drop_v, drop_w;
+	float drop_t, drop_g;
 };
 int vr_bpt_ruck_count(CActor* A, LPCSTR sect);                                       // ActorInput.cpp (B2b)
 int vr_bpt_pick(CActor* A, LPCSTR sect, bool& eatable, float& weight);
 bool vr_bpt_drop(CActor* A, int id, const Fvector& pos);
-int vr_bpt_dropped(int id, const Fvector& bc, Fvector& centre, bool set, const Fmatrix& xf, bool& was_set);
+int vr_bpt_dropped(int id, const Fvector& bc, Fvector& centre, int mode, const Fmatrix& xf, const Fvector& lv, const Fvector& av, bool& was_set, Fmatrix& att);
+float vr_bpt_gravity();
 int vr_bpt_use(CActor* A, int id);
 static vr_bph_state s_vr_bph = {};
 struct vr_bph_mem
@@ -4467,6 +4478,8 @@ static void vr_bph_parse()
 	if (LPCSTR q = strstr(Core.Params, "-vr_bp_reach "))
 		sscanf(q + 13, "%f", &H.reach);
 	H.out_off = !!strstr(Core.Params, "-vr_bp_out_off");
+	H.vel_off = !!strstr(Core.Params, "-vr_bp_vel_off");
+	Msg("* [vr17] a released item keeps the hand's velocity: %s", H.vel_off ? "OFF (-vr_bp_vel_off, TEST ONLY)" : "on");
 	Msg("* [vr14] hands in the bag: %s; reach %.3f m", H.off ? "OFF (-vr_bp_grab_off, TEST ONLY)" : "on", H.reach);
 	Msg("* [vr16] taking out of the bag: %s", H.off ? "off (hands in the bag are off)" : H.out_off ? "OFF (-vr_bp_out_off, TEST ONLY)" : "on");
 }
@@ -4504,11 +4517,30 @@ static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
 	{
 		Fvector dc;
 		bool ws = false;
-		const int st = vr_bpt_dropped(H.drop_id1 - 1, H.drop_bc, dc, H.drop_set < 2, H.drop_xf, ws);
+		// B2b: placed and stopped on its first two free frames. B2c: placed with the hand's velocities on the first,
+		// velocities again (gravity over the elapsed time taken off) on the second, never placed twice.
+		Fmatrix da;
+		Fvector lv, av;
+		lv.set(0.f, 0.f, 0.f);
+		av.set(0.f, 0.f, 0.f);
+		int mode = H.drop_set < 2 ? 1 : 0;
+		if (H.drop_vel && mode)
+		{
+			lv = H.drop_v;
+			av = H.drop_w;
+			if (H.drop_set == 1)
+			{
+				H.drop_t += Device.fTimeDelta;
+				lv.y -= H.drop_g * H.drop_t;
+				mode = 2;
+			}
+		}
+		const int st = vr_bpt_dropped(H.drop_id1 - 1, H.drop_bc, dc, mode, H.drop_xf, lv, av, ws, da);
 		if (ws)
 			++H.drop_set;
-		Msg("* [vr16d] frame %u dropped id %d %s placed %d centre %.4f %.4f %.4f", I.frame, H.drop_id1 - 1, st == 0 ? "GONE" : st == 1 ? "owned" : "free", H.drop_set,
-			dc.x, dc.y, dc.z);
+		Msg("* [vr16d] frame %u dropped id %d %s placed %d centre %.4f %.4f %.4f dt %.5f axes %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f", I.frame, H.drop_id1 - 1,
+			st == 0 ? "GONE" : st == 1 ? "owned" : "free", H.drop_set, dc.x, dc.y, dc.z, Device.fTimeDelta, da.i.x, da.i.y, da.i.z, da.j.x, da.j.y, da.j.z, da.k.x, da.k.y,
+			da.k.z);
 		if (st == 0)
 			H.drop_id1 = 0;
 	}
@@ -4549,6 +4581,23 @@ static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
 		L.mul_43(ib, w);
 		Fvector c;
 		L.transform_tiny(c, e.bc);
+		{ // B2c: this frame's sample of the item in the hand
+			for (int k = 15; k > 0; --k)
+			{
+				H.vf[k] = H.vf[k - 1];
+				H.vok[k] = H.vok[k - 1];
+				H.vdt[k] = H.vdt[k - 1];
+				H.vc[k] = H.vc[k - 1];
+				H.vh[k] = H.vh[k - 1];
+			}
+			H.vf[0] = I.frame;
+			H.vok[0] = geo;
+			H.vdt[0] = Device.fTimeDelta;
+			w.transform_tiny(H.vc[0], e.bc);
+			H.vh[0] = hand;
+			if (H.out_id1 > 0 && !H.out_off)
+				Msg("* [vr17s] frame %u dt %.5f centre %.5f %.5f %.5f", I.frame, H.vdt[0], H.vc[0].x, H.vc[0].y, H.vc[0].z);
+		}
 		const float cc[3] = {c.x, c.y, c.z};
 		bool in = geo;
 		for (int k = 0; k < 3; ++k)
@@ -4649,6 +4698,55 @@ static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
 				{
 					H.drop_id1 = id + 1;
 					H.drop_set = 0;
+					// B2c: the velocity of the item's box centre in the hand, and the hand's spin, over the last 0.12 s
+					Fvector lv, av;
+					lv.set(0.f, 0.f, 0.f);
+					av.set(0.f, 0.f, 0.f);
+					int n = 0;
+					float T = 0.f;
+					bool capped = false;
+					if (!H.vel_off && H.vok[0])
+						for (int k = 1; k < 16; ++k)
+						{
+							if (H.vf[k] + u32(k) != I.frame || !H.vok[k])
+								break;
+							const float T2 = T + H.vdt[k - 1];
+							if (k > 1 && T2 > 0.12f)
+								break;
+							T = T2;
+							n = k;
+						}
+					if (n > 0 && T > 1e-4f)
+					{
+						lv.sub(H.vc[0], H.vc[n]);
+						lv.div(T);
+						Fmatrix ih, D;
+						ih.invert(H.vh[n]);
+						D.mul_43(H.vh[0], ih); // the hand's turn from then to now, in the world
+						Fvector vee;
+						vee.set(D.j.z - D.k.y, D.k.x - D.i.z, D.i.y - D.j.x);
+						const float sn = 0.5f * vee.magnitude();
+						const float cs = 0.5f * (D.i.x + D.j.y + D.k.z - 1.f);
+						if (sn > 1e-7f)
+							av.mul(vee, atan2f(sn, cs) / (2.f * sn * T));
+						if (lv.magnitude() > 10.f)
+						{
+							lv.mul(10.f / lv.magnitude());
+							capped = true;
+						}
+						if (av.magnitude() > 20.f)
+						{
+							av.mul(20.f / av.magnitude());
+							capped = true;
+						}
+					}
+					H.drop_vel = !H.vel_off;
+					H.drop_v = lv;
+					H.drop_w = av;
+					H.drop_t = 0.f;
+					H.drop_g = vr_bpt_gravity();
+					Msg("* [vr17] frame %u release: id %d frames %d time %.5f v %.4f %.4f %.4f w %.4f %.4f %.4f gravity %.3f %s", I.frame, id, n, T, lv.x, lv.y, lv.z, av.x,
+						av.y, av.z, H.drop_g, H.vel_off ? "off" : capped ? "capped" : "free");
 				}
 				H.carried1 = 0;
 				return false;

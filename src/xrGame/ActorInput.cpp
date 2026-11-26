@@ -37,6 +37,7 @@
 #include "eatable_item.h"          // GammaVR backpack B2b
 #include "PhysicsShellHolder.h"
 #include "../xrPhysics/PhysicsShell.h"
+#include "../xrPhysics/IPHWorld.h"
 #include "holder_custom.h"
 #include "Weapon.h"
 #include "CustomOutfit.h"
@@ -1134,26 +1135,33 @@ bool vr_bpt_drop(CActor* A, int id, const Fvector& pos) // the game's own drop, 
 }
 // the dropped object: 0 gone, 1 still owned, 2 free in the world. centre = its matrix applied to bc. With set (and free,
 // with a physics shell): placed at xf and stopped (the game's drop throws it along the view; B2b lets it fall from rest).
-int vr_bpt_dropped(int id, const Fvector& bc, Fvector& centre, bool set, const Fmatrix& xf, bool& was_set)
+float vr_bpt_gravity() { return physics_world() ? physics_world()->Gravity() : 19.62f; }
+// mode 0: only follow; 1: place at xf and give the velocities; 2: give the velocities only (B2c)
+int vr_bpt_dropped(int id, const Fvector& bc, Fvector& centre, int mode, const Fmatrix& xf, const Fvector& lv, const Fvector& av, bool& was_set, Fmatrix& att)
 {
 	was_set = false;
 	centre.set(0.f, 0.f, 0.f);
+	att.identity();
 	CObject* O = id >= 0 ? Level().Objects.net_Find(u16(id)) : NULL;
 	if (!O)
 		return 0;
 	const bool free_ = !O->H_Parent();
-	if (free_ && set)
+	if (free_ && mode)
 	{
 		CPhysicsShellHolder* sh = smart_cast<CPhysicsShellHolder*>(O);
 		if (sh && sh->PPhysicsShell())
 		{
-			sh->XFORM().set(xf);
-			sh->PPhysicsShell()->SetTransform(xf, mh_clear);
-			sh->PPhysicsShell()->set_LinearVel(Fvector().set(0.f, 0.f, 0.f));
-			sh->PPhysicsShell()->set_AngularVel(Fvector().set(0.f, 0.f, 0.f));
+			if (mode == 1)
+			{
+				sh->XFORM().set(xf);
+				sh->PPhysicsShell()->SetTransform(xf, mh_clear);
+			}
+			sh->PPhysicsShell()->set_LinearVel(lv);
+			sh->PPhysicsShell()->set_AngularVel(av);
 			was_set = true;
 		}
 	}
+	att.set(O->XFORM());
 	O->XFORM().transform_tiny(centre, bc);
 	return free_ ? 2 : 1;
 }
