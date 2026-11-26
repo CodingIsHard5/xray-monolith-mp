@@ -1,0 +1,114 @@
+## Amendment 138 (REGISTERED 2026-11-26): a death is confirmed only once the creature reads dead; kj2, the second joint run
+Pins: mod blob bd8ca4a8439e537421348337b3f568c230db2035; `tools/kj2_check.py` sha256 bdd8cf12104a659de607a59e5601b5638f8d2dd9604d605d61248af2a89fb12b; `tools/kj1_check.py` (imported, unchanged, as registered in amendment 137) sha256 f8583123a4e6f33f66a35c4e0886554520c8c2713d871bb765217b8f92b3c863; `tools/kc_feed.py` (offline stand-in only) sha256 1bd9c9c592beaae3692e20d5caf0f8399ab0c575edec10080d3fb0258af0977c.
+Joint with EnginePerf (their text: `perf-harness/PREREG-killchannel-joint-kj2-2026-11-26.md`, sha256 9dc6c901…, perf/render-split
+ae115dd3d). Ordered by the Overseer after kj1.
+Amendments 134, 136 and 137 stand except where this one says otherwise. No run before the Overseer's check and GO.
+
+**Why.** kj1 (amendment 137) failed J6 and J7 on our side from one cause. A creature was killed in ITR2 while X-Ray
+was stopped. X-Ray's first snapshot after the stop carried `k,<id>,…,dead` (its kill call was made) while the
+creature's own line still read alive at health 0.0008. The mod took the `dead` line as the confirmation, closed its
+report, and the living line in the same snapshot made it spawn the puppet again; 0.10 s later the creature read dead
+and the puppet was removed. EnginePerf found the same two snapshots in their kept bytes. The fault is in what a
+`dead` line may mean; it gets one rule in the format and a guard on our side.
+
+**The format (joint; replaces the sentences on the `dead` line in amendment 134; the version stays 4).**
+1. X-Ray writes `k,<id>,<applied>,dead` only when, as the snapshot is built, the creature reads dead (its `o` line
+   has alive 0) or no object exists for the id. A kill call that was made but is not yet in effect writes the plain
+   line `k,<id>,<applied>` (the applied count already holds the last piece). So a `dead` line and an `o` line with
+   alive 1 for the same id never stand in one snapshot.
+2. New word: `k,<id>,<applied>,stale`. The id is listed but is not the creature of our line (another section, or
+   alive again after its death was confirmed more than 10 s ago). The mod drops its line, counts it stale and never
+   counts it a confirmation. With the line gone the id is no longer held back: a living creature under that id is
+   shown again, as any other creature X-Ray lists. An id with no object is answered as in
+   amendment 134, unchanged: a `dead` line carrying the applied total X-Ray holds for it (for example
+   `k,106,0.300,dead`), and `0.000` only when X-Ray holds nothing for the id at all.
+3. The `r` line is unchanged. "Processed" no longer implies that the `dead` line is in that same snapshot; it may
+   come one or more snapshots later. Our 10 s rule (amendment 134) runs from `r` as before: an online kill that never
+   takes effect ends as `KILL not applied` and the mod follows X-Ray.
+   On X-Ray's side an online kill whose creature still reads alive 2.0 s (X-Ray script time) after the call is
+   logged and counted (`kdead_fail`); its line stays the plain line. If the creature reads dead later all the same,
+   the `dead` line is written then.
+4. Older software: a mod without this amendment reads `stale` as a plain line (it never drops by it; harmless). An
+   X-Ray reader without it is kj1's fault. Both sides are pinned anew; no version step.
+
+**Who guards.** X-Ray keeps rule 1 (EnginePerf's reader; their test and mutant). The mod guards it as well: a death
+report closes only on a `dead` line whose creature, in that same snapshot, reads dead (alive 0) or is not listed.
+Dead means X-Ray's alive field alone, on both sides: EnginePerf's rule 1 tests the object's alive state as the
+snapshot is built, and under version 4 our reader takes a creature printed at alive 1 as living whatever its health
+prints (X-Ray lets a creature stand at health 0 or below for a frame; 4 decimals can print 0.0000). The puppet rule
+follows the same reading. A `dead` line beside a living creature line is counted (`dead_beside_alive=N` at the end of
+the `KC end` line), logged once per report (`KC dead line beside a living creature id=… snap=…: not acted on`), and
+nothing is closed, dropped or spawned by it; the same holds for a part-hit line of ours. Nothing is remembered from
+it: a later snapshot needs its own `dead` line. A creature line alone, with no `dead` line, never closes a report
+(as before: X-Ray's own world may have hurt it).
+
+**What changed in the mod** (all inside the kill channel, which runs only under `t2v=4`; with the levers off the
+three witnesses are byte-identical to master 9091e5d's mod): `STR.kcSnap` (the guard, the `stale` word), the
+snapshot reader (`stale` parsed; under version 4 a living creature's health is never read as 0), `STR.kcSum` (the new end-line field).
+
+**The run, kj2.** `scripts/boot_t2.sh kj2`: levers, schedule, stop and env exactly as kj1 in amendment 137 (`hcheal=2
+t2span=4 t2gap=0 t2v=4 t2rec0=1 t2fc=1 kcj=30 kcjs=0.6 kcjt=0.5 t2stop=300 t2end=600`; S from `sim_default_` stalkers
+only; M killed at clock 115 inside EnginePerf's 20 s stop). The stall-kill is the case that failed and is run again.
+EnginePerf's files, checked by the boot script before the claim and again before their runner starts; the hashes
+are FINAL (their message after their review; each recomputed by us on the files; the full ones are in
+`scripts/boot_t2.sh`). New: reader `harness/zz_p1_puppet_kill5.script` c01f0f20… (replaces kill4), runner
+`tools/t2_xray_kj2.sh` f52da5c0… (kj1's runner with the one line that installs the reader changed; checked by diff).
+Unchanged from kj1: `tools/lib_engine_pids.sh` cb183b7b…, `tools/t1_watch_keep.py` 9df9c8e4…, `tools/tb_run.sh`
+1b8d103f…, `tools/run_noguard.sh` 92729abc…, `harness/zz_eperf_dump.script` 2b79a817…, `out/user.ltx.orig`
+3efd38ee…, `run/appdata/savedgames/cordon1.scop` 6dea752b…, `run/bin/Stance14.exe` b4ce9c77…. Their checker, which
+our boot script does not call: `tools/t3_kj2_check.py` cf69899b…. Their runner's changed line has not run on the box
+before this run (their text says so); if it fails, their runner ends before its data and that is the one-retry case.
+
+**Checks** (`tools/kj2_check.py <our run dir> <X-Ray out dir>`; PASS = all nine):
+
+| check | what must hold |
+|---|---|
+| J1 to J8 | exactly as in amendment 137, scored by the registered `tools/kj1_check.py`, unchanged |
+| J9 rule | in every snapshot the mod accepted, X-Ray's rule 1 held and our guard never had to act: the end line says `dead_beside_alive=0` (the field must be there), there is no `KC dead line beside a living creature` line and no stale-word line. The mod reads only the newest snapshot; every kept snapshot is judged by EnginePerf's check 15 |
+
+NO VERDICT: the three reasons of amendment 137, with the same scope. None of them covers J9. One retry for a run
+that dies before its data needs the Overseer's GO.
+
+**Predictions and margins.** J1 to J5, J7, J8: as measured in kj1 (RESULTS), where all of them but J7 passed.
+
+| bound | how derived | predicted | margin |
+|---|---|---|---|
+| J5 confirmed within 2.0 s | COPIED from amendment 137. New component: the `dead` line may come one snapshot after the kill call; snapshot period 0.10 s (kw1, kj1) | about 0.15 s (kj1: 0.04 s, plus one period) | 13 times |
+| J6 confirmed at most 2.5 s after our first accepted snapshot from CONT on | COPIED from amendment 137. New component as J5: in kj1 the creature read dead one snapshot (0.10 s) after the first one | about 0.12 s (kj1: 0.02 s, plus one period) | 20 times |
+| J6 the confirming snapshot shows M dead or unlisted | now also enforced by our guard, so this clause cannot fail alone; what can fail instead is the 2.5 s, `KILL not applied` (J6) or J9 | holds | none: not an independent test |
+| J7 not spawned again | the report stays open, and the id blocked, until the creature reads dead | 0 | exact count |
+| J9 `dead_beside_alive=0` | X-Ray's rule 1, exact count | 0 | exact count |
+
+Unknown and thin, said plainly: how long X-Ray needs between the kill call and the creature reading dead after a
+stop was seen once (one snapshot). If it ever takes more than 10 s of snapshots, the mod gives the kill up by rule.
+J5 and J6's bounds are copied, not derived anew; their new component is 0.10 s against 2.0 and 2.5 s.
+
+**What can fail honestly.** Everything amendment 137 lists (healing too slow, a picked creature leaving, X-Ray slow
+after its stop, no generic stalker). New: X-Ray's reader still writes a `dead` line beside a living creature (J9; our
+guard then keeps the creature from being shown again, so J7 can pass while J9 fails). The kill does not take effect
+within 10 s of snapshots (`KILL not applied`, J6 or J5). Not reachable with EnginePerf's reader as written, named
+all the same: `dead` lines kept up beside a living creature on a part-hit line of ours would leave that line open
+and the creature shown lowered for as long as they last; J9 fails first.
+
+A living creature whose health prints 0.0000 or below is read as 0.00005 and so shows as 0.0001 in our log lines
+(`snap=`, `xray=`).
+
+**Reported, not scored.** As in amendment 137, and: the time from the first snapshot after CONT to the confirmation;
+the number of X-Ray `dead` lines read.
+
+**Self-tests** (all PASS on this tree). `tools/kc_selftest.sh`: 59 mutants; new case 20 (the new order of lines;
+kj1's bytes: `dead` beside a living creature; unlisted; alive for 10 s and given up; no `dead` line; a part-hit
+line; the `stale` word; the end line) with 10 mutants, the reader's parse of `stale` with one, and the alive-field rule with two (one shows the older
+snapshot's rule unchanged).
+`tools/kj2_selftest.py`: the offline loop (the real mod against the stand-in, which now puts a kill into effect one
+snapshot after the call) passes all nine; five mutants of J9; the stand-in as the old reader (`KJ_EARLY=1`) with this
+mod: the guard acts on both deaths, nothing is closed early, only J9 fails; the old reader with kj1's mod (9091e5d):
+kj1's failure is reproduced; the real kj1 run folder fails J6, J7 and J9. `tools/kj1_selftest.py`,
+`tools/kc1_selftest.py`, `tools/kc_feed_selftest.py`: PASS. The offline loop found an error in this change before any
+run (the end line's new field raised a Lua error; no unit test called that function); fixed, and the end line is now
+under test with a mutant. The stand-in is not X-Ray, and the loop does not run the puppet tick's spawn: "not spawned
+again" is tested only by the run (J7) and by the unit test of the block rule.
+
+**Review.** One Opus readiness pass on this change (no paid review): no blocking defect; four findings, all in the
+wording and all taken (the `stale` word does lift the id's block; J9 sees only the snapshots the mod accepted; the
+part-hit case above; the 0.0001 in our log).
