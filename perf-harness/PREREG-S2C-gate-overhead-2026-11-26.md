@@ -99,3 +99,43 @@ Noise: part B's two 30 Hz runs were 7 % apart in sim per tick; the capped arms a
 0ac0fc7897f44fc4; driver s2c_run.sh a2e218c0d93d07cc; s2_series_b.sh 75b2335b52bc662f; s2_bench.sh 072af8edb67eab09;
 SimTick14.exe 93fff4b537711cb38062f432c29551642e36ab852703b191727edb337e858f21. Copies: perf-harness/s2c/.
 Run: `tools/s2c_run.sh` (background). Score once: `python3 -I tools/s2c_score.py out out/s2c_score.txt`. Result: section 6.
+
+## 6. E1 result (run 2026-11-25 19:29 to 19:55 EST, one EXCLUSIVE slice, scored once)
+
+**As registered: NO VERDICT.** Two of the ten runs (s2c_g30u_1, s2c_g30x120_2) were marked "other heavy process
+present" by the bench. The series script excluded them and re-ran both in the same slice, clean (s2c_g30u_1_rr,
+s2c_g30x120_2_rr), as it did in part B. The registered scorer reads only the ten registered names, so it reports the
+two arms as invalid. That is an error in my registration: I reused the series script and did not tell the scorer about
+its re-run rule. Output: `s2c/s2c_score_registered.txt`.
+
+**Not registered, shown next to it: the same scorer, unchanged, on a copy of the run folders where the two excluded
+runs are replaced by their re-runs** (`s2c/s2c_score_rr_substituted.txt`). Whether this counts is the Overseer's call.
+| arm | frames per tick | sim ms per tick (two runs) | E against capped 30 | script self | brain self |
+|---|---|---|---|---|---|
+| stock capped 30 | 1.00 | 4.087 (4.242 / 3.931) | 0 | 1.687 | 0.438 |
+| tick 30, cap 31 | 1.03 | 3.965 (4.003 / 3.927) | -3.0 % | 1.676 | 0.432 |
+| tick 30, cap 60 | 2.00 | 4.092 (4.101 / 4.083) | +0.1 % | 1.733 | 0.445 |
+| tick 30, cap 120 | 3.97 | 4.626 (4.591 / 4.661) | +13.2 % | 2.071 | 0.509 |
+| tick 30, uncapped | 7.20 | 4.923 (4.848 / 4.998) | +20.5 % | 2.262 | 0.558 |
+F (share of the uncapped extra): cap 60 0.01, cap 120 0.65. Verdict by the registered rules on this copy: **H1 RISE**.
+My guess was H1 RISE 45 %: right on the substituted read, and I did not foresee the no-verdict.
+
+What it says, if the substituted read is accepted:
+- The gate itself costs nothing: with one frame per tick the gated tick is as cheap as stock (-3 %, inside the
+  capped arm's own 7.6 % spread).
+- One extra rendered frame between ticks costs nothing either (+0.1 %). The frame-number jump (H2) predicted most of
+  the extra here; it is not there.
+- The extra grows with the number of rendered frames between ticks: +13 % at four, +20.5 % at seven.
+- Part B's +30 % at tick 30 is +20.5 % here against a capped arm measured in the same slice.
+
+Limits:
+- This is a SHAPE, not a cause. "More renders between ticks make the tick slower" fits the render work pushing the
+  update's code and data out of the CPU caches, and it fits anything else that grows with render count. No counter
+  measured caches (perf_event_paranoid is not ours to touch).
+- The capped stock arm's two runs differ by 7.6 % (within the 12 % limit); every E carries that.
+- Uncapped is also the only arm without the frame limiter's wait; cap 120 has it and still shows two thirds of the extra.
+- One machine, one save, 55 s captures.
+
+Consequence for the plan: on a display-capped machine (60 fps, tick 30 or 60) the extra is about zero; it is a cost of
+running the renderer many times per tick, which only fast machines do. E2 (the frame-number lever) is not needed
+on this read. No fix is proposed here.

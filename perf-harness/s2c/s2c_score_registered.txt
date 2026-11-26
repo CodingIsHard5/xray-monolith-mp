@@ -1,0 +1,6 @@
+ARM s2c_c30: frames per tick 1.00; sim 4.087 ms per tick (4.242 / 3.931, spread 7.6 %); script self 1.687; brain self 0.438; updates 1800/1800
+ARM s2c_g30x31: frames per tick 1.03; sim 3.965 ms per tick (4.003 / 3.927, spread 1.9 %); script self 1.676; brain self 0.432; updates 1646/1645
+ARM s2c_g30x60: frames per tick 2.00; sim 4.092 ms per tick (4.101 / 4.083, spread 0.4 %); script self 1.733; brain self 0.445; updates 1650/1650
+INVALID s2c_g30x120_2: conditions not clean
+INVALID s2c_g30u_1: conditions not clean
+S2-C E1: NO VERDICT (s2c_g30x120_2; s2c_g30u_1)

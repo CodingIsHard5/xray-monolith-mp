@@ -1,0 +1,10 @@
+ARM s2c_c30: frames per tick 1.00; sim 4.087 ms per tick (4.242 / 3.931, spread 7.6 %); script self 1.687; brain self 0.438; updates 1800/1800
+ARM s2c_g30x31: frames per tick 1.03; sim 3.965 ms per tick (4.003 / 3.927, spread 1.9 %); script self 1.676; brain self 0.432; updates 1646/1645
+ARM s2c_g30x60: frames per tick 2.00; sim 4.092 ms per tick (4.101 / 4.083, spread 0.4 %); script self 1.733; brain self 0.445; updates 1650/1650
+ARM s2c_g30x120: frames per tick 3.97; sim 4.626 ms per tick (4.591 / 4.661, spread 1.5 %); script self 2.071; brain self 0.509; updates 1665/1662
+ARM s2c_g30u: frames per tick 7.20; sim 4.923 ms per tick (4.848 / 4.998, spread 3.0 %); script self 2.262; brain self 0.558; updates 1661/1674
+reported, script self against capped: x31 -0.6 %, x60 +2.7 %, x120 +22.7 %, u +34.1 %
+reported, brain self against capped: x31 -1.5 %, x60 +1.6 %, x120 +16.2 %, u +27.2 %
+E (sim per tick against capped 30): x31 -3.0 %, x60 +0.1 %, x120 +13.2 %, u +20.5 %
+F (share of the uncapped extra): x31 -0.15, x60 0.01, x120 0.65
+S2-C E1: H1 RISE
