@@ -1,0 +1,38 @@
+# wu2 alife_warmup lever (PREREG-wu2-alife-warmup-DRAFT.md section 3). ONE source for the driver and the scorer.
+# tag|exe|save|warm|frames|slow_ms|arm   arm: on = -alife_warmup, off = stock, prime = disk-cache priming load (not scored)
+# all-lowercase tags (the bench lowercases folder names). 1 prime + 32 scored loads, ABBA blocks: on off off on (x8).
+# Same exe, flags and order as wu1 (warm-up 0, 20000 frames). wu2 changes only where the scorer puts the window: the
+# capture holds the loading frames, the scorer finds the end of loading inside it (prereg 5.1, 5.4).
+wu2_prime|Warm18.exe|cordon1|0|20000|20|prime
+wu2_01_on|Warm18.exe|cordon1|0|20000|20|on
+wu2_02_off|Warm18.exe|cordon1|0|20000|20|off
+wu2_03_off|Warm18.exe|cordon1|0|20000|20|off
+wu2_04_on|Warm18.exe|cordon1|0|20000|20|on
+wu2_05_on|Warm18.exe|cordon1|0|20000|20|on
+wu2_06_off|Warm18.exe|cordon1|0|20000|20|off
+wu2_07_off|Warm18.exe|cordon1|0|20000|20|off
+wu2_08_on|Warm18.exe|cordon1|0|20000|20|on
+wu2_09_on|Warm18.exe|cordon1|0|20000|20|on
+wu2_10_off|Warm18.exe|cordon1|0|20000|20|off
+wu2_11_off|Warm18.exe|cordon1|0|20000|20|off
+wu2_12_on|Warm18.exe|cordon1|0|20000|20|on
+wu2_13_on|Warm18.exe|cordon1|0|20000|20|on
+wu2_14_off|Warm18.exe|cordon1|0|20000|20|off
+wu2_15_off|Warm18.exe|cordon1|0|20000|20|off
+wu2_16_on|Warm18.exe|cordon1|0|20000|20|on
+wu2_17_on|Warm18.exe|cordon1|0|20000|20|on
+wu2_18_off|Warm18.exe|cordon1|0|20000|20|off
+wu2_19_off|Warm18.exe|cordon1|0|20000|20|off
+wu2_20_on|Warm18.exe|cordon1|0|20000|20|on
+wu2_21_on|Warm18.exe|cordon1|0|20000|20|on
+wu2_22_off|Warm18.exe|cordon1|0|20000|20|off
+wu2_23_off|Warm18.exe|cordon1|0|20000|20|off
+wu2_24_on|Warm18.exe|cordon1|0|20000|20|on
+wu2_25_on|Warm18.exe|cordon1|0|20000|20|on
+wu2_26_off|Warm18.exe|cordon1|0|20000|20|off
+wu2_27_off|Warm18.exe|cordon1|0|20000|20|off
+wu2_28_on|Warm18.exe|cordon1|0|20000|20|on
+wu2_29_on|Warm18.exe|cordon1|0|20000|20|on
+wu2_30_off|Warm18.exe|cordon1|0|20000|20|off
+wu2_31_off|Warm18.exe|cordon1|0|20000|20|off
+wu2_32_on|Warm18.exe|cordon1|0|20000|20|on
