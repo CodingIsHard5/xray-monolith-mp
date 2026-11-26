@@ -1,0 +1,12 @@
+# S2 stage 4b slice 1 (PREREG-S2-4b): new build (SimTick16, objects between ticks) against the previous (SimTick15), tick 30 and 60, and off. Mirrored.
+# tag|exe|save|lowend|warm|frames|fixed|cfg   -- all-lowercase tags, as the bench names its folders
+s4b_n30_1|SimTick16.exe|bench1|0|3000|12000|0|sim_tick=30
+s4b_p30_1|SimTick15.exe|bench1|0|3000|12000|0|sim_tick=30
+s4b_p60_1|SimTick15.exe|bench1|0|3000|12000|0|sim_tick=60
+s4b_n60_1|SimTick16.exe|bench1|0|3000|12000|0|sim_tick=60
+s4b_noff_1|SimTick16.exe|bench1|0|3000|12000|0|
+s4b_poff_1|SimTick15.exe|bench1|0|3000|12000|0|
+s4b_n60_2|SimTick16.exe|bench1|0|3000|12000|0|sim_tick=60
+s4b_p60_2|SimTick15.exe|bench1|0|3000|12000|0|sim_tick=60
+s4b_p30_2|SimTick15.exe|bench1|0|3000|12000|0|sim_tick=30
+s4b_n30_2|SimTick16.exe|bench1|0|3000|12000|0|sim_tick=30
