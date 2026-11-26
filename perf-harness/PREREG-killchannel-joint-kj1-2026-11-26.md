@@ -215,7 +215,7 @@ side (files, env, the stop, the death's look, the three shared NO VERDICT reason
 
 **X side, of record: NO VERDICT (checker rc 3). Scored once, registered checker 4b838850…, nothing re-scored.**
 Run: one boot on the Overseer's GO, booted by itrzone. X out dir /home/caden/Projects/ITRZone/out/runs/20261126-152750-t2kj1-xray
-(runner rc 0). Score text: kj1/kj1_xscore.txt, sha256 ac6e2dba…6eea (67 lines), written by the single scoring run.
+(runner rc 0). Score text: kj1/kj1_xscore.txt, sha256 ac6e2dbaf28388f27d6eb57f9100dde3fe8115faf8f190b8129f7ff1626d8eea (67 lines), written by the single scoring run.
 ITR2 side (itrzone's own scoring, theirs to state): FAIL 6 of 8, J6 and J7.
 
 Limits first:
