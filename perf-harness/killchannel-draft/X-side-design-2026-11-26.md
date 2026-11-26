@@ -21,8 +21,10 @@ NOT checked, each needs a test before any registration:
 - `set_health_ex` on every monster class and on stalkers in every state (wounded, in a scripted scene, in a vehicle).
 - What GAMMA's own hit and death callbacks do with a near-zero hit from the actor (pain animation, sounds, "you are
   being shot" reactions, hit markers), and with `kill(actor)` (statistics, goodwill, squad turning hostile).
-- Whether the bridge script's Lua state survives a level change. If it does not, the table below must be carried
-  across a crossing in a file, as the crossing state already is.
+Checked after the first draft: the script's Lua state does NOT survive a level change. The script already carries
+its crossing state (session number, last seq) over in `cross.txt` and reads it back at game start for that reason
+(zz_p1_puppet_lost3.script lines 319 and 585). So the table is written beside it at the crossing request and read
+back at the resume. An X-Ray restart (new run id) does not read it.
 
 ## 1. Reading the report
 - `k,<id>,<total>,<dead>` lines between `p` and `end`, taken only from a complete pose (header seq = footer seq, as
@@ -85,7 +87,7 @@ version must ignore `k` lines by rule.
 | new ITR2 session number | every `applied` set to 0, damage kept, as itrzone proposed. Death confirmations still run out their 10 s |
 | an old pose-v2 or v3 writer | no `k` lines: nothing to do |
 | X-Ray restarts | the table is gone with the script state and the world is the save's; itrzone drops its totals on the new run id. Kills since the last save are undone: a limit to state to Caden |
-| a crossing | ids stay; the table must survive my level change (see "not checked") |
+| a crossing | ids stay; the table is written to a file at the crossing request and read back at the resume. A crossing that fails before the resume leaves the file; it is only read when the run id matches |
 | X-Ray stalled or stopped by the bridge (freeze) | nothing is read; after the stop the newest totals are applied in one step |
 | the creature dies in X-Ray first | confirmed dead; an open total for it is dropped |
 
