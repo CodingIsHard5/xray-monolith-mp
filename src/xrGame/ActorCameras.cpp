@@ -478,6 +478,7 @@ float firstPersonDeathHeadScale = 3.f;
 
 void CActor::cam_Update(float dt, float fFOV)
 {
+	PROF_EVENT("CActor::cam_Update"); // S2 stage 4a: its call count is the outcome the checks read
 	if (m_holder) return;
 
 	// HUD FOV Update
