@@ -1,4 +1,4 @@
-# wu1 alife_warmup lever (PREREG-wu1-alife-warmup-DRAFT.md section 3). ONE source for the driver and the scorer.
+# wu1 alife_warmup lever (PREREG-wu1-alife-warmup-2026-11-26.md section 3). ONE source for the driver and the scorer.
 # tag|exe|save|warm|frames|slow_ms|arm   arm: on = -alife_warmup, off = stock, prime = disk-cache priming load (not scored)
 # all-lowercase tags (the bench lowercases folder names). 1 prime + 32 scored loads, ABBA blocks: on off off on (x8).
 # Revision 2: frames 20000 (was 10000): the 30 s headline window at the 3.0 ms per-frame floor = 60 s = 2x (prereg 5.3).

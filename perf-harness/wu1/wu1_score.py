@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 # wu1 scorer: does the engine lever -alife_warmup remove the slow frames after a level load?
-# (PREREG-wu1-alife-warmup-DRAFT.md). Stdlib only; run with python3 -I. DRAFT, not registered.
+# (PREREG-wu1-alife-warmup-2026-11-26.md). Stdlib only; run with python3 -I. DRAFT, not registered.
 #
 #   python3 -I wu1_score.py root=<folder holding the load folders> order=<wu1_order.txt> out=<new report file>
 #   python3 -I wu1_score.py parse=<xray.log>        (log parser only, prints what it found; used by the self-test)
+#   python3 -I wu1_score.py probe=<out/<prime tag>> order=<wu1_order.txt>   (Revision 3, driver: after the PRIME load,
+#        before any scored load: does the real log hold every line the scorer needs? exit 0 yes, 1 no = stop the series)
+#   python3 -I wu1_score.py check=<out/<tag>> order=<wu1_order.txt>         (Revision 3, driver: after each scored load:
+#        the same per-load rules as scoring; exit 1 = a FAIL or a stop-VOID, the driver stops the series)
 #
 # Order file: "tag|exe|save|warm|frames|slow_ms|arm" per line, '#' = comment; arm on / off / prime (prime is not read).
 # Load folder <root>/<tag>/: perf_frames_<tag>.csv, perf_sites_<tag>.csv, perf_slow_<tag>.csv, conditions.txt, xray.log.
 # Every file is read with CR stripped (engine output is CRLF). A missing, empty or unparsable file is a FAIL, by name.
 # The report is written to out= in this same call; an existing out file is refused, never overwritten.
 # Exit: 0 PASS, 1 FAIL, 3 NO VERDICT, 2 refused (usage, order file, duplicate or uppercase tag, out exists).
+# A load the scorer cannot read (any exception) is a named FAIL; the report is always written (Revision 3).
 # Every rule and constant is the registered one (prereg sections 4-7); nothing is read from the environment.
 import hashlib
+import math
 import os
 import re
 import sys
@@ -50,6 +56,9 @@ SAME_PRICE_S = 1.0        #   and |median ON load - median OFF-IN-LOADING load| 
 SAME_MIN_OFFL = 2
 SLOW_CAP_ROWS = 600 * 14 - 14   # profiler_agg.cpp:42-43, 190: a slow frame is kept only while rows + 14 <= 8400, so a file
                                 #   with more than 8386 rows may have lost slow frames: VOID slow_cap (Revision 2)
+VERDICTS = ("VERDICT: clean", "VERDICT: CONFOUNDED (other heavy process present)",
+            "VERDICT: functional run, timings are not measurements")   # the only three tools/s2_bench.sh:72-74 writes
+STOP_VOIDS = ("framecount", "capture_lines", "stock_loop", "frame_limiter", "threshold_header")   # check=: driver stops
 SAVE_ZONES = ("CALifeStorageManager::save", "CALifeStorageManager::prepare_objects_for_save")
 ARMS = ("on", "off", "prime")
 
@@ -64,6 +73,14 @@ class Bad(Exception):
     def __init__(self, kind, text):
         Exception.__init__(self, "%s: %s" % (kind, text))
         self.kind = kind
+
+
+def num(t):
+    """float that must be finite (Revision 3: inf / nan in a timing field are UNPARSABLE, never a number)."""
+    v = float(t)
+    if on("finite") and not math.isfinite(v):
+        raise ValueError(t)
+    return v
 
 
 def sha(p):
@@ -111,7 +128,7 @@ def read_frames(d, tag):
         try:
             if len(a) != 2 or int(a[0]) != k:
                 raise ValueError
-            v = float(a[1])
+            v = num(a[1])
             if not v >= 0.0:
                 raise ValueError
         except ValueError:
@@ -141,7 +158,7 @@ def read_sites(d, tag):
                 raise ValueError
             c = int(a[3]) + int(a[6])
             cm = int(a[3])
-            float(a[5]); float(a[8])
+            num(a[4]); num(a[5]); num(a[7]); num(a[8])
         except ValueError:
             raise Bad("unparsable", "UNPARSABLE %s row %r" % (p, l))
         t = calls.setdefault(a[0], [0, 0])
@@ -156,7 +173,7 @@ def read_slow(d, tag):
     try:
         if not L[0].startswith("#threshold_ms,"):
             raise ValueError
-        thr = float(L[0].split(",")[1])
+        thr = num(L[0].split(",")[1])
         if len(L) < 2 or L[1] != "frame,frame_ms,thread,self_ms,calls,name,file,line":
             raise ValueError
     except (ValueError, IndexError):
@@ -167,7 +184,7 @@ def read_slow(d, tag):
         try:
             if len(a) != 8 or a[2] not in ("main", "other"):
                 raise ValueError
-            rows.append((int(a[0]), float(a[1]), a[2], float(a[3]), a[5]))
+            rows.append((int(a[0]), num(a[1]), a[2], num(a[3]), a[5]))
         except ValueError:
             raise Bad("unparsable", "UNPARSABLE %s row %r" % (p, l))
     return thr, rows
@@ -175,10 +192,14 @@ def read_slow(d, tag):
 
 def read_verdict(d):
     p = os.path.join(d, "conditions.txt")
-    for l in lines_of(p):
-        if l.startswith("VERDICT"):
-            return l.strip()
-    raise Bad("unparsable", "UNPARSABLE %s has no VERDICT line" % p)
+    v = [l.strip() for l in lines_of(p) if l.startswith("VERDICT")]
+    if not v:
+        raise Bad("unparsable", "UNPARSABLE %s has no VERDICT line" % p)
+    # Revision 3: a VERDICT line the bench never writes (e.g. "VERDICTX: clean"), or more than one, is a named FAIL,
+    # not a not_clean VOID that silently drops the load
+    if on("verdict_form") and (len(v) != 1 or v[0] not in VERDICTS):
+        raise Bad("unparsable", "UNPARSABLE %s VERDICT line(s) %r are not one of the bench's three forms" % (p, v))
+    return v[0]
 
 
 # ---------------- xray.log ----------------
@@ -194,6 +215,24 @@ HANDLED = "* [x-ray]: Handled Necessary Textures Destruction"
 
 def parse_log(path):
     L = lines_of(path)
+    try:
+        return parse_lines(path, L)
+    except ValueError as e:
+        # Revision 3: a field that matches the line's pattern but is not a finite number (e.g. "1..2 ms") is UNPARSABLE
+        # by name, never an exception that ends the scorer without its report
+        if on("log_num"):
+            raise Bad("unparsable", "UNPARSABLE %s line %d %r (not a finite number)" % (path, e.args[1] + 1, e.args[2]))
+        raise
+
+
+def lnum(t, i, l):
+    try:
+        return num(t)
+    except ValueError:
+        raise ValueError(t, i, l)
+
+
+def parse_lines(path, L):
     g = dict(cmd=None, intro=None, handled=None, cap_start={}, cap_fin={}, full=[], held=[], cap=[], passes=[],
              opus=[], slows=[], n_lines=len(L))
     for i, raw in enumerate(L):
@@ -215,7 +254,7 @@ def parse_log(path):
             m = RE_FULL.match(l)
             if m:
                 g["full"].append(dict(i=i, N=int(m.group(1)), M=int(m.group(2)), F=int(m.group(3)), P=int(m.group(4)),
-                                      X=float(m.group(5))))
+                                      X=lnum(m.group(5), i, l)))
                 continue
             m = RE_HELD.match(l)
             if m:
@@ -243,7 +282,7 @@ def parse_log(path):
             m = RE_SLOW.match(l)
             if not m:
                 raise Bad("unparsable", "UNPARSABLE %s line %d %r" % (path, i + 1, l))
-            g["slows"].append(dict(i=i, F=int(m.group(1)), ms=float(m.group(3))))
+            g["slows"].append(dict(i=i, F=int(m.group(1)), ms=lnum(m.group(3), i, l)))
             continue
     if g["cmd"] is None:
         raise Bad("unparsable", "UNPARSABLE %s has no 'command line' line" % path)
@@ -296,9 +335,19 @@ def classify_off(g):
 
 
 def load_time(g, ms):
-    """Prereg 5.4: engine clock (time_global, ms since device init) at the first frame after the loading screen."""
+    """Prereg 5.4: engine clock (time_global, ms since device init) at the first frame after the loading screen.
+    Revision 3 (held frames, device.cpp:131-170 on perf/alife-warmup): End() counts dwPrecacheFrame down by one a frame,
+    except that at 3, while the pass is pending, it does not count down (one held frame each); the frame whose End()
+    finally counts 3 -> 2 prints "precache held K frames" first. So a line read at precache P > 3 is K + P frames before
+    the first frame with precache 0, a line at P <= 2 is P frames before it, and a line at P = 3 can be anywhere in the
+    hold (0..K extra frames): with K > 0 such lines are not used. K = the held line's K (plus a cap line's K)."""
+    K = sum(h["K"] for h in g["held"]) + sum(c["K"] for c in g["cap"])
     pts = [(x["F"], x["T"], x["P"], x["i"]) for x in g["passes"] + g["opus"]]
     pre = [x for x in pts if x[2] > 0]
+    if K and on("held_k"):
+        pre = [(x[0] + (K if x[2] > 3 else 0), x[1], x[2], x[3]) for x in pre if x[2] != 3]
+        if not pre:
+            return None, "precache held %d frames and no measurement line outside the hold (precache > 3 or <= 2)" % K
     if not pre:
         return None, "no measurement line during the loading countdown"
     last = max(pre, key=lambda x: (x[0], x[3]))
@@ -313,8 +362,9 @@ def load_time(g, ms):
     t_end = first[1] - sum(ms[:k])
     if t_end + 1.0 < last[1] or t_end > first[1] + 0.5:
         return None, "inconsistent: %.0f ms not between %d and %d" % (t_end, last[1], first[1])
-    return t_end / 1000.0, "frame0=%d from line at frame %d precache %d; first in-play line frame %d (+%d frames)" % (
-        F0, last[0], last[2], first[0], k)
+    return t_end / 1000.0, "frame0=%d from line at frame %d precache %d%s; first in-play line frame %d (+%d frames)" % (
+        F0, last[0] - (K if K and last[2] > 3 and on("held_k") else 0), last[2],
+        (" + %d held frames" % K) if K and last[2] > 3 and on("held_k") else "", first[0], k)
 
 
 def window(ms, excl, limit):
@@ -380,8 +430,15 @@ def score_load(root, s):
         arm_bad.append("-alife_warmup %s on an %s load" % ("present" if "-alife_warmup" in tok else "absent", s["arm"].upper()))
     if on("arm_cmdline") and arm_bad:
         R["fatal"].append("arm_mismatch: " + "; ".join(arm_bad))
+    # ---- Revision 3: the measurement lines exist at all (a build printing them differently is a FAIL, not OFF-OTHER).
+    # Every Warm18 load prints both: alife_pass on the simulator's first scheduled pass (alife_update_manager.cpp:174-191,
+    # the 10 s log window starts at that pass), alife_opu on the actor's reinit (bind_stalker.script:200 ->
+    # alife_simulator_script.cpp:504-511), both in the profiler build ----
+    if on("measure_lines") and (not g["passes"] or not g["opus"]):
+        R["fatal"].append("no_measure_lines: %d alife_pass and %d alife_opu lines (each must be >= 1 in a Warm18 log)"
+                          % (len(g["passes"]), len(g["opus"])))
     # ---- lever off = stock: no lever line at all ----
-    if s["arm"] == "off" and on("off_not_stock") and (g["full"] or g["held"] or g["cap"]):
+    if s["arm"] in ("off", "prime") and on("off_not_stock") and (g["full"] or g["held"] or g["cap"]):
         R["fatal"].append("off_not_stock: %d [alife_warmup] line(s) in an OFF load" % (
             len(g["full"]) + len(g["held"]) + len(g["cap"])))
     # ---- per ON load: the full pass ran behind the loading screen (prereg 4.1) ----
@@ -409,8 +466,11 @@ def score_load(root, s):
     if (len(ms) != N or nfr != N) and on("framecount"):
         R["void"].append("framecount: frames file %d rows, sites header %d, registered %d" % (len(ms), nfr, N))
     cs, cf = g["cap_start"].get(tag), g["cap_fin"].get(tag)
-    if on("capture_lines") and (cs is None or cf is None or cs[1] != N or cf[1] != N or cs[0] < g["handled"]):
-        R["void"].append("capture_lines: xrprof started/finished lines for '%s' with %d frames after loading not found" % (tag, N))
+    # Revision 3: in log order, textures handled (the end of loading) < capture started < capture finished
+    if on("capture_lines") and (cs is None or cf is None or cs[1] != N or cf[1] != N or cs[0] < g["handled"] or
+                                (on("capture_order") and not g["handled"] < cs[0] < cf[0])):
+        R["void"].append("capture_lines: xrprof started/finished lines for '%s' with %d frames after loading not found"
+                         " (or not in the order loading end < started < finished)" % (tag, N))
     if on("stock_loop"):
         sf = calls.get("Process seqFrame", [0, 0])[0]
         if sf != N:
@@ -429,6 +489,7 @@ def score_load(root, s):
     save_calls = sum(calls.get(z, [0, 0])[1] for z in SAVE_ZONES)
     if on("save_unlocated") and save_calls and not save_frames:
         R["void"].append("save_unlocated: %d save-zone calls in the capture but no slow-frame row names them" % save_calls)
+    R["save_frames"] = save_frames
     excl = set(save_frames) if on("save_exclude") else set()
     R["save"] = ", ".join("#%d %.0f ms" % (i, ms[i]) for i in save_frames) or "none in capture"
     R["w1"] = window(ms, excl, WINDOW_MS)
@@ -446,6 +507,76 @@ def score_load(root, s):
     R["wide"] = sum(1 for p in g["passes"] if p["n"] > WIDE_N)
     R["legacy"] = "%s (max %d alife_slow lines in one frame before intro_start)" % (g["legacy"], g["slow_pre_max"])
     return R
+
+
+def score_safe(root, s):
+    """score_load, but a load the scorer cannot read is a named FAIL (scorer_error), never an exit without the report."""
+    try:
+        return score_load(root, s)
+    except Exception as e:  # noqa: BLE001 - deliberately every exception: the report must always be written
+        return dict(tag=s["tag"], arm=s["arm"], fatal=["scorer_error: %s: %r" % (type(e).__name__, e)], void=[],
+                    notes=[], group=None, why="", lt=None)
+
+
+def read_order(path):
+    """Returns (slots, None) or (None, refusal text)."""
+    try:
+        olines = [l for l in lines_of(path) if not l.lstrip().startswith("#")]
+    except Bad as e:
+        return None, "REFUSED: order file: %s" % e
+    slots, seen = [], set()
+    for l in olines:
+        a = [x.strip() for x in l.split("|")]
+        if len(a) != 7:
+            return None, "REFUSED: order line %r is not tag|exe|save|warm|frames|slow_ms|arm" % l
+        tag, exe, save, warm, frames, slow, arm = a
+        if tag != tag.lower() and on("lowercase"):
+            return None, "REFUSED: tag %s is not lowercase" % tag
+        if arm not in ARMS:
+            return None, "REFUSED: arm %r of %s is not one of %s" % (arm, tag, ", ".join(ARMS))
+        if tag in seen and on("dup_tag"):
+            return None, "REFUSED: tag %s listed twice" % tag
+        seen.add(tag)
+        try:
+            slots.append(dict(tag=tag, exe=exe, save=save, warm=int(warm), frames=int(frames), slow=float(slow), arm=arm))
+        except ValueError:
+            return None, "REFUSED: order line %r has a non-number in warm/frames/slow_ms" % l
+    return slots, None
+
+
+def one_load(folder, order, probe):
+    """probe= / check= modes for the driver (Revision 3). Same rules as scoring (score_load), one load. Exit 0 = go on,
+    1 = stop the series, 2 = refused. check=: stop on any FAIL and on the VOIDs the driver always stopped on
+    (STOP_VOIDS); not on not_clean (the driver counts those), window_short, save_unlocated, slow_cap.
+    probe= (the PRIME load, never scored): also needs every line the scorer reads: a save frame located and the order
+    lines (alife_pass, alife_opu) present; the load time and OFF group are printed, not required."""
+    slots, err = read_order(order)
+    if err:
+        print(err)
+        return 2
+    folder = folder.rstrip("/")
+    tag = os.path.basename(folder)
+    s = next((x for x in slots if x["tag"] == tag), None)
+    if s is None or (s["arm"] == "prime") != probe:
+        print("REFUSED: %s is not %s load in %s" % (tag, "the prime" if probe else "a scored", order))
+        return 2
+    R = score_safe(os.path.dirname(folder) or ".", s)
+    stop = list(R["fatal"]) + [v for v in R["void"] if v.split(":")[0] in STOP_VOIDS]
+    if probe and on("probe_save") and "w1" in R and not R.get("save_frames"):
+        stop.append("no_save_frame: no perf_slow row names %s inside the capture" % " / ".join(SAVE_ZONES))
+    if probe and on("probe_save") and "w1" in R:
+        stop += [v for v in R["void"] if v.split(":")[0] == "save_unlocated"]
+    word = "PROBE" if probe else "CHECK"
+    for r in stop:
+        print("%s STOP %s %s" % (word, tag, r))
+    for r in R["void"]:
+        if r not in stop:
+            print("%s note %s %s" % (word, tag, r))
+    if "w1" in R:
+        print("%s info %s group=%s save=%s load=%s s (%s)" % (word, tag, R["group"], R["save"], fmt(R["lt"], "%.2f"),
+                                                         R["lt_why"]))
+    print("%s %s %s" % (word, tag, "FAIL" if stop else "ok"))
+    return 1 if stop else 0
 
 
 def fmt(v, f="%.1f"):
@@ -466,40 +597,21 @@ def main(argv):
                  g["slow_any_max"], len(g["slows"]), len(g["passes"]), len(g["opus"]), len(g["full"]),
                  len(g["held"]), len(g["cap"])))
         return 0
+    for mode in ("probe", "check"):
+        if set(args) == {mode, "order"} and len(argv) == 2:
+            return one_load(args[mode], args["order"], mode == "probe")
     if set(args) != {"root", "order", "out"} or len(argv) != 3:
-        print("usage: python3 -I wu1_score.py root=<dir> order=<order file> out=<new file>   |   parse=<xray.log>")
+        print("usage: python3 -I wu1_score.py root=<dir> order=<order file> out=<new file>   |   parse=<xray.log>   |   "
+              "probe=<prime load folder> order=<order file>   |   check=<load folder> order=<order file>")
         return 2
     out = args["out"]
     if os.path.exists(out) and on("refuse_out"):
         print("REFUSED: %s exists, not overwriting" % out)
         return 2
-    try:
-        olines = [l for l in lines_of(args["order"]) if not l.lstrip().startswith("#")]
-    except Bad as e:
-        print("REFUSED: order file: %s" % e)
+    slots, err = read_order(args["order"])
+    if err:
+        print(err)
         return 2
-    slots, seen = [], set()
-    for l in olines:
-        a = [x.strip() for x in l.split("|")]
-        if len(a) != 7:
-            print("REFUSED: order line %r is not tag|exe|save|warm|frames|slow_ms|arm" % l)
-            return 2
-        tag, exe, save, warm, frames, slow, arm = a
-        if tag != tag.lower() and on("lowercase"):
-            print("REFUSED: tag %s is not lowercase" % tag)
-            return 2
-        if arm not in ARMS:
-            print("REFUSED: arm %r of %s is not one of %s" % (arm, tag, ", ".join(ARMS)))
-            return 2
-        if tag in seen and on("dup_tag"):
-            print("REFUSED: tag %s listed twice" % tag)
-            return 2
-        seen.add(tag)
-        try:
-            slots.append(dict(tag=tag, exe=exe, save=save, warm=int(warm), frames=int(frames), slow=float(slow), arm=arm))
-        except ValueError:
-            print("REFUSED: order line %r has a non-number in warm/frames/slow_ms" % l)
-            return 2
     if not any(s["arm"] == "on" for s in slots) or not any(s["arm"] == "off" for s in slots):
         print("REFUSED: the order file needs both on and off loads")
         return 2
@@ -519,7 +631,7 @@ def main(argv):
         if s["arm"] == "prime":
             P("LOAD %s prime: not scored" % s["tag"])
             continue
-        R = score_load(args["root"], s)
+        R = score_safe(args["root"], s)
         loads.append(R)
         state = "FAIL" if R["fatal"] else ("VOID" if R["void"] else "VALID")
         reasons = [r.split(":")[0] for r in R["fatal"] + R["void"]]

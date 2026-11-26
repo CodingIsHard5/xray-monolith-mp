@@ -15,6 +15,13 @@ reported beside the headline, deciding nothing. Every number that depends on the
 5.3, 6, 6.1 and 9, each labelled MEASURED / DESK / GUESS. Arms, grouping rule, lever checks, exe, flags other than the
 frame count, verdict structure and exit codes are unchanged.
 
+**Revision 3 (2026-11-26, review fixes; NOTES "Revision 3").** Unchanged: arms, load count, windows, H1-H3 bounds,
+exit codes, every NO VERDICT rule except that a held-frame load time can now be unmeasurable (5.4). Added: a PROBE of
+the prime load's real log before any scored load (8; a failed probe ends the attempt with no verdict); FAIL
+`no_measure_lines` (4.3); a malformed bench VERDICT line, a non-finite or unconvertible number and any scorer exception
+are named FAILs (4.3); capture markers must be in the order loading end < started < finished (4.3); the driver's
+per-load check is the scorer's own (8). Wording: the converted hitch and train times are estimates at their low end (6).
+
 ## 0. Limits first
 - One box (Ryzen 9800X3D, Wine + DXVK, headless Xvfb 1280x720), no Present (`-perf_nopresent`), no input
   (`-perf_noinput`), uncapped frame rate. Nothing about the 2012 reference machine, native Windows, vsync or 4 cores.
@@ -42,7 +49,17 @@ frame count, verdict structure and exit codes are unchanged.
 - The load time is measured on the engine's own clock from device start-up (section 5.4), not from process start: it
   misses Wine start-up and file-system init, which the lever cannot touch.
 - Fixtures: the scorer has only been run on made data and on real logs that predate the alife_pass / alife_opu lines.
-  The first real Warm18 log is the first test of those parsers on real bytes.
+  The first real Warm18 log is the first test of those parsers on real bytes. Revision 3: that first log is the PRIME
+  load's, and the driver PROBES it (section 8) before any scored load: if a line the scorer needs is missing or not
+  parsed, the series stops with no verdict and nothing consumed. The probe cannot catch a format drift that shows only
+  in later loads, nor a line that parses but means something else.
+- Revision 3: a load with NO alife_pass line or NO alife_opu line at all is a FAIL `no_measure_lines`, not OFF-OTHER
+  (a build that prints them differently must not quietly turn stock loads into "other"). Both are guaranteed in every
+  Warm18 load by the code (DESK, perf/alife-warmup d77d70b5c): alife_pass on the simulator's first scheduled pass
+  (alife_update_manager.cpp:174-191: the 10 s log window starts AT that pass, so it always prints); alife_opu on the
+  actor's reinit (stock bind_stalker.script:200 `set_objects_per_update(65534)` -> alife_simulator_script.cpp:504-511,
+  not windowed). The alife_opu guarantee rests on a stock SCRIPT (no loose override of bind_stalker.script in
+  run/gamedata/scripts; a mod archive was not checked): if a mod removed that call, every load would FAIL by name.
 
 ## 1. Question
 On cordon1 in real time, with the lever ON (`-alife_warmup`) against lever OFF (stock), in ABBA order:
@@ -158,6 +175,13 @@ cp3, uc1, lc1-3, cpl1 P (self-test cases real_parse_*).
   `window_short` (capture shorter than the 30 s headline window; Revision 2, was 15 s), `save_unlocated` (save calls in
   the capture but no slow row names them), `slow_cap` (Revision 2: perf_slow has more than 8386 rows, so the profiler's
   600-frame slow dump may be full and a save frame may be missing from it; 5.3).
+- Revision 3, **FAIL**: `no_measure_lines` (no alife_pass line or no alife_opu line at all in the log; section 0);
+  `unparsable` also covers a conditions.txt whose VERDICT line is not exactly one of the bench's three forms
+  (s2_bench.sh:72-74; or more than one VERDICT line), any inf / nan in a frame time, site time, slow threshold or slow
+  row, and a log field that matches its pattern but is not a finite number (e.g. `1..2 ms`); `scorer_error` (any other
+  exception while reading a load: named, and the report is still written). Revision 3, VOID `capture_lines` also when
+  the markers are out of order: required "Handled Necessary Textures Destruction" < capture started < capture finished
+  (log line order), each with the registered tag and frame count.
 
 ## 5. Measures in player units
 ### 5.1 The capture starts at the end of loading (code)
@@ -208,7 +232,16 @@ on request, log.cpp:244-257), so a driver watching the file cannot time intro_st
 TimerGlobal ms since device init, Device_Initialize.cpp:40; real time, device.cpp:1110-1113) at the first frame after the
 loading screen, from the measurement lines:
 F0 = F + P of the LAST alife_pass/alife_opu line with precache P > 0 (the countdown loses 1 per frame: F0 is the first
-frame with precache 0; +-1 frame if the A-Life thread read P after End() in that frame); then the first such line with
+frame with precache 0; +-1 frame if the A-Life thread read P after End() in that frame).
+**Revision 3, held frames (ON loads with `precache held K frames`, K > 0).** Code (device.cpp:131-170 on
+perf/alife-warmup): End() counts the precache down by one each frame, except at 3 while the pass is pending (one held
+frame per End(), up to 300); the End() that finally counts 3 -> 2 prints the held line first. The held line has no
+frame number, and a line read at P = 3 may lie anywhere in the hold (0..K frames before its end; the A-Life thread's
+claim and the main thread's End() race by a frame). So: a line with P > 3 gives F0 = F + P + K, a line with P <= 2
+gives F0 = F + P, a line with P = 3 is NOT used when K > 0 (K = the held line's K, plus a cap line's K). If no line is
+left, that load's load time is unmeasurable (named), which counts toward NO VERDICT `loadtime` (7.2). Without this rule
+an ON load whose last loading line is at P = 3 early in the hold put F0 up to K frames early and understated the price
+(self-test l_held_ok: K = 12, the old rule gives 60 ms less). Then the first such line with
 P = 0 and frame F1 >= F0 gives load time = T(F1) - sum(ms[0 .. F1-F0-1]). It must lie between the T of the two lines,
 else the load's load time is "unmeasurable" (named). Error: about one frame (5-30 ms). It misses process start ->
 device init (Wine start, FS init: identical in both arms, the lever is not armed before the simulator exists).
@@ -229,7 +262,7 @@ X ms and held frames.
 ## 6. Constants, each with its derivation (all derived for wu1; none copied from another arm's bound)
 | constant | value | derivation |
 |---|---|---|
-| WINDOW (headline) | **30 s** (Revision 2, was 15 s) | DESK from MEASURED, re-derived for Revision 2 from the 14 in-play fixed-step captures with frame files (cp1, cp3, lc1-3, uc1, r1a_cor_1-3, r1a_cor_k0_1, r1_cor_f2-3, r1_cor_k1, r1_cor_k1_rr). Hitch = capture frame k_h 99-122 (MEASURED); its time after loading C = W + 33 ms x k_h (time_global moves 33 ms a fixed-step frame, device.cpp:1063-1074; it is wall time in the 600 real-time warm-up frames). W is bounded below by 600 x the capture's mean frame (no save cost) and above by the mcm_log "Time continual is:" wall stamps (mcm_log.script:201-207, dwTimeContinual = TimerMM, device.cpp:1050) from before intro_start to after the capture start. Result: **hitch 6.5-7.8 s** after loading (the earlier 7.4-8.6 s was an estimate of W; the stamps put it lower); the train's passes follow 14 frames (462 ms) apart from hitch + 2.8 s to hitch + 14.8 s; the last frame > 20 ms inside 30 s lies at 20.8-22.1 s (12 of 14), with a non-train straggler at 25.6-28.3 s in 2. So 30 s holds the hitch (3.8x) and the whole train (1.36x on its end, UNDER 2x: flagged in 6.1). The supervisor's ~15 s is kept as a reported-only window |
+| WINDOW (headline) | **30 s** (Revision 2, was 15 s) | DESK from MEASURED, re-derived for Revision 2 from the 14 in-play fixed-step captures with frame files (cp1, cp3, lc1-3, uc1, r1a_cor_1-3, r1a_cor_k0_1, r1_cor_f2-3, r1_cor_k1, r1_cor_k1_rr). Hitch = capture frame k_h 99-122 (MEASURED); its time after loading C = W + 33 ms x k_h (time_global moves 33 ms a fixed-step frame, device.cpp:1063-1074; it is wall time in the 600 real-time warm-up frames). W is bounded ABOVE by the mcm_log "Time continual is:" wall stamps (mcm_log.script:201-207, dwTimeContinual = TimerMM, device.cpp:1050) from before intro_start to after the capture start (a real bound: the stamps span more than the warm-up). Its low end, 600 x the capture's mean frame, is an ESTIMATE, not a bound (Revision 3, review: the mean frame of the later capture does not bound the 600 warm-up frames, which could be faster). Result: **hitch at most 7.8 s** after loading (bound), estimated from 6.5 s (the earlier 7.4-8.6 s was an estimate of W; the stamps put it lower); the train's passes follow 14 frames (462 ms) apart from hitch + 2.8 s to hitch + 14.8 s; the last frame > 20 ms inside 30 s lies at most at 22.1 s, estimated from 20.8 s (12 of 14), with a non-train straggler at most at 28.3 s, estimated from 25.6 s, in 2. So 30 s holds the hitch (3.8x on the bound) and the whole train (1.36x on the bound of its end, UNDER 2x: flagged in 6.1). Only the upper ends decide whether 30 s holds them; the lower ends (estimates) decide nothing registered. The supervisor's ~15 s is kept as a reported-only window |
 | SLOW1 / SLOW2 | 20 / 33.3 ms | supervisor; 33.3 ms = one frame at 30 fps |
 | LEGACY_WIDE | 50 lines in one frame | 20-per-pass can log at most 20 lines per pass; in-play logs peak at 16-19, wide passes log 128-185 (DESK, 22 logs). 50 is 2.6x above 19 and 2.6x below 128 |
 | WIDE | n > 20 | stock limits are 3 (alife.ltx) and 20 (script reset); n <= limit (CUpdatePredicate) |
@@ -255,8 +288,8 @@ X ms and held frames.
 | item | expected | bound | margin | label / status |
 |---|---|---|---|---|
 | valid OFF-IN-PLAY loads | ~11 of 16 (p 0.68) | >= 3 | 3.7x | DESK (3.2); unchanged |
-| stock hitch time after loading | 6.5-7.8 s | inside 30 s | 3.8-4.6x | DESK from MEASURED (6, WINDOW) |
-| stock train end (last frame > 20 ms) | 20.8-22.1 s (12 of 14); stragglers to 28.3 s (2 of 14) | inside 30 s | 1.36-1.44x (1.06x for the straggler) | DESK from MEASURED; **UNDER 2x**: a train ending late loses frames from n20; backed by no_stock_train (7 of 16-19) |
+| stock hitch time after loading | at most 7.8 s (bound); from about 6.5 s (ESTIMATE, Revision 3) | inside 30 s | 3.8x on the bound (4.6x on the estimate) | DESK from MEASURED (6, WINDOW); the low end is an estimate, the margin rests on the bound |
+| stock train end (last frame > 20 ms) | at most 22.1 s (bound), from about 20.8 s (ESTIMATE) (12 of 14); stragglers at most 28.3 s (2 of 14) | inside 30 s | 1.36x on the bound (1.44x on the estimate; 1.06x for the straggler) | DESK from MEASURED; **UNDER 2x**: a train ending late loses frames from n20; backed by no_stock_train (7 of 16-19) |
 | median OFF-IN-PLAY worst (30 s) | 293-361 ms, median 323 (MEASURED captures) | >= 150 ms | 1.95-2.4x | MEASURED; **UNDER 2x at the low end** (293/150) |
 | median OFF-IN-PLAY n20 (30 s) | 16-19, median 17 | >= 7 (STOCK_TRAIN_MIN) | 2.3-2.7x | DESK from MEASURED; at a 25 ms cut 11-18 (1.6x): flagged if real-time frames run much faster |
 | H1 ON worst vs 0.5 x in-play | 13-23 ms after 3 s (MEASURED in-loading captures) + first 3-4 s (GUESS 20-80 ms) vs ~160 ms | <= 0.5 x | 2.0-7x (12x on the MEASURED part) | **UNDER 2x at the high GUESS (80 ms)**; unchanged by the window except that 30 s also holds 15 s more of ordinary play (MEASURED quiet: in-loading worst 13-23 ms) |
@@ -282,10 +315,11 @@ X ms and held frames.
 
 ## 7. Verdict rules (implemented exactly in wu1_score.py)
 1. **FAIL** (exit 1) if any scored load has: a missing/empty/unparsable file (named), arm_mismatch, off_not_stock, or any
-   ON lever check L1-L5 failing. A failing ON load is never dropped.
+   ON lever check L1-L5 failing; Revision 3: or no_measure_lines, or scorer_error (4.3). A failing ON load is never dropped.
 2. Else **NO VERDICT** (exit 3) if any of: `few_on` (< 8 valid ON), `few_inplay` (< 3 valid OFF-IN-PLAY),
    `no_stock_hitch` (median OFF-IN-PLAY worst < 150 ms), `no_stock_train` (median OFF-IN-PLAY n20 < 7),
-   `stock_orders_alike` (6), `loadtime` (load time measurable in < 8 ON or < 3 OFF-IN-PLAY). All that apply are listed.
+   `stock_orders_alike` (6), `loadtime` (load time measurable in < 8 ON or < 3 OFF-IN-PLAY; Revision 3: an ON load with
+   held frames and no measurement line outside the hold is not measurable, 5.4). All that apply are listed.
 3. Else **PASS** (exit 0) if all of (worst and n20 in the 30 s headline window):
    - H1: median ON worst <= 0.5 x median OFF-IN-PLAY worst, and at most 1 ON load has worst >= median OFF-IN-PLAY worst;
    - H2: median OFF-IN-PLAY n20 - median ON n20 >= 7;
@@ -300,11 +334,16 @@ order" comparison. The groups are never pooled; a self-test mutant that pools th
 ## 8. Scorer, self-test, driver
 `wu1_score.py` (stdlib, `python3 -I`), `wu1_selftest.sh`, `wu1_run.sh` (bash -n only), `wu1_order.txt`; hashes in
 NOTES.md and in the final message (they are pinned into the driver at registration; until then the driver refuses).
+Self-test 2026-11-26 Revision 3: SEE NOTES "Revision 3" for the current line and folder (it adds the review fixes,
+each with a case that fails without it: VERDICT form, inf/nan and `1..2` numbers, capture order, no_measure_lines,
+held-frame load time (K = 12), the probe and check modes, slow-dump cutoff at 8386 (VALID) / 8387 and 8400 (VOID, the
+largest the profiler can write) with constant mutants 8400 and 8385, and a find-error check of the untouched test).
 Self-test 2026-11-26 Revision 2: `WU1 SELFTEST PASS 118/118 (11 real cases, 61 made cases, 36 hook mutants caught, 8 constant mutants caught, 1 hook-coverage check, 1 untouched check)` (folder selftest-runs/20261126-170026-3025479). (First draft: 101/101.) Revision 2 added: made
 in-play loads shaped from the real captures (hitch at 7 s; 16 of 27 passes over 20 ms, from 9.8 s to 21.1 s: 17 frames
 > 20 ms in 30 s, 3 in 15 s), FR 7000 frames per made load (~35 s), edge cases on both sides of every changed bound
 (n20 6/7 for STOCK_TRAIN_MIN, drop 6/7 for H2 and for stock_orders_alike, a hitch at 20 s (in) and 31 s (out) for
-the window, capture 21 s for window_short, 8414 slow rows for slow_cap), a hook mutant for slow_cap and 8 constant
+the window, capture 21 s for window_short, 8414 slow rows for slow_cap (Revision 3: replaced, 8414 cannot be written
+by the profiler; now 8386 / 8387 / 8400)), a hook mutant for slow_cap and 8 constant
 mutants (window 15 s, windows swapped, window 45 s, STOCK_TRAIN_MIN 6 and 8, N20_DROP 6 and 8, SLOW_CAP_ROWS raised),
 each caught. Real: the log parser on 9 real Cordon logs (CRLF), 4 real run folders scored as loads
 (wrong exe, fixed step, missing slow file: FAIL by name), made loads spliced into 4 real logs (real alife_slow lines,
@@ -313,10 +352,28 @@ switched off one at a time (35 hooks, including "the two OFF groups pooled" and 
 the self-test also fails if a hook has no mutant.
 Score ONCE after the series, output written in the same call:
 `python3 -I wt-render-split/perf-harness/wu1/wu1_score.py root=out order=wt-render-split/perf-harness/wu1/wu1_order.txt out=out/wu1_state/wu1_score.txt`
-Driver: hash preflight (PIN_ME placeholders refuse until registration), display :141 rule, user.ltx read-only check
-(r__framelimit 0, no sim_tick, no alife_warmup), claim / renewal / release decided by EXIT CODE only (fixes sf1's
-output match: quiet-required.sh header "THE EXIT CODE IS THE API. DO NOT PARSE THE OUTPUT"), after every load the
-same checks as 4.1-4.3 in bash, stop on crash / timeout / failed check / refused renewal / third CONFOUNDED load; no retry.
+Driver: hash preflight (PIN_ME placeholders refuse until registration; the first order line must be the prime load),
+display :141 rule, user.ltx read-only check (r__framelimit 0, no sim_tick, no alife_warmup), state folder created and
+writable BEFORE the queue is joined (else refused), the cleanup trap installed before the first queue operation
+(withdraws WANT; releases only a claim this invocation acquired), claim / renewal / release decided by EXIT CODE only
+(fixes sf1's output match: quiet-required.sh header "THE EXIT CODE IS THE API. DO NOT PARSE THE OUTPUT"); stop on
+crash / timeout / failed check / refused renewal / third CONFOUNDED load / failed write of done.txt; no retry.
+- **Probe (Revision 3, registered).** After the PRIME load and before the first scored load the driver runs
+  `python3 -I wu1_score.py probe=out/wu1_prime order=wu1_order.txt` (exit 0 / 1). It applies every per-load rule of
+  this prereg to the prime load's REAL log and files, and also requires a located save frame: files parse, command line
+  = the registered (OFF) arm, intro_start / textures-handled lines, xrprof started / finished in order with the tag and
+  frame count, at least one alife_pass and one alife_opu line, frame / stock-loop / limiter / threshold checks, a save
+  frame located. **A failed probe ends the attempt with NO verdict:** the series stops before any scored load, the
+  claim is released, the series is NOT scored and nothing is consumed (the prime load is never scored). Another
+  attempt needs the supervisor's word. The same holds for any stop before the probe has passed (no scored load ran).
+  The driver refuses to start a scored load without a passed probe.
+- **Per-load check (Revision 3).** After every scored load: `python3 -I wu1_score.py check=out/<tag>
+  order=wu1_order.txt`, the scorer's own rules for that one load (replaces the bash copy). Stop on any FAIL (missing /
+  unparsable file, arm_mismatch: exe, save, -perf_capture, lever flag present/absent, -perf_fixed_dt / -det_mode /
+  -sim_tick; off_not_stock, L1-L5, no_measure_lines) and on VOID framecount / capture_lines / stock_loop /
+  frame_limiter / threshold_header; not on not_clean (counted, stop at the third), window_short, save_unlocated or
+  slow_cap (VOIDs the scorer handles). tools/s2_bench.sh returns rc 0 for a completed CONFOUNDED capture (RC set only
+  by its capture loop, lines 57-64; the VERDICT is written after, 72-74), so such a load reaches the counter.
 
 ## 9. Predictions (registered; GUESS unless marked)
 | # | prediction | P |

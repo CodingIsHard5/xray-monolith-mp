@@ -174,3 +174,47 @@ structure, exit codes, the scripted-save exclusion rule.
    scratchpad was touched.
 10. **Superseded in this file:** 1.6 ("15 s window"), 2.5 ("N = 10 000"), 2.10 ("15 s window"). Their Revision 2
     values are above and in the prereg.
+
+## Revision 3: review fixes (2026-11-26)
+**No registered bound was found wrong.** (P1: the converted hitch / train times' LOW ends are estimates, not bounds;
+only the upper ends, from the mcm_log wall stamps, decide whether 30 s holds them, and those are real bounds. Wording
+changed in prereg 6 and 6.1; no number changed.) Unchanged: arms, load count, windows, H1-H3 bounds, exit codes; NO
+VERDICT rules except that a held-frame ON load can now be "load time unmeasurable" (counts toward `loadtime`).
+Triage of every review point: coderabbit-triage-2026-11-26.md (14 first-review findings, 2 from a second review of
+these changes, all fixed or answered).
+
+1. **Scorer.** VERDICT line must be exactly one of the bench's three forms (S1); inf / nan / `1..2` in any timing
+   field are named UNPARSABLE, and any other exception per load is FAIL `scorer_error`, so the report is always
+   written (S2); capture markers must be in order textures-handled < started < finished (S3); held-frame load time
+   (S4, below); FAIL `no_measure_lines` (S5, below); new modes `probe=` and `check=` for the driver.
+2. **S4, from the code** (device.cpp:131-170, alife_update_manager.cpp:158-200 on perf/alife-warmup d77d70b5c):
+   End() counts dwPrecacheFrame down once a frame except at 3 while the pass is pending (hold); the End() that counts
+   3 -> 2 prints `precache held K frames` first. The claim (1 -> 0) is in update() at the start of the pass, on the
+   A-Life thread or inline, so whether the claim frame's own End() still holds is a one-frame race, and the held line
+   carries no frame number. Exact from the log: a line at P > 3 is K + P frames before frame 0, a line at P <= 2 is
+   P frames before it, a line at P = 3 is ambiguous by up to K and is not used when K > 0. If no line is left:
+   unmeasurable. The old rule could put frame 0 up to K frames early when the last loading line is at P = 3 early in
+   the hold (possible when the full pass falls outside the 10 s alife_pass log window, so only an alife_opu line at
+   P = 3 is logged): fixture l_held_ok, K = 12, reads 33.00 s; the old rule (mutant held_k) 32.94 s.
+3. **S5, from the code:** every Warm18 load prints at least one alife_pass (the log window starts AT the first
+   scheduled pass, alife_update_manager.cpp:174-191) and at least one alife_opu (stock bind_stalker.script:200, actor
+   reinit, set_objects_per_update(65534) -> alife_simulator_script.cpp:504-511, not windowed). The second rests on a
+   script: no loose bind_stalker.script in run/gamedata/scripts; mod archives not checked. Rule applied to both.
+4. **Driver.** D1: probe of the prime load before any scored load; failed = series stops, NOT scored, nothing
+   consumed, supervisor's word needed; no scored load can start without a passed probe; the first order line must be
+   the prime. D2: tools/s2_bench.sh sets RC only in its capture loop (57-64) and writes the VERDICT after (72-74):
+   a completed CONFOUNDED capture exits 0 and reaches the driver's counter, as registered; no code change. D3: the
+   per-load check is the scorer's check= (replaces the awk copy; stops on any FAIL and on VOID framecount /
+   capture_lines / stock_loop / frame_limiter / threshold_header). D4: trap before the queue; WANT withdrawn; release
+   only if CLAIMED=1; TERM during the claim deferred until CLAIMED is set. D5: state folder, done.txt and series.log
+   created before the queue or REFUSED; failed append to done.txt or write of check_<tag>.txt stops by name.
+   bash -n only, never run.
+5. **Self-test** `WU1 SELFTEST PASS 164/164 (11 real cases, 98 made cases, 43 hook mutants caught, 9 constant mutants
+   caught, 1 hook-coverage check, 1 find-error check, 1 untouched check)`, folder
+   selftest-runs/20261126-172535-3385389. New: 7 hooks (finite, verdict_form, log_num, held_k, capture_order,
+   measure_lines, probe_save), each caught; T1 find-error check; T2 slow-dump fixtures 8386 (VALID), 8387 and 8400
+   (VOID) with constant mutants 8400 and 8385 (replacing 8414, which the profiler cannot write); probe and check cases.
+   The old `lever held` fixture had held lines on a stock countdown; it now follows the engine's order.
+6. **Disk:** two self-test folders of 37 MB each added (selftest-runs now 286 MB); nothing deleted.
+7. **Superseded:** Revision 2 item 1 "lower bound 600 x the capture's mean frame" (an estimate); prereg 8's "after
+   every load the same checks in bash".

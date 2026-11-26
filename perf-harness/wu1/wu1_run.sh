@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# DRAFT - NOT RUN, NOT REGISTERED (only `bash -n` checked). wu1 driver (PREREG-wu1-alife-warmup-DRAFT.md section 7).
+# NOT YET RUN (only `bash -n` checked); pins filled at registration. wu1 driver (PREREG-wu1-alife-warmup-2026-11-26.md section 7).
 #   wt-render-split/perf-harness/wu1/wu1_run.sh [--preflight-only]
 # 33 EXCLUSIVE loads (1 prime + 16 lever ON + 16 lever OFF, ABBA) in ONE WANT slice (at most 3 h), in the order of
 # wu1_order.txt (one source with the scorer): Warm18.exe, cordon1, real time (BENCH_FIXED=0), uncapped, capture from the
@@ -8,10 +8,15 @@
 # Box rules: hash preflight of every pinned file (missing = refused by name; PIN_ME_* = refused until registered);
 # display :141 refused if /tmp/.X11-unix/X141 or /tmp/.X141-lock exists (preflight, slice grant, before every load);
 # claim/renew/release decided by EXIT CODE ONLY (quiet-required.sh header: "THE EXIT CODE IS THE API. DO NOT PARSE THE
-# OUTPUT"); out folders must be new. STOP on: bench rc != 0 (crash, timeout, no capture), any failed check after a load
-# (files, frames, stock loop, limiter, slow threshold, command line, lever log check), a refused claim renewal, the third
-# CONFOUNDED load, display not free, settings not stock, settle cap, < 15 min left, protected title, Roblox, Caden's
-# launcher. NO RETRY: a load is never run twice; a stopped series is not resumed without a new GO.
+# OUTPUT"); out folders must be new. STOP on: bench rc != 0 (crash, timeout, no capture), a failed PROBE of the prime
+# load (Revision 3: before any scored load; the series is then not scored, nothing is consumed, and another attempt
+# needs the supervisor's word), any failed check after a load (Revision 3: the scorer's own check= mode, one source of
+# rules: files, frames, stock loop, limiter, slow threshold, capture markers in order, command line = registered arm,
+# lever log checks, measurement lines), a refused claim renewal, the third CONFOUNDED load (tools/s2_bench.sh returns
+# rc 0 for a completed CONFOUNDED capture: RC is set only by the capture loop, lines 57-64, the VERDICT is written
+# after, 72-74, so such a load reaches the counter), display not free, settings not stock, settle cap, < 15 min left,
+# protected title, Roblox, Caden's launcher, a failed write of the state folder. NO RETRY: a load is never run twice; a
+# stopped series is not resumed without a new GO.
 # Not scored here. Score ONCE afterwards, output written in the same call:
 #   python3 -I wt-render-split/perf-harness/wu1/wu1_score.py root=out order=wt-render-split/perf-harness/wu1/wu1_order.txt out=out/wu1_state/wu1_score.txt
 set -u
@@ -35,9 +40,9 @@ pin tools/run_noguard.sh                 92729abc420784053cee4b1b1832f5d112f7497
 pin run/bin/$EXE                         $EXE_SHA || bad=1
 pin run/appdata/savedgames/cordon1.scop  6dea752bc652a45c748e1438e3bc8ffd2d8d89f24730177c792328aeb5d13f3e || bad=1
 pin run/appdata/savedgames/cordon1.scoc  a9f9a8a91b034de28a49be7f8029d823d057e46b4445f3f94d7255dbc77b0b6b || bad=1
-pin $ORDER                               PIN_ME_ORDER    || bad=1
-pin $WU/wu1_score.py                     PIN_ME_SCORER   || bad=1
-pin $WU/wu1_selftest.sh                  PIN_ME_SELFTEST || bad=1
+pin $ORDER                               66b38e7e1606fbb2aaec2c9626ffb119301196f5faf27c129f608c9ae0e8bfa7 || bad=1
+pin $WU/wu1_score.py                     54532b9521045bcddb8925dea63a1d5b203f0259c3eaf5537a062307df2145c1 || bad=1
+pin $WU/wu1_selftest.sh                  536bbde2809b0d26c59c7879c91f87872d653512e94d7cddfd1d26a8de9bd1ca || bad=1
 DISP=${BENCH_DISPLAY:-:141}
 [ "$DISP" = ":141" ] || { echo "REFUSED: BENCH_DISPLAY '$DISP' is not :141 (this experiment's own display)"; bad=1; }
 disp_free() {   # refuses a display that exists or left a lock (tools/t3_kw1.sh)
@@ -62,6 +67,7 @@ lines=$(grep -v '^#' "$ORDER" 2>/dev/null | grep .)
 [ "$(echo "$lines" | grep -c .)" = $NLOADS ] || { echo "REFUSED: $ORDER does not list $NLOADS loads"; bad=1; }
 [ "$(echo "$lines" | grep -c '|on$')" = $NON ] && [ "$(echo "$lines" | grep -c '|off$')" = $NOFF ] && \
   [ "$(echo "$lines" | grep -c '|prime$')" = 1 ] || { echo "REFUSED: $ORDER is not 1 prime + $NON on + $NOFF off"; bad=1; }
+[ "$(echo "$lines" | head -1 | cut -d'|' -f7)" = prime ] || { echo "REFUSED: the first load of $ORDER is not the prime load"; bad=1; }
 echo "$lines" | awk -F'|' -v e=$EXE 'NF!=7 || $2!=e || $3!="cordon1" || $4!="0" || $5!="20000" || $6!="20" || $7!~/^(on|off|prime)$/ {print "REFUSED: order line " $0 " is not <tag>|" e "|cordon1|0|20000|20|on/off/prime"; f=1} END{exit f}' || bad=1
 for t in $(echo "$lines" | cut -d'|' -f1); do
   [ "$t" = "${t,,}" ] || { echo "REFUSED: tag $t is not lowercase"; bad=1; }
@@ -71,7 +77,9 @@ done
 [ "$bad" = 0 ] || exit 2
 [ "${1:-}" = "--preflight-only" ] && { echo "preflight ok"; exit 0; }
 
-mkdir -p $ST; touch $ST/done.txt
+# Revision 3 (D5): the state folder must be created (new) and writable BEFORE the queue is joined
+mkdir "$ST" 2>/dev/null && : > "$ST/done.txt" 2>/dev/null && : >> "$ST/series.log" 2>/dev/null || {
+  echo "REFUSED: cannot create the state folder $ST (or its done.txt / series.log)"; exit 2; }
 WHAT="EXCLUSIVE: headless wu1 alife_warmup loads (one engine at a time)"
 log() { echo "$(date '+%F %T') $*" | tee -a $ST/series.log; }
 pending() { grep -v '^#' "$ORDER" | grep . | while IFS='|' read -r tag rest; do grep -qx "$tag" $ST/done.txt || echo "$tag|$rest"; done; }
@@ -82,68 +90,45 @@ settle() { local t0 l1 hv; t0=$(date +%s)      # tools/s4c_series.sh: 1-min load
     awk -v l="$l1" 'BEGIN{exit !(l<2)}' && [ -z "${hv// /}" ] && { echo "settle wait=$(( $(date +%s) - t0 ))s load=$l1 heavy=[] ok"; return 0; }
     [ $(( $(date +%s) - t0 )) -ge 300 ] && { echo "settle wait=$(( $(date +%s) - t0 ))s load=$l1 heavy=[$hv] cap"; return 1; }
     sleep 15; done; }
-check_run() {   # outcome inside the capture and the log: <tag> <frames> <slow_ms> <arm>
-  local tag=${1,,} n=$2 s=$3 arm=$4 d=out/${1,,} f bad=""
-  for f in perf_frames_$tag.csv perf_sites_$tag.csv perf_slow_$tag.csv conditions.txt xray.log; do
-    [ -s "$d/$f" ] || bad="$bad missing:$d/$f"; done
-  [ -z "$bad" ] || { echo "check FAIL:$bad"; return 1; }
-  local rows up st eco th lev
-  rows=$(tr -d '\r' < $d/perf_frames_$tag.csv | grep -c '^[0-9]')
-  up=$(tr -d '\r' < $d/perf_sites_$tag.csv | awk -F, '$1=="Process seqFrame"{print $4}' | head -1)
-  st=$(tr -d '\r' < $d/perf_sites_$tag.csv | awk -F, '$1=="Sim tick"{s+=$4+$7} END{print s+0}')
-  eco=$(tr -d '\r' < $d/perf_sites_$tag.csv | awk -F, '$1=="Eco Render"{s+=$4+$7} END{print s+0}')
-  th=$(head -1 $d/perf_slow_$tag.csv | tr -d '\r' | cut -d, -f2)
-  [ "$rows" = "$n" ] || bad="$bad frames($rows)!=$n"
-  [ "${up:-0}" = "$n" ] || bad="$bad seqFrame-calls(${up:-none})!=$n"
-  [ "$st" = 0 ] || bad="$bad sim-tick-calls($st)"
-  [ "$eco" = 0 ] || bad="$bad frame-limiter-calls($eco)"
-  awk -v a="$th" -v b="$s" 'BEGIN{exit !(a-b<0.0005 && b-a<0.0005)}' || bad="$bad slow-threshold($th)!=$s"
-  # command line and lever log check (same rules as wu1_score.py; the scorer decides, this only stops the series early)
-  lev=$(tr -d '\r' < $d/xray.log | awk -v arm="$arm" -v cap="0,$n,$tag" '
-    /^command line / && !cmd { cmd=1; w=(index($0" ", " -alife_warmup ")>0); fx=(index($0" ", " -perf_fixed_dt ")>0); pc=(index($0" ", " -perf_capture " cap " ")>0) }
-    $0=="intro_start game_loaded" && !intro { intro=NR }
-    $0=="* [x-ray]: Handled Necessary Textures Destruction" && !hand { hand=NR }
-    /\[alife_warmup\]/ { aw++ }
-    /^\* \[alife_warmup\] full pass: / { full++; if (full==1) { fl=NR; N=$5+0; M=$7+0; P=$12+0 } }
-    /^! \[alife_warmup\] hold cap hit/ { capl++ }
-    END { r="";
-      if (!cmd) r=r " no-command-line";
-      if (cmd && w!=(arm=="on")) r=r " -alife_warmup-" (w ? "present" : "absent") "-on-" arm;
-      if (fx) r=r " -perf_fixed_dt-present";
-      if (cmd && !pc) r=r " -perf_capture-not-" cap;
-      if (!intro) r=r " no-intro_start";
-      if (arm=="off" && aw) r=r " off_not_stock(" aw "-lever-lines)";
-      if (arm=="on") {
-        if (full!=1) r=r " lever_count(" full+0 ")";
-        else { if (!(fl<intro && fl<hand)) r=r " lever_after_intro"; if (P<3) r=r " lever_precache(" P ")"; if (N<0.9*M) r=r " lever_partial(" N "/" M ")" }
-        if (capl) r=r " lever_cap";
-      }
-      if (r=="") print "ok" (arm=="on" ? " full pass " N "/" M " precache_left " P : ""); else print "FAIL" r }')
-  case "$lev" in ok*) ;; *) bad="$bad log:${lev#FAIL}";; esac
-  [ -z "$bad" ] && { echo "check ok (frames $rows, seqFrame $up, sim tick 0, limiter 0, slow threshold $th, log $lev)"; return 0; }
-  echo "check FAIL:$bad"; return 1; }
+check_run() {   # <tag> <arm>: the scorer's own per-load rules (Revision 3, one source; exit 0 go on, else stop)
+  local tag=${1,,} mode=check
+  [ "$2" = prime ] && mode=probe
+  python3 -I $WU/wu1_score.py $mode=out/$tag order=$ORDER 2>&1; }
 
+stop=""; BP=""; rc=0; nconf=0; CLAIMED=0; PROBED=0
+# ONE way out, also when cancelled (Revision 3, D4: installed BEFORE the first queue operation): the bench stopped and
+# reaped (its own trap kills wine and its Xvfb), the WANT entry withdrawn (always: a cancel while queued leaves none),
+# then the slice released ONLY if this invocation acquired the claim (CLAIMED=1) (tools/t3_kw1.sh)
+finish() { trap - EXIT TERM INT
+  [ -n "$BP" ] && kill -0 $BP 2>/dev/null && { kill -TERM $BP 2>/dev/null; wait $BP 2>/dev/null; }
+  "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1
+  if [ "$CLAIMED" = 1 ]; then
+    "$T/quiet-required.sh" release $W >/dev/null 2>&1 || log "release exit code $? (claim may already have expired)"
+  fi
+  log "slice end: $(grep -c . $ST/done.txt) done, $(pending | wc -l) left, $nconf confounded. ${stop:-list finished}"
+  timeout 60 "$T/notify-overseer.sh" engineperf - <<<"EnginePerf wu1 alife_warmup series: slice ended $(date +%T), $(grep -c . $ST/done.txt) loads done, $(pending | wc -l) left, $nconf confounded. ${stop:-list finished}. $([ "$PROBED" = 1 ] && echo "Not scored yet (score once by hand)." || echo "NOT scored: no passed prime probe (failed or not reached), no scored load ran, nothing is consumed; another attempt needs the supervisor's word.")" >/dev/null 2>&1
+  exit $rc; }
+trap finish EXIT; trap 'stop="cancelled"; rc=143; finish' TERM INT
 # WANT queue and slice. Every decision on the EXIT CODE of quiet-required.sh (its header: "THE EXIT CODE IS THE API.
 # DO NOT PARSE THE OUTPUT"): claim exit 0 = granted; otherwise queue with want (its exit code is not acted on: the loop
 # simply tries claim again in 60 s) and wait. After the grant, withdraw from the queue at once (tools/t3_kw1.sh).
-until ! "$T/protected-title-check.sh" >/dev/null 2>&1 && ! pgrep -x sober >/dev/null && ! caden_lock && \
-      "$T/quiet-required.sh" claim $W 30 "$WHAT" >/dev/null 2>&1; do
+# A TERM/INT during the claim call is deferred until CLAIMED records its outcome (review 2: else a granted claim could
+# be left unreleased), then handled as a cancel
+CANCEL=0
+while :; do
+  got=0
+  trap 'CANCEL=1' TERM INT
+  if ! "$T/protected-title-check.sh" >/dev/null 2>&1 && ! pgrep -x sober >/dev/null && ! caden_lock && \
+     "$T/quiet-required.sh" claim $W 30 "$WHAT" >/dev/null 2>&1; then got=1; CLAIMED=1; fi
+  trap 'stop="cancelled"; rc=143; finish' TERM INT
+  [ "$CANCEL" = 1 ] && { stop="cancelled"; rc=143; finish; }
+  [ "$got" = 1 ] && break
   "$T/quiet-required.sh" want $W EXCLUSIVE >/dev/null 2>&1
   sleep 60
 done
 "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1
-SL_END=$(( $(date +%s) + 3*3600 )); stop=""; BP=""; rc=0; nconf=0
+SL_END=$(( $(date +%s) + 3*3600 ))
 log "slice granted, wu1, display $DISP, load $(cut -d' ' -f1-3 /proc/loadavg)"
-# ONE way out, also when cancelled: the bench stopped and reaped (its own trap kills wine and its Xvfb), then the slice
-# given back, withdraw FIRST (tools/t3_kw1.sh)
-finish() { trap - EXIT TERM INT
-  [ -n "$BP" ] && kill -0 $BP 2>/dev/null && { kill -TERM $BP 2>/dev/null; wait $BP 2>/dev/null; }
-  "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1
-  "$T/quiet-required.sh" release $W >/dev/null 2>&1 || log "release exit code $? (claim may already have expired)"
-  log "slice end: $(grep -c . $ST/done.txt) done, $(pending | wc -l) left, $nconf confounded. ${stop:-list finished}"
-  timeout 60 "$T/notify-overseer.sh" engineperf - <<<"EnginePerf wu1 alife_warmup series: slice ended $(date +%T), $(grep -c . $ST/done.txt) loads done, $(pending | wc -l) left, $nconf confounded. ${stop:-list finished}. Not scored yet (score once by hand)." >/dev/null 2>&1
-  exit $rc; }
-trap finish EXIT; trap 'stop="cancelled"; rc=143; finish' TERM INT
 # the wait for the slice can be long: the display must still be free now
 disp_free >> $ST/series.log 2>&1 || { stop="display $DISP not free at the slice grant"; rc=2; finish; }
 while :; do
@@ -162,6 +147,8 @@ while :; do
   pin run/bin/$EXE $EXE_SHA >> $ST/series.log 2>&1 || { stop="exe changed"; rc=1; break; }
   # same-text renewal for this load (tools/s4c_series.sh), decided by exit code
   "$T/quiet-required.sh" claim $W 30 "$WHAT" >/dev/null 2>&1 || { stop="claim renewal refused before $tag (exit $?)"; rc=1; break; }
+  # Revision 3 (D1): no scored load before the prime probe passed
+  [ "$arm" = prime ] || [ "$PROBED" = 1 ] || { stop="scored load $tag reached without a passed prime probe"; rc=1; break; }
   LEVER=""; [ "$arm" = on ] && LEVER="-alife_warmup"
   log "load $tag arm=$arm exe=$exe save=$save warm=$warm frames=$frames slow=$slow display=$DISP load $(cut -d' ' -f1-3 /proc/loadavg)"
   BENCH_DISPLAY=$DISP BENCH_NOCLAIM=1 BENCH_EXCLUSIVE=1 BENCH_SAVE=$save BENCH_LOWEND=0 BENCH_FIXED=0 BENCH_TIMEOUT=900 \
@@ -169,10 +156,20 @@ while :; do
   wait $BP; brc=$?; BP=""
   v=$(grep -a '^VERDICT' out/${tag,,}/conditions.txt 2>/dev/null)
   log "load $tag rc=$brc $v"
-  echo "$tag" >> $ST/done.txt                     # ran (whatever happened): never run again (no retry)
+  # ran (whatever happened): never run again (no retry). Revision 3 (D5): a failed append stops the series by name
+  echo "$tag" >> $ST/done.txt || { stop="state write failed: cannot append $tag to $ST/done.txt"; rc=1; break; }
   [ $brc = 0 ] || { stop="load $tag ended rc=$brc (crash, timeout or no capture)"; rc=1; break; }
-  c=$(check_run "$tag" "$frames" "$slow" "$arm"); crc=$?; log "load $tag $c"
-  [ $crc = 0 ] || { stop="load $tag failed a check: $c"; rc=1; break; }
+  c=$(check_run "$tag" "$arm"); crc=$?
+  echo "$c" > $ST/check_$tag.txt || { stop="state write failed: cannot write $ST/check_$tag.txt"; rc=1; break; }
+  log "load $tag $(echo "$c" | tail -1)"
+  if [ "$arm" = prime ]; then
+    # Revision 3 (D1): the probe of the prime load's real log. Failed = the series ends here with NO verdict and
+    # nothing consumed (the prime is never scored); another attempt needs the supervisor's word
+    [ $crc = 0 ] || { stop="PROBE FAILED on the prime load $tag ($(echo "$c" | grep '^PROBE STOP' | head -3 | tr '\n' ' ')): series NOT scored, nothing consumed, supervisor's word needed for another attempt"; rc=1; break; }
+    PROBED=1
+  else
+    [ $crc = 0 ] || { stop="load $tag failed a check: $(echo "$c" | grep '^CHECK STOP' | head -3 | tr '\n' ' ')"; rc=1; break; }
+  fi
   if [ "$v" != "VERDICT: clean" ]; then
     nconf=$((nconf+1)); log "load $tag not clean ($nconf of $MAX_CONFOUNDED allowed): the scorer voids it, no re-run"
     [ $nconf -ge $MAX_CONFOUNDED ] && { stop="$nconf confounded loads: the box is not quiet"; rc=1; break; }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wu1 scorer self-test (PREREG-wu1-alife-warmup-DRAFT.md section 8). DRAFT.
+# wu1 scorer self-test (PREREG-wu1-alife-warmup-2026-11-26.md section 8). DRAFT.
 #   bash wu1_selftest.sh     -> builds wu1/selftest-runs/<stamp>/, runs every case and every mutant, prints one final line
 # Real fixtures: earlier run folders and logs under <project>/out, read IN PLACE (never copied whole, never written);
 #   real xray.log bytes (CRLF) are also spliced into made loads so the classifier is exercised on real engine output.
@@ -67,6 +67,25 @@ def log_events(tag, kind, o, ms, zone):
     T = lambda F: te - (F0 - F) * 40
     Pc = lambda F: F0 - F
     L, lv = [], o.get("lever", "good")
+    if kind == "on" and lv == "held":
+        # Revision 3 (S4), the engine's order (device.cpp:131-170 on perf/alife-warmup): the countdown is held at 3 for
+        # K = 12 frames (49..60 read precache 3) until the pass is claimed at frame 61, whose End() prints the held line
+        # and counts 3 -> 2; frame 64 is the first with precache 0. Loading frames 200 ms of time_global apart, so the
+        # 10 s pass-log window (from the pass at frame 6) has closed before the full pass: its alife_pass line is not
+        # printed, and the last line with precache > 0 is the actor-reinit alife_opu at frame 50, inside the hold
+        # (precache 3). The narrowing alife_opu (not windowed) is the first in-play line, capture frame 5.
+        Th = lambda F: te - (F0 - F) * 200
+        Ph = lambda F: F0 - F if F > F0 - 3 else max(3, F0 - 12 - F)
+        L = [(6, 0, pline(6, Th(6), Ph(6), 3, 2400, 3)), (17, 0, pline(17, Th(17), Ph(17), 3, 2400, 3)),
+             (28, 0, oline(28, Th(28), Ph(28), 20)), (42, 0, pline(42, Th(42), Ph(42), 3, 2400, 3)),
+             (50, 0, oline(50, Th(50), Ph(50), LIMIT_WIDE))]
+        L += [(61, 1, sline(61, 14200 + j, "zat_b106_smart_terrain" if j == 0 else "stalker_sim_squad_novice%d" % (19000 + j), 300.0 if j == 0 else 2.1)) for j in range(130)]
+        L.append((61, 2, "* [alife_warmup] full pass: 2400 of 2400 objects, frame 61, precache_left 3, 612.3 ms"))
+        L.append((61, 3, "* [alife_warmup] precache held 12 frames"))
+        cum = [0.0]
+        for v in ms[:6]:
+            cum.append(cum[-1] + v)
+        return L, [oline(F0 + 5, int(round(te + cum[5])), 0, 20)]
     L.append((6, 0, pline(6, T(6), Pc(6), 3, 2400, 3)))
     L.append((17, 0, pline(17, T(17), Pc(17), 3, 2400, 3)))
     L.append((28, 0, oline(28, T(28), Pc(28), LIMIT_WIDE)))
@@ -75,18 +94,15 @@ def log_events(tag, kind, o, ms, zone):
         Ff, Pf, seq = 31, Pc(31), 2
         if lv == "after_intro": Ff, seq = 62, 60
         if lv == "p2": Ff, Pf, seq = 62, 2, 0
-        if lv == "held": Ff, Pf = 61, 3
         N = 1000 if lv == "partial" else 2400
         if lv != "none":
             L += wide_slows(Ff, 130)
-            L.append((Ff, seq, "* [alife_warmup] full pass: %d of 2400 objects, frame %d, precache_left %d, 612.3 ms" % (N, Ff, Pf)))
+            L.append((Ff, seq, "* [alife_warmup] full pass: %d of 2400 objects, frame %d, precache_left %d, %s ms" % (N, Ff, Pf, o.get("full_ms", "612.3"))))
             L.append((Ff, seq + 1, pline(Ff, T(Ff), Pf, N, 2400, LIMIT_FULL)))
         if lv == "two":
             L.append((33, 2, "* [alife_warmup] full pass: 2400 of 2400 objects, frame 33, precache_left 31, 20.1 ms"))
         if lv == "cap":
             L.append((62, 1, "! [alife_warmup] hold cap hit after 300 frames, pass not run"))
-        if lv == "held":
-            L.append((62, 1, "* [alife_warmup] precache held 12 frames"))
         L.append((42, 0, pline(42, T(42), Pc(42), 2400, 2400, LIMIT_WIDE)))
         L.append((50, 0, oline(50, T(50), Pc(50), 20)))
         L.append((53, 0, pline(53, T(53), Pc(53), 20, 2400, 20)))
@@ -105,6 +121,8 @@ def log_events(tag, kind, o, ms, zone):
         L.append((62, 1, "* [alife_warmup] precache held 3 frames"))
     if o.get("bad_pass"):
         L.append((40, 0, "* alife_pass frame 40 time_global garbage"))
+    if o.get("bad_slow_ms"):
+        L.append((40, 0, "* alife_slow frame 40 id 14200 zat_b106_smart_terrain [zat_b106_smart_terrain] %s ms" % o["bad_slow_ms"]))
     # in play: every 452 ms of time_global while within 10 s of the first pass (frame 6)
     play, cum = [], [0.0]
     for v in ms:
@@ -128,13 +146,19 @@ def log_events(tag, kind, o, ms, zone):
         if z == "ALife/scheduled/update":
             play.append((i, sline(F0 + i, 14200, "zat_b106_smart_terrain", ms[i] - 5.0)))
     play.sort(key=lambda x: x[0])
-    return L, [t for _, t in play]
+    # Revision 3 (S5): a build that prints no alife_pass / alife_opu line, or prints them under another prefix
+    drop = o.get("drop_lines", ())
+    keep = lambda t: not any(t.startswith(d) for d in drop)
+    ren = lambda t: t.replace("* alife_opu ", "* alife_opu2 ") if o.get("rename_opu") else t
+    return [(a, b, ren(t)) for a, b, t in L if keep(t)], [ren(t) for _, t in play if keep(t)]
 
 def cmdline(tag, arm, o):
     t = ["z:\\home\\caden\\projects\\stalkergameengine\\run\\bin\\warm18.exe", "-nointro", "-dbg", "-start",
          "server(cordon1/single/alife/load)", "client(localhost)", "-perf_capture", "%d,%d,%s" % (o.get("warm", 0), FR, tag),
          "-perf_quit", "-perf_noinput", "-perf_nopresent", "-perf_slow", "20"]
     if o.get("fixed_dt"): t.insert(8, "-perf_fixed_dt")
+    if o.get("save_name"): t[4] = "server(%s/single/alife/load)" % o["save_name"]
+    t += list(o.get("more_flags", ()))
     if (arm == "on") != bool(o.get("flip_flag")): t.append("-alife_warmup")
     return " ".join(t)
 
@@ -153,6 +177,7 @@ def make(tag, kind, real=None, **o):
     n_rows = FR - 1 if o.get("drop_last") else FR
     fl = ["frame,ms"] + ["%d,%.4f" % (i, v) for i, v in enumerate(ms[:n_rows])]
     if o.get("bad_frame_row"): fl[100] = "99,abc"
+    if o.get("frame_text"): fl[101] = "100,%s" % o["frame_text"]
     if "frames" not in skip: write(os.path.join(d, "perf_frames_%s.csv" % tag), fl, crlf, "frames" in o.get("empty", ()))
     tot = sum(ms)
     sl = ["#frames,%d" % n_rows, "#total_ms,%.3f" % tot,
@@ -161,18 +186,26 @@ def make(tag, kind, real=None, **o):
           "ALife/scheduled/update,z:\\src\\xrgame\\alife_schedule_registry.h,62,0,0.0000,0.0000,500,900.0000,900.0000"]
     if o.get("save", True):
         sl.append("CALifeStorageManager::save,z:\\src\\xrgame\\alife_storage_manager.cpp,48,2,800.0000,700.0000,0,0.0000,0.0000")
+    if o.get("site_text"): sl.append("CDetailManager::cache_Update,z:\\src\\x.cpp,1,10,1.0000,%s,0,0.0000,0.0000" % o["site_text"])
     if o.get("simtick"): sl.append("Sim tick,z:\\src\\xrengine\\device.cpp,1060,100,1.0000,1.0000,0,0.0000,0.0000")
     if o.get("eco"): sl.append("Eco Render,z:\\src\\xrengine\\device.cpp,758,4000,9000.0000,9000.0000,0,0.0000,0.0000")
     if "sites" not in skip: write(os.path.join(d, "perf_sites_%s.csv" % tag), sl, crlf)
     rows = ["#threshold_ms,%.3f" % o.get("thr", 20.0), "frame,frame_ms,thread,self_ms,calls,name,file,line"]
+    per = []
     for i, v in enumerate(ms):
         if v > 20.0:
             z = zone.get(i, "CDetailManager::cache_Update")
             th = "other" if z.startswith("ALife") else "main"
-            rows.append("%d,%.4f,%s,%.4f,1,%s,z:\\src\\x.cpp,1" % (i, v, th, v * 0.8, z))
-            rows.append("%d,%.4f,main,%.4f,1,bench: wait for GPU (no present),z:\\src\\y.cpp,2" % (i, v, 1.5))
+            fr = ["%d,%.4f,%s,%.4f,1,%s,z:\\src\\x.cpp,1" % (i, v, th, v * 0.8, z),
+                  "%d,%.4f,main,%.4f,1,bench: wait for GPU (no present),z:\\src\\y.cpp,2" % (i, v, 1.5)]
             for k in range(o.get("rows_per", 2) - 2):
-                rows.append("%d,%.4f,main,%.4f,1,filler site %d,z:\\src\\f.cpp,%d" % (i, v, 0.1, k, k))
+                fr.append("%d,%.4f,main,%.4f,1,filler site %d,z:\\src\\f.cpp,%d" % (i, v, 0.1, k, k))
+            per.append(fr)
+    if o.get("last_rows") and per:          # the last slow frame keeps only this many rows (profiler: up to 14)
+        per[-1] = per[-1][:o["last_rows"]]
+    for fr in per:
+        rows += fr
+    if o.get("count_rows"): assert len(rows) - 2 == o["count_rows"], (tag, len(rows) - 2)
     if "slow" not in skip: write(os.path.join(d, "perf_slow_%s.csv" % tag), rows, crlf)
     cond = ["start 2026-11-27 10:00:00 kind=EXCLUSIVE timing loadavg=0.30 0.40 0.50 heavy_others=[]",
             "end   2026-11-27 10:02:00 loadavg=1.10 0.60 0.55 heavy_others=[]", o.get("verdict", "VERDICT: clean")]
@@ -187,8 +220,10 @@ def make(tag, kind, real=None, **o):
         head = ["* Detected CPU: AMD Ryzen 7 9800X3D 8-Core Processor", "Init FileSystem 5.5 sec",
                 "Game started: 27.11.2026 10:00:09.000", "command line " + cmdline(tag, arm, o)]
         head += ["[LSS] Spawning object [m_crow%d][m_crow][%d]" % (j, j) for j in range(50)]
+        if o.get("cap_fin_early"):      # S3: a finished marker inside loading, the started marker after it
+            made = made[:-2] + [cap_f] + made[-2:]
         body = head + made + ([] if o.get("no_cap_lines") else [cap_s]) + play + ["- Autosaved new game"] + \
-               ([] if o.get("no_cap_lines") else [cap_f])
+               ([] if o.get("no_cap_lines") or o.get("cap_fin_early") else [cap_f])
         nl = "\r\n" if crlf else "\n"
         data = (nl.join(body) + nl).encode("ascii")
     else:
@@ -233,11 +268,31 @@ var("not_clean", "on", verdict="VERDICT: CONFOUNDED (other heavy process present
 var("framecount", "offP", drop_last=True); var("seqframe", "on", seq_delta=-3); var("simtick", "on", simtick=True)
 var("limiter", "offL", eco=True); var("threshold", "on", thr=9.0); var("window_short", "on", base=3.0)
 var("save_unlocated", "on", save_row=False); var("no_cap_lines", "on", no_cap_lines=True)
-var("slow_cap", "on", extra=tuple((3000.0 + 30.0 * k, 21.0) for k in range(600)), rows_per=14)   # 601 slow frames x 14 rows
+# slow-dump cap (Revision 3, T2): row counts the profiler can write (a frame is kept while rows + 14 <= 8400, so at most
+# 8400): 599 frames x 14 = 8386 (the bound, VALID), 599 x 14 + 1 = 8387 (just above, VOID), 600 x 14 = 8400 (full, VOID)
+SLOWX = lambda n: tuple((3000.0 + 30.0 * k, 21.0) for k in range(n))      # + the save frame = n + 1 slow frames
+var("slow_cap", "on", extra=SLOWX(599), rows_per=14, count_rows=8400)
+var("slow_8387", "on", extra=SLOWX(599), rows_per=14, last_rows=1, count_rows=8387)
+var("slow_8386", "on", extra=SLOWX(598), rows_per=14, count_rows=8386)
+# Revision 3 fixtures: S1 verdict form, S2 numbers, S3 capture order, S5 measurement lines, D3 command line
+var("verdictx", "on", verdict="VERDICTX: clean"); var("verdict2", "offP", verdict="VERDICT: clean\nVERDICT: clean")
+var("inf_frame", "on", frame_text="inf"); var("nan_frame", "offL", frame_text="nan"); var("nan_thr", "on", thr=float("nan"))
+var("inf_site", "offP", site_text="inf"); var("full_ms", "on", full_ms="1..2"); var("slow_ms", "offP", bad_slow_ms="1..2")
+var("inf_slow_ms", "offL", bad_slow_ms="inf")
+var("cap_order", "on", cap_fin_early=True)
+var("no_opu", "on", drop_lines=("* alife_opu ",)); var("no_pass", "offP", drop_lines=("* alife_pass ",))
+var("opu_renamed", "offL", rename_opu=True)
+var("cordon2", "offP", save_name="cordon2"); var("det_mode", "on", more_flags=("-det_mode",))
+var("sim_tick_flag", "offL", more_flags=("-sim_tick", "60"))
 var("on_noflag", "on", flip_flag=True); var("off_flag", "offP", flip_flag=True); var("fixed_dt", "on", fixed_dt=True)
 var("warm600", "offL", warm=600); var("off_warm", "offP", off_warm=True)
 for lv in ("none", "two", "after_intro", "p2", "cap", "partial", "held"):
     var("lever_" + lv, "on", lever=lv)
+for nm, kind, o in (("ok", "offL", {}), ("no_opu", "offP", dict(drop_lines=("* alife_opu ",))),
+                    ("no_pass", "offL", dict(drop_lines=("* alife_pass ",))), ("no_save", "offP", dict(save=False)),
+                    ("no_cap", "offL", dict(no_cap_lines=True)), ("lever", "offP", dict(flip_flag=True)),
+                    ("bad_row", "offL", dict(bad_frame_row=True))):
+    make("p_prime_" + nm, kind, **o)      # D1 probe fixtures: the PRIME load (an OFF load, never scored)
 var("reset_late", "offP", reset_late=True); var("legacy_disagree", "offL", wide_slows=10); var("wide_in_play", "offP", wide_in_play=True)
 CONF = [make("v_conf_%d" % i, "on", verdict="VERDICT: CONFOUNDED (other heavy process present)") or "v_conf_%d" % i for i in range(9)]
 QUIET = [make("v_quiet_%d" % i, "offP", hitch=False) or "v_quiet_%d" % i for i in range(3)]
@@ -272,9 +327,13 @@ def order_lines(on_tags, off_tags, frames=FR):
 OFF_GOOD = [GP[0], GP[1], GL[0], GP[2], GP[3], GL[1], GP[4], GP[5], GL[2], GP[6], GP[7], GL[3], GP[8], GP[9], GL[4], GP[10]]
 def sub(lst, old, new):
     l = list(lst); l[l.index(old)] = new; return l
-def case(name, want, pats, on_tags=GON, off_tags=OFF_GOOD, lines=None, root=None, pre_out=False, parse=None, targets=()):
+def case(name, want, pats, on_tags=GON, off_tags=OFF_GOOD, lines=None, root=None, pre_out=False, parse=None, targets=(),
+         one=None):
+    """one = ("probe" | "check", tag): the driver's one-load modes on POOL/<tag> with this case's order file (lines)."""
     cd = os.path.join(ST, "cases", name); os.makedirs(cd)
-    if parse is None:
+    if one is not None:
+        parse = ["%s=%s" % (one[0], os.path.join(root or POOL, one[1])), "order=" + os.path.join(cd, "wu1_order.txt")]
+    if parse is None or one is not None:
         L = lines if lines is not None else order_lines(on_tags, off_tags)
         with open(os.path.join(cd, "wu1_order.txt"), "w") as f:
             f.write("# selftest case %s\n" % name + "\n".join(L) + "\n")
@@ -325,7 +384,9 @@ case("a_off_not_stock", 1, [r"LOAD v_off_warm OFF FAIL \[off_not_stock\]", r"^WU
 for lv, code in (("none", "lever_count"), ("two", "lever_count"), ("after_intro", "lever_after_intro"), ("p2", "lever_precache"),
                  ("cap", "lever_cap"), ("partial", "lever_partial")):
     case("l_" + lv, 1, [r"LOAD v_lever_%s ON FAIL \[%s\] group=" % (lv, code), r"^WU1 RESULT: FAIL \(1 load"], on_tags=sub(GON, GON[6], V["lever_" + lv]))
-case("l_held_ok", 0, [r"LOAD v_lever_held ON VALID", r"precache held 12 frames \(cap 300\)", r"^WU1 RESULT: PASS$"],
+case("l_held_ok", 0, [r"LOAD v_lever_held ON VALID .*\| load=33\.00 s$", r"precache held 12 frames \(cap 300\)",
+                      r"load time: frame0=64 from line at frame 42 precache 10 \+ 12 held frames; first in-play line frame 69 \(\+5 frames\)",
+                      r"^WU1 RESULT: PASS$"],
      on_tags=sub(GON, GON[6], V["lever_held"]))
 for nm, pat in (("reset_late", r"pass lines end before the narrowing"), ("legacy_disagree", r"pass lines say in-loading, alife_slow lines say P"),
                 ("wide_in_play", r"wide pass only after loading ended")):
@@ -358,6 +419,64 @@ case("good_15s_reported", 0, [r"LOAD g_offp_01 OFF VALID group=OFF-IN-PLAY worst
                               r"OFF-IN-PLAY +n20_15 +median 3\.00", r"^WU1 RESULT: PASS$"])
 case("h_price", 1, [r"H3 .* -> FAIL", r"SAME AS GOOD ORDER .* -> DIFFERENT", r"^WU1 RESULT: FAIL \(H3\)$"], on_tags=PRICE + GON[:7])
 G = order_lines(GON, OFF_GOOD)
+# ---------------- Revision 3 (review fixes) ----------------
+# S1: a VERDICT line the bench never writes is a named FAIL (was: not_clean VOID, load dropped, PASS)
+case("f_verdictx", 1, [r"LOAD v_verdictx ON FAIL \[unparsable\]", r"VERDICT line\(s\) \['VERDICTX: clean'\] are not one",
+                       r"^WU1 RESULT: FAIL"], on_tags=sub(GON, GON[8], V["verdictx"]))
+case("f_verdict2", 1, [r"LOAD v_verdict2 OFF FAIL \[unparsable\]", r"^WU1 RESULT: FAIL"], off_tags=sub(OFF_GOOD, GP[8], V["verdict2"]))
+# S2: inf / nan in a timing field, a pattern-matching but unconvertible number in the log: named UNPARSABLE, report written
+for nm, slot, pat in (("inf_frame", "on", r"UNPARSABLE .*perf_frames_v_inf_frame\.csv row 101 '100,inf'"),
+                      ("nan_frame", "offl", r"UNPARSABLE .*perf_frames_v_nan_frame\.csv row 101 '100,nan'"),
+                      ("nan_thr", "on", r"UNPARSABLE .*perf_slow_v_nan_thr\.csv header"),
+                      ("inf_site", "offp", r"UNPARSABLE .*perf_sites_v_inf_site\.csv row"),
+                      ("full_ms", "on", r"UNPARSABLE .*v_full_ms/xray\.log line \d+ .*1\.\.2 ms.* \(not a finite number\)"),
+                      ("slow_ms", "offp", r"UNPARSABLE .*v_slow_ms/xray\.log line \d+ .*1\.\.2 ms.* \(not a finite number\)"),
+                      ("inf_slow_ms", "offl", r"UNPARSABLE .*v_inf_slow_ms/xray\.log line \d+ .*inf ms")):
+    ot = sub(GON, GON[9], V[nm]) if slot == "on" else GON
+    ft = OFF_GOOD if slot == "on" else sub(OFF_GOOD, GP[9] if slot == "offp" else GL[2], V[nm])
+    case("f_" + nm, 1, [r"LOAD %s \S+ FAIL \[unparsable\]" % V[nm], pat, r"^WU1 RESULT: FAIL"], on_tags=ot, off_tags=ft)
+# S3: finished marker before the end of loading, started after it: VOID capture_lines (was VALID)
+case("v_cap_order", 0, [r"LOAD v_cap_order ON VOID \[capture_lines\]", r"^WU1 RESULT: PASS$"], on_tags=sub(GON, GON[10], V["cap_order"]))
+# S5: no alife_opu / no alife_pass / alife_opu under another prefix: FAIL no_measure_lines (was OFF-OTHER or VALID)
+case("f_no_opu", 1, [r"LOAD v_no_opu ON FAIL \[no_measure_lines\]", r"no_measure_lines: \d+ alife_pass and 0 alife_opu",
+                     r"^WU1 RESULT: FAIL \(1 load\(s\) failed a registered check: no_measure_lines\)"], on_tags=sub(GON, GON[11], V["no_opu"]))
+case("f_no_pass", 1, [r"LOAD v_no_pass OFF FAIL \[no_measure_lines\]", r"no_measure_lines: 0 alife_pass and \d+ alife_opu",
+                      r"^WU1 RESULT: FAIL"], off_tags=sub(OFF_GOOD, GP[10], V["no_pass"]))
+case("f_opu_renamed", 1, [r"LOAD v_opu_renamed OFF FAIL \[no_measure_lines\]", r"^WU1 RESULT: FAIL"], off_tags=sub(OFF_GOOD, GL[3], V["opu_renamed"]))
+# T2: the slow-dump cutoff at exactly 8386 rows (VALID) and just above (8387, VOID); 8400 (full) is v_slow_cap
+case("v_slow_8387", 0, [r"LOAD v_slow_8387 ON VOID \[slow_cap\]", r"perf_slow has 8387 rows > 8386", r"^WU1 RESULT: PASS$"],
+     on_tags=sub(GON, GON[12], V["slow_8387"]))
+case("slow_8386_ok", 0, [r"LOAD v_slow_8386 ON VALID group=ON", r"^WU1 RESULT: PASS$"], on_tags=sub(GON, GON[12], V["slow_8386"]))
+# D1: the probe on the PRIME load (exit 0 = go on, 1 = stop the series before any scored load, 2 = refused)
+def one_order(tag, arm):
+    return ["%s|Warm18.exe|cordon1|0|%d|20|%s" % (tag, FR, arm), "g_on_01|Warm18.exe|cordon1|0|%d|20|on" % FR]
+case("probe_ok", 0, [r"^PROBE info p_prime_ok group=OFF-IN-LOADING save=#\d+ 900 ms load=\d", r"^PROBE p_prime_ok ok$"],
+     lines=one_order("p_prime_ok", "prime"), one=("probe", "p_prime_ok"))
+for nm, pat in (("no_opu", r"no_measure_lines"), ("no_pass", r"no_measure_lines"), ("no_save", r"no_save_frame"),
+                ("no_cap", r"capture_lines"), ("lever", r"arm_mismatch: .*-alife_warmup present on an PRIME load"),
+                ("bad_row", r"unparsable")):
+    case("probe_" + nm, 1, [r"^PROBE STOP p_prime_%s %s" % (nm, pat), r"^PROBE p_prime_%s FAIL$" % nm],
+         lines=one_order("p_prime_" + nm, "prime"), one=("probe", "p_prime_" + nm))
+case("probe_refused", 2, [r"REFUSED: g_on_01 is not the prime load"], lines=one_order("p_prime_ok", "prime"), one=("probe", "g_on_01"))
+# D3: the per-load check after every scored load (same rules as scoring; stop on a FAIL or a stop-VOID, not on not_clean)
+def chk(name, want, tag, arm, pats):
+    case(name, want, pats + [r"^CHECK %s %s$" % (tag, "ok" if want == 0 else "FAIL")],
+         lines=["wu1_prime|Warm18.exe|cordon1|0|%d|20|prime" % FR, "%s|Warm18.exe|cordon1|0|%d|20|%s" % (tag, FR, arm)],
+         one=("check", tag))
+chk("check_ok", 0, "g_on_01", "on", [r"^CHECK info g_on_01 group=ON"])
+chk("check_not_clean", 0, V["not_clean"], "on", [r"^CHECK note v_not_clean not_clean"])
+chk("check_cordon2", 1, V["cordon2"], "off", [r"^CHECK STOP v_cordon2 arm_mismatch: save is not cordon1"])
+chk("check_det_mode", 1, V["det_mode"], "on", [r"^CHECK STOP v_det_mode arm_mismatch: -det_mode present"])
+chk("check_sim_tick", 1, V["sim_tick_flag"], "off", [r"^CHECK STOP v_sim_tick_flag arm_mismatch: -sim_tick present"])
+chk("check_lever_absent", 1, V["on_noflag"], "on", [r"^CHECK STOP v_on_noflag arm_mismatch: -alife_warmup absent on an ON"])
+chk("check_lever_present", 1, V["off_flag"], "off", [r"^CHECK STOP v_off_flag arm_mismatch: -alife_warmup present on an OFF"])
+chk("check_no_cap", 1, V["no_cap_lines"], "on", [r"^CHECK STOP v_no_cap_lines capture_lines"])
+chk("check_cap_order", 1, V["cap_order"], "on", [r"^CHECK STOP v_cap_order capture_lines"])
+chk("check_framecount", 1, V["framecount"], "off", [r"^CHECK STOP v_framecount framecount"])
+chk("check_lever_cap", 1, V["lever_cap"], "on", [r"^CHECK STOP v_lever_cap lever_cap"])
+chk("check_missing", 1, V["miss_slow"], "off", [r"^CHECK STOP v_miss_slow missing: MISSING"])
+chk("check_window_short", 0, V["window_short"], "on", [r"^CHECK note v_window_short window_short"])
+case("check_refused", 2, [r"REFUSED: wu1_prime is not a scored load"], lines=one_order("wu1_prime", "prime"), one=("check", "wu1_prime"))
 case("r_out_exists", 2, [r"REFUSED: .*score\.txt exists, not overwriting"], pre_out=True)
 case("r_uppercase", 2, [r"REFUSED: tag G_on_01 is not lowercase"], lines=[G[0], G[1].replace("g_on_01", "G_on_01", 1)] + G[2:])
 case("r_dup", 2, [r"REFUSED: tag g_on_01 listed twice"], lines=G + [G[1]])
@@ -371,7 +490,8 @@ def run(scorer, c, outdir):
         with open(out, "w") as f:
             f.write("an earlier score that must not be overwritten\n")
     before = open(out, "rb").read() if os.path.exists(out) else None
-    args = [sys.executable, "-I", scorer] + (["parse=" + c["parse"]] if c["parse"] else
+    args = [sys.executable, "-I", scorer] + ((c["parse"] if isinstance(c["parse"], list) else ["parse=" + c["parse"]])
+                                             if c["parse"] else
                                              ["root=" + c["root"], "order=" + c["order"], "out=" + out])
     p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     txt = p.stdout.decode("ascii", "replace")
@@ -409,7 +529,11 @@ MUT = {"missing_fail": ["f_miss_xray"], "cr_strip": ["good_crlf"], "not_clean": 
        "l_in_loading": ["c_wide_in_play"], "nv_few_on": ["nv_few_on"], "nv_few_inplay": ["nv_few_inplay"],
        "nv_no_hitch": ["nv_no_hitch"], "nv_no_train": ["nv_no_train"], "nv_loadtime": ["nv_loadtime"], "nv_alike": ["nv_alike_worst", "nv_alike_train"],
        "h1_median": ["h_worst"], "h1_max": ["h_stray_two"],
-       "h2": ["h_train"], "h3": ["h_price"], "refuse_out": ["r_out_exists"], "lowercase": ["r_uppercase"], "dup_tag": ["r_dup"]}
+       "h2": ["h_train"], "h3": ["h_price"], "refuse_out": ["r_out_exists"], "lowercase": ["r_uppercase"], "dup_tag": ["r_dup"],
+       # Revision 3 hooks
+       "finite": ["f_inf_frame", "f_inf_site", "f_nan_thr"], "verdict_form": ["f_verdictx", "f_verdict2"],
+       "log_num": ["f_full_ms", "f_slow_ms"], "held_k": ["l_held_ok"], "capture_order": ["v_cap_order", "check_cap_order"],
+       "measure_lines": ["f_no_opu", "f_no_pass", "f_opu_renamed", "probe_no_opu"], "probe_save": ["probe_no_save"]}
 src = open(SC).read()
 hook = 'def on(name):\n    """Self-test mutation hook: every check below is guarded by on("<name>"). Always True in this file."""\n    return True\n'
 if src.count(hook) != 1:
@@ -445,7 +569,9 @@ CMUT = {"window_15_headline": ("WINDOW_MS = 30000.0 ", "WINDOW_MS = 15000.0 ", [
         "train_min_8": ("STOCK_TRAIN_MIN = 7 ", "STOCK_TRAIN_MIN = 8 ", ["train_edge_ok"]),
         "n20_drop_6": ("N20_DROP = 7 ", "N20_DROP = 6 ", ["h_train", "nv_alike_train"]),
         "n20_drop_8": ("N20_DROP = 7 ", "N20_DROP = 8 ", ["h_train_edge_ok", "nv_alike_edge_ok", "train_edge_ok"]),
-        "slow_cap_rows_up": ("SLOW_CAP_ROWS = 600 * 14 - 14 ", "SLOW_CAP_ROWS = 600 * 14 + 14 ", ["v_slow_cap"])}
+        # Revision 3 (T2): the cutoff moved to what the profiler can write: 8400 (cap) misses 8387 and 8400; 8385 voids 8386
+        "slow_cap_rows_up": ("SLOW_CAP_ROWS = 600 * 14 - 14 ", "SLOW_CAP_ROWS = 600 * 14 - 0 ", ["v_slow_8387", "v_slow_cap"]),
+        "slow_cap_rows_down": ("SLOW_CAP_ROWS = 600 * 14 - 14 ", "SLOW_CAP_ROWS = 600 * 14 - 15 ", ["slow_8386_ok"])}
 ncm = 0
 for m, spec in sorted(CMUT.items()):
     old, new, targets = spec[0], spec[1], spec[2]
@@ -475,12 +601,23 @@ PYEOF
 [ -s "$ST/counts.txt" ] || { echo "WU1 SELFTEST FAIL: case runner did not finish" | tee -a "$LOG"; exit 1; }
 read -r pass fail nreal nmade nmut ncm < "$ST/counts.txt"
 # the real fixture folders must be untouched: nothing in them newer than the start of this self-test
+# Revision 3 (T1): a folder that is missing or that find cannot read counts as touched, never as "unchanged"
+newer_count() {   # <dir> <stamp file>: prints the number of paths newer than the stamp; returns 1 if find failed
+  local out
+  [ -d "$1" ] || { echo "missing $1" >&2; return 1; }
+  out=$(find "$1" -newer "$2" -print) || return 1
+  printf '%s' "$out" | grep -c . || true
+}
+# the check itself must fail on a find error (a path that does not exist; nothing is created for it)
+if newer_count "$ST/t1_no_such_dir" "$ST/.t0" >/dev/null 2>&1; then fail=$((fail+1)); echo "FAIL untouched check: a find error was not caught" | tee -a "$LOG"
+else pass=$((pass+1)); echo "ok   untouched check fails on a find error" | tee -a "$LOG"; fi
 touched=0
 for t in cp1 cp2 cp3 cp4 uc1 lc1 lc2 lc3 cpl1 r1a_cor_1; do
-  [ -d "$REAL/$t" ] && touched=$((touched + $(find "$REAL/$t" -newer "$ST/.t0" -print | wc -l)))
+  if n=$(newer_count "$REAL/$t" "$ST/.t0"); then touched=$((touched + n))
+  else touched=$((touched + 1)); echo "FAIL fixture folder $REAL/$t could not be checked" | tee -a "$LOG"; fi
 done
 if [ "$touched" != 0 ]; then fail=$((fail+1)); echo "FAIL real fixture folders changed during the self-test ($touched paths)" | tee -a "$LOG"
 else pass=$((pass+1)); echo "ok   real fixture folders unchanged" | tee -a "$LOG"; fi
 tot=$((pass+fail))
-if [ "$fail" = 0 ]; then echo "WU1 SELFTEST PASS $pass/$tot ($nreal real cases, $nmade made cases, $nmut hook mutants caught, $ncm constant mutants caught, 1 hook-coverage check, 1 untouched check) in $ST" | tee -a "$LOG"; exit 0
+if [ "$fail" = 0 ]; then echo "WU1 SELFTEST PASS $pass/$tot ($nreal real cases, $nmade made cases, $nmut hook mutants caught, $ncm constant mutants caught, 1 hook-coverage check, 1 find-error check, 1 untouched check) in $ST" | tee -a "$LOG"; exit 0
 else echo "WU1 SELFTEST FAIL $fail of $tot in $ST" | tee -a "$LOG"; exit 1; fi
