@@ -109,6 +109,16 @@ Built (draft 6): `kj1/t2_xray_kj.sh` = the kw runner plus the keep watcher and `
 once, <s> seconds after the utc_ms of the first new play pose the runner read; rows in `stall.csv`). Syntax
 checked only; never run. Open with itrzone: whether their play clock can start before my runner is up (then the
 first play pose I read is not their first).
+Amendment 136 REGISTERED (ITRZone master 79dae83): my byte copy `kj1/itrzone-amendment-136.txt`, sha256
+ac48771ca360e1eaacc6e1767d273eb5fbf4beba28adafd5a8d85a05a424e131, 64 lines, 5650 bytes: MATCH. Against the draft
+only the title word and my own precision (offline: owed) differ; read by diff.
+Play clock, settled (itrzone, from their code): their clock starts at 0 on the first puppet tick with an accepted
+snapshot of mine, and no play pose is written before it; old pose and snapshot files are removed before ITR2
+starts. So the first new play pose my runner reads is their first, and its header time is their clock 0 within one
+frame. Their clock adds at most 0.25 s a frame, so a long frame makes their events LATER on the wall, never
+earlier; in d2 the loss was nil. A hitch before 115 s moves the monster's kill toward the end of my stop, which the
+2 s NO VERDICT rule covers (10 s of room at the end, 8 at the start).
+Their run line: t2v=4 kcj=30 kcjs=0.6 kcjt=0.5 (defaults 40, 60, 85), no kcrig.
 From their lever (`kcj`, built, not merged): if the picked creature's snapshot health is below 1 (say 0.95), a
 later kill reports total = the part hits + what was left, not a round number. So no check here names a death total.
 Proposed for the run, so both are judged in the engine: S gets 0.6 at 30 s and 0.5 at 70 s (total 1.100), kill at
