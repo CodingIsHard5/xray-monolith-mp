@@ -94,3 +94,49 @@ health baseline before the first hit (a correct run could have failed); the writ
 had 16 of 17 columns. Neither case has a fixture of its own in the selftest. Not changed: the runner does not reap
 the engine when it is cancelled mid-run (the same code ran d0, d1, d2; I keep the runner's diff to the two lines);
 the driver gives the slice back by itself, so after a cancel I look for a leftover engine at once, stop it and report it.
+
+## 8. RESULT kw1 (2026-11-26, one boot, scored once): PASS 12/12 by the registered checker
+
+Limits first:
+- One stalker (`sim_default_stalker_0`, id 19428) and one mutant (`flesh_03a_normal`, id 23183), both at full
+  health, standing in Cordon, online. Nothing about other classes, offline creatures, special states, or ITR2.
+- Nobody looked at it. Pain animations, sounds and hit markers are unknown.
+- Checker gap, found after scoring: the registration's check 12 lists `ktabfail 0`, but the registered checker does
+  not judge that counter. Its value is in the T2SUM line the checker printed: 0. The verdict is the checker's; the
+  counter was read by me, not by a check.
+- The three "reported, not judged" items of section 4 were NOT delivered. The run stores no whole snapshots, so the
+  health of the other creatures at the hit moments is not known ("only S and M change" is not shown). Frame time
+  around the steps was not extracted. The engine log has no time stamps, so "GAMMA lines within 1 s" cannot be
+  answered; no line in it names either id apart from the spawn lines. A later run needs the snapshots kept.
+- All checker fixtures were stub-made; this was its first read of real engine bytes. It did not fault.
+
+Score: `kw1/kw1_xscore.txt`, sha256 6eea3b5df23d4e7baedbfc53ace9fdd97517ddfc7033c2a541567dac245d4eef (out dir
+`out/kw1`; checker hash matched its pin at scoring; runner rc 0, no restart, no leftover engine, display gone).
+
+| # | result | numbers |
+|---|---|---|
+| 1 | PASS | rc 0, one boot, 0 Lua errors, 0 FATAL |
+| 2 | PASS | S 1.0000 -> 0.7500, 0.8008 -> 0.4508; M 1.0000 -> 0.7500, 0.7518 -> 0.4018 (exact to 4 decimals) |
+| 3 | PASS | no further KAPPLY while a total repeated |
+| 4 | PASS | snapshot drops 0.2500 / 0.3500 (S), 0.2500 / 0.3499 (M) |
+| 5 | PASS | both totals confirmed 101 ms after their first pose |
+| 6 | PASS | one KDEAD online each; `dead` line read 101 ms after the first dead pose |
+| 7 | PASS | 617 snapshots after, alive in 0 |
+| 8 | PASS | last `dead` line 10006 ms after the last pose carrying the line |
+| 9 | PASS | KWHO killer 0 for both |
+| 10 | PASS | actor health 1.0000 in every snapshot; one KREFUSED 0,actor |
+| 11 | PASS | 1001 snapshots: r never absent, never back, never over 2.0 s |
+| 12 | PASS | khits 6, kdead_online 2, krefused 1, the rest 0 (ktabfail 0 read by hand, see limits) |
+NO VERDICT rules: both clear.
+
+My guess was PASS 35 % / NO VERDICT 25 % / FAIL 40 %. It passed; I rated a pass as the less likely outcome, and
+none of the six named risks happened in this one sample (killer named correctly for the flesh and the stalker, the
+health write was not undone, no fight before the steps, no early death from the near-zero hit).
+
+Seen, not judged:
+- Regeneration is visible: in the 5 s between the hits the stalker went 0.7500 -> 0.8008 and 0.4508 -> 0.5016
+  (about 0.01 a second), the flesh 0.7500 -> 0.7518. So X-Ray's health after a part hit drifts up from ITR2's
+  total; by the joint text the puppet shows X-Ray's health, so a stalker hit for 25 % reads about 20 % down five
+  seconds later. Whether that is wanted is a design question for the joint run, not a fault of the channel.
+- At the death step the stalker stood at 0.1016 after the last 0.400 and was then killed by the kill call, as
+  designed (ITR2 decides death, not X-Ray's arithmetic).

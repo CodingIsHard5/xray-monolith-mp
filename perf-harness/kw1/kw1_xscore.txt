@@ -1,0 +1,28 @@
+1 no crash, no FATAL, no Lua error naming the bridge script, runner rc 0, one boot: PASS (rc0 True, restart rows 0, lua errors 0, FATAL 0, engine log lines 11005, boots ['boot0'])
+2 part hits: two KAPPLY each, 0.250 then 0.350, after = before - difference +/- 0.0002: PASS (S id 19428: 598,19428,0.250,0.250,1.0000,0.7500,hit; 698,19428,0.350,0.600,0.8008,0.4508,hit | M id 23183: 598,23183,0.250,0.250,1.0000,0.7500,hit; 698,23183,0.350,0.600,0.7518,0.4018,hit)
+3 no second effect while a total is repeated: PASS (S: totals ['0.250', '0.600', '1.000'], further KAPPLY [] | M: totals ['0.250', '0.600', '1.000'], further KAPPLY [])
+4 the creature lost health: next snapshot below the last one before, by at least half the difference: PASS (S: 0.250: snap 385 1.0000 -> snap 386 0.7500, drop 0.25 (floor 0.125); 0.600: snap 431 0.8008 -> snap 432 0.4508, drop 0.35 (floor 0.175) | M: 0.250: snap 385 1.0000 -> snap 386 0.7500, drop 0.25 (floor 0.125); 0.600: snap 431 0.7517 -> snap 432 0.4018, drop 0.3499 (floor 0.175))
+5 confirmation: k,<id>,0.250 then k,<id>,0.600 read within 2.0 s of the first pose carrying the total: PASS (S: 0.250 read 101 ms after its first pose; 0.600 read 101 ms after its first pose | M: 0.250 read 101 ms after its first pose; 0.600 read 101 ms after its first pose)
+6 death: one KDEAD online each; the writer reads the dead line within 2.0 s of the first pose with dead = 1: PASS (S: KDEAD online 1, dead read 101 ms after the first dead pose | M: KDEAD online 1, dead read 101 ms after the first dead pose)
+7 dead in X-Ray: alive 0 or not listed, from 2.0 s after the dead line to the end: PASS (S: 617 snapshots from 2.0 s after the dead line, alive in 0 [] | M: 617 snapshots from 2.0 s after the dead line, alive in 0 [])
+8 the dead line stays, and goes 10.0 s +/- 1.0 s after the last pose that carried the line: PASS (S: last dead line 10006 ms after the last pose with the line, gaps [], snapshots after it 497 | M: last dead line 10006 ms after the last pose with the line, gaps [], snapshots after it 497)
+9 the kill is the actor's: one KWHO each with killer id 0: PASS (S: KWHO ['19428,0'] | M: KWHO ['23183,0'])
+10 actor unhurt (health = first snapshot's in every snapshot); one KREFUSED 0,actor; no KAPPLY/KDEAD for 0: PASS (first 1.0000, differing in 0 []; KREFUSED for 0: ['0,actor']; KAPPLY/KDEAD for 0: 0)
+11 the r line: present after the first pose taken, never back, within 2.0 s of the newest pose: PASS (1001 snapshots from seq 112: r absent or not session 1795718744260 in 0 [], back [], over 2.0 s [])
+12 counters in the last T2SUM: khits 6 kdead_online 2 kdead_offline 0 kdead_fail 0 krefused 1 kstale 0 kback 0 kclamped 0 kver 0 kowed 0: PASS (differ: {})
+NV1 no stalker or no monster with health >= 0.9 at the pick: clear (both picked)
+NV2 S or M hurt or killed by X-Ray's own world before its step: clear (none)
+reported: picks {'S': {'id': '19428', 'sec': 'sim_default_stalker_0', 'h': 1.0}, 'M': {'id': '23183', 'sec': 'flesh_03a_normal', 'h': 1.0}}
+reported: T2SUM {'last_seq': '2188', 'torn': '0', 'holds': '0', 'paused': 'false', 'near': '161', 'guards': '0', 'lost': '0', 'epochs': '0', 'khits': '6', 'kdead_online': '2', 'kdead_offline': '0', 'kowed': '0', 'kstale': '0', 'kback': '0', 'krefused': '1', 'kclamped': '0', 'kver': '0', 'kdead_fail': '0', 'ktabfail': '0'}
+reported: KAPPLY,62202,598,19428,0.250,0.250,1.0000,0.7500,hit
+reported: KAPPLY,62202,598,23183,0.250,0.250,1.0000,0.7500,hit
+reported: KAPPLY,67223,698,19428,0.350,0.600,0.8008,0.4508,hit
+reported: KAPPLY,67223,698,23183,0.350,0.600,0.7518,0.4018,hit
+reported: KAPPLY,72207,797,19428,0.400,1.000,0.5016,0.1016,hit
+reported: KAPPLY,72207,797,23183,0.400,1.000,0.4035,0.0035,hit
+reported: KDEAD,72207,797,19428,online
+reported: KDEAD,72207,797,23183,online
+reported: KREFUSED,62202,598,0,actor
+reported: KWHO,72207,19428,0
+reported: KWHO,72207,23183,0
+KW1 X SIDE: PASS
