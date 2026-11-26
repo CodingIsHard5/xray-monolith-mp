@@ -1161,6 +1161,8 @@ int vr_bpt_dropped(int id, const Fvector& bc, Fvector& centre, int mode, const F
 				sh->XFORM().set(xf);
 				sh->PPhysicsShell()->SetTransform(root, mh_clear);
 			}
+			else // not placed again: the game's drop has just moved the object's own matrix to its drop point; take the shell's back
+				sh->PPhysicsShell()->InterpolateGlobalTransform(&sh->XFORM());
 			sh->PPhysicsShell()->set_LinearVel(lv);
 			sh->PPhysicsShell()->set_AngularVel(av);
 			was_set = true;
