@@ -1,0 +1,22 @@
+tag          frames updates actor  camera  frame ms  p99 ms  sim ms/tick  camera ms/call
+s4a_n30_1     12000   1662   1662  12000    4.617   11.75    4.823      0.0127
+s4a_n30_2     12000   1685   1685  12000    4.679   12.25    4.919      0.0125
+s4a_n60_1     12000   3590   3590  12000    4.985   11.45    3.585      0.0125
+s4a_n60_2     12000   3508   3508  12000    4.871   10.79    3.514      0.0127
+s4a_noff_1    12000  12000  12000  12000    5.800   11.48    2.011      0.0128
+s4a_p30_1     12000   1681   1681      -    4.668   11.81    4.993      -
+s4a_p30_2     12000   1638   1638      -    4.549   11.11    4.759      -
+s4a_p60_1     12000   3502   3502      -    4.863   10.85    3.498      -
+s4a_p60_2     12000   3479   3479      -    4.831   10.79    3.552      -
+s4a_poff_1    12000  12000  12000      -    5.993   11.88    2.154      -
+V1 s4a_n30_1: PASS  camera 12000 of 12000 frames, actor 1662 of 1662 updates
+V1 s4a_n30_2: PASS  camera 12000 of 12000 frames, actor 1685 of 1685 updates
+V1 s4a_n60_1: PASS  camera 12000 of 12000 frames, actor 3590 of 3590 updates
+V1 s4a_n60_2: PASS  camera 12000 of 12000 frames, actor 3508 of 3508 updates
+V2 s4a_noff_1: PASS  camera 12000, actor 12000, updates 12000, frames 12000
+V3 frame time tick 30: PASS  new/previous = 1.009 (limit 1.05), arm spread 2.6 %
+V4 tick cost tick 30: PASS  new/previous = 0.999 (limit 1.05), arm spread 4.9 %
+V3 frame time tick 60: PASS  new/previous = 1.017 (limit 1.05), arm spread 2.3 %
+V4 tick cost tick 60: PASS  new/previous = 1.007 (limit 1.05), arm spread 2.0 %
+V5 off frame time: PASS  new/previous = 0.968 (one run each)
+RESULT: PASS (10 of 10 checks passed)

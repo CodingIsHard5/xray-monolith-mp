@@ -72,5 +72,25 @@ My guess was 75 % for all four: it held. Output: `s4a/s4a_partA_score.txt`.
 Limit, as registered: serial test mode, first 320 A-Life passes; it shows the new code is inert when off, nothing
 about gated mode.
 
-### 5.2 Part B
-(empty until scored)
+### 5.2 Part B (run 2026-11-25 22:17 to 22:41 EST, one EXCLUSIVE slice, ten runs all clean, no re-run, no
+substitution; scored once with s4a_score.py 3a77202c): PASS 10 of 10
+| check | result |
+|---|---|
+| V1 view every frame | camera calls 12000 of 12000 frames in all four gated runs; actor updates = updates (1662, 1685, 3590, 3508) |
+| V2 off = stock call pattern | camera 12000 = actor 12000 = updates 12000 = frames 12000 |
+| V3 frame time, tick 30 | new / previous 1.009 (4.648 against 4.609 ms; arm spread 2.6 %) |
+| V3 frame time, tick 60 | 1.017 (4.928 against 4.847 ms; spread 2.3 %) |
+| V4 tick cost, tick 30 | 0.999 (spread 4.9 %) |
+| V4 tick cost, tick 60 | 1.007 (spread 2.0 %) |
+| V5 off frame time | 0.968 (5.800 against 5.993 ms, one run each) |
+Reported, no gate: camera update 0.0127 ms per call (the hands update is not inside that site); p99 frame time
+10.8 to 12.3 ms in every gated run, new and previous alike.
+Guesses: all checks PASS 45 %: it passed. Frame time 1.00 to 1.04: held. Tick cost 0.97 to 1.00: tick 30 inside,
+tick 60 at 1.007 just outside (I expected the tick to get cheaper; it did not, within the spread). Camera cost
+0.03 to 0.10 ms per call: WRONG, it is 0.013.
+
+What this shows: in gated mode the camera now updates on every rendered frame, the actor still updates once per tick,
+and it costs about 1 to 2 % of frame time, which is inside the runs' own spread. Off is unchanged.
+What it does not show (section 4 stands): the mouse path was not exercised (input off); smoothness was not measured;
+the player's body, other objects and vehicle cameras are still at tick positions; the frame-rate side effects on
+values the simulation reads were not checked. V5 is one run per build.
