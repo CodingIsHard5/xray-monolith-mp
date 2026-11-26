@@ -1,0 +1,36 @@
+# wu1 alife_warmup lever (PREREG-wu1-alife-warmup-DRAFT.md section 3). ONE source for the driver and the scorer.
+# tag|exe|save|warm|frames|slow_ms|arm   arm: on = -alife_warmup, off = stock, prime = disk-cache priming load (not scored)
+# all-lowercase tags (the bench lowercases folder names). 1 prime + 32 scored loads, ABBA blocks: on off off on (x8).
+wu1_prime|Warm18.exe|cordon1|0|10000|20|prime
+wu1_01_on|Warm18.exe|cordon1|0|10000|20|on
+wu1_02_off|Warm18.exe|cordon1|0|10000|20|off
+wu1_03_off|Warm18.exe|cordon1|0|10000|20|off
+wu1_04_on|Warm18.exe|cordon1|0|10000|20|on
+wu1_05_on|Warm18.exe|cordon1|0|10000|20|on
+wu1_06_off|Warm18.exe|cordon1|0|10000|20|off
+wu1_07_off|Warm18.exe|cordon1|0|10000|20|off
+wu1_08_on|Warm18.exe|cordon1|0|10000|20|on
+wu1_09_on|Warm18.exe|cordon1|0|10000|20|on
+wu1_10_off|Warm18.exe|cordon1|0|10000|20|off
+wu1_11_off|Warm18.exe|cordon1|0|10000|20|off
+wu1_12_on|Warm18.exe|cordon1|0|10000|20|on
+wu1_13_on|Warm18.exe|cordon1|0|10000|20|on
+wu1_14_off|Warm18.exe|cordon1|0|10000|20|off
+wu1_15_off|Warm18.exe|cordon1|0|10000|20|off
+wu1_16_on|Warm18.exe|cordon1|0|10000|20|on
+wu1_17_on|Warm18.exe|cordon1|0|10000|20|on
+wu1_18_off|Warm18.exe|cordon1|0|10000|20|off
+wu1_19_off|Warm18.exe|cordon1|0|10000|20|off
+wu1_20_on|Warm18.exe|cordon1|0|10000|20|on
+wu1_21_on|Warm18.exe|cordon1|0|10000|20|on
+wu1_22_off|Warm18.exe|cordon1|0|10000|20|off
+wu1_23_off|Warm18.exe|cordon1|0|10000|20|off
+wu1_24_on|Warm18.exe|cordon1|0|10000|20|on
+wu1_25_on|Warm18.exe|cordon1|0|10000|20|on
+wu1_26_off|Warm18.exe|cordon1|0|10000|20|off
+wu1_27_off|Warm18.exe|cordon1|0|10000|20|off
+wu1_28_on|Warm18.exe|cordon1|0|10000|20|on
+wu1_29_on|Warm18.exe|cordon1|0|10000|20|on
+wu1_30_off|Warm18.exe|cordon1|0|10000|20|off
+wu1_31_off|Warm18.exe|cordon1|0|10000|20|off
+wu1_32_on|Warm18.exe|cordon1|0|10000|20|on
