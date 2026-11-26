@@ -503,6 +503,11 @@ CSE_Abstract* try_to_clone_object(CALifeSimulator* self, CSE_Abstract* object, L
 
 void set_objects_per_update(CALifeSimulator* self, u32 count)
 {
+#ifdef XRCORE_PROFILER_AGG
+	// measurement only (B2b): when the script widens / narrows the A-Life pass, against the loading countdown
+	Msg("* alife_opu frame %u time_global %u precache %u value %u", Device.dwFrame, Device.dwTimeGlobal,
+	    Device.dwPrecacheFrame, count);
+#endif
 	self->objects_per_update(count);
 }
 

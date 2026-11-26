@@ -1099,6 +1099,7 @@ extern int g_ErrorLineCount;
 
 extern ENGINE_API int g_freeze_absorb_ms;
 extern ENGINE_API int g_freeze_absorb_armed;
+extern ENGINE_API int g_alife_warmup; // B2b lever (device.cpp): never written to user.ltx
 // B1-T2 freeze settings are NEVER written to user.ltx (cfg_save on exit would otherwise keep "armed" or the
 // threshold on for the next session, where a loading hitch could be swallowed). Set per run by script only.
 class CCC_IntegerNoSave : public CCC_Integer
@@ -1207,6 +1208,7 @@ void CCC_Register()
 	CMD4(CCC_Integer, "g_ai_unlimited_ammo", &g_ai_unlimited_ammo, 0, 1);
 	CMD4(CCC_IntegerNoSave, "g_freeze_absorb_ms", &g_freeze_absorb_ms, 0, 3600000);     // B1-T2 freeze, default 0 (off)
 	CMD4(CCC_IntegerNoSave, "g_freeze_absorb_armed", &g_freeze_absorb_armed, 0, 1);
+	CMD4(CCC_IntegerNoSave, "alife_warmup", &g_alife_warmup, 0, 1); // B2b lever (device.cpp), default 0 (off), acts from the next load
 
 	// Render device states
 	CMD4(CCC_Integer, "r__supersample", &ps_r__Supersample, 1, 4);

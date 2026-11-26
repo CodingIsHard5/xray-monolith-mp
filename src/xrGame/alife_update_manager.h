@@ -25,6 +25,9 @@ class CALifeUpdateManager :
 {
 private:
 	bool m_first_time;
+	bool m_warmup_pending; // B2b alife_warmup: this load's full pass is still owed (A-Life update thread only)
+	u32 m_pass_log_t0; // B2b measurement (XRCORE_PROFILER_AGG): dwTimeGlobal of the first scheduled pass, u32(-1) = none yet
+	u32 update_warmup();
 
 protected:
 	u64 m_max_process_time;

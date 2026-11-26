@@ -30,6 +30,13 @@ using namespace ALife;
 
 extern string_path g_last_saved_game;
 
+// B2b alife_warmup lever (defined in xrEngine/device.cpp, which holds the precache countdown; read the note there)
+extern ENGINE_API int g_alife_warmup;
+extern ENGINE_API volatile long g_alife_warmup_hold;
+class CActor;
+extern CActor* g_actor;
+static const CALifeUpdateManager* s_warmup_owner = 0; // the simulator that armed g_alife_warmup_hold (main thread only)
+
 class CSwitchPredicate
 {
 private:
@@ -71,10 +78,31 @@ CALifeUpdateManager::CALifeUpdateManager(xrServer* server, LPCSTR section) :
 	m_objects_per_update = pSettings->r_u32(section, "objects_per_update");
 	m_changing_level = false;
 	m_first_time = true;
+
+	// B2b alife_warmup: every load path (save load, same-level load, level change, new game) builds a new simulator
+	static bool warmup_parsed = false;
+	if (!warmup_parsed)
+	{
+		warmup_parsed = true;
+		if (strstr(Core.Params, "-alife_warmup"))
+			g_alife_warmup = 1;
+	}
+	m_warmup_pending = !!g_alife_warmup;
+	if (m_warmup_pending)
+	{
+		s_warmup_owner = this;
+		InterlockedExchange(&g_alife_warmup_hold, 1);
+	}
+	m_pass_log_t0 = u32(-1);
 }
 
 CALifeUpdateManager::~CALifeUpdateManager()
 {
+	if (s_warmup_owner == this)
+	{
+		s_warmup_owner = 0;
+		InterlockedExchange(&g_alife_warmup_hold, 0);
+	}
 	shedule_unregister();
 	Device.remove_from_seq_parallel(
 		xr_make_delegate(
@@ -110,11 +138,65 @@ void CALifeUpdateManager::update_scheduled(bool init_ef)
 	STOP_PROFILE
 }
 
+// B2b alife_warmup: the one full pass (every scheduled object once, the wrap check ends it). The limit the script set
+// (m_objects_per_update) is neither read nor written, so a set_objects_per_update on another thread is never undone.
+u32 CALifeUpdateManager::update_warmup()
+{
+	const u32 frame = Device.dwFrame;
+	const u32 precache = Device.dwPrecacheFrame;
+	CTimer timer;
+	timer.Start();
+	u32 n;
+	START_PROFILE("ALife/scheduled")
+		n = scheduled().update(u32(-1));
+	STOP_PROFILE
+	Msg("* [alife_warmup] full pass: %u of %u objects, frame %u, precache_left %u, %.1f ms", n,
+	    u32(scheduled().objects().size()), frame, precache, timer.GetElapsed_sec() * 1000.f);
+	return n;
+}
+
 void CALifeUpdateManager::update()
 {
 	PROF_EVENT("AI: A-Life Update");
 	update_switch();
-	update_scheduled(false);
+	// B2b alife_warmup: m_warmup_pending is false when the lever is off, so this is the stock path
+	bool warmup = false;
+	if (m_warmup_pending && g_actor)
+	{
+		m_warmup_pending = false;
+		// 1 -> 0 claims the pass; 2 = the precache hold hit its cap first: no forced pass for this load
+		warmup = InterlockedCompareExchange(&g_alife_warmup_hold, 0, 1) == 1;
+	}
+#ifdef XRCORE_PROFILER_AGG
+	// measurement only (B2b): every scheduled pass in the first 10 s of dwTimeGlobal from this simulator's first
+	// pass (not from its constructor: dwTimeGlobal does not move during the load and jumps by the load time on the
+	// first frame after it). Same pass as below, the limit read once as the stock predicate reads it.
+	if (m_pass_log_t0 == u32(-1))
+		m_pass_log_t0 = Device.dwTimeGlobal;
+	if (Device.dwTimeGlobal - m_pass_log_t0 <= 10000)
+	{
+		const u32 perf_frame = Device.dwFrame;
+		const u32 perf_time = Device.dwTimeGlobal;
+		const u32 perf_precache = Device.dwPrecacheFrame;
+		const u32 perf_limit = warmup ? u32(-1) : scheduled().objects_per_update();
+		u32 perf_n;
+		if (warmup)
+			perf_n = update_warmup();
+		else
+		{
+			START_PROFILE("ALife/scheduled")
+				perf_n = scheduled().update(perf_limit);
+			STOP_PROFILE
+		}
+		Msg("* alife_pass frame %u time_global %u precache %u n %u of %u limit %u", perf_frame, perf_time,
+		    perf_precache, perf_n, u32(scheduled().objects().size()), perf_limit);
+		return;
+	}
+#endif
+	if (warmup)
+		update_warmup();
+	else
+		update_scheduled(false);
 }
 
 void CALifeUpdateManager::shedule_Update(u32 dt)

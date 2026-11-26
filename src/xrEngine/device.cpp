@@ -111,6 +111,47 @@ void CRenderDevice::Clear()
 }
 
 
+// B2b lever (plan-facts/B2b-desk-read-2026-11-26.md): console `alife_warmup 0|1` (not saved) or start switch
+// `-alife_warmup`; 0 = OFF = stock. ON: CALifeUpdateManager (xrGame) arms g_alife_warmup_hold = 1 when it is built;
+// its first scheduled pass with g_actor set updates every object once and sets it back to 0 (InterlockedCompareExchange
+// 1 -> 0). Until then the precache countdown is held at 3 here (game_loaded / intro_start act at <= 2), at most
+// alife_warmup_hold_cap frames; at the cap the hold is cancelled (1 -> 2) and the pass is not run for this load.
+// Threads: armed/disarmed on the main thread (simulator ctor/dtor), claimed on the thread that runs the A-Life update
+// (the GameThread task, or the main thread for its first inline call), read and cancelled here on the main thread.
+ENGINE_API int g_alife_warmup = 0;
+ENGINE_API volatile long g_alife_warmup_hold = 0; // 0 none, 1 pending (hold), 2 cancelled by the cap
+static u32 s_alife_warmup_held = 0;               // frames held at 3 for this precache (main thread only)
+// 300 frames: the pass is due at most ~452 ms of dwTimeGlobal after the previous one (alife.ltx schedule_min/max,
+// shedule_Scale 0.5). Fixed-step frames (det_mode, rsConstantFPS) advance 33 ms: ~14 frames needed, cap = 9.9 s.
+// Real-time loading frames render the level: the cap covers 452 ms if they average >= 1.5 ms. The cap is only reached
+// when the pass cannot run at all (no actor, paused): then it bounds the extra loading at 300 frames.
+static const u32 alife_warmup_hold_cap = 300;
+
+// called only at dwPrecacheFrame == 3; true = do not count this frame down
+static bool alife_warmup_hold_frame()
+{
+	if (g_alife_warmup_hold == 1)
+	{
+		if (s_alife_warmup_held < alife_warmup_hold_cap)
+		{
+			++s_alife_warmup_held;
+			return true;
+		}
+		if (InterlockedCompareExchange(&g_alife_warmup_hold, 2, 1) == 1)
+		{
+			Msg("! [alife_warmup] hold cap hit after %u frames, pass not run", s_alife_warmup_held);
+			s_alife_warmup_held = 0;
+			return false;
+		}
+	}
+	if (s_alife_warmup_held)
+	{
+		Msg("* [alife_warmup] precache held %u frames", s_alife_warmup_held);
+		s_alife_warmup_held = 0;
+	}
+	return false;
+}
+
 void CRenderDevice::End(void)
 {
 	PROF_EVENT("Render: End");
@@ -124,7 +165,8 @@ void CRenderDevice::End(void)
 	if (dwPrecacheFrame)
 	{
 		::Sound->set_master_volume(0.f);
-		dwPrecacheFrame--;
+		if (!(dwPrecacheFrame == 3 && alife_warmup_hold_frame())) // B2b alife_warmup: always false when off
+			dwPrecacheFrame--;
 
 		if (!dwPrecacheFrame)
 		{
@@ -178,6 +220,7 @@ void CRenderDevice::PreCache(u32 amount, bool b_draw_loadscreen, bool b_wait_use
 #endif
 
 	dwPrecacheFrame = dwPrecacheTotal = amount;
+	s_alife_warmup_held = 0; // B2b alife_warmup: a new countdown starts with no held frames
 	if (amount && !precache_light && g_pGameLevel && g_loading_events.empty())
 	{
 		precache_light = ::Render->light_create();
