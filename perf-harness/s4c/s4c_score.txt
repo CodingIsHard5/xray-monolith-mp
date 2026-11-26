@@ -1,0 +1,33 @@
+SUBSTITUTED s4c_poff_1: not clean, read from its in-slice re-run s4c_poff_1_rr
+tag          frames updates actor  camera  frame ms  p99 ms  sim ms/tick  camera ms/call
+s4c_n30_1     12000   1707   1707  12000    4.741   12.19    4.895      0.0118
+s4c_n30_2     12000   1696   1696  12000    4.711   11.44    4.732      0.0117
+s4c_n60_1     12000   3614   3614  12000    5.019   11.23    3.500      0.0122
+s4c_n60_2     12000   3529   3529  12000    4.902   10.77    3.349      0.0122
+s4c_noff_1    12000  12000  12000  12000    5.854   12.14    2.042      0.0124
+s4c_p30_1     12000   1706   1706      -    4.736   12.24    4.916      -
+s4c_p30_2     12000   1661   1661      -    4.614   10.94    4.765      -
+s4c_p60_1     12000   3565   3565      -    4.951   11.41    3.636      -
+s4c_p60_2     12000   3594   3594      -    4.990   11.18    3.526      -
+s4c_poff_1    12000  12000  12000      -    5.854   11.78    2.050      -
+V1 s4c_n30_1: PASS  camera 12000 of 12000 frames, actor 1707 of 1707 updates
+V1 s4c_n30_2: PASS  camera 12000 of 12000 frames, actor 1696 of 1696 updates
+V1 s4c_n60_1: PASS  camera 12000 of 12000 frames, actor 3614 of 3614 updates
+V1 s4c_n60_2: PASS  camera 12000 of 12000 frames, actor 3529 of 3529 updates
+W1 s4c_n30_1: PASS  captures 519219 (304.2 per tick), in-between draws 83159 (6.93 per frame, 0.01 us each)
+W1 s4c_n30_2: PASS  captures 516292 (304.4 per tick), in-between draws 85059 (7.09 per frame, 0.01 us each)
+W1 s4c_n60_1: PASS  captures 1085657 (300.4 per tick), in-between draws 82123 (6.84 per frame, 0.01 us each)
+W1 s4c_n60_2: PASS  captures 1057371 (299.6 per tick), in-between draws 78730 (6.56 per frame, 0.01 us each)
+X1 s4c_n30_1: PASS  first-person animation steps 12000 of 12000 frames
+X1 s4c_n30_2: PASS  first-person animation steps 12000 of 12000 frames
+X1 s4c_n60_1: PASS  first-person animation steps 12000 of 12000 frames
+X1 s4c_n60_2: PASS  first-person animation steps 12000 of 12000 frames
+X2 s4c_noff_1: PASS  first-person animation steps 0
+W2 s4c_noff_1: PASS  captures 0, in-between draws 0
+V2 s4c_noff_1: PASS  camera 12000, actor 12000, updates 12000, frames 12000
+V3 frame time tick 30: PASS  new/previous = 1.011 (limit 1.05), arm spread 2.7 %
+V4 tick cost tick 30: PASS  new/previous = 0.995 (limit 1.05), arm spread 3.4 %
+V3 frame time tick 60: PASS  new/previous = 0.998 (limit 1.05), arm spread 2.4 %
+V4 tick cost tick 60: PASS  new/previous = 0.956 (limit 1.05), arm spread 4.5 %
+V5 off frame time: PASS  new/previous = 1.000 (one run each)
+RESULT: PASS (20 of 20 checks passed)

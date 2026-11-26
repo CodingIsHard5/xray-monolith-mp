@@ -67,5 +67,38 @@ Self-test `python3 -I tools/s4c_input_selftest.py out <work dir>` (cdf81240): PA
   objects, attached lights and particles, marks on moving NPCs, culling, tracers, the player's own body and shadow.
 - The shot origin reads a hands bone posed at tick time plus the fraction. Hit tests use tick positions.
 
-## 6. Result
-(none yet)
+## 6. Result (all three run 2026-11-26 on the Overseer's GO; each scored once)
+### 6.1 Part A (03:01 to 03:22 EST, six runs, both preflights ok): PASS 4 of 4
+R1 stock agrees with stock, R2 switch-off (SimTick17) agrees with stock: C = 0 at all three checkpoints in all runs.
+R3 frame at checkpoint 1: +0.0 (limit 8). R4 call spacing normal. Guess 75 %: held. Output `s4c/s4c_partA_score.txt`.
+
+### 6.2 Part B (03:50 to 04:19 EST, one slice): PASS 20 of 20, with ONE SUBSTITUTION
+s4c_poff_1 (previous build, off) was not clean; the series re-ran it in the slice and the scorer read s4c_poff_1_rr,
+as registered. It feeds V5 only.
+| check | result |
+|---|---|
+| X1 hands step every frame | 12000 of 12000 frames in all four gated runs |
+| X2 off | 0 |
+| W1, W2 | 300 to 304 captures per tick, 6.6 to 7.1 in-between draws per frame; off 0 and 0 |
+| V1, V2 | camera 12000 of 12000 gated; off all = 12000 |
+| V3 frame time | new / previous 1.011 at tick 30 (spread 2.7 %), 0.998 at tick 60 (spread 2.4 %) |
+| V4 tick cost | 0.995 at tick 30 (spread 3.4 %), 0.956 at tick 60 (spread 4.5 %) |
+| V5 off frame time | 1.000 (one run each; the previous build's from its re-run) |
+Guesses: all PASS 40 %: it passed. X1 75 %: held, so the actor is "focused" headless. Frame time 1.00 to 1.04: 1.011
+and 0.998. Tick cost 0.97 to 1.01: 0.995 held; 0.956 at tick 60 is below my range and at the edge of its spread: I
+do not read it as a gain. X1 counts the step, not a visible pose change (as registered). Output `s4c/s4c_score.txt`.
+
+### 6.3 Part C, input on (05:12 to 05:16 EST, one slice, both runs clean): PASS 2 of 2
+| run | frames | updates | camera | hands steps | mouse polls | mouse reads that succeeded |
+|---|---|---|---|---|---|---|
+| tick 30 | 6000 | 854 | 6000 | 6000 | 5146 | 5146 |
+| tick 60 | 6000 | 1907 | 6000 | 6000 | 4106 | 4106 |
+Guess 60 %, with "no mouse device headless" as the likely failure: wrong on the failure, the device exists and every
+read succeeded. No crash in 12000 frames with input on.
+What it shows: the per-frame mouse code runs and reads the device on every frame without a tick, with zero motion.
+What it does not show (section 5 stands): any real motion, buttons, wheel, cursor capture in a real window, or how it
+feels. Caden's hands are the first test of that. Output `s4c/s4c_input_score.txt`.
+
+### 6.4 For Caden (not run by me: I start nothing on his screen)
+`s4c/delivery/`: launcher `caden_simtick_play.sh` (pinned to SimTick17, own prefix and settings in run/), a .desktop
+entry, and the short sheet. The launcher has NEVER been started; only its syntax is checked.

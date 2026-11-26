@@ -1,0 +1,3 @@
+s4c_i30_1: PASS  frames 6000, updates 854, camera 6000, animation steps 6000, mouse polls 5146 (frames without a tick at least 5146), mouse reads that succeeded 5146 (reported), frame 4.75 ms, bench verdict [VERDICT: clean]
+s4c_i60_1: PASS  frames 6000, updates 1907, camera 6000, animation steps 6000, mouse polls 4106 (frames without a tick at least 4093), mouse reads that succeeded 4106 (reported), frame 5.30 ms, bench verdict [VERDICT: clean]
+RESULT: PASS
