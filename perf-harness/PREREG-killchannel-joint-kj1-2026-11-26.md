@@ -192,10 +192,11 @@ Under 2 times, or unknown: check 9's edge before STOP (thin by construction); ch
 Scorer selftest line, run by me on the pinned bytes:
 `SELFTEST: PASS (110 folders: good 4/4; mutant 40/40; nv 13/13; counter 22/22; nvfail 2/2; missing 7/7; empty 7/7; unreadable 7/7; unparsed 8/8; counters-only 4/4; refuse-overwrite ok)`
 
-### 10.2 Story characters (the Overseer's point; agreed with itrzone, see their amendment 137)
+### 10.2 Story characters (the Overseer's point; asked of itrzone 2026-11-26, to be in their amendment 137 before any boot)
 The nearest stalker to the rig may be Fanatic or Wolf. A story or scripted character failing checks 2, 5 or 11
 would be GAMMA's script, not the channel. So the rig does not pick one: S is picked only among stalkers whose
 snapshot section begins with `sim_default_` (the generic simulation stalkers; kw1's S was `sim_default_stalker_0`).
-My checker is not changed; it prints S's section, and I state it in the result. If the pick still names another
+My checker is not changed and does not print the section: I read S's section by hand from the `k` line of the
+kept poses (one grep, written into the result with the line). If the pick still names another
 section, the run is reported as outside the registered conditions and S's checks are not scored (NO VERDICT for S).
 Limit this adds: nothing here says how the channel behaves on a story character. That needs its own run.
