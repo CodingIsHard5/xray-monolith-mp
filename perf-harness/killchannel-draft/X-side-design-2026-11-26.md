@@ -111,7 +111,12 @@ Lines: KAPPLY, KDEAD, KOWED, KSTALE, KBACK, KREFUSED.
      health at those moments by more than the scene explains (control: the same boot without `k` lines).
 3. One joint run with itrzone's rig lever (its draft): part hit, kill, kill during a 20 s freeze.
 
-## 11. For Caden, through the Overseer (player-visible, so not mine or itrzone's to decide)
+## 11. RULED by Caden (Discord 2026-11-26 16:50-16:54 UTC, confirmed to me by the Overseer): all four as proposed
+1 damage by ITR2's health and weapons, not X-Ray armour or headshots; 2 ITR2 kills count as the player's in X-Ray
+(goodwill, hostility); 3 a restart undoing kills since X-Ray's last save is OK for now; 4 looting happens in ITR2.
+Section 4's offline death is superseded: it uses the alife object's own kill(), not alife():kill_entity (which leaves
+health unchanged, alife_combat_manager.cpp:459). The registered text is itrzone's amendment 134.
+The questions as they were put:
 1. Feel: the player's shots count by ITR2's health and weapons. X-Ray's armour, hit zones and headshots are not used
    for them. (itrzone's proposal; my half fits either way, but with X-Ray's rules it would be a different design.)
 2. A kill in ITR2 counts as the player's kill in X-Ray: statistics, faction goodwill, squads turning hostile. I

@@ -1,0 +1,166 @@
+## Amendment 134 (REGISTERED 2026-11-26): pose version 4 and the kill channel, joint with EnginePerf (formats and rules; no run)
+Ordered by the Overseer as its own joint item, ahead of anomalies and arm E. This amendment registers the two file
+formats and the rules of both sides, as amendment 125 did for pose version 3. It registers no run: every run (their
+X-only witness, our ITR2-side witness, the joint run) gets its own amendment before it boots. The text of sections 1
+to 6 and 8 below is the joint text, draft 7 (`docs/design-notes/2026-11-26-pose-v4-kill-channel-joint-draft.md`),
+agreed line by line with EnginePerf; they hold the same text and match it byte for byte.
+
+**The fault it fixes.** Damage and kills the player does in ITR2 never reach X-Ray, which owns who is alive. Today a
+puppet the player hurts stays hurt here while X-Ray's creature is unhurt, and a killed puppet's body is moved by the
+mod to follow X-Ray's living creature until the game clears it; then the creature is spawned again.
+
+### 1. The pose file, version 4 (ITR2 writes)
+
+    seq,<n>,<utc_ms>,<state>,<level>,<keep|freeze>,<session>,4
+    p,<x>,<yfloor>,<z>,<yaw>,<hp>,<stance>
+    c,<changer>                      (only in state cross, as today)
+    k,<id>,<section>,<total>,<dead>  (0 to 64 lines)
+    end,<n>
+
+- The 8th header field is the version, the digit 4. A pose with 7 header fields is version 3 and has no `k` lines.
+- A version 3 reader refuses a version 4 pose whole (its header patterns take 6 or 7 fields only): the pose counts as
+  torn, nothing is applied, and it is LOST after 5 s. So a version 4 ITR2 cannot drive a version 3 X-Ray. This fails
+  closed and is intended; both sides change together.
+- The version 4 reader: 7 fields = version 3, and `k` lines in it are not applied and are counted; 8 fields with the
+  8th equal to 4 = version 4; any other 8th field, or more than 8 fields, refused whole and counted (`kver`).
+- Today's version 3 reader acts on a bare `k,<id>` line (it kills that id). The version 4 reader removes this in every
+  version. Until then no version 3 pose may carry a `k` line. Checked in the mod (blob 2c8ad852, `STR.t2Write`): the
+  pose body is built from one format string with the lines `seq`, `p`, an optional `c` and `end`; no `k` line can be written.
+- `<id>`: X-Ray's id from the snapshot's `o` line. `<section>`: the section name from that same `o` line, copied.
+- `<total>`: all damage ITR2 has dealt to this creature in this ITR2 session, as a share of full health, 3 decimals,
+  0.000 to 1.000. It never falls within a session.
+- `<dead>`: 1 once the puppet has died in ITR2, else 0. Always present.
+- The form `k,<id>` with fewer than 5 fields is not valid in any version and is refused.
+- A line is written only for an id that was listed in a snapshot of the current X-Ray run id.
+- More than 64 creatures with damage: the 64 with the newest change are written; the mod counts the rest (`kdrop`).
+
+### 2. The snapshot (X-Ray writes)
+
+    r,<session>,<pose seq>      at most one line
+    k,<id>,<applied>            for every id with applied > 0 that is alive
+    k,<id>,<applied>,dead       for 10 s after a death was applied or seen, or while a pose line for it is stale
+
+- After the `o` lines, before `end`; the `r` line before the `k` lines. The `o` line is unchanged.
+- The `r` line (EnginePerf's wording): seq of the newest version 4 pose whose k lines X-Ray has processed (also when it
+  carried none). Absent until the first such pose of this X-Ray run. Not advanced while the pose is LOST, in a
+  crossing, for another level, or refused (torn, kver). On a new session number it carries the new session and that
+  pose's seq.
+- Processed means: every death in that pose is applied or confirmed in the same step. So a snapshot whose `r` is at or
+  past a death's first pose also carries the `dead` line for it, or the kill was refused (and a stale one is answered
+  `dead` as well), or it failed and is not confirmed. In the failed case ITR2's 10 s rule ends it: `KILL not applied`,
+  and the mod follows X-Ray. An owed part hit is processed but not applied: `r` advances, `applied` stays.
+- `r` is the last pose processed before this snapshot was written; pose reads and snapshot writes are separate steps,
+  so it can lag the pose file by one read.
+- Nothing else in the snapshot says the pose is LOST; an `r` line standing still is the sign.
+- Header: `seq,<n>,<t_xray_ms>,<t_track_s>,<level>,<run id>,4`. The 7th field is the version, the digit 4: one bridge
+  version for both files. A snapshot with 6 header fields has no `k` lines.
+- The mod's reader today takes the first six header fields and ignores line types it does not know, so an older mod is
+  not disturbed by a version 4 snapshot.
+
+### 3. What ITR2 does
+
+- Each puppet tick, on the game thread: read the puppet's health. The drop since the value the mod itself last wrote is
+  damage dealt in ITR2; it is added to the total as a share of the class's full health.
+- Death: health reads 0 on a valid actor. `dead` = 1, and the total includes the drop to 0. From then on the body is
+  ITR2's: the mod neither moves nor removes it, and does not spawn that id again while the report is open.
+- A puppet that only vanished (fell out of the world, cleared by the game) with health above 0 at its last read is NOT
+  reported dead: reporting it would make X-Ray kill a creature the player never killed. It is spawned again, as today.
+- Health is read 20 times a second on the mod's own clock, also while X-Ray stalls, so a death is seen before the
+  game clears the body.
+- Full health of a puppet is its first health read after spawn (the game shows no maximum to scripts).
+- Shown health: full health times (the snapshot's health minus `total - applied`), never below 1 % by this arithmetic.
+  Written by the mod after an accepted snapshot when it differs from the puppet's health; the value is read back, and
+  only a later drop below it is damage. (New code; today the mod never writes puppet health.)
+- The 10 s and 60 s rules below run on a clock of accepted snapshots (each counts its real spacing, at most 0.25 s).
+- A death's 10 s count only snapshots whose `r` line names our session and a seq at or past the first pose that
+  carried the death. No `r` line, another session or an older seq means X-Ray is not reading us: the kill is kept.
+- A report retired and later opened again starts at X-Ray's applied count for that id as of the newest snapshot
+  (counts of the current session only), so the total never falls below it.
+- Under the 64-line limit deaths are written first, then the newest changes.
+- A line is dropped when: X-Ray's `dead` line for the id is read; or the id has been absent from the snapshot for 60 s;
+  or the id is listed with another section name.
+- X-Ray's `dead` line removes the puppet even when our total is 0.
+
+### 4. What X-Ray does (EnginePerf's wording)
+
+- Reads `k` lines only from a whole pose of version 4. Applies nothing while the pose is LOST, in a crossing, or for
+  another level. Refuses and counts: id 0, an id that is not a creature or stalker, a bad or negative total, over 64 lines.
+- Part hit, creature online and alive, `total - applied` > 0: a near-zero hit with the actor as source, then health
+  lowered directly by the difference, stopping at 0.01 unless `dead` is 1; then `applied = total`. A difference
+  above 1.0 is cut to 1.0 and counted. A total below `applied` within one session is ignored and counted.
+- Offline part hit: owed. `applied` stays, so the snapshot shows less than the total; applied when the creature is
+  online again. An owed part is lost when the ITR2 session changes (the new totals start at 0).
+- Death: online, `kill` with the actor as killer; offline, the alife object's own kill (no killer can be named); the
+  death is confirmed only if the object then reads dead, otherwise it is logged, counted (`kdead_fail`) and not
+  confirmed; already dead or released, confirmed dead.
+- A falling total with `dead` = 1: the total is ignored and counted, the death is still applied.
+- More than 64 `k` lines in a pose: every `k` line of that pose is refused; the rest of the pose is still applied.
+  Refused lines count as processed, so `r` advances. (ITR2's writer never writes more than 64.)
+- No object at all for the id (released): confirmed dead whatever the `dead` field says.
+- A line for a creature already dead in X-Ray refreshes the 10 s hold, so the `dead` answer stays until the writer
+  drops the line.
+- A stale id with no row is answered `k,<id>,0.000,dead`.
+- An offline id is accepted only if a snapshot of this X-Ray run listed it as a monster or stalker.
+- A line whose section differs from the object's now, or whose death was confirmed more than 10 s ago while the id is
+  alive again: stale, nothing applied, answered with a `dead` line so the writer drops it. The section compared is
+  the object's now (online: the game object's; offline: the alife object's).
+- The table is written to a file at the crossing request and read back at the resume, only when the run id matches.
+- The actor takes no damage from any of this (standing rule); checked in the witness run.
+
+### 5. When something is lost
+
+| event | ITR2 | X-Ray |
+|---|---|---|
+| pose writes missed | nothing; every write carries every total | nothing |
+| X-Ray stalled, or pose LOST | keeps totals, keeps writing; dead stay dead here | applies nothing; goes on where it was |
+| a death unconfirmed through 10 s of snapshots whose `r` is at or past its pose | logs `KILL not applied id=…`, counts it, follows X-Ray | - |
+| X-Ray restarts (new run id) | drops every total and open report, logs how many | table gone; world as its save |
+| ITR2 restarts (new session number) | totals start at 0 | every `applied` set to 0; damage kept; owed parts dropped |
+| a crossing | open reports stay; old level's ids retire by the 60 s rule | table carried over the level change |
+| the creature dies in X-Ray first | removes the puppet, drops the line | confirms dead |
+
+The 10 s clock for an unconfirmed death runs only while X-Ray is writing snapshots of our level AND has processed the
+pose that carried it, so a stall, a crossing, a restart or a pose X-Ray is not reading cannot trip it.
+
+### 6. Limits to state plainly
+
+- Kills since X-Ray's last save are undone by an X-Ray restart. Accepted for now (section 8, ruling 3).
+- An offline kill names no killer: no statistics or relation change for it.
+- Hit place (head or body) is not in version 4. X-Ray uses the torso.
+- Part hits on a creature that never comes online again are never applied.
+- An id reused by another creature of the same section while a line for it is open: the damage goes to the wrong
+  creature and neither side can tell. Thought to be very rare (the id pool hands out the longest-free block first).
+
+### 8. RULED by Caden (2026-11-26)
+
+Caden answered the four questions on Discord, 16:50 to 16:54 UTC, as relayed by the Overseer: "You guessed right … Just
+itr2". All four as proposed:
+
+1. RULED: the player's shots count by ITR2's health and weapons, not X-Ray's armour and hit zones.
+2. RULED: a kill in ITR2 counts as the player's kill in X-Ray (goodwill, squads turning hostile).
+3. RULED: a restart of X-Ray undoing the kills since its last save is accepted for now.
+4. RULED: loot is in ITR2. The body the player searches is ITR2's; X-Ray's corpse and its loot are not used for it.
+
+### 9. Our side as built (desk; lever `t2v=4`, default 1; nothing changes with the lever below 4)
+- Mod blob 259cd8c6ab7bd18e3c6efa1a93ffbf37e32e8396 (`mod/ITRZone/Scripts/main.lua`): `STR.kcRow`, `kcDamage`, `kcDeath`, `kcSnap`, `kcShown`, `kcBlocked`,
+  `kcLines`, `kcSum` (no engine call), `STR.kcHealth` (game thread, from the puppet tick, every 50 ms), and the hooks
+  in `STR.t1Poll` (7th header field, `r` and `k` lines, section names), `STR.t0Tick` and `STR.t2Write` (8th header
+  field, `k` lines; still no engine call in the writer).
+- Offline test `tools/kc_test.lua`, driver `tools/kc_selftest.sh`: the test passes on the mod and fails under each of
+  26 one-place changes of the mod's source (a mutant for every check). Result on this blob: KC SELFTEST -> PASS.
+- Lever off: the existing offline tests pass (span, pose, cross, arm B, arm C, finer clock, duplicate names), and the
+  arm C witness log is byte-identical to the one from the mod before this amendment (sha256 starts 8fae7756a92674ad).
+- Reviewed once by an Opus sub-agent; its six findings: four fixed with tests, one closed by the `r` line (section 2),
+  one accepted (a dead puppet can be moved for at most 50 ms before its death is read).
+
+### 10. What this amendment does not show (each needs a registered run)
+- That a fresh puppet's first health read is its full health, on every class the mod spawns.
+- That a health write does not disturb a puppet under ITR2's own AI.
+- How long ITR2 keeps a body. The 20-a-second health read assumes longer than 50 ms.
+- `STR.kcHealth`'s place in the puppet tick (its 50 ms clock, the order against spawning) is not driven by the offline
+  test; the test calls the function directly.
+- Everything on X-Ray's side that needs the engine (EnginePerf's list): the direct health change on every class, a
+  kill on an object already dying, GAMMA's callbacks on a near-zero hit and on a kill by the actor.
+- No bound in this amendment is a timing or a count from a run, so it has no margin table. The 10 s, 60 s, 0.25 s, 50 ms
+  and 64 are rules of the design, each checked at its boundary by the offline test (9.9 and 10.05 s; 59.8 and 60.2 s;
+  a 300 s stall counted as 0.25 s; 64 lines of 70).
