@@ -141,6 +141,16 @@ Their run line: t2v=4 kcj=30 kcjs=0.6 kcjt=0.5 (defaults 40, 60, 85), no kcrig.
 - Who is near the track's start: from kw1's boot dump (positions at boot, creatures move): stalkers about 27 m off
   are devushka, the story character esc_2_12_stalker_fanat, and four sim_default_stalker_0 (one is kw1's S); Wolf
   (esc_2_12_stalker_wolf) at 34 m. So S may be a story character. In a bench boot nothing is saved.
+- Check 10's row contradicted itself (my text): "within 2.0 s of the first snapshot after CONT" and "a slow first
+  frame fails". Settled with itrzone, both sides alike: the 2.0 s count from the FIRST KEPT SNAPSHOT READ AT OR AFTER
+  CONT; the time from CONT to that snapshot is reported, not judged. A slow first frame fails neither side by itself.
+- Fact, from a real run (out/t2pre6, a 300 s stop): X-Ray's script clock (time_global) JUMPS by the length of an
+  unabsorbed stop; only the frame delta is clamped. My stop here is not absorbed, so after CONT the script's time is
+  20 s further on. For this run: S's 10 s `dead` hold has run out before the stop anyway; M's starts after it.
+- The verdict rule (as itrzone's): a NO VERDICT never hides a failure it does not explain. Every NO VERDICT rule
+  names the checks it leaves untested; a failing check outside that set makes the run a FAIL.
+- Draft 5's "if no total above 1.000 was sent, NO VERDICT" is gone: S dead at the second hit, or no live total
+  above 1.000, is a FAIL of check 5 by name.
 - More pins (the runner's own dependencies): tools/run_noguard.sh 92729abc…, harness/zz_eperf_dump.script
   2b79a817…, out/user.ltx.orig 3efd38ee….
 - New NO VERDICT rule, the same on both sides: S or M is not listed (offline or gone) in my kept snapshot at the
