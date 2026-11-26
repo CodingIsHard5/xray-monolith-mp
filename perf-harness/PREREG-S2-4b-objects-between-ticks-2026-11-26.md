@@ -73,4 +73,14 @@ well above 1, I report "capture works, draw path not exercised by this scene", n
 - Hit tests use tick positions while the player sees in-between positions (up to one tick of target motion).
 
 ## 5. Result
+### 5.1 Part A (run 2026-11-26, ended 00:55 EST; six runs, both preflights ok; scored once): PASS 4 of 4
+- R1 stock agrees with stock: C = 0 at all three checkpoints.
+- R2 switch-off (SimTick16) agrees with stock: C = 0 at all three checkpoints, all three runs.
+- R3 frame at checkpoint 1: off mean minus stock mean -1.7 frames (limit 8); reported checkpoint 2 -1.0, 3 -1.0.
+- R4 A-Life call spacing: 100 calls in every run, first call on the same frame, normal gaps only.
+My guess was 65 %: it held. The larger object (about 220 bytes) did not change any counter in this mode.
+Limit, as registered: serial test mode, first 320 A-Life passes; inert when off, nothing about gated mode.
+Output: `s4b/s4b_partA_score.txt`.
+
+### 5.2 Part B
 (empty until scored)
