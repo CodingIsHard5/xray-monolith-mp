@@ -144,7 +144,7 @@ Their run line: t2v=4 kcj=30 kcjs=0.6 kcjt=0.5 (defaults 40, 60, 85), no kcrig.
 - Check 10's row contradicted itself (my text): "within 2.0 s of the first snapshot after CONT" and "a slow first
   frame fails". Settled with itrzone, both sides alike: the 2.0 s count from the FIRST KEPT SNAPSHOT READ AT OR AFTER
   CONT; the time from CONT to that snapshot is reported, not judged. A slow first frame fails neither side by itself.
-- Fact, from a real run (out/t2pre6, a 300 s stop): X-Ray's script clock (time_global) JUMPS by the length of an
+- Fact, from a real run (out/t2pre2, a 300 s stop; I first wrote t2pre6, whose stop was absorbed and shows no jump): X-Ray's script clock (time_global) JUMPS by the length of an
   unabsorbed stop; only the frame delta is clamped. My stop here is not absorbed, so after CONT the script's time is
   20 s further on. For this run: S's 10 s `dead` hold has run out before the stop anyway; M's starts after it.
 - The verdict rule (as itrzone's): a NO VERDICT never hides a failure it does not explain. Every NO VERDICT rule

@@ -1,0 +1,23 @@
+COUNTERS ONLY (check 14 logic, descriptive): meta /home/caden/Projects/StalkerGameEngine/out/kw1/run/boot0/meta_t2.csv
+14 counters, every key of the last T2SUM judged: FAIL (1 T2SUM line(s), last one judged: 19 keys; failing: krefused; NOT JUDGED (counters-only mode, input not given): last_seq, khits)
+14.last_seq = 2188, expected not computable here (needs poses_all.txt and snaps_all.txt): NOT JUDGED (seq of the last pose the script took (p_last). Expected: at least the r seq of the last kept snapshot (the script had processed that pose) and at most the highest seq in poses_all.txt (it cannot take a pose that was never written))
+14.torn = 0, expected 0: PASS (torn pose reads (prereg row 14))
+14.holds = 0, expected 0 (0 HOLD lines in the meta file): PASS (poses held off-mesh: must equal the HOLD lines in the meta file (the counter and its own log agree; how often the actor is held is not a kill-channel criterion))
+14.paused = false, expected false: PASS (device():pause in force at the end: false (the runner passes no -t2_pause; the stop is the runner's SIGSTOP))
+14.near = 161, expected 161 (0 NEAR + 161 P2ring lines in the meta file): PASS (poses grounded on a neighbouring AI cell: must equal NEAR lines + P2 lines with ring > 0 (the counter and its own log agree; not a kill-channel criterion))
+14.guards = 0, expected 0 (0 GUARD lines in the meta file): PASS (actor position guard fired: must equal the GUARD lines (the counter and its own log agree; not a kill-channel criterion))
+14.lost = 0, expected 0: PASS (pose LOST events (prereg row 14))
+14.epochs = 0, expected 0: PASS (new ITR2 sessions / v2 resets (prereg row 14: no restart of either side))
+14.khits = 6, expected not computable here (needs poses_all.txt): NOT JUDGED (part hits applied = distinct (id, total) steps with a positive difference in the kept poses)
+14.kdead_online = 2, expected 2: PASS (S and M killed online (prereg row 14))
+14.kdead_offline = 0, expected 0: PASS (no offline creature (prereg row 14))
+14.kowed = 0, expected 0: PASS (no owed part hit (prereg row 14))
+14.kstale = 0, expected 0: PASS (no stale line (prereg row 14))
+14.kback = 0, expected 0: PASS (no falling total (prereg row 14))
+14.krefused = 1, expected 0: FAIL (nothing refused (prereg row 14))
+14.kclamped = 0, expected 0: PASS (no single difference above 1.0 (prereg row 14))
+14.kver = 0, expected 0: PASS (no pose of a wrong version (prereg row 14))
+14.kdead_fail = 0, expected 0: PASS (no failed kill (prereg row 14))
+14.ktabfail = 0, expected 0: PASS (no failed table save (prereg row 14; unjudged in kw1, judged here))
+reported: last T2SUM line: T2SUM,last_seq=2188,torn=0,holds=0,paused=false,near=161,guards=0,lost=0,epochs=0,khits=6,kdead_online=2,kdead_offline=0,kowed=0,kstale=0,kback=0,krefused=1,kclamped=0,kver=0,kdead_fail=0,ktabfail=0
+KJ1 COUNTERS ONLY: FAIL
