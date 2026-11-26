@@ -74,6 +74,10 @@ public:
 private:
 #endif
 	u32 Update_LastTime;
+	// S2 stage 4c (sim_tick gated mode only, see LL_SetSimHudClock): read by UpdateTracks only on a gated frame
+	bool m_sim_hud_clock; // a first-person HUD model (set by xrGame; cleared by Spawn/Copy)
+	u32 m_sim_hud_epoch; // g_sim_view_epoch of m_sim_hud_last
+	double m_sim_hud_last; // the time (ms, dwTimeGlobal base) the tracks were last advanced to on a gated frame
 
 	CBlendInstance* blend_instances;
 
@@ -161,6 +165,7 @@ public:
 	void UpdateTracks(); // Update motions
 	void LL_UpdateTracks(float dt, bool b_force, bool leave_blends); // Update motions
 	void LL_UpdateFxTracks(float dt);
+	void LL_SetSimHudClock(bool on) { m_sim_hud_clock = on; }
 	void DestroyCycle(CBlend& B);
 
 	// cycles

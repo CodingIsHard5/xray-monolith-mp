@@ -639,6 +639,38 @@ void CKinematicsAnimated::LL_UpdateFxTracks(float dt)
 void CKinematicsAnimated::UpdateTracks()
 {
 	_DBG_SINGLE_USE_MARKER;
+#ifndef _EDITOR
+	// S2 stage 4c: a first-person HUD model on a gated frame (sim_tick gated mode only; both device flags are FALSE on
+	// every stock frame and no model is marked unless xrGame marked it). Between ticks dwTimeGlobal stands still, so
+	// the stock path would step the pose at tick rate; this one advances the tracks to the time being shown: the
+	// tick's dwTimeGlobal inside a tick (a motion started there begins at its tick time, as in stock), g_sim_hud_ms from
+	// the presentation step to the end of the render. One clock, one stamp: however many calls (tick, presentation,
+	// render), the sum of the steps is the clock's advance, so nothing is advanced twice and the total speed is the
+	// simulated one. Steps are clamped to 66 ms as below.
+	if (m_sim_hud_clock && (g_sim_view_gate || g_sim_render_lerp) && !GetUpdateTracksCalback())
+	{
+		const double now = g_sim_render_lerp ? g_sim_hud_ms : double(RDEVICE.dwTimeGlobal);
+		if (m_sim_hud_epoch != g_sim_view_epoch)
+		{
+			// first gated call of this epoch (gated mode just began, or the tick clock resynced): the step the stock
+			// path would take now, from the stock stamp
+			u32 DT0 = RDEVICE.dwTimeGlobal - Update_LastTime;
+			if (DT0 > 66) DT0 = 66;
+			m_sim_hud_epoch = g_sim_view_epoch;
+			m_sim_hud_last = now - double(DT0);
+		}
+		Update_LastTime = RDEVICE.dwTimeGlobal; // a stock call after the gated frame (switch off) starts from here
+		double step_ms = now - m_sim_hud_last;
+		if (step_ms <= 0.0)
+			return; // nothing new to show (or a rounding step back: the stamp stays, the next step makes it up)
+		m_sim_hud_last = now;
+		if (step_ms > 66.0) step_ms = 66.0;
+		// b_force: the stamp above is the guard; blends stamped with this dwFrame by a call in this frame's tick must
+		// still take the presentation step's advance
+		LL_UpdateTracks(float(step_ms / 1000.0), true, false);
+		return;
+	}
+#endif
 	if (Update_LastTime == RDEVICE.dwTimeGlobal) return;
 	u32 DT = RDEVICE.dwTimeGlobal - Update_LastTime;
 	if (DT > 66) DT = 66;
@@ -684,7 +716,10 @@ CKinematicsAnimated::CKinematicsAnimated():
 	m_Partition(NULL),
 	m_blend_destroy_callback(0),
 	m_update_tracks_callback(0),
-	Update_LastTime(0)
+	Update_LastTime(0),
+	m_sim_hud_clock(false),
+	m_sim_hud_epoch(0),
+	m_sim_hud_last(0.0)
 {
 }
 
@@ -716,6 +751,7 @@ void CKinematicsAnimated::Copy(dxRender_Visual* P)
 	CKinematicsAnimated* pFrom = (CKinematicsAnimated*)P;
 	PCOPY(m_Motions);
 	PCOPY(m_Partition);
+	m_sim_hud_clock = false; // S2 stage 4c: a new instance is never a marked HUD model
 
 	IBlend_Startup();
 }
@@ -729,6 +765,7 @@ void CKinematicsAnimated::Spawn()
 	for (u32 i = 0; i < bones->size(); i++)
 		blend_instances[i].construct();
 	m_update_tracks_callback = 0;
+	m_sim_hud_clock = false; // S2 stage 4c: an instance taken back from the pool is not marked either
 	channels.init();
 }
 

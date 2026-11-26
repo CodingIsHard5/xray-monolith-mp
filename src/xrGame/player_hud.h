@@ -475,6 +475,7 @@ public:
 
 	// Lua supplies the left-hand target; both arms are finalized after HUD layers.
 	void finalize_hands_ik();
+	void OnFramePose(); // S2 stage 4c: the part of OnFrame that must follow update() (see OnFrame)
 	void solve_hand_ik(int arm);
 	// Script hand numbering: 0 right, 1 left, 2 both (setter only).
 	void set_arm_ik_enabled(u8 hand, bool enabled);

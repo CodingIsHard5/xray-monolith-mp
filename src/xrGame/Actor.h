@@ -388,7 +388,9 @@ protected:
 	CEffectorBobbing* pCamBobbing;
 	// S2 stage 4a (sim_tick gated mode only, see g_sim_view_gate in device.h): the camera and the hands run once per
 	// rendered frame in sim_view_present, not in UpdateCL; the camera sits between the last two tick positions
-	bool sim_view_gated() const;
+public:
+	bool sim_view_gated() const; // public: player_hud::OnFrame asks (stage 4c)
+protected:
 	void sim_view_tick();
 	static void sim_view_present(float dt, float alpha);
 	Fvector m_sim_view_pos_prev; // actor position (XFORM().c) at the tick before the newest one

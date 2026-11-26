@@ -88,6 +88,10 @@ public:
 	// Main functionality
 	virtual void UpdateTracks() = 0; // Update motions
 	virtual void LL_UpdateTracks(float dt, bool b_force, bool leave_blends) = 0; // Update motions
+	// S2 stage 4c (sim_tick gated mode only): mark a first-person HUD model. While a gated frame runs (g_sim_view_gate
+	// or g_sim_render_lerp, device.h) UpdateTracks of a marked model follows the presented time, not dwTimeGlobal
+	// alone; on every other frame, and for every unmarked model, UpdateTracks is the stock one.
+	virtual void LL_SetSimHudClock(bool on) = 0;
 	//void						DestroyCycle	(CBlend &B);
 
 	// cycles

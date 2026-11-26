@@ -762,7 +762,13 @@ void CActor::sim_view_present(float dt, float alpha)
 	A->Cameras().hud_camera_Matrix(trans);
 
 	if (A->IsFocused())
+	{
+		// S2 stage 4c: the HUD models' UpdateTracks in here follow g_sim_hud_ms (set by the device for this step), so
+		// their pose moves every rendered frame; its call count is the outcome the checks read
+		PROF_EVENT("sim_hud_anim");
 		g_player_hud->update(trans);
+		g_player_hud->OnFramePose(); // near-wall offset, attachment transforms, hand IK: after update(), as in stock
+	}
 }
 // ---------------------------------------------------------------------------------------------------------------
 

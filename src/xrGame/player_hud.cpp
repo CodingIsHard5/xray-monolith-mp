@@ -626,6 +626,7 @@ void attachable_hud_item::load(const shared_str& sect_name)
 	IKinematicsAnimated* visual = ::Render->model_Create(visual_name)->dcast_PKinematicsAnimated();
 	::Render->hud_loading = false;
 	R_ASSERT2(visual, make_string("could not create model %s, section %s", visual_name, sect_name.c_str()));
+	visual->LL_SetSimHudClock(true); // S2 stage 4c: animated every rendered frame in sim_tick gated mode only
 	m_model = smart_cast<IKinematics*>(visual);
     if (m_model)
     {
@@ -909,12 +910,14 @@ void player_hud::load(const shared_str& player_hud_sect, bool force)
         IRenderVisual* pVisual = m_model->dcast_RenderVisual();
         if (pVisual)
             pVisual->MarkIgnoreOptimization(TRUE);
+        m_model->LL_SetSimHudClock(true); // S2 stage 4c: animated every rendered frame in sim_tick gated mode only
     }
     if (m_model_2)
     {
         IRenderVisual* pVisual = m_model_2->dcast_RenderVisual();
         if (pVisual)
             pVisual->MarkIgnoreOptimization(TRUE);
+        m_model_2->LL_SetSimHudClock(true);
     }
 
 	bool b_reload = (m_attached_items[0] != nullptr || m_attached_items[1] != nullptr);
@@ -1942,6 +1945,8 @@ void player_hud::create_script_anim_item_model(LPCSTR section)
 	::Render->hud_loading = true;
 	script_anim_item_model = ::Render->model_Create(pSettings->r_string(section, "item_visual"))->dcast_PKinematicsAnimated();
 	::Render->hud_loading = false;
+	if (script_anim_item_model)
+		script_anim_item_model->LL_SetSimHudClock(true); // S2 stage 4c: as the hands
 
 	::luabind::functor<void> funct;
 	if (ai().script_engine().functor("_G.player_hud__OnCreateHudMotionItem", funct))
@@ -2598,6 +2603,17 @@ void player_hud::OnFrame()
 		// Delegate control
 		m_attached_items[1]->m_parent_hud_item->OnFrame();
 
+	// S2 stage 4c: the rest (near-wall offset, attachment transforms, hand IK) follows update(), every time update()
+	// ran. Stock: both run in the tick. Gated mode: update() runs in the actor's presentation step (stage 4a), so this
+	// part runs there too (CActor::sim_view_present) and not here, where it would be applied to the last shown pose a
+	// second time. sim_view_gated() is false with sim_tick 0: then this is the stock call order.
+	if (g_actor && g_actor->sim_view_gated())
+		return;
+	OnFramePose();
+}
+
+void player_hud::OnFramePose()
+{
 	// If near-wall is in position mode...
 	if (g_nearwall == NW_POS)
 	{

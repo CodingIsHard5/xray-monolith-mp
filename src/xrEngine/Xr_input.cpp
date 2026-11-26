@@ -750,11 +750,15 @@ void CInput::MouseMoveOnly()
 	static const bool perf_noinput = !!strstr(Core.Params, "-perf_noinput");
 	if (perf_noinput || !pMouse || Device.dwPrecacheFrame || cbStack.empty())
 		return;
+	PROF_EVENT("sim_mouse_poll"); // calls that reach GetDeviceData
 	DWORD dwElements = MOUSEBUFFERSIZE;
 	auto od = std::make_unique<DIDEVICEOBJECTDATA[]>(MOUSEBUFFERSIZE);
 	const HRESULT hr = pMouse->GetDeviceData(sizeof(DIDEVICEOBJECTDATA), &od[0], &dwElements, 0);
 	if (FAILED(hr))
 		return; // lost or not acquired: the next tick's MouseUpdate re-acquires
+	{
+		PROF_EVENT("sim_mouse_read"); // calls whose GetDeviceData succeeded
+	}
 	int dx = 0, dy = 0;
 	for (u32 i = 0; i < dwElements; i++)
 	{

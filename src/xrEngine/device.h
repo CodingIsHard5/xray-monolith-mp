@@ -580,6 +580,12 @@ extern ENGINE_API sim_view_present_fn g_sim_view_present;
 extern ENGINE_API u32 g_sim_view_tick;
 extern ENGINE_API BOOL g_sim_render_lerp;
 extern ENGINE_API float g_sim_render_alpha;
+// S2 stage 4c (device.cpp, sim_tick gated mode only): the first-person HUD animation every rendered frame.
+// g_sim_hud_ms is the simulated time the presentation step shows, in ms on the dwTimeGlobal time base: the newest
+// tick's time plus alpha of one tick (never behind the newest tick, never past the next one, never going back within
+// an epoch). Written by the presentation step only; read only while g_sim_render_lerp is TRUE, by the animated models
+// xrGame marked with IKinematicsAnimated::LL_SetSimHudClock (UpdateTracks in SkeletonAnimated.cpp).
+extern ENGINE_API double g_sim_hud_ms;
 
 typedef xr_delegate<bool()> LOADING_EVENT;
 extern ENGINE_API xr_list<LOADING_EVENT> g_loading_events;

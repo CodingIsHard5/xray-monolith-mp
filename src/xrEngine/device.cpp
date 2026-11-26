@@ -436,6 +436,8 @@ ENGINE_API sim_view_present_fn g_sim_view_present = nullptr;
 ENGINE_API u32 g_sim_view_tick = 0;
 ENGINE_API BOOL g_sim_render_lerp = FALSE;
 ENGINE_API float g_sim_render_alpha = 1.f;
+// S2 stage 4c: the time the first-person HUD animation shows (declared in device.h)
+ENGINE_API double g_sim_hud_ms = 0.0;
 static u64 s_sv_last_ticks = 0;      // TimerGlobal ticks at the previous presentation step
 static u32 s_sv_last_epoch = 0;      // g_sim_view_epoch at the previous presentation step
 static float s_sv_dt = 0.f;          // smoothed real frame time handed to the presentation step
@@ -574,6 +576,10 @@ static void sim_view_present(int n)
 	// reached when paused: that frame renders stock, as the paused frames after it do)
 	g_sim_render_alpha = alpha;
 	g_sim_render_lerp = TRUE;
+	// S2 stage 4c: the same point in simulated time for the HUD animation (s_sim_ms is the newest tick's time, the
+	// unrounded dwTimeGlobal) = clamp(real time on the tick clock, newest tick, newest tick + one step): it does not go
+	// back while the epoch stays (beyond float rounding of alpha; the reader ignores a step back)
+	g_sim_hud_ms = s_sim_ms + double(alpha) * step * 1000.0;
 
 	const float saved_f = Device.fTimeDelta;
 	const u32 saved_dw = Device.dwTimeDelta;
