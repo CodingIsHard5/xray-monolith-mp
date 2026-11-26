@@ -1153,8 +1153,13 @@ int vr_bpt_dropped(int id, const Fvector& bc, Fvector& centre, int mode, const F
 		{
 			if (mode == 1)
 			{
+				// the shell is placed by its root element; the object sits in it at ObjectInRoot (object = root * object_in_root).
+				// Placing the root at the object's pose (B2b did) turned the item by that offset on its first physics frame.
+				Fmatrix ioir, root;
+				ioir.invert(sh->PPhysicsShell()->ObjectInRoot());
+				root.mul_43(xf, ioir);
 				sh->XFORM().set(xf);
-				sh->PPhysicsShell()->SetTransform(xf, mh_clear);
+				sh->PPhysicsShell()->SetTransform(root, mh_clear);
 			}
 			sh->PPhysicsShell()->set_LinearVel(lv);
 			sh->PPhysicsShell()->set_AngularVel(av);
