@@ -46,6 +46,14 @@ Self-test `python3 -I tools/s4a_selftest.py out <work dir>` (79fc1608): PASS 11/
 folders under the names the bench gives; cases: good; camera only per tick; 50 frames short; twice per frame; off run
 with an extra call; site missing; folder missing; run not clean; 10 % slower; one run 20 % slower; off 10 % slower.
 
+### 3.1 Amendment, registered before any stage 4a run exists (2026-11-25 20:10 EST; no s4a folder in out/)
+E1 showed the gap (PREREG-S2C section 6): the series script re-runs a not-clean run in the slice as `<tag>_rr`, and a
+scorer with a fixed name list then gives no verdict. The Overseer's rule: the re-run policy and the scorer's names
+come from one source. `tools/s4a_score.py` is now 3a77202c: a registered run whose conditions are not clean is read
+from `<tag>_rr` when that folder exists, and the output names every substitution ("SUBSTITUTED ..."); a re-run that is
+not clean either gives NO VERDICT by name. Nothing else changed. Self-test 3c8f8b6f: PASS 13/13 (two cases added).
+Part A is not affected (its harness has no re-run rule).
+
 ## 4. What these runs cannot show
 - The bench runs with input off (`-perf_noinput`): the mouse path (motion on frames with no tick, buttons kept for
   the next tick) is NOT exercised. Only a run with a real mouse does that.

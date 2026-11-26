@@ -136,6 +136,16 @@ Limits:
 - Uncapped is also the only arm without the frame limiter's wait; cap 120 has it and still shows two thirds of the extra.
 - One machine, one save, 55 s captures.
 
+### 6.1 Overseer's ruling (2026-11-25) and verdict of record
+- The registered read stays **NO VERDICT**.
+- Recorded alongside it: the substituted read = the same scorer, unchanged; the 2 flagged runs replaced by their
+  in-slice clean re-runs; **decided after scoring**. Verdict of record: **"H1 RISE (substituted read)"**.
+- The capped arm's two runs differ by 7.6 %, so the 1- and 2-frame values (-3.0 % and +0.1 %) are inside the noise.
+  Only the 4- and 7-frame rise (+13 % and +20 %) carries the shape. Read the first two bullets above with that limit:
+  "costs nothing" means "no cost seen above a 7.6 % noise floor".
+- For later series: the re-run policy and the scorer's name list come from one source (done for stage 4a, its 3.1).
+- E2 is not needed.
+
 Consequence for the plan: on a display-capped machine (60 fps, tick 30 or 60) the extra is about zero; it is a cost of
 running the renderer many times per tick, which only fast machines do. E2 (the frame-number lever) is not needed
 on this read. No fix is proposed here.

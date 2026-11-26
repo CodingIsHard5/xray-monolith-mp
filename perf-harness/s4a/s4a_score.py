@@ -15,12 +15,18 @@ CAM = 'CActor::cam_Update'; ACT = 'CActor UpdateCL'; UPD = 'Process seqFrame'
 GT = ['Sheduler Deferred', 'seqParallel', 'seqFrameMT']
 NEW = ['s4a_n30_1', 's4a_n30_2', 's4a_n60_1', 's4a_n60_2', 's4a_noff_1']
 OLD = ['s4a_p30_1', 's4a_p30_2', 's4a_p60_1', 's4a_p60_2', 's4a_poff_1']
-lines = []; miss = []
+lines = []; miss = []; subs = []
 def say(s): lines.append(s)
 def rd(p):
     if not os.path.isfile(p): miss.append('missing file ' + p); return []
     return open(p, 'rb').read().decode('latin-1').replace('\r', '').split('\n')
-def arm(tag, new):
+def arm(name, new):
+    # Amended before any run (prereg 3.1): the series script (s2_series_b.sh) excludes a run whose conditions are not
+    # clean and re-runs it in the slice as <tag>_rr. The scorer follows that one rule: such a run is read from <tag>_rr.
+    tag = name; c = os.path.join(ROOT, name, 'conditions.txt')
+    if os.path.isfile(c) and not any(l.strip() == 'VERDICT: clean' for l in open(c, 'rb').read().decode('latin-1').replace('\r', '').split('\n')) \
+       and os.path.isdir(os.path.join(ROOT, name + '_rr')):
+        tag = name + '_rr'; subs.append(f'{name}: not clean, read from its in-slice re-run {tag}')
     d = os.path.join(ROOT, tag); S = {}; n = tot = None; n0 = len(miss)
     for l in rd(os.path.join(d, f'perf_sites_{tag}.csv')):
         if l.startswith('#frames,'): n = int(l.split(',')[1])
@@ -38,7 +44,7 @@ def arm(tag, new):
     U = S[UPD][0]
     if U <= 0: miss.append(f'{tag}: no updates'); return None
     F.sort()
-    return dict(tag=tag, N=n, U=int(U), act=int(S[ACT][0]), cam=int(S[CAM][0]) if new else None, cam_ms=S[CAM][1] if new else None,
+    return dict(tag=name, N=n, U=int(U), act=int(S[ACT][0]), cam=int(S[CAM][0]) if new else None, cam_ms=S[CAM][1] if new else None,
                 ft=tot / n, p99=F[int(0.99 * (len(F) - 1))], tick=(S[UPD][1] + sum(S[g][1] + S[g][3] for g in GT)) / U)
 A = {t: arm(t, True) for t in NEW}; A.update({t: arm(t, False) for t in OLD})
 def finish(rc):
@@ -48,6 +54,7 @@ def finish(rc):
 if miss:
     for m in miss: say('NO VERDICT: ' + m)
     finish(2)
+for x in subs: say('SUBSTITUTED ' + x)
 say('tag          frames updates actor  camera  frame ms  p99 ms  sim ms/tick  camera ms/call')
 for t in NEW + OLD:
     a = A[t]; say(f"{t:12s} {a['N']:6d} {a['U']:6d} {a['act']:6d} {str(a['cam']) if a['cam'] is not None else '-':>6s}  {a['ft']:7.3f} {a['p99']:7.2f}  {a['tick']:7.3f}      " + (f"{a['cam_ms'] / max(a['cam'], 1):.4f}" if a['cam'] else '-'))
