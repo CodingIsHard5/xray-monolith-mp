@@ -1,7 +1,12 @@
 -- Offline test of the pose v4 / kill channel bridge script (harness/zz_p1_puppet_kill4.script).
+-- Direct runs need the workspace kill4_test.sh creates (a workdir with empty subdirectories a, b, c, each with a .keep file).
 -- Runs the REAL script under plain Lua 5.1 with faked engine objects (modelled on armD-draft/armD_stub.lua) and checks
 -- OUTCOMES: creature health and alive flags, kill / kill_entity calls, the snapshot file, meta log lines, T2SUM counters.
---   lua5.1 kill4_stub.lua run <script> <check> <workdir> [<lost3 script>]   prints "PASS <check>" or "FAIL <check>: ..."
+--   lua5.1 kill4_stub.lua run <script> <check> <workdir> [<lost3 script>]   prints "PASS <check>", "FAIL <check>: ..." (an
+--                         outcome was wrong) or "ERROR <check>: ..." (a Lua exception or a setup failure: never a catch)
+--   lua5.1 kill4_stub.lua fixture <script> <dir> [good|nomonster]          kw1 checker selftest (tools/t3_kw1_selftest.sh):
+--                         one world, <dir> as its tmpfs, driven from stdin: tick | hurt <id> <h> | wkill <id> <killer> |
+--                         finish; answers "ok <time_global>" per command ("ERROR fixture: ..." and exit 1 on an error)
 --   lua5.1 kill4_stub.lua checks                                            check names, one per line
 --   lua5.1 kill4_stub.lua mutants                                           "<mutant> <check>" per line
 --   lua5.1 kill4_stub.lua mkmutant <mutant> <script in> <script out>        patched copy; exits 1 if the patch did not apply once
@@ -49,6 +54,14 @@ local MUTANTS = {
 	{ "m_r_once", "r_advances", 'k_r = string.format("%s,%d", tostring(sess or 0), n)', 'k_r = k_r or string.format("%s,%d", tostring(sess or 0), n)' },
 	{ "m_r_zone", "r_stands_still", 'if zone ~= level.name() then m(', 'if zone ~= level.name() then k_r = tostring(p_sess or 0) .. "," .. n; m(' },
 	{ "m_r_kver", "r_stands_still", 'if kbad then f:close()', 'if kbad then f:close(); k_r = "0," .. n' },
+	{ "m_lethal_kill", "death_lethal_total", 'o:kill(a)', 'if o.health > 0 then o:kill(a) end' },
+	{ "m_kwho_killer", "kill_who", 'who and who:id() or -1', '-1' },
+	{ "m_kwho_gate", "kill_who", 'if not ok or not K[id] or kwho[id] then return end', 'if not ok or kwho[id] then return end' },
+	{ "m_kwho_once", "kill_who", 'kwho[id] = true;', '' },
+	{ "m_over64_r", "over64_r", 'then kref(now, n, "-", "over64")', 'then return kref(now, n, "-", "over64")' },
+	{ "m_ktab_decimals", "ktab_decimals", 'r,%d,%.9f,', 'r,%d,%.3f,' },
+	{ "m_ktab_openfail", "ktab_savefail", 'if not f then return k_savefail() end', 'if not f then return end' },
+	{ "m_ktab_writefail", "ktab_savefail", 'if not ok then return k_savefail() end', '' },
 	{ "m_r_session", "r_new_session", 'k_r = string.format("%s,%d", tostring(sess or 0), n)', 'k_r = string.format("%s,%d", k_r and string.match(k_r, "^(%d+)") or tostring(sess or 0), n)' },
 }
 
@@ -65,18 +78,24 @@ if MODE == "mkmutant" then
 	local o = s:sub(1, a - 1) .. mu[4] .. s:sub(a + #mu[3])
 	if o == s then print("PATCH CHANGED NOTHING " .. name); os.exit(1) end
 	local g = real_open(fout, "wb"); if not g then print("CANNOT WRITE " .. tostring(fout)); os.exit(1) end
-	g:write(o); g:close(); print("MUTANT " .. name .. " written"); os.exit(0)
+	local okw = g:write(o); local okc = g:close()
+	if not (okw and okc) then print("CANNOT WRITE " .. tostring(fout)); os.exit(1) end
+	print("MUTANT " .. name .. " written"); os.exit(0)
 end
 
 ------------------------------------------------------------------------------------------------ fake engine
 local SHM, NOW, LEVEL, RUN, CL_EXTRA = nil, 0, "l01_escape", "1", ""
 local CB, OBJ, ACT, CHANGED
+local DEATHQ = {}   -- deaths whose death callback fires at the start of the next frame (the GE_DIE event is handled later)
 local function V(x, y, z) local v = { x = x or 0, y = y or 0, z = z or 0 }
 	function v:set(a, b, c) self.x, self.y, self.z = a, b, c; return self end
 	function v:distance_to(o) return math.sqrt((self.x - o.x) ^ 2 + (self.y - o.y) ^ 2 + (self.z - o.z) ^ 2) end
 	function v:normalize() local l = math.sqrt(self.x ^ 2 + self.y ^ 2 + self.z ^ 2); if l > 1e-9 then self.x, self.y, self.z = self.x / l, self.y / l, self.z / l end; return self end
 	return v end
-io.open = function(p, m) p = p:gsub("^Z:\\dev\\shm\\itrz_b1\\", SHM .. "/"); return real_open(p, m) end
+local KTAB_WFAIL = false   -- ktab_savefail: the ktab.txt handle opens, but every write fails (as a full disk)
+io.open = function(p, m) p = p:gsub("^Z:\\dev\\shm\\itrz_b1\\", SHM .. "/")
+	if KTAB_WFAIL and p:find("/ktab%.txt$") and m == "wb" then return { write = function() return nil, "disk full" end, close = function() return true end } end
+	return real_open(p, m) end
 function time_global() return NOW end
 os.time = function() return 1795000000 + math.floor(NOW / 1000) end   -- wall clock follows the fake time: logs are reproducible
 function command_line() return "-p1 -t2_pose -t2_run " .. RUN .. " -t2_lost 5000 -t2_lostx 120000 " .. CL_EXTRA end
@@ -101,7 +120,7 @@ level = { name = function() return LEVEL end,
 
 -- creatures: OBJ[id] = { sec, kind (m|s|x), lvl, online, health, dtime (death time), killer, hits = {}, kill_err, offkill }
 local function add(id, sec, kind, o) o = o or {}
-	OBJ[id] = { sec = sec, kind = kind, lvl = o.lvl or LEVEL, online = o.online ~= false, health = o.health or 1, hits = {}, kill_err = 0, offkill = 0, sekill = 0, sets = 0 }
+	OBJ[id] = { sec = sec, kind = kind, lvl = o.lvl or LEVEL, online = o.online ~= false, health = o.health or 1, hits = {}, kill_err = 0, offkill = 0, sekill = 0, sets = 0, pos = o.pos }
 	return OBJ[id] end
 local GO_MT = { __index = function(t, k) if k == "health" then return t._r.health end end }
 local function go(id, R)
@@ -111,12 +130,14 @@ local function go(id, R)
 	function o:is_monster() return R.kind == "m" end
 	function o:is_stalker() return R.kind == "s" end
 	function o:alive() return R.health > 0 end
-	function o:position() return V(10, 0, 10) end
+	function o:position() local p = R.pos or V(10, 0, 10); return V(p.x, p.y, p.z) end
 	function o:direction() return V(0, 0, 1) end
 	function o:best_enemy() return nil end
 	function o:set_health_ex(h) R.sets = R.sets + 1; R.health = math.max(-0.01, math.min(1, h)) end
 	function o:hit(h) R.hits[#R.hits + 1] = { who = h.draftsman and h.draftsman:id() or -1, power = h.power, type = h.type } end
-	function o:kill(who) if R.dtime then R.kill_err = R.kill_err + 1 else R.dtime = NOW; R.killer = who and who:id() or -1; R.health = 0 end end
+	-- Kill refuses only an object already killed (AlreadyDie = death time set, Entity.h:104), not one at health 0
+	function o:kill(who) if R.dtime then R.kill_err = R.kill_err + 1 else R.dtime = NOW; R.killer = who and who:id() or -1; R.health = 0
+		DEATHQ[#DEATHQ + 1] = { id = id, who = who } end end
 	return o
 end
 local function online(R) return R.online and R.lvl == LEVEL and not R.released end
@@ -161,9 +182,15 @@ function alife() return {
 	kill_entity = function(_, se) se._r.offkill = se._r.offkill + 1 end,   -- health untouched, as the engine source (must not be used)
 	release = function() end, create = function() end } end
 
-local function fire(name) for _, f in ipairs(CB[name] or {}) do f() end end
+local function fire(name, ...) for _, f in ipairs(CB[name] or {}) do f(...) end end
+-- a death in X-Ray's own world (not by the script): killer by id, nil = none named
+local function world_kill(id, kid) local R = OBJ[id]; R.dtime = NOW; R.killer = kid or -1; R.health = 0
+	DEATHQ[#DEATHQ + 1] = { id = id, who = kid and { id = function() return kid end } or nil } end
 local function tick(ms)
 	NOW = NOW + ms
+	local q = DEATHQ; DEATHQ = {}
+	for _, d in ipairs(q) do local R = OBJ[d.id]   -- GAMMA: stalkers -> npc_on_death_callback, monsters -> monster_on_death_callback
+		fire(R.kind == "s" and "npc_on_death_callback" or "monster_on_death_callback", go(d.id, R), d.who) end
 	db.storage = {}
 	for id, R in pairs(OBJ) do if online(R) then db.storage[id] = { object = go(id, R) } end end
 	fire("actor_on_update")
@@ -175,7 +202,7 @@ local function boot()
 	dofile(SCRIPT); on_game_start(); tick(1); tick(15000)
 end
 local function new_world(dir, script, run)
-	SHM, SCRIPT, RUN, LEVEL, OBJ, CHANGED, NOW = dir, script, run or "1", "l01_escape", {}, nil, 0
+	SHM, SCRIPT, RUN, LEVEL, OBJ, CHANGED, NOW, DEATHQ, KTAB_WFAIL = dir, script, run or "1", "l01_escape", {}, nil, 0, {}, false
 	new_actor()
 end
 local function ticks(ms)   -- a level change inside: on_before_level_changing, then the new level boots
@@ -245,7 +272,7 @@ check("v3_unchanged", function(ARGS)
 		local m3 = v3_sequence(ARGS.lost3, DIRS.a .. (v2 and "/v2" or "/v3"), v2)
 		local m4 = v3_sequence(SCRIPT_UNDER_TEST, DIRS.b .. (v2 and "/v2" or "/v3"), v2)
 		expect(#m3 > 0, "lost3 wrote no log")
-		local stripped = string.gsub(m4, "(T2SUM,[^\n]-),khits=%d+,kdead_online=%d+,kdead_offline=%d+,kowed=%d+,kstale=%d+,kback=%d+,krefused=%d+,kclamped=%d+,kver=0,kdead_fail=0", "%1")
+		local stripped = string.gsub(m4, "(T2SUM,[^\n]-),khits=%d+,kdead_online=%d+,kdead_offline=%d+,kowed=%d+,kstale=%d+,kback=%d+,krefused=%d+,kclamped=%d+,kver=0,kdead_fail=0,ktabfail=0", "%1")
 		expect(stripped == m3, "meta differs from lost3 (" .. (v2 and "v2" or "v3") .. " sequence)")
 		expect(string.find(m3, v2 and "RESET," or "EPOCH,", 1, true) and string.find(m3, "LOST,", 1, true), "sequence did not reach its LOST/EPOCH/RESET")
 		if not v2 then expect(string.find(m3, "CROSS_RESUME,", 1, true), "sequence did not cross") end
@@ -478,19 +505,22 @@ local function cross_world(dir, run2)
 	add(101, "dog_weak", "m"); add(102, "stalker_bandit", "s")
 	boot()
 	run(v4({ "k,101,dog_weak,0.300,0" }), 300)
+	local r_pre = SEQ   -- the last pose whose k lines were processed before the crossing
 	local r; for _ = 1, 20 do r = run(v4({ "k,101,dog_weak,0.300,0" }, { state = "cross", zone = "l02_garbage", c = "esc_to_gar" }), 50); if r then break end end
 	expect(r == "changed" and LEVEL == "l02_garbage", "no level change")
 	if run2 then RUN = run2; end
-	return r
+	return r, r_pre
 end
 check("crossing", function()
 	-- same run id: table carried over
-	cross_world(DIRS.a)
+	local _, r_pre = cross_world(DIRS.a)
 	local kt = readf(DIRS.a .. "/ktab.txt")
-	expect(string.find(kt, "^run,1\n") and string.find(kt, "\nr,101,0.300,", 1, true), "ktab.txt not written at the crossing request")
+	expect(string.find(kt, "^run,1\n") and string.find(kt, "\nr,101,0.300000000,", 1, true), "ktab.txt not written at the crossing request")
+	expect(rline() == SESS .. "," .. r_pre, "r line before the first destination pose not the pre-crossing " .. SESS .. "," .. r_pre .. ": " .. tostring(rline()))
+	pose(v4({ "k,101,dog_weak,0.300,0" }, { zone = "l02_garbage" })); ticks(100)
+	expect(rline() == SESS .. "," .. SEQ, "r did not advance to the first destination pose " .. SEQ .. ": " .. tostring(rline()))
 	run(v4({ "k,101,dog_weak,0.300,0" }, { zone = "l02_garbage" }), 500)
 	expect(has_line(snap(), "k,101,0.300"), "table not read back at the resume (no k,101,0.300)")
-	expect(rline() and rline() ~= "", "r line not carried over the crossing")
 	run(v4({ "k,101,dog_weak,0.500,0" }, { zone = "l02_garbage" }), 300)
 	finish()
 	expect(string.find(meta(), "KOWED,%d+,%d+,101,0%.500,0%.300"), "after the resume 101 not owed from 0.300")
@@ -583,18 +613,104 @@ check("r_new_session", function()
 	expect(rline() == "222,1", "r after the new session: " .. tostring(rline()))
 end)
 
+check("death_lethal_total", function()   -- the part hit alone takes health to 0 (dead = 1): the kill call still kills
+	add(101, "dog_weak", "m"); boot()
+	run(v4({ "k,101,dog_weak,1.000,1" }), 300)
+	expect(OBJ[101].dtime and OBJ[101].killer == 0, "101 not killed by the actor (killer " .. tostring(OBJ[101].killer) .. ")")
+	expect(OBJ[101].kill_err == 0 and OBJ[101].health == 0, "kill error or health not 0")
+	finish()
+	expect(sum("kdead_online") == 1 and count(meta(), "KDEAD,%d+,%d+,101,online") == 1, "KDEAD online / kdead_online not 1")
+end)
+
+check("kill_who", function()
+	add(101, "dog_weak", "m"); add(102, "stalker_bandit", "s"); add(103, "boar_strong", "m"); boot()
+	run(v4({ "k,101,dog_weak,0.250,1", "k,102,stalker_bandit,0.300,1" }), 500)
+	world_kill(103, 102); ticks(200)                                   -- a death with no row: no KWHO
+	DEATHQ[#DEATHQ + 1] = { id = 102, who = { id = function() return 9000 end } }; ticks(200)   -- a second callback (another killer) for 102
+	finish()
+	local s = meta()
+	expect(count(s, "\nKWHO,%d+,101,0\n") == 1 and count(s, "\nKWHO,%d+,102,0\n") == 1, "KWHO with killer 0 not once each for 101 and 102")
+	expect(count(s, "\nKWHO,") == 2, "KWHO lines: " .. count(s, "\nKWHO,") .. ", expected 2 (none for 103, none repeated)")
+	-- a v3 run: no rows, no line, whatever dies
+	new_world(DIRS.b, SCRIPT_UNDER_TEST); add(101, "dog_weak", "m"); add(102, "stalker_bandit", "s"); boot()
+	run({ k = { "k,101,dog_weak,0.300,1" } }, 300); world_kill(101, 0); world_kill(102, 0); run({}, 300)
+	finish()
+	expect(OBJ[101].dtime and not string.find(meta(), "KWHO,", 1, true), "KWHO in a v3 run")
+end)
+
+check("over64_r", function()   -- a pose with more than 64 k lines is refused but processed: r advances
+	add(101, "dog_weak", "m"); boot()
+	run(v4({ "k,101,dog_weak,0.100,0" }), 200)
+	local L = {}; for i = 1, 65 do L[#L + 1] = string.format("k,%d,dog_weak,0.100,0", 3000 + i) end
+	pose(v4(L)); ticks(100)
+	expect(rline() == SESS .. "," .. SEQ, "r not at the over-64 pose " .. SEQ .. ": " .. tostring(rline()))
+end)
+
+check("ktab_decimals", function()   -- a total with more than 3 decimals survives the crossing exactly
+	add(101, "dog_weak", "m"); boot()
+	run(v4({ "k,101,dog_weak,0.1234,0" }), 300)
+	expect(near(OBJ[101].health, 1 - 0.1234), "0.1234 not applied: " .. OBJ[101].health)
+	local r; for _ = 1, 20 do r = run(v4({ "k,101,dog_weak,0.1234,0" }, { state = "cross", zone = "l02_garbage", c = "esc_to_gar" }), 50); if r then break end end
+	expect(r == "changed", "no level change")
+	OBJ[101].lvl = "l02_garbage"                                         -- the creature is online on the new level
+	run(v4({ "k,101,dog_weak,0.1234,0" }, { zone = "l02_garbage" }), 500)
+	expect(near(OBJ[101].health, 1 - 0.1234) and #OBJ[101].hits == 1, "same total after the crossing changed health: " .. OBJ[101].health)
+	finish()
+	expect(count(meta(), "KAPPLY,") == 1, "KAPPLY lines " .. count(meta(), "KAPPLY,") .. ", expected 1")
+end)
+
+check("ktab_savefail", function()
+	for _, how in ipairs({ "open", "write" }) do
+		new_world(how == "open" and DIRS.b or DIRS.c, SCRIPT_UNDER_TEST, "1")
+		if how == "open" then os.execute("mkdir -p '" .. SHM .. "/ktab.txt'") else KTAB_WFAIL = true end   -- a directory cannot be opened as a file
+		add(101, "dog_weak", "m"); boot()
+		run(v4({ "k,101,dog_weak,0.300,0" }), 300)
+		local r; for _ = 1, 20 do r = run(v4({ "k,101,dog_weak,0.300,0" }, { state = "cross", zone = "l02_garbage", c = "esc_to_gar" }), 50); if r then break end end
+		expect(r == "changed", how .. ": the crossing did not proceed")
+		run(v4({}, { zone = "l02_garbage" }), 300)
+		finish()
+		local s = meta()
+		expect(count(s, "KTAB,savefail,1") == 1, how .. ": KTAB,savefail not logged once")
+		local t; for x in string.gmatch(s, "T2SUM,[^\n]*") do t = t or x end   -- the first T2SUM: the Lua state that saved
+		expect(t and string.find(t, ",ktabfail=1$"), how .. ": ktabfail not 1 at the end of the first T2SUM: " .. tostring(t))
+	end
+end)
+
+if MODE == "fixture" then   -- STUB-MADE fixtures for the kw1 checker: the real script in this fake world
+	local script, dir, scen = arg[2], arg[3], arg[4] or "good"
+	if not (script and real_open(script, "rb") and dir) then print("ERROR fixture: usage or script missing"); os.exit(1) end
+	SCRIPT_UNDER_TEST = script; new_world(dir, script); CL_EXTRA = "-p1_tag t2"
+	add(201, "stalker_bandit", "s", { pos = V(5, 0, 0) }); add(202, "stalker_duty", "s", { pos = V(40, 0, 0) })
+	add(301, "dog_weak", "m", { pos = V(0, 0, 8), health = scen == "nomonster" and 0.5 or 1 }); add(302, "boar_strong", "m", { pos = V(0, 0, 3), health = 0.5 })
+	local ok, e = pcall(boot); if not ok then print("ERROR fixture: " .. tostring(e)); os.exit(1) end
+	print("ready " .. NOW); io.stdout:flush()
+	for line in io.lines() do
+		local c, a1, a2 = line:match("^(%S+)%s*(%S*)%s*(%S*)$")
+		local ok2, e2 = pcall(function()
+			if c == "tick" then ticks(50)
+			elseif c == "hurt" then OBJ[tonumber(a1)].health = tonumber(a2)
+			elseif c == "wkill" then world_kill(tonumber(a1), tonumber(a2))
+			elseif c == "finish" then finish()
+			else error("unknown command " .. tostring(line)) end end)
+		if not ok2 then print("ERROR fixture: " .. tostring(e2)); os.exit(1) end
+		print("ok " .. NOW); io.stdout:flush()
+		if c == "finish" then os.exit(0) end
+	end
+	print("ERROR fixture: stdin ended without finish"); os.exit(1)
+end
+
 if MODE == "checks" then for _, n in ipairs(ORDER) do print(n) end; os.exit(0) end
 if MODE ~= "run" then print("usage: see the header"); os.exit(2) end
 SCRIPT_UNDER_TEST = arg[2]
 local name, wd = arg[3], arg[4]
 local ARGS = { lost3 = arg[5] }
-if not C[name] then print("FAIL " .. tostring(name) .. ": no such check"); os.exit(1) end
-if not real_open(SCRIPT_UNDER_TEST, "rb") then print("FAIL " .. name .. ": script missing " .. tostring(SCRIPT_UNDER_TEST)); os.exit(1) end
-if name == "v3_unchanged" and not (ARGS.lost3 and real_open(ARGS.lost3, "rb")) then print("FAIL " .. name .. ": lost3 script missing"); os.exit(1) end
+if not C[name] then print("ERROR " .. tostring(name) .. ": no such check"); os.exit(1) end
+if not real_open(SCRIPT_UNDER_TEST, "rb") then print("ERROR " .. name .. ": script missing " .. tostring(SCRIPT_UNDER_TEST)); os.exit(1) end
+if name == "v3_unchanged" and not (ARGS.lost3 and real_open(ARGS.lost3, "rb")) then print("ERROR " .. name .. ": lost3 script missing"); os.exit(1) end
 DIRS = { a = wd .. "/a", b = wd .. "/b", c = wd .. "/c" }
-for _, d in pairs(DIRS) do if not real_open(d .. "/.keep", "rb") then print("FAIL " .. name .. ": workdir " .. d .. " not prepared"); os.exit(1) end end
+for _, d in pairs(DIRS) do if not real_open(d .. "/.keep", "rb") then print("ERROR " .. name .. ": workdir " .. d .. " not prepared"); os.exit(1) end end
 F = {}
 new_world(DIRS.a, SCRIPT_UNDER_TEST)
 local ok, e = pcall(C[name], ARGS)
-if not ok then F[#F + 1] = "error: " .. tostring(e) end
+if not ok then print("ERROR " .. name .. ": exception: " .. tostring(e) .. (#F > 0 and (" (after: " .. table.concat(F, "; ") .. ")") or "")); os.exit(1) end
 if #F == 0 then print("PASS " .. name) else print("FAIL " .. name .. ": " .. table.concat(F, "; ")); os.exit(1) end

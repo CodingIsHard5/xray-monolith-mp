@@ -33,10 +33,13 @@ for c in $checks; do
 	d="$RUN/real-$c"; prep "$d" || { echo "FAIL $c: cannot prepare $d"; nfail=$((nfail + 1)); continue; }
 	out="$("$LUA" "$STUB" run "$SCRIPT" "$c" "$d" "$LOST3" 2>&1)"; rc=$?
 	if [ $rc -eq 0 ] && [ "$out" = "PASS $c" ]; then echo "PASS $c"; npass=$((npass + 1))
-	else echo "FAIL $c (rc=$rc): $out"; nfail=$((nfail + 1)); fi
+	else case "$out" in "ERROR $c: "*) echo "ERROR $c (rc=$rc): ${out#ERROR $c: }" ;; *) echo "FAIL $c (rc=$rc): $out" ;; esac; nfail=$((nfail + 1)); fi
 done
 
-echo "== mutants (each must FAIL its check)"
+# the mutant manifest, captured on its own: a stub that cannot list it stops the run (as the check list above)
+mutants="$("$LUA" "$STUB" mutants)" || { echo "FAIL stub does not list its mutants"; exit 1; }
+[ -n "$mutants" ] || { echo "FAIL no mutants listed"; exit 1; }
+echo "== mutants (each must FAIL its check; an ERROR, a Lua exception or a setup failure, is never a catch)"
 ncaught=0; nmissed=0
 declare -A guarded
 while read -r mu c; do
@@ -51,9 +54,10 @@ while read -r mu c; do
 	case "$out" in
 		"FAIL $c: "*) if [ $rc -ne 0 ]; then echo "CAUGHT $mu by $c: ${out#FAIL $c: }"; ncaught=$((ncaught + 1))
 			else echo "NOT CAUGHT $mu -> $c: FAIL printed but rc=0"; nmissed=$((nmissed + 1)); fi ;;
+		"ERROR $c: "*) echo "NOT CAUGHT $mu -> $c: ERROR, not an outcome failure (${out#ERROR $c: })"; nmissed=$((nmissed + 1)) ;;
 		*) echo "NOT CAUGHT $mu -> $c (rc=$rc): $out"; nmissed=$((nmissed + 1)) ;;
 	esac
-done <<< "$("$LUA" "$STUB" mutants)"
+done <<< "$mutants"
 for c in $checks; do [ -n "${guarded[$c]:-}" ] || { echo "NO MUTANT for check $c"; nmissed=$((nmissed + 1)); }; done
 
 echo "== checks: $npass pass, $nfail fail; mutants: $ncaught caught, $nmissed not caught or missing"

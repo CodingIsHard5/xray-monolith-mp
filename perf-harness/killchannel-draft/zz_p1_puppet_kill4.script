@@ -23,7 +23,8 @@
 --   (0..64). 7 header fields = v3 (k lines counted, not applied); any other 8th field or > 8 fields: refused whole (kver).
 --   The old bare `k,<id>` kill is gone in every version. Snapshot header field 7 = `4`; k,<id>,<applied>[,dead] lines
 --   after the o lines. Table carried over a crossing in ktab.txt (same run id only). Meta: KAPPLY KDEAD KOWED KSTALE
---   KBACK KREFUSED; counters at the end of T2SUM. Inert unless a v4 pose with k lines arrives (except the snapshot mark).
+--   KBACK KREFUSED KWHO (killer id from the death callbacks, once per id with a row; -1 = none named) KTAB,savefail;
+--   counters at the end of T2SUM (ktabfail last). Inert unless a v4 pose with k lines arrives (except the snapshot mark).
 --   Track time t starts WAIT_MS after the first update (the actor holds the t=0 point meanwhile, t < 0), so GAMMA's
 --   auto_switch (1250 m for 10 s after load, then 450 m; configs\alife.ltx) has settled before the track starts.
 local cl = command_line and command_line() or ""
@@ -68,7 +69,8 @@ local seen = {}
 -- kcre[id]: exported as monster/stalker in a snapshot (the offline creature test: no engine call needed)
 local K, kcre, klog, kver_n, k_note = {}, {}, {}, nil, nil
 local k_r = nil   -- "<session>,<seq>" of the newest v4 pose whose k lines were processed (snapshot line r)
-local kc = { khits = 0, kdead_online = 0, kdead_offline = 0, kowed = 0, kstale = 0, kback = 0, krefused = 0, kclamped = 0, kver = 0, kdead_fail = 0 }
+local kc = { khits = 0, kdead_online = 0, kdead_offline = 0, kowed = 0, kstale = 0, kback = 0, krefused = 0, kclamped = 0, kver = 0, kdead_fail = 0, ktabfail = 0 }
+local kwho, ktab_logged = {}, false   -- kwho[id]: KWHO logged (once per id that has a row in K); KTAB,savefail logged once
 local K_HOLD, K_MAX = 10000, 64
 
 local WAIT_MS = 15000
@@ -342,13 +344,29 @@ local function k_pose(a, now, n, v4, lines, sess)
 	k_r = string.format("%s,%d", tostring(sess or 0), n)
 end
 -- the table over a level change: written at the crossing request, read back at the resume when the run id matches
+-- true only if the open, every write and the close succeeded; a failure is logged once (KTAB,savefail) and counted
+-- (ktabfail). The crossing goes on either way. ap is written with 9 decimals so any total round-trips.
+local function k_savefail()
+	kc.ktabfail = kc.ktabfail + 1
+	if not ktab_logged then ktab_logged = true; m("KTAB,savefail," .. t2_run); if meta then meta:flush() end end
+	return false
+end
 local function k_save()
-	local f = io.open(DIR .. "ktab.txt", "wb"); if not f then return end
-	f:write("run,", t2_run, "\n")
-	for id, r in pairs(K) do f:write(string.format("r,%d,%.3f,%s,%d,%d\n", id, r.ap, r.dd and string.format("%d", r.dd) or "-", r.ow and 1 or 0, r.st and 1 or 0)) end
-	for id in pairs(kcre) do f:write(string.format("c,%d\n", id)) end
-	if k_r then f:write("s,", k_r, "\n") end
-	f:write("end\n"); f:close()
+	local f = io.open(DIR .. "ktab.txt", "wb"); if not f then return k_savefail() end
+	local ok = f:write("run,", t2_run, "\n") and true
+	for id, r in pairs(K) do ok = f:write(string.format("r,%d,%.9f,%s,%d,%d\n", id, r.ap, r.dd and string.format("%d", r.dd) or "-", r.ow and 1 or 0, r.st and 1 or 0)) and ok end
+	for id in pairs(kcre) do ok = f:write(string.format("c,%d\n", id)) and ok end
+	if k_r then ok = f:write("s,", k_r, "\n") and ok end
+	ok = f:write("end\n") and ok; ok = f:close() and ok
+	if not ok then return k_savefail() end
+	return true
+end
+-- KWHO (witness kw1, check 9): the killer named by GAMMA's death callbacks, once per id that has a row in K. Nothing
+-- for any other death, so a v3 run (no rows) writes no line. Guarded: an error here must not break GAMMA's callback loop.
+local function k_who(victim, who)
+	local ok, id, wid = pcall(function() return victim:id(), who and who:id() or -1 end)
+	if not ok or not K[id] or kwho[id] then return end
+	kwho[id] = true; m(string.format("KWHO,%d,%d,%d", time_global(), id, wid)); if meta then meta:flush() end
 end
 local function k_load()
 	local f = io.open(DIR .. "ktab.txt", "rb"); if not f then return end
@@ -682,7 +700,7 @@ on_quit = function()
 		hits, cancels, refills, min_health, exp_n, exp_n > 0 and exp_sum / exp_n or 0, p99, exp_max))
 	if t2 then t2_disarm(time_global(), p_last, "end") end
 	if t2 then m(string.format("T2SUM,last_seq=%d,torn=%d,holds=%d,paused=%s,near=%d,guards=%d,lost=%d,epochs=%d", p_last, p_torn, p_holds, tostring(p_paused), p_near, t3_guards, p_lost_n, p_epochs)
-		.. string.format(",khits=%d,kdead_online=%d,kdead_offline=%d,kowed=%d,kstale=%d,kback=%d,krefused=%d,kclamped=%d,kver=%d,kdead_fail=%d", kc.khits, kc.kdead_online, kc.kdead_offline, kc.kowed, kc.kstale, kc.kback, kc.krefused, kc.kclamped, kc.kver, kc.kdead_fail)) end
+		.. string.format(",khits=%d,kdead_online=%d,kdead_offline=%d,kowed=%d,kstale=%d,kback=%d,krefused=%d,kclamped=%d,kver=%d,kdead_fail=%d,ktabfail=%d", kc.khits, kc.kdead_online, kc.kdead_offline, kc.kowed, kc.kstale, kc.kback, kc.krefused, kc.kclamped, kc.kver, kc.kdead_fail, kc.ktabfail)) end
 	do local a = db.actor; local api = "na"
 		if a and a.get_actor_stance then local ok, v = pcall(a.get_actor_stance, a); api = ok and tostring(v) or "err" end
 		m(string.format("VITALS,min_health=%.3f,max_radiation=%.4f,max_bleeding=%.4f,unread=%d", min_health, vit_rad, vit_bleed, vit_na))
@@ -716,6 +734,9 @@ function on_game_start()
 	RegisterScriptCallback("actor_on_hit_callback", function() if db.actor and db.actor.health < (dmg_open("god_off_norefill") and 0.7 or 1.0) then db.actor:set_health_ex(1.0) end end)  -- second refill point, after each hit
 	RegisterScriptCallback("on_before_level_changing", on_quit)
 	RegisterScriptCallback("actor_on_net_destroy", on_quit)   -- "on_game_end" is not a callback in this GAMMA build (prereg section 30)
+	if t2 then   -- KWHO: (victim, who) as axr_main.script lists them; monsters from bind_monster.script's death_callback
+		RegisterScriptCallback("npc_on_death_callback", k_who)
+		RegisterScriptCallback("monster_on_death_callback", k_who) end
 	-- summary also every 60 s of track time so a killed run keeps it
 	local last_sum = 0
 	RegisterScriptCallback("actor_on_update", function()
