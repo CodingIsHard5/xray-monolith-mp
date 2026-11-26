@@ -14,6 +14,16 @@ mutant unless the rig can do more; no offline creature; no crossing; no restart 
   mod's health read, their rule "a vanished puppet is not a death" changes; my reader would not. Its result is read
   before this text is fixed.
 - **[I]** the rig's steps and their times (below: T1, T2, T3, TF are the rig's, to be filled from their text).
+  itrzone, 2026-11-26: today's lever `kcrig` (their am135) cannot do steps A to D (it hits 30 % then kills, puppet by
+  puppet in id order). A new scripted lever is theirs to draft after kc1: a list of play-clock time, nearest stalker
+  or nearest monster at that time, hit share or kill; the id is logged. Their pose period is 50 ms.
+  - The hit share is exact only if ITR2 lets the mod write health; with engine damage it is what the game gives.
+    So no check here names 0.250: checks 2 to 5 take the total from the pose my watcher kept.
+  - Step D has two forms. (i) The real path: the rig goes to state away under away_sim = freeze for 20 s, X-Ray is
+    stopped by the registered v3 rule, the kill is dealt in that time; possible only if ITR2 keeps the puppets while
+    away (itrzone checks on the desk). (ii) My runner stops X-Ray on its own (T2_STALL_AT, as arm D d0) while their
+    state stays play. Preferred: (i), because it is the path a player would take; (ii) only if (i) cannot deal the kill.
+    The registered text names one, and check 9's stop window comes from `freeze.csv` in both.
 - Build owed on my side: reader `kill5` (section 3), a watcher that keeps whole files (section 2), the checker and
   its selftest (section 5). CodeRabbit on each.
 
