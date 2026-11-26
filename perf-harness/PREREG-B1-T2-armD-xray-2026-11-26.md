@@ -143,3 +143,19 @@ My guess was PASS 40 %: FAIL as scored, so the guess's direction held, but for n
 (timing at the 120 s limit, the recover crossing); those all passed.
 itrzone's side scored once: PASS 10 of 10 (gap 178.0 s).
 Output: `armD-xray/d2_xscore.txt` (sha256 1956f6e2…).
+
+### 7.3 POST-HOC DESCRIPTIVE, not a re-score (2026-11-26, ordered by the Overseer): where X-Ray put the first pose after the return in d2
+The d2 result stays FAIL 9 of 10. This only answers what check 9 was meant to ask: did X-Ray put the player where
+ITR2 actually was.
+- ITR2's own record, session 2 (`ITRZone out/runs/20261126-112315-stream-t2d2s2/UE4SS.log`):
+  `T2 wrote seq=510 state=play utc_ms=1795710348164 … x=-188.10 y=-19.87 z=-148.16`
+- X-Ray's first applied pose after the second resume (`boot0/meta_t2.csv`):
+  `P2,510,1795710348164,…` pose x -188.100, z -148.162; distance of the player from the pose after applying: 0.000 m.
+- Same pose number, same time stamp, same x and z to ITR2's two printed decimals. Height: X-Ray stood the player
+  on its own ground at -20.121, 0.25 m below ITR2's -19.87; that is the registered ground-snap rule, not a miss.
+- Why 33 m from the track's start: itrzone reports session 2 did not walk for its first 12.8 s (its clock runs only
+  in free play with accepted snapshots), then walked for about 13 s before X-Ray was back on Cordon.
+Limit: one pose compared, by eye from two files; no scorer, no registration.
+
+Process change (the Overseer, 2026-11-26): every bound is derived again for each arm from what that arm does, with
+the derivation written next to it; a copied bound is flagged in the margin table. See REGISTRATION-CHECKLIST.md.
