@@ -51,6 +51,19 @@ Self-test `python3 -I tools/s4b_selftest.py out <work dir>` (352f3385): PASS 18/
 cases plus: no in-between draw in one run, capture site missing in a gated run, fewer captures than ticks, off run
 captures, off run draws in between.
 
+### 3.1 Desk check of W1's weak point, before any part B run (Overseer's condition, 2026-11-26)
+Source: the position dumps of an existing run on the same save (out/det_s4a_s1, bench1, checkpoints at 56 s and 112 s
+of engine time; the player stands still at 207.1, 0.0, 88.4).
+- Six online objects within 80 m of the player moved between the two checkpoints: three Duty stalkers of one squad
+  (52.7, 52.7 and 60.2 m away; moved 46.0, 45.7 and 42.3 m) and three crows (41.6, 47.1, 64.8 m away; moved 39 to 70 m).
+- In the 4a bench runs the stalker client update ran 42 times per tick (69804 calls in 1662 ticks), so stalkers near
+  the player are updated, and therefore captured, every tick.
+- So the scene has moving objects near the player in the right time range. NOT shown: that one of them is inside a
+  render pass (view or a shadow pass) during the 55 s capture, and that the squad was already walking before 56 s
+  (the bench capture runs from about 15 s to 75 s). The dumps are from the serial test mode, not from a bench run.
+W1 stays as registered. My guess for W1 moves from 70 % to 80 %. If in-between draws come out 0 with captures per tick
+well above 1, I report "capture works, draw path not exercised by this scene", not "draw path broken".
+
 ## 4. What these runs cannot show
 - Whether it LOOKS right: no picture is judged. Held items on moving NPCs may be off by one tick on tick frames;
   only eyes can tell. That, and smoothness, is Caden's sheet.
