@@ -229,3 +229,42 @@ S's section by hand from the `k` line of the kept poses, with one command writte
 `tr -d '\r' < boot0/watch/poses_all.txt | grep '^k,<S id>,' | cut -d, -f3 | sort | uniq -c`.
 If it names another section, the run is reported as outside the registered conditions and S's checks are not scored (NO
 VERDICT for S). If the rig finds no generic stalker, no stalker `k` line is sent: NV1, NO VERDICT on both sides.
+
+## 11. RESULT (2026-11-26, appended after the run; sections 1-10 unchanged, registered sha 9dc6c901…046a)
+
+**X side, of record: PASS, 15 of 15, no NO VERDICT rule fired (checker rc 0). Scored once with the registered checker
+cf69899b…e9c9; nothing re-scored.** ITR2 side (itrzone's own scoring): PASS 9 of 9. So kj2 passes on both sides.
+Run: one boot on the Overseer's GO, booted by itrzone. X out dir /home/caden/Projects/ITRZone/out/runs/20261126-172548-t2kj2-xray
+(runner rc 0). Score text: kj2/kj2_xscore.txt, sha256 e258179671f71bc005068ce1a5f0e3ed5c029252711b8c3528ea084022afdceb
+(71 lines), written by the single scoring run.
+
+Limits first:
+- THE NEW PATH DID NOT OCCUR. kill5's change is "a kill call that is not yet in effect writes the plain line; `dead` only
+  once the creature reads dead". In this run both lethal hits took health to exactly 0.0000 (S 0.4107 - 0.411, M 0.7277
+  - 0.728), both creatures read dead in the frame of the call, and both KCONF lines say 0 ms. No snapshot ever showed a
+  pending kill. In kj1 M was left at 0.0008 and read alive for one snapshot; that case was not repeated. So the run shows
+  the fix does no harm and the rule held in all 1949 snapshots (check 15: 180 dead lines, none beside alive 1); it does
+  NOT show the pending path working in the engine. That path is tested offline only (stub tests, and itrzone's unit cases).
+- This also corrects my reading in kj1's result: what decided "alive in the snapshot of the dead line" was the health
+  left after the last piece (above 0 or not), which is rounding luck of the totals, not a fixed delay of the kill.
+- KNOCONF, `stale`, the released-target path: none occurred (by design); fixture and stub bytes only.
+- Found by the review AFTER registration, not reachable in this run, to fix before any later run: a stale row whose id
+  belongs to a dead replacement logs KNOCONF and counts kdead_fail after 2 s; a later pose that omits the id clears the
+  stale mark, so a replacement could confirm the kill; a pending kill on a released target is lost over a crossing.
+- One stalker, one flesh, a rig, nobody looking: as in section 0.
+
+Story-character rule (10.2): `tr -d '\r' < boot0/watch/poses_all.txt | grep '^k,19425,' | cut -d, -f3 | sort | uniq -c`
+-> `1201 sim_default_stalker_0`. S is a generic stalker and is scored. M: id 23183 flesh_03a_normal (the same two as kj1).
+
+Numbers (from the score text): S healed +0.3571 between its hits (0.4000 -> 0.7571); the total above 1.000 applied as
+0.500, not cut; S's dead line 6 ms after its dead pose; stop 20.002 s (bound 20.0 +/- 0.1); M's dead pose read 8.2 s after
+STOP and 11.8 s before CONT; nothing applied or written inside the stop; M dead after it, once; actor health 1.0000 in
+all 1949 snapshots; both kills the actor's; every T2SUM key and both KCONF rows as expected; NV3's two exempt death
+steps were S 800->801 and M 950->951 (health 0.0000 -> -1.0000), the case that broke kj1's checker.
+Margins as measured: every flagged margin held (check 9's whole-second edges; healing 0.357 against 0.15).
+
+My guess was PASS 45 / NO VERDICT 20 / FAIL 35. Outcome PASS. The risk I named first (a kill pending longer than one
+snapshot) did not show up because no kill was pending at all.
+
+Open, for the Overseer: whether the pending path needs its own engine witness (a run whose totals leave the creature
+just above 0 before the kill, as kj1's M: itrzone's rig would have to choose the total), and the three review points above.
