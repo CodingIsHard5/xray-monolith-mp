@@ -1,0 +1,27 @@
+tag          frames updates actor  camera  frame ms  p99 ms  sim ms/tick  camera ms/call
+s4b_n30_1     12000   1657   1657  12000    4.601   11.55    4.890      0.0117
+s4b_n30_2     12000   1655   1655  12000    4.598   11.58    4.889      0.0118
+s4b_n60_1     12000   3583   3583  12000    4.975   11.54    3.622      0.0123
+s4b_n60_2     12000   3527   3527  12000    4.898   10.94    3.501      0.0124
+s4b_noff_1    12000  12000  12000  12000    5.998   12.13    2.117      0.0124
+s4b_p30_1     12000   1667   1667      -    4.628   11.57    4.825      -
+s4b_p30_2     12000   1719   1719      -    4.775   12.85    5.038      -
+s4b_p60_1     12000   3593   3593      -    4.989   11.57    3.593      -
+s4b_p60_2     12000   3471   3471      -    4.820   10.85    3.505      -
+s4b_poff_1    12000  12000  12000      -    5.845   11.35    2.078      -
+V1 s4b_n30_1: PASS  camera 12000 of 12000 frames, actor 1657 of 1657 updates
+V1 s4b_n30_2: PASS  camera 12000 of 12000 frames, actor 1655 of 1655 updates
+V1 s4b_n60_1: PASS  camera 12000 of 12000 frames, actor 3583 of 3583 updates
+V1 s4b_n60_2: PASS  camera 12000 of 12000 frames, actor 3527 of 3527 updates
+W1 s4b_n30_1: PASS  captures 503293 (303.7 per tick), in-between draws 81188 (6.77 per frame, 0.01 us each)
+W1 s4b_n30_2: PASS  captures 503936 (304.5 per tick), in-between draws 83539 (6.96 per frame, 0.01 us each)
+W1 s4b_n60_1: PASS  captures 1083669 (302.4 per tick), in-between draws 84317 (7.03 per frame, 0.01 us each)
+W1 s4b_n60_2: PASS  captures 1061930 (301.1 per tick), in-between draws 83234 (6.94 per frame, 0.01 us each)
+W2 s4b_noff_1: PASS  captures 0, in-between draws 0
+V2 s4b_noff_1: PASS  camera 12000, actor 12000, updates 12000, frames 12000
+V3 frame time tick 30: PASS  new/previous = 0.978 (limit 1.05), arm spread 3.2 %
+V4 tick cost tick 30: PASS  new/previous = 0.991 (limit 1.05), arm spread 4.4 %
+V3 frame time tick 60: PASS  new/previous = 1.006 (limit 1.05), arm spread 3.5 %
+V4 tick cost tick 60: PASS  new/previous = 1.004 (limit 1.05), arm spread 3.5 %
+V5 off frame time: PASS  new/previous = 1.026 (one run each)
+RESULT: PASS (15 of 15 checks passed)

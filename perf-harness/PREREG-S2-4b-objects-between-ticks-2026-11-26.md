@@ -82,5 +82,27 @@ My guess was 65 %: it held. The larger object (about 220 bytes) did not change a
 Limit, as registered: serial test mode, first 320 A-Life passes; inert when off, nothing about gated mode.
 Output: `s4b/s4b_partA_score.txt`.
 
-### 5.2 Part B
-(empty until scored)
+### 5.2 Part B (run 2026-11-26 01:48 to 02:10 EST, one EXCLUSIVE slice, ten runs all clean, no re-run, no
+substitution; scored once with s4b_score.py 7efb142b): PASS 15 of 15
+| check | result |
+|---|---|
+| W1 captured and drawn in between | all four gated runs: 301 to 305 captures per tick; 6.8 to 7.0 in-between draws per frame (81188 to 84317 per run) |
+| W2 off | captures 0, in-between draws 0 |
+| V1 view every frame | camera 12000 of 12000 frames in all four gated runs; actor updates = updates |
+| V2 off call pattern | camera = actor = updates = frames = 12000 |
+| V3 frame time, tick 30 | new / previous 0.978 (arm spread 3.2 %) |
+| V3 frame time, tick 60 | 1.006 (spread 3.5 %) |
+| V4 tick cost, tick 30 | 0.991 (spread 4.4 %) |
+| V4 tick cost, tick 60 | 1.004 (spread 3.5 %) |
+| V5 off frame time | 1.026 (5.998 against 5.845 ms, one run each) |
+Guesses: all PASS 40 %: it passed. W1 80 % after the desk check: held; about seven objects per frame were drawn in
+between, so the scene does exercise the draw path. Frame time 1.00 to 1.03: tick 30 came out below (0.978), inside
+the spread; I do not read that as a gain. Tick cost 1.00 to 1.03: 0.991 and 1.004, no cost seen.
+The scorer's "us each" figure for an in-between draw is NOT a cost: the profiler site covers only the counting line,
+not the interpolation. The cost evidence is V3 and V4.
+
+What this shows: with the tick on, about 300 objects are captured per tick and about 7 moving ones per frame are
+handed to the renderer at an in-between matrix, at no cost visible above the runs' spread (2 to 4 %). Off is unchanged.
+What it does not show (section 4 stands): that it looks right; nothing was looked at. Held items, poses, attached
+lights and particles, marks, culling, tracers and the player's body are as listed there. The mouse path is untested.
+V5 is one run per build.
