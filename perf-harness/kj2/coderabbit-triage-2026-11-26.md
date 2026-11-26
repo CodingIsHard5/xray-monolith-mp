@@ -22,7 +22,7 @@ DECLINED, with reasons:
   harness/ in the main project folder, hash-checked by itrzone's boot script. Said in the text.
 - "can ITR2 take a plain k line as confirmation": itrzone's side; their unit case 20 covers it. Passed on.
 
-## Pass 2 (ordered by the Overseer), on the fix round ae115dd3d, 7 files, 2026-11-26 about 21:55 UTC
+## Pass 2 (ordered by the Overseer), on the fix round ae115dd3d, 7 files, 2026-11-26, ended before 21:49 UTC (by `date`)
 Result: "No new findings" (the tool lists the 20 earlier findings as previous). No byte changed after it; the pins in
 the registration text stand. Fixes 1-8 above were made in ae115dd3d, each with a test that fails without it (names in
 kj2/NOTES.md, "Fix round 2").
