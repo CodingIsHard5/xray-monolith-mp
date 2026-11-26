@@ -119,3 +119,174 @@ installs kill5 by a fixed path, so a run of kill6 needs a copy with that line ch
 `bash kj3/kill6h_test.sh`: `== checks: 58 pass, 0 fail; mutants: 73 caught, 0 not caught or missing` / `RESULT: PASS`
 (run dir kj3/runs/r-20261126-175502-3981627). The first run (kj3/runs/r-20261126-175415-3970229: 13 fail, 4 not caught:
 setup timing in the new tests and three mutant anchors with a wrong escape) is kept; nothing deleted.
+
+# Stage 2: emission lines (2026-11-26, desk)
+
+## Limits first
+- Never run in the engine. Nothing here touched the game, Wine, a display or a runner. The reader's new code has run only
+  under the Lua 5.1 stub, against FAKE managers I wrote from the script text. Whether `surge_manager` /
+  `psi_storm_manager` resolve as globals from the bridge's namespace, whether `CTime:diffSec` returns a fractional number,
+  and how `tostring(level.get_time_factor())` prints the engine's float (I expect `10` and `6`) are all INFERRED.
+- The fake models only the fields the reader reads. It does not model save/load, a level change during an event, the
+  `on_before_surge` veto, invalid levels, sleeping, or the order of the scripts' 1 s update against the bridge's update in
+  one frame (in the stub the script update runs first).
+- tools/t2_xray_kj3.sh: `bash -n` only, never run. The witness path (runner appends -> reader calls start_surge() ->
+  emission starts) has never run end to end.
+- No CodeRabbit review: this is not a git repository, and git commands that change anything are forbidden.
+- **Desk read: things I found wrong or imprecise** (plan-facts/emission-clock-desk-read-2026-11-26.md):
+  1. It says the timeline actions happen "at the first 1 s update with t >= the value". The scripts test `diff_sec >= X`
+     with `diff_sec = math.ceil(diffSec/factor)` (SM:676, SM:708-977; PSM:317, PSM:335-392). So an action fires at the
+     first update with **t > X - 1**, up to 1 s earlier than the read says. My phase table follows the scripts (ceil).
+  2. "Psi strike time of vortex v: v.start_time + 20 in t units" (PSM:373): the test is `diff_sec - start_time >= 20`,
+     so the strike comes at t > start_time + 19. In the `v` line, s therefore reaches (-1, 1] when the vortex goes, not 0.
+  3. "Next start ... (SM:662)": SM:662 is the comparison. The game-seconds value with its `math.floor` is SM:266
+     (PSM:132).
+  4. Not wrong, but missing: `vortex_index` is reset only in initialize (PSM:56), not at each start (PSM:105-118). Over
+     several storms it grows, and old indices are gone from `vortexes` (emptied at start, PSM:109). So a vortex's n is
+     unique for the Lua state, not 1.. per storm (the example at t = 60 shows n = 3..6 of the first storm).
+  The rest of what I used checked out against the scripts: SM:24/PSM:19 globals; SM:160-167 / PSM:41-46 initial fields;
+  SM:497 wave fields; SM:688 + SM:1065 wave z; SM:1072-1073 wave stop; PSM:412 vortex fields; PSM:357-364 window 30..77
+  (`==` creation); PVF:137-138 period 3..6; start functions SM:1673-1675, PSM:713-715 (no arguments used); SM:227-231 /
+  PSM:101 skip when t + 6 > duration (a forced start sets inited_time = now, so t = 0: not skipped).
+
+## What the reader writes (harness/zz_p1_puppet_kill6.script)
+Every version-4 snapshot (`if t2`, the same condition as the k answers), after the r line (if there is one) and before the
+k lines: one `e`, then `w` lines, then `v` lines, then one `ns`. Phases: kj3/emission-phases.md. Fixtures:
+kj3/emission-line-examples.txt (real stub bytes).
+- `e,<kind>,<t>,<phase>,<tf>`: kind surge if `SurgeManager.started`, else psi if `PsiStormManager.started`, else none.
+  t = `game.get_game_time():diffSec(M.inited_time) / level.get_time_factor()`, `%.2f`. tf = `tostring(level.get_time_factor())`.
+- `w,<n>,<z>` (`%.3f`): only during a surge, for n = 1, 2 with `blowout_waves[n].effect:playing()`.
+- `v,<n>,<x>,<y>,<z>,<s>` (`%.3f` x3, `%.2f`): only during a psi storm, for each `vortexes[i]` with `hit == false`,
+  ascending i. s = `start_time + 20 - t`.
+- `ns,<surge_s>,<psi_s>`: `max(0, floor(_delta - now:diffSec(last_*_time)))`; -1 while that kind is running; both -1 when
+  degraded.
+- Meta (once each): `ESTART,<now>,<kind>,<t>`, `EPHASE,<now>,<kind>,<phase>,<t>`, `EEND,<now>,<kind>,<t at last sight>`,
+  `EERR,<now>,<message>` (first degraded snapshot of the Lua state), `EFORCE,<now>,<line>,<result>`.
+
+## Decisions you did not specify
+- **Phase boundaries** come from `ceil(t)`, as the scripts do (see desk read point 1). 13 surge phases and 6 psi phases.
+  I left out stages that mark no change useful to the partner (siren 25, which never plays in this install; quakes
+  100-106; the fade steps): listed in emission-phases.md. Phase 13 / 6 = "end due": the script ends the event at its next
+  1 s update.
+- **Degrading is all or nothing.** Any error in the group (a nil module or instance, `started` not a boolean, a missing
+  `inited_time`, `_delta` or `last_*_time`, a throwing accessor, a factor that is unreadable or <= 0) removes every e, w,
+  v, ns line of that snapshot already built and writes `e,none,0.00,0,<tf>` + `ns,-1,-1` instead (tf = `-1` if the
+  factor itself is unreadable). Each degraded snapshot adds 1 to eerr. Only the first is logged (EERR). A degraded
+  snapshot leaves the ESTART/EPHASE/EEND tracking alone: a short read error inside an event produces no EEND/ESTART pair.
+- A nil manager counts as an error (eerr). The bridge exports only 15 s after the actor's first update, and the scripts
+  build both instances at their first 1 s update after that update (SM:59-64), so in a normal run eerr stays 0. A run
+  with eerr > 0 means that something was not readable.
+- **ns while an event of that kind runs = -1.** During the event `last_*_time` and `_delta` still describe the old date;
+  the next date is rolled at the end (SM:337-341). An overdue date whose start is still pending prints 0, not a negative.
+- **Restart rule:** the same kind with t lower by more than 0.5 s than at the last snapshot = a new event: `EEND` (old t)
+  then `ESTART`, and the phases are logged again from 1. That covers start_surge() during an emission (inited_time = now,
+  SM:205-206) and the Lua-state case. A new Lua state (level change, load) starts with no tracked event, so ESTART is
+  logged again with the current t. It also opens its meta file with "w" unless it is a crossing, as before.
+- **Time jump:** every skipped phase gets its own EPHASE line, in order, all with the same script time and the same t
+  (the t after the jump). A phase going DOWN without a restart (not produced by the scripts) is logged as one EPHASE with
+  the lower phase.
+- **Kind change** (surge starts during a psi storm; PSM:313 cancels the psi storm): EEND psi, then ESTART surge.
+- **Forced starts (Part B).** The test mode is decided ONCE, in on_game_start (t2 only): if `DIR .. "emtest.txt"` opens
+  (`Z:\dev\shm\itrz_b1\emtest.txt`, the same folder and the same way as dmgtest.txt), `em_test = true`, and the complete
+  lines already in the file are taken as done (`em_done`), so a level change or a load does not repeat them. Without
+  the file there is one failed open at game start and nothing else: per frame the cost is one upvalue test
+  (`if em_test then`). No read, no call (check em_force_absent counts the opens: exactly 1, at game start, even if the
+  file appears later). With the file: at most one open + read per second; only lines ending in LF count (an
+  incomplete line waits); each new non-empty line is acted on once: `surge` -> `surge_manager.start_surge()`, `psi` ->
+  `psi_storm_manager.start_psi_storm()`, both inside pcall; result `started` / `notstarted` (the manager's `started`
+  after the call, so a skip by the level, the option or the veto reads `notstarted`) / `error:<text>`; any other text
+  -> `unknown`, no call. Note PSM:313: a psi storm forced while an emission runs reads `started` and is cancelled by the
+  script one second later.
+- **Runner:** the file must exist when the game starts, so the runner creates it EMPTY when T2_SURGE_PLAY or T2_PSI_PLAY
+  is not 99999 (after removing any stale one), and appends the lines later. Each trigger fires once per runner run (not
+  per boot; a boot after a restart treats lines already in the file as done). T2_STALL_PLAY=99999 did NOT mean "never"
+  in kj2: it armed a stop 99999 s (27.8 h) after the first play pose, so in practice never in a 1100 s run, but not by
+  rule. kj3 maps 99999 to 0 (off). kj2 removes dmgtest.txt only at start (when T2_DMG_OK is not 1), never at cleanup;
+  emtest.txt is removed at start always and at cleanup (in `cleanup()`, the EXIT trap).
+- The SRC line ("line 54" in kj2) is line 62 in kj3 because of the new header lines; it is the same statement.
+
+## T2SUM change: LOUD
+**T2SUM has a new key `eerr` (snapshots whose emission lines were degraded), appended as the LAST key, after
+`ktabfail`.** The run checker judges every T2SUM key: it must learn `eerr` (expected 0). A checker that requires
+`ktabfail` to be last will break. Two existing stub checks were updated for this (v3_unchanged now strips
+`,eerr=0` as well; ktab_savefail expects `,ktabfail=1,eerr=0$`). Two more were updated for the new layout
+(snapshot_lines and r_line_presence: `e,none,0.00,0,6` and `ns,...` now sit between r and k). Their intent is unchanged.
+
+## Per-snapshot cost
+Per v4 snapshot: one `pcall(level.get_time_factor)`, one `pcall(em_body, ...)` with its arguments (no closure, so no
+allocation for it), two global lookups and a few field reads, ONE `game.get_game_time()` (one CTime userdata, shared by
+t, the wave z and both ns values), one or two `diffSec`, 2 + (<= 2 waves | pending vortices) `string.format` strings
+that go into the L table that the snapshot builds anyway. The vortex walk goes down from `vortex_index` until a nil
+entry: <= one storm's vortices (8-15) plus one lookup. No table is allocated. On an error: one `string.gsub` (first time
+only) and two constant strings. The test mode (absent): one boolean test per frame. INFERRED cheap (same order as one o
+line); not measured.
+
+## Tests (kj3/kill6h_stub.lua, kj3/kill6h_test.sh)
+19 new checks (em_*) with 31 mutants (m_em_*). Each mutant fails its own check with an outcome (no ERROR):
+em_v4_every, em_absent_v3 (a -b1_snap run without -t2_pose writes T1 snapshots without e/ns), em_none_exact,
+em_surge_timeline / em_psi_timeline (every 10 Hz snapshot of a whole 222 s / 103 s event: exact e line; a snapshot at
+every whole second), em_surge_bounds / em_psi_bounds (every threshold at X-1, X-0.99, X, X+0.5, with the clock frozen),
+em_waves, em_vortex, em_ns, em_degraded_nil, em_degraded_field (missing _delta, a throwing vortexes accessor, a throwing
+effect:playing, missing inited_time: degraded, exactly one EERR, eerr = degraded snapshots, no Lua error), em_order (r e
+w ns k / r e v ns k), em_force_absent, em_force_lines (once, never twice, at most one read per second, unknown line,
+incomplete line, psi), em_force_throw, em_meta_once (ESTART 1, EPHASE 1..13 once each in order, EEND 1 with the last
+t), em_jump (+20 s at t = 100: EPHASE 6 and 7 at one time, after 5), em_backwards (start_surge again at t = 150: EEND
+150.x, ESTART 0.x, EPHASE 1).
+Fake fidelity: each fake field cites its script line in the stub ("kj3 Stage 2: fake surge / psi managers"). The fake's
+vortex positions and period cycle (4,3,6,5) are deterministic stand-ins for math.random.
+
+## Results (2026-11-26, desk)
+`bash kj3/kill6h_test.sh`: `== checks: 77 pass, 0 fail; mutants: 104 caught, 0 not caught or missing` / `RESULT: PASS`
+(58 + 19 checks, 73 + 31 mutants). The kept run dir is under kj3/runs/. Two earlier runs from this stage (one with 2
+layout failures, one before the cost fix) were removed by literal path to keep the disk use under the limit.
+
+## Runner diff (tools/t2_xray_kj2.sh -> tools/t2_xray_kj3.sh), bash -n only
+```diff
+--- t2_xray_kj2.sh	2026-11-26 16:04:09.179919672 -0500
++++ t2_xray_kj3.sh	2026-11-26 18:08:41.083344846 -0500
+@@ -32,6 +32,13 @@
+ # complete pose with state play that this runner read in this boot, counted from that pose's own utc_ms (header field 3).
+ # Rows go to stall.csv as for T2_STALL_AT; the two triggers share the "done" latch, so use one of them.
+ SPLAY=${T2_STALL_PLAY:-0}
++# kj3 Stage 2: T2_SURGE_PLAY / T2_PSI_PLAY = <s> after the first play pose's utc_ms (the T2_STALL_PLAY clock; default 99999 =
++# never): the runner appends `surge` / `psi` to $SHM/emtest.txt once (the reader then calls the manager's own start function)
++# and logs it in emforce.csv. emtest.txt is created EMPTY before the engine starts when either is set (the reader enables its
++# test mode only if the file is there at game start) and removed at start and at cleanup. T2_STALL_PLAY=99999 = no stop at all.
++SURGE_PLAY=${T2_SURGE_PLAY:-99999}; PSI_PLAY=${T2_PSI_PLAY:-99999}
++[ "$SPLAY" = 99999 ] && SPLAY=0
++EMPLAY=""; { [ "$SURGE_PLAY" != 99999 ] || [ "$PSI_PLAY" != 99999 ]; } && EMPLAY=1
+ PFLAG=""; [ "${T2_PAUSE:-0}" = 1 ] && PFLAG="-t2_pause"
+ # T2_ABSORB=<ms> (with T2_FREEZE=sigstop, engine perf/freeze-absorb): the world clock skips the frozen time.
+ # T2_ABSORB_SKIP=<k>: the first k freezes stay unarmed (pre-flight 3 control).
+@@ -51,10 +58,11 @@
+ # pre-flight E test mode (section 46): its control file may exist only when the pre-flight runner says so (T2_DMG_OK=1)
+ [ "${T2_DMG_OK:-0}" = 1 ] || { [ -e "$SHM/dmgtest.txt" ] && { rm -f "$SHM/dmgtest.txt"; log "REMOVED a stale test-mode control file (dmgtest.txt)"; }; }
+ rm -f "$SHM"/snap.txt "$SHM"/meta_t2.csv "$SHM"/hits_t2.csv; mkdir -p "$SHM"      # pose.txt is ITR2's: never touched here
+-SRC="$P/harness/zz_p1_puppet_kill5.script"   # kj2 (am138), was kill4; kw1: the kill channel script (pose v4) is installed beside the frozen one, under its own name
++rm -f "$SHM/emtest.txt"; if [ -n "$EMPLAY" ]; then : > "$SHM/emtest.txt"; echo "utc_ms,wall_utc,kind,ms_after_play0" > "$O/emforce.csv"; log "emtest.txt created (surge at ${SURGE_PLAY} s, psi at ${PSI_PLAY} s after the first play pose; 99999 = never)"; fi
++SRC="$P/harness/zz_p1_puppet_kill6.script"   # kj3 (kill6 + Stage 2 emission lines), was kill5; kj2 (am138), was kill4; kw1: the kill channel script (pose v4) is installed beside the frozen one, under its own name
+ cp "$SRC" "$RUN/gamedata/scripts/zz_p1_puppet.script" && cmp -s "$SRC" "$RUN/gamedata/scripts/zz_p1_puppet.script" || { log "REFUSED: could not install $SRC"; exit 2; }
+ # a runner that is cancelled must not leave a stopped engine behind: CONT whatever this runner stopped
+-cleanup() { [ -n "${FZP:-}" ] && kill -CONT "$FZP" 2>/dev/null; [ -n "${STP:-}" ] && kill -CONT "$STP" 2>/dev/null; rm -f "$RUN/gamedata/scripts/zz_p1_puppet.script"; }
++cleanup() { [ -n "${FZP:-}" ] && kill -CONT "$FZP" 2>/dev/null; [ -n "${STP:-}" ] && kill -CONT "$STP" 2>/dev/null; rm -f "$RUN/gamedata/scripts/zz_p1_puppet.script"; rm -f "$SHM/emtest.txt"; }
+ trap cleanup EXIT; trap 'exit 143' TERM INT
+ # first line of pose.txt, but only of a COMPLETE record (first line seq,<n>,... and last line end,<n>); else empty
+ posehdr() { awk '{ sub(/\r$/, "") } NR == 1 { h = $0; split($0, a, ","); if (a[1] != "seq") exit } NF { l = $0 } END { if (h != "" && l == "end," a[2]) print h }' "$SHM/pose.txt" 2>/dev/null; }
+@@ -114,8 +122,14 @@
+     # LOST: wall time since a new complete pose last appeared. Counted only after one appeared in this boot.
+     if [ -n "$pl" ] && [ "$pl" != "$ppl" ]; then ppl=$pl; pchg=$(utc); pseen=1
+       [ -n "$lost" ] && { log "lost end: new pose (state ${pst:-?}) after $(( pchg - lostu )) ms"; lost=""; }; fi
+-    if [ "$SPLAY" -gt 0 ] && [ -n "$pseen" ] && [ -z "${play0:-}" ] && [ "${pst:-}" = play ]; then
+-      IFS=, read -r _ _ play0 _ <<<"$pl"; case "$play0" in ''|*[!0-9]*) play0="" ;; *) log "first play pose read: $pl (stop planned ${SPLAY} s after its utc_ms)" ;; esac; fi
++    if { [ "$SPLAY" -gt 0 ] || [ -n "$EMPLAY" ]; } && [ -n "$pseen" ] && [ -z "${play0:-}" ] && [ "${pst:-}" = play ]; then
++      IFS=, read -r _ _ play0 _ <<<"$pl"; case "$play0" in ''|*[!0-9]*) play0="" ;; *) log "first play pose read: $pl (stop planned ${SPLAY} s after its utc_ms; 0 = none)" ;; esac; fi
++    if [ -n "$EMPLAY" ] && [ -n "${play0:-}" ]; then el=$(( $(utc) - play0 ))   # kj3: forced starts, once each per run (every boot)
++      if [ "$SURGE_PLAY" != 99999 ] && [ -z "${em_s_done:-}" ] && [ $el -ge $(( SURGE_PLAY * 1000 )) ]; then em_s_done=1
++        echo surge >> "$SHM/emtest.txt"; echo "$(utc),$(date -u '+%FT%T.%3NZ'),surge,$el" >> "$O/emforce.csv"; log "EMFORCE surge appended to emtest.txt, $el ms after the first play pose"; fi
++      if [ "$PSI_PLAY" != 99999 ] && [ -z "${em_p_done:-}" ] && [ $el -ge $(( PSI_PLAY * 1000 )) ]; then em_p_done=1
++        echo psi >> "$SHM/emtest.txt"; echo "$(utc),$(date -u '+%FT%T.%3NZ'),psi,$el" >> "$O/emforce.csv"; log "EMFORCE psi appended to emtest.txt, $el ms after the first play pose"; fi
++    fi
+     if [ $k = 0 ] && [ "$SPLAY" -gt 0 ] && [ -z "$done_stall" ] && [ -n "${play0:-}" ] && [ $(( $(utc) - play0 )) -ge $(( SPLAY * 1000 )) ]; then
+       EP=$(engine); [ -n "$EP" ] || { why="no engine pid found (stall)"; break; }; log "STALL start (play clock): $(( $(utc) - play0 )) ms after the first play pose; seq $s track ${tt}s engine $EP"
+       echo "utc_ms,event,seq,track_s" > "$O/stall.csv"; echo "$(utc),STOP,$s,$tt" >> "$O/stall.csv"
+```

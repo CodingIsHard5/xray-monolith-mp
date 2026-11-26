@@ -1,3 +1,7 @@
+-- kj3 Stage 2 (emission lines, 2026-11-26; kj3/NOTES.md "Stage 2"): fake surge / psi managers, game clock and time factor
+-- (section "kj3 Stage 2: fake ..."), 19 new checks em_* with 31 mutants m_em_*, mode `examples` (writes the fixtures of
+-- kj3/emission-line-examples.txt), and two kj3 checks updated for the new layout and T2SUM key: snapshot_lines and
+-- r_line_presence (e and ns now sit between r and k), v3_unchanged and ktab_savefail (eerr=0 is the new last T2SUM key).
 -- kj3 copy (kill6, review fixes 1-3 after kj2; see kj3/NOTES.md): the kj2 stub pointed at harness/zz_p1_puppet_kill6.script,
 -- with 14 new checks and 16 new mutants (section "kj3 checks"), and three kj2 mutants re-anchored on kill6's changed lines
 -- (m_conf_never, m_hold_from_call, m_conf_on_stale: same mutations). Everything else as kj2.
@@ -116,6 +120,38 @@ local MUTANTS = {
 	{ "m_cross_ks", "cross_ident", 'r.ks = ks ~= "-" and ks or nil;', '' },
 	{ "m_cross_kx", "cross_kx", 'r.kx = kx == "1" or nil', 'r.kx = nil' },
 	{ "m_old_format", "ktab_old_format", '([01]),([01])([^\\n]*)")', '([01]),([01])(,[^\\n]+)")' },
+	-- kj3 Stage 2 (emission lines; kj3/NOTES.md "Stage 2")
+	{ "m_em_rk", "em_v4_every", 'if t2 then em_snap(now, L) end', 'if t2 and k_r then em_snap(now, L) end' },
+	{ "m_em_v3", "em_absent_v3", 'if t2 then em_snap(now, L) end', 'em_snap(now, L)' },
+	{ "m_em_fmt", "em_none_exact", 'string.format("e,%s,%.2f,%d,%s", kind, t, ph, tostring(tf))', 'string.format("e,%s,%.1f,%d,%s", kind, t, ph, tostring(tf))' },
+	{ "m_em_tf", "em_none_exact", 'kind, t, ph, tostring(tf))', 'kind, t, ph, "6")' },
+	{ "m_em_div", "em_surge_timeline", 't = gt:diffSec(M.inited_time) / tf;', 't = gt:diffSec(M.inited_time) / 6;' },
+	{ "m_em_sph_t", "em_surge_timeline", '200, 212, 220', '200, 210, 220' },
+	{ "m_em_ceil", "em_surge_bounds", 'PSI_PH, math.ceil(t)) end', 'PSI_PH, math.floor(t)) end' },
+	{ "m_em_sph", "em_surge_bounds", '108, 120, 156', '108, 121, 156' },
+	{ "m_em_pph", "em_psi_bounds", '{ 0, 10, 12, 30, 78, 103 }', '{ 0, 10, 12, 30, 77, 103 }' },
+	{ "m_em_pph_t", "em_psi_timeline", '{ 0, 10, 12, 30, 78, 103 }', '{ 0, 10, 12, 31, 78, 103 }' },
+	{ "m_em_wz", "em_waves", '(dgs - wv.inited_time) * 3)', '(dgs - wv.inited_time) * 2)' },
+	{ "m_em_wplay", "em_waves", 'if wv and wv.effect:playing() then', 'if wv then' },
+	{ "m_em_vhit", "em_vortex", 'if v.hit == false then local p', 'if true then local p' },
+	{ "m_em_vs", "em_vortex", 'v.start_time + 20 - t)', 'v.start_time + 18 - t)' },
+	{ "m_em_vn", "em_vortex", '"v,%d,%.3f,%.3f,%.3f,%.2f", i,', '"v,%d,%.3f,%.3f,%.3f,%.2f", #L,' },
+	{ "m_em_nsrun", "em_ns", 'if M.started then return -1 end', '' },
+	{ "m_em_nsfloor", "em_ns", 'local v = math.floor(M._delta', 'local v = math.ceil(M._delta' },
+	{ "m_em_nopcall", "em_degraded_nil", 'local ok, err = pcall(em_body, L, tf, now)', 'local ok, err = true, em_body(L, tf, now)' },
+	{ "m_em_logmany", "em_degraded_nil", 'if not em_logged then em_logged = true;', 'if true then em_logged = true;' },
+	{ "m_em_nocount", "em_degraded_field", 'eerr = eerr + 1', '' },
+	{ "m_em_notrunc", "em_degraded_field", 'for i = #L, n0 + 1, -1 do L[i] = nil end', '' },
+	{ "m_em_order", "em_order", { { 'if t2 then em_snap(now, L) end   -- Stage 2: e, w, v, ns (after r, before k)', '' }, { 'L[#L + 1] = string.format("end,%d", seq)', 'if t2 then em_snap(now, L) end; L[#L + 1] = string.format("end,%d", seq)' } } },
+	{ "m_em_force_always", "em_force_absent", 'if em_test then em_step(now) end', 'em_step(now)' },
+	{ "m_em_force_again", "em_force_lines", 'if i > em_done then em_done = i', 'if true then em_done = i' },
+	{ "m_em_force_rate", "em_force_lines", 'if now - em_last < 1000 then return end; em_last = now', 'em_last = now' },
+	{ "m_em_force_torn", "em_force_lines", '"([^\\n]*)\\n") do l = string.gsub', '"([^\\n]+)") do l = string.gsub' },
+	{ "m_em_force_nopcall", "em_force_throw", 'local ok, st = pcall(em_start, l)', 'local ok, st = true, em_start(l)' },
+	{ "m_em_phase_rep", "em_meta_once", 'em_ph, em_t = ph, t', 'em_ph, em_t = 0, t' },
+	{ "m_em_eend_t", "em_meta_once", 'm(string.format("EEND,%d,%s,%.2f", now, em_kind, em_t))', 'm(string.format("EEND,%d,%s,%.2f", now, em_kind, 0))' },
+	{ "m_em_jump", "em_jump", 'for p = em_ph + 1, ph do', 'for p = ph, ph do' },
+	{ "m_em_restart", "em_backwards", 'if kind ~= em_kind or (M and t < em_t - 0.5) then', 'if kind ~= em_kind then' },
 }
 
 if MODE == "mutants" then for _, mu in ipairs(MUTANTS) do print(mu[1] .. " " .. mu[2]) end; os.exit(0) end
@@ -152,12 +188,14 @@ local function V(x, y, z) local v = { x = x or 0, y = y or 0, z = z or 0 }
 	function v:normalize() local l = math.sqrt(self.x ^ 2 + self.y ^ 2 + self.z ^ 2); if l > 1e-9 then self.x, self.y, self.z = self.x / l, self.y / l, self.z / l end; return self end
 	return v end
 local KTAB_WFAIL = false   -- ktab_savefail: the ktab.txt handle opens, but every write fails (as a full disk)
-io.open = function(p, m) p = p:gsub("^Z:\\dev\\shm\\itrz_b1\\", SHM .. "/")
+EM_OPENS = 0   -- kj3: opens of emtest.txt
+io.open = function(p, m) p = p:gsub("^Z:\\dev\\shm\\itrz_b1\\", SHM .. "/"); if p == "p1_track.csv" then p = SHM .. "/p1_track.csv" end
+	if p:find("/emtest%.txt$") then EM_OPENS = EM_OPENS + 1 end
 	if KTAB_WFAIL and p:find("/ktab%.txt$") and m == "wb" then return { write = function() return nil, "disk full" end, close = function() return true end } end
 	return real_open(p, m) end
 function time_global() return NOW end
 os.time = function() return 1795000000 + math.floor(NOW / 1000) end   -- wall clock follows the fake time: logs are reproducible
-function command_line() return "-p1 -t2_pose -t2_run " .. RUN .. " -t2_lost 5000 -t2_lostx 120000 " .. CL_EXTRA end
+function command_line() return (CL_BASE or ("-p1 -t2_pose -t2_run " .. RUN .. " -t2_lost 5000 -t2_lostx 120000 ")) .. CL_EXTRA end   -- kj3: CL_BASE = a non-t2 run
 function printf() end
 function vector() return V() end
 function device() return { pause = function() end, f_time_delta = 0.05, frame = 0 } end
@@ -176,6 +214,60 @@ local lastprobe = 0
 level = { name = function() return LEVEL end,
 	vertex_id = function(v) lastprobe = v.y; return 1 end,
 	vertex_position = function() return V(0, lastprobe - 1.0, 0) end }
+
+-- kj3 Stage 2: fake surge / psi managers, game clock and time factor. Only the fields the reader uses, set as the real
+-- scripts set them (SM = run/gamedata/scripts/surge_manager.script, PSM = psi_storm_manager.script, PVF =
+-- pulse_vortex_consistency_fix.script). The 1 s script update (SM:51-57 main_loop `_tmr`) is modelled by em_sim below.
+-- Game time: integer game ms, advanced by frame ms * TF (alife_time_manager_inline.h:25); CTime:diffSec in seconds.
+GAME_MS, TF, GS_FROZEN, SIM_OFF = 0, 6, false, false
+local function CT(ms) local c = { ms = ms }
+	function c:diffSec(o) if type(o) ~= "table" or not o.ms then error("diffSec: bad CTime", 0) end; return (self.ms - o.ms) / 1000 end
+	return c end
+game.get_game_time = function() return CT(GAME_MS) end
+level.get_time_factor = function() return TF end
+local function fx() local e = { on = true }; function e:playing() return self.on end; return e end
+local VPER = { 4, 3, 6, 5 }   -- PVF:137-138: vortex period 3..6 (math.random); deterministic cycle here
+local SMF, PMF, EMC, EM_SIM_NEXT, VPI
+local function sm_start()   -- SM:191-249 start(true): inited_time = now, started, waves/stages emptied, factor 10
+	SMF.inited_time = CT(GAME_MS); SMF.started = true; SMF.finished = false; SMF.blowout_waves = {}; SMF.stages = {}; TF = 10 end
+local function pm_start()   -- PSM:72-121 start(true)
+	PMF.inited_time = CT(GAME_MS); PMF.started = true; PMF.finished = false; PMF.stages = {}; PMF.vortexes = {}; PMF.next_vortex_at = nil; TF = 10 end
+local function new_managers()
+	EMC = { surge = 0, psi = 0 }; EM_SIM_NEXT = 0; VPI = 0
+	-- SM:160-167 initialize; SM:171 _delta = random(12 h, 24 h) (emission_frequency 24)
+	SMF = { started = false, finished = true, inited_time = CT(0), last_surge_time = CT(0), _delta = 50000, surge_time = 222, blowout_waves = {}, stages = {} }
+	-- PSM:41-46, PSM:53 (psi_storm_frequency 48), PSM:56 vortex_index = 0
+	PMF = { started = false, finished = true, inited_time = CT(0), last_psi_storm_time = CT(0), _delta = 90000, psi_storm_duration = 103, vortexes = {}, vortex_index = 0, stages = {} }
+	surge_manager = { SurgeManager = SMF, start_surge = function() EMC.surge = EMC.surge + 1; if EM_START_ERR then error(EM_START_ERR, 0) end; sm_start() end }   -- SM:1673-1675
+	psi_storm_manager = { PsiStormManager = PMF, start_psi_storm = function() EMC.psi = EMC.psi + 1; if EM_START_ERR then error(EM_START_ERR, 0) end; pm_start() end }   -- PSM:713-715
+end
+local function em_sim()   -- one 1 s script update (SM:571-1100 / PSM:276-393), only the parts behind the read fields
+	local ap = db.actor:position()
+	if SMF.started then
+		local d = math.ceil((GAME_MS - SMF.inited_time.ms) / 1000 / TF)   -- SM:676
+		if d >= SMF.surge_time then   -- SM:677 -> end_surge: SM:337 last_surge_time, SM:259 new _delta, SM:388 factor back
+			SMF.started = false; SMF.finished = true; SMF.last_surge_time = CT(GAME_MS); SMF._delta = 60000; TF = 6
+			for _, wv in pairs(SMF.blowout_waves) do wv.effect.on = false end; return end
+		local dgs = math.ceil((GAME_MS - SMF.inited_time.ms) / 1000 / 2)   -- SM:688
+		for _, n in ipairs({ 1, 2 }) do local key = n == 1 and "1stwave" or "2ndwave"
+			if d >= (n == 1 and 120 or 168) and SMF.stages[key] == nil then   -- SM:870-873 / SM:894-897 -> start_wave SM:490-498
+				SMF.blowout_waves[n] = { effect = fx(), inited_time = dgs, inited_pos = V(ap.x, ap.y / 2, ap.z + 250) }; SMF.stages[key] = true end end
+		for _, wv in pairs(SMF.blowout_waves) do if wv.effect.on and wv.inited_pos.z - (dgs - wv.inited_time) * 3 < ap.z - 250 then wv.effect.on = false end end   -- SM:1065,1072-1073
+	end
+	if PMF.started then
+		if SMF.started then PMF.started = false; PMF.finished = true; PMF.last_psi_storm_time = CT(GAME_MS); return end   -- PSM:313-314 skip
+		local d = math.ceil((GAME_MS - PMF.inited_time.ms) / 1000 / TF)   -- PSM:317
+		if d >= PMF.psi_storm_duration then PMF.started = false; PMF.finished = true; PMF.last_psi_storm_time = CT(GAME_MS); PMF._delta = 100000; TF = 6; return end   -- PSM:318-319
+		if d >= 30 and d <= 77 then   -- PSM:357-365
+			if PMF.next_vortex_at == nil then VPI = VPI % 4 + 1; PMF.next_vortex_at = d + VPER[VPI] end
+			if PMF.next_vortex_at == d then   -- PSM:400-412 vortex(): index + 1, particle at actor + offset, y + 20
+				PMF.vortex_index = PMF.vortex_index + 1; local i = PMF.vortex_index
+				PMF.vortexes[i] = { particle_pos = V(ap.x + 10 * i, ap.y + 20, ap.z - 7 * i), sound_pos = V(ap.x + 10 * i, ap.y + 60, ap.z - 7 * i), start_time = d, hit = false }
+				VPI = VPI % 4 + 1; PMF.next_vortex_at = d + VPER[VPI] end
+		end
+		for _, v in pairs(PMF.vortexes) do if d - v.start_time >= 20 and v.hit == false then v.hit = true end end   -- PSM:367-383
+	end
+end
 
 -- creatures: OBJ[id] = { sec, kind (m|s|x), lvl, online, health, dtime (death time), killer, hits = {}, kill_err, offkill }
 local function add(id, sec, kind, o) o = o or {}
@@ -250,6 +342,8 @@ local function world_kill(id, kid) local R = OBJ[id]; R.dtime = NOW; R.killer = 
 	DEATHQ[#DEATHQ + 1] = { id = id, who = kid and { id = function() return kid end } or nil } end
 local function tick(ms)
 	NOW = NOW + ms
+	if not GS_FROZEN then GAME_MS = GAME_MS + ms * TF end   -- kj3
+	if not SIM_OFF and NOW >= EM_SIM_NEXT then EM_SIM_NEXT = NOW + 1000; em_sim() end   -- kj3: the scripts' 1 s update, before the bridge's (callback order not modelled)
 	for id, R in pairs(OBJ) do if R.kill_at and NOW >= R.kill_at then   -- kj2: a delayed kill takes effect at the frame start
 		R.kill_at = nil; R.health = -1; DEATHQ[#DEATHQ + 1] = { id = id, who = R.kill_who } end end
 	local q = DEATHQ; DEATHQ = {}
@@ -268,6 +362,7 @@ end
 local function new_world(dir, script, run)
 	SHM, SCRIPT, RUN, LEVEL, OBJ, CHANGED, NOW, DEATHQ, KTAB_WFAIL = dir, script, run or "1", "l01_escape", {}, nil, 0, {}, false
 	KILL_LAG, LAST_SQ = 0, nil
+	GAME_MS, TF, GS_FROZEN, SIM_OFF, CL_BASE, EM_START_ERR = 0, 6, false, false, nil, nil; new_managers()   -- kj3
 	new_actor()
 end
 local function ticks(ms)   -- a level change inside: on_before_level_changing, then the new level boots
@@ -358,7 +453,7 @@ check("v3_unchanged", function(ARGS)
 		local m3 = v3_sequence(ARGS.lost3, DIRS.a .. (v2 and "/v2" or "/v3"), v2)
 		local m4 = v3_sequence(SCRIPT_UNDER_TEST, DIRS.b .. (v2 and "/v2" or "/v3"), v2)
 		expect(#m3 > 0, "lost3 wrote no log")
-		local stripped = string.gsub(m4, "(T2SUM,[^\n]-),khits=%d+,kdead_online=%d+,kdead_offline=%d+,kowed=%d+,kstale=%d+,kback=%d+,krefused=%d+,kclamped=%d+,kver=0,kdead_fail=0,ktabfail=0", "%1")
+		local stripped = string.gsub(m4, "(T2SUM,[^\n]-),khits=%d+,kdead_online=%d+,kdead_offline=%d+,kowed=%d+,kstale=%d+,kback=%d+,krefused=%d+,kclamped=%d+,kver=0,kdead_fail=0,ktabfail=0,eerr=0", "%1")   -- kj3: eerr is the new last key (must be 0 here)
 		expect(stripped == m3, "meta differs from lost3 (" .. (v2 and "v2" or "v3") .. " sequence)")
 		expect(string.find(m3, v2 and "RESET," or "EPOCH,", 1, true) and string.find(m3, "LOST,", 1, true), "sequence did not reach its LOST/EPOCH/RESET")
 		if not v2 then expect(string.find(m3, "CROSS_RESUME,", 1, true), "sequence did not cross") end
@@ -629,7 +724,7 @@ check("snapshot_lines", function()
 	run(v4({ "k,101,dog_weak,0.250,0" }), 300)
 	local s = snap()
 	expect(string.match(s, "^seq,%d+,%d+,[^,]+,l01_escape,1,4\n"), "snapshot header 7th field not 4")
-	expect(string.find(s, "\no,[^\n]*\nr,[^\n]*\nk,101,0%.250\nend,%d+\n$"), "k line not after the o and r lines and before end")
+	expect(string.find(s, "\no,[^\n]*\nr,[^\n]*\ne,none,0%.00,0,6\nns,[^\n]*\nk,101,0%.250\nend,%d+\n$"), "k line not after the o and r lines and before end")
 	expect(not string.find(s, "\nk,102", 1, true), "line for an id never hit")
 	run(v4({ "k,101,dog_weak,0.250,1" }), 50)
 	run(v4({}), 9000)
@@ -676,7 +771,7 @@ check("r_line_presence", function()
 	run(v4({}), 200)                                            -- v4 pose without k lines counts
 	expect(rline() == SESS .. "," .. SEQ, "r line after a v4 pose without k lines: " .. tostring(rline()))
 	run(v4({ "k,101,dog_weak,0.250,0" }), 200)
-	expect(string.find(snap(), "\no,[^\n]*\nr," .. SESS .. "," .. SEQ .. "\nk,101,0%.250\nend,%d+\n$"), "r line not between the o lines and the k lines")
+	expect(string.find(snap(), "\no,[^\n]*\nr," .. SESS .. "," .. SEQ .. "\ne,none,0%.00,0,6\nns,[^\n]*\nk,101,0%.250\nend,%d+\n$"), "r line not between the o lines and the k lines")
 end)
 
 check("r_advances", function()
@@ -773,7 +868,7 @@ check("ktab_savefail", function()
 		local s = meta()
 		expect(count(s, "KTAB,savefail,1") == 1, how .. ": KTAB,savefail not logged once")
 		local t; for x in string.gmatch(s, "T2SUM,[^\n]*") do t = t or x end   -- the first T2SUM: the Lua state that saved
-		expect(t and string.find(t, ",ktabfail=1$"), how .. ": ktabfail not 1 at the end of the first T2SUM: " .. tostring(t))
+		expect(t and string.find(t, ",ktabfail=1,eerr=0$"), how .. ": ktabfail not 1 at the end of the first T2SUM: " .. tostring(t))
 	end
 end)
 
@@ -1144,6 +1239,241 @@ if MODE == "fixture" then   -- STUB-MADE fixtures for the kw1 checker: the real 
 		if c == "finish" then os.exit(0) end
 	end
 	print("ERROR fixture: stdin ended without finish"); os.exit(1)
+end
+
+------------------------------------------------------------------------------------------------ kj3 Stage 2 checks (emission lines)
+-- independent copies of the phase table of kj3/emission-phases.md (phase i when ceil(t) >= X[i])
+local SPH = { 0, 30, 47, 50, 80, 108, 120, 156, 168, 200, 212, 220, 222 }
+local PPH = { 0, 10, 12, 30, 78, 103 }
+local function phx(tab, t) local d, p = math.ceil(t), 0; for i, x in ipairs(tab) do if d >= x then p = i end end; return p end
+local function erec(ms)   -- every new snapshot meanwhile, with the game clock at that moment
+	local out = {}
+	for _ = 1, math.floor(ms / 50) do ticks(50); local s = snap(); local q = sseq(s)
+		if q and q ~= LAST_SQ then LAST_SQ = q; local vh = {}; for n, v in pairs(PMF.vortexes) do vh[n] = v.hit end
+			out[#out + 1] = { s = s, gs = GAME_MS, now = NOW, vh = vh } end end
+	return out end
+local function lines(s, pre) local r = {}; for l in string.gmatch(s, "[^\n]+") do if string.sub(l, 1, #pre) == pre then r[#r + 1] = l end end; return r end
+local function eline(s) return lines(s, "e,")[1] end
+local function et(s) return tonumber(string.match(eline(s) or "", "^e,[^,]+,([^,]+),")) end
+local function one_snap() local S = erec(100); return S[#S] and S[#S].s or "" end
+local function append(l) local f = real_open(SHM .. "/emtest.txt", "ab"); f:write(l); f:close() end
+local function safe(f, ...) local ok, e = pcall(f, ...); expect(ok, "Lua error in the bridge: " .. tostring(e)); return ok end
+local function timeline(kind, tab, secs)   -- a whole event at the scripts' own pace; every snapshot judged
+	boot(); erec(1000)
+	if kind == "surge" then surge_manager.start_surge() else psi_storm_manager.start_psi_storm() end
+	local g0 = GAME_MS; local S = erec((secs + 5) * 1000)
+	local seen_end, bad, n = false, 0, 0
+	local M = kind == "surge" and surge_manager.SurgeManager or psi_storm_manager.PsiStormManager
+	for _, x in ipairs(S) do local e = eline(x.s)
+		if string.find(e, "^e,none,") then seen_end = true; if e ~= "e,none,0.00,0,6" then bad = bad + 1 end
+		else n = n + 1; local t = (x.gs - g0) / 1000 / 10
+			local want = string.format("e,%s,%.2f,%d,10", kind, t, phx(tab, t))
+			if e ~= want then bad = bad + 1; if bad == 1 then expect(false, "snapshot e line " .. e .. " want " .. want) end end
+			if seen_end then expect(false, "event line after the end") end end end
+	expect(seen_end, kind .. " never ended")
+	expect(n >= secs * 10 - 5, kind .. ": only " .. n .. " event snapshots")
+	expect(bad == 0, kind .. ": " .. bad .. " wrong e lines")
+	-- one-second steps: at every whole second 0..secs-1 one snapshot exists with that t
+	local have = {}; for _, x in ipairs(S) do local t = et(x.s); if t then have[string.format("%.2f", t)] = true end end
+	for k = 0, secs - 1 do if not have[string.format("%.2f", k)] then expect(false, kind .. ": no snapshot at t = " .. k); break end end
+	return S
+end
+check("em_v4_every", function()
+	boot(); local S = rec({}, 1000)   -- no kill: no r line (the e lines do not depend on it)
+	surge_manager.start_surge(); for _, x in ipairs(rec(nil, 3000)) do S[#S + 1] = x end
+	expect(#S >= 30, "too few snapshots")
+	for _, s in ipairs(S) do
+		if #lines(s, "e,") ~= 1 or #lines(s, "ns,") ~= 1 then expect(false, "snapshot without exactly one e and one ns line: " .. s); break end end
+end)
+check("em_absent_v3", function()   -- a T1 snapshot (-b1_snap, no -t2_pose; header without the version field) gets no e line
+	CL_BASE = "-p1 -b1_snap "
+	local f = real_open(SHM .. "/p1_track.csv", "wb"); f:write("t,x,y,z,nd\n0,0,0,0,1\n1000,0,0,0,1\n"); f:close()
+	boot(); surge_manager.start_surge(); local S = rec(nil, 2000)
+	expect(#S >= 10, "no T1 snapshots (" .. #S .. ")")
+	for _, s in ipairs(S) do
+		expect(string.find(s, "^seq,%d+,%d+,[%-%d%.]+\n"), "not a T1 header: " .. string.sub(s, 1, 40))
+		if string.find(s, "\ne,") or string.find(s, "\nns,") then expect(false, "e/ns line in a T1 snapshot"); break end end
+end)
+check("em_none_exact", function()
+	boot(); local S = erec(2000)
+	for _, x in ipairs(S) do local e = eline(x.s)
+		if e ~= "e,none,0.00,0,6" then expect(false, "outside an event: " .. tostring(e)); break end end
+	TF = 1; local s = one_snap(); expect(eline(s) == "e,none,0.00,0,1", "factor 1 not printed: " .. tostring(eline(s)))
+end)
+check("em_surge_timeline", function() local S = timeline("surge", SPH, 222)
+	local last; for _, x in ipairs(S) do if string.find(x.s, "\ne,surge,") then last = x.s end end
+	expect(et(last or "") and et(last) > 221 and phx(SPH, et(last)) == 13, "last surge snapshot not in phase 13 past 221 s")
+end)
+check("em_psi_timeline", function() timeline("psi", PPH, 103) end)
+local function bounds(kind, tab)
+	boot(); SIM_OFF, GS_FROZEN, GAME_MS, TF = true, true, 100000000, 10
+	local M = kind == "surge" and surge_manager.SurgeManager or psi_storm_manager.PsiStormManager
+	M.started = true
+	for i, x in ipairs(tab) do
+		for _, c in ipairs({ { x - 1, i - 1 }, { x - 0.99, i }, { x, i }, { x + 0.5, (tab[i + 1] and tab[i + 1] <= x + 1) and i + 1 or i } }) do
+			M.inited_time = CT(GAME_MS - math.floor(c[1] * 10000 + 0.5))
+			local want = string.format("e,%s,%.2f,%d,10", kind, c[1], c[2]); local e = eline(one_snap())
+			expect(e == want, "threshold " .. x .. ": " .. tostring(e) .. " want " .. want) end end
+end
+check("em_surge_bounds", function() bounds("surge", SPH) end)
+check("em_psi_bounds", function() bounds("psi", PPH) end)
+check("em_waves", function()
+	boot(); surge_manager.start_surge(); local g0 = GAME_MS; local S = erec(225000)
+	local first, last, both, bad = {}, {}, 0, 0
+	for _, x in ipairs(S) do local W = lines(x.s, "w,"); local t = et(x.s)
+		if #W == 2 then both = both + 1 end
+		for _, l in ipairs(W) do local n, z = string.match(l, "^w,(%d),([%-%d%.]+)$"); n = tonumber(n)
+			local wv = surge_manager.SurgeManager.blowout_waves[n]
+			local want = wv and string.format("w,%d,%.3f", n, wv.inited_pos.z - (math.ceil((x.gs - g0) / 1000 / 2) - wv.inited_time) * 3)
+			if l ~= want then bad = bad + 1; if bad == 1 then expect(false, "wave line " .. l .. " want " .. tostring(want)) end end
+			first[n] = first[n] or t; last[n] = t end end
+	expect(first[1] and first[1] > 119 and first[1] <= 121, "wave 1 first at " .. tostring(first[1]))
+	expect(first[2] and first[2] > 167 and first[2] <= 169, "wave 2 first at " .. tostring(first[2]))
+	expect(last[1] and last[1] > 150 and last[1] < 156, "wave 1 last at " .. tostring(last[1]))
+	expect(last[2] and last[2] > 198 and last[2] < 204, "wave 2 last at " .. tostring(last[2]))
+	expect(both == 0, "both waves listed together " .. both .. " times (they do not overlap)")
+	-- a wave is listed exactly while its effect plays: count the snapshots without the line while it plays
+	expect(bad == 0, bad .. " wrong wave lines")
+end)
+check("em_vortex", function()
+	boot(); psi_storm_manager.start_psi_storm(); local S = erec(105000)
+	local pos, firstsnap, lastS, gone, bad, maxp = {}, {}, {}, {}, 0, 0
+	for k, x in ipairs(S) do local Vl = lines(x.s, "v,"); local t = et(x.s); if #Vl > maxp then maxp = #Vl end
+		local newn = 0
+		for _, l in ipairs(Vl) do local n, xyz, sv = string.match(l, "^v,(%d+),([^,]+,[^,]+,[^,]+),([%-%d%.]+)$"); n = tonumber(n)
+			local v = psi_storm_manager.PsiStormManager.vortexes[n]
+			if not v then bad = bad + 1 else
+				local want = string.format("%.2f", v.start_time + 20 - t)
+				if sv ~= want then bad = bad + 1; if bad == 1 then expect(false, "vortex " .. n .. " s " .. sv .. " want " .. want) end end
+				if pos[n] and pos[n] ~= xyz then expect(false, "vortex " .. n .. " moved") end; pos[n] = xyz
+				if gone[n] then expect(false, "vortex " .. n .. " listed again") end
+				if lastS[n] and tonumber(sv) > lastS[n] then expect(false, "vortex " .. n .. " s rose") end; lastS[n] = tonumber(sv)
+				if x.vh[n] ~= false then expect(false, "vortex " .. n .. " listed after striking") end
+				if not firstsnap[n] then firstsnap[n] = k; newn = newn + 1 end end end
+		if newn > 1 then expect(false, newn .. " vortices appeared in one snapshot") end
+		for n in pairs(pos) do local hit = true; for _, l in ipairs(Vl) do if string.match(l, "^v,(%d+),") == tostring(n) then hit = false end end; if hit then gone[n] = true end end
+	end
+	local N = psi_storm_manager.PsiStormManager.vortex_index; local listed = 0; for _ in pairs(pos) do listed = listed + 1 end
+	expect(N >= 8 and listed == N, "vortices created " .. N .. ", listed " .. listed)
+	expect(maxp >= 3, "never 3 pending at once (" .. maxp .. ")")
+	expect(bad == 0, bad .. " wrong vortex lines")
+end)
+check("em_ns", function()
+	boot(); local S = erec(1500)
+	for _, x in ipairs(S) do local gs = x.gs / 1000
+		local want = string.format("ns,%d,%d", math.max(0, math.floor(50000 - gs)), math.max(0, math.floor(90000 - gs)))
+		local l = lines(x.s, "ns,")[1]; if l ~= want then expect(false, "idle " .. tostring(l) .. " want " .. want); break end end
+	surge_manager.start_surge(); local x = erec(200); x = x[#x]
+	expect(lines(x.s, "ns,")[1] == string.format("ns,-1,%d", math.floor(90000 - x.gs / 1000)), "surge running: " .. tostring(lines(x.s, "ns,")[1]))
+	SMF.started = false; psi_storm_manager.start_psi_storm(); x = erec(200); x = x[#x]
+	expect(lines(x.s, "ns,")[1] == string.format("ns,%d,-1", math.max(0, math.floor(50000 - x.gs / 1000))), "psi running: " .. tostring(lines(x.s, "ns,")[1]))
+	PMF.started = false; SMF._delta = 1; x = erec(200); x = x[#x]
+	expect(string.find(lines(x.s, "ns,")[1] or "", "^ns,0,"), "a start overdue is not 0: " .. tostring(lines(x.s, "ns,")[1]))
+end)
+local function degraded_ok(S, what)
+	expect(#S > 0, what .. ": no snapshot")
+	for _, x in ipairs(S) do local s = x.s or x
+		if #lines(s, "e,") ~= 1 or eline(s) ~= "e,none,0.00,0," .. tostring(TF) or #lines(s, "ns,") ~= 1 or lines(s, "ns,")[1] ~= "ns,-1,-1"
+			or #lines(s, "w,") > 0 or #lines(s, "v,") > 0 then expect(false, what .. ": not degraded: " .. s); return end end end
+check("em_degraded_nil", function()
+	boot(); erec(200); local nd = 0
+	safe(function()
+		local keep = surge_manager; surge_manager = nil; local S = erec(1000); degraded_ok(S, "surge_manager nil"); nd = nd + #S; surge_manager = keep
+		keep = psi_storm_manager.PsiStormManager; psi_storm_manager.PsiStormManager = nil; S = erec(1000); degraded_ok(S, "PsiStormManager nil"); nd = nd + #S
+		psi_storm_manager.PsiStormManager = keep; S = erec(500); expect(eline(S[#S].s) == "e,none,0.00,0,6", "not back after the manager came back")
+	end)
+	finish(); expect(count(meta(), "\nEERR,") == 1, "EERR lines: " .. count(meta(), "\nEERR,")); expect(sum("eerr") == nd, "eerr " .. tostring(sum("eerr")) .. " want " .. nd)
+end)
+check("em_degraded_field", function()
+	boot(); erec(200); local nd = 0
+	safe(function()
+		SMF._delta = nil; local S = erec(1000); degraded_ok(S, "_delta missing"); nd = nd + #S; SMF._delta = 50000
+		pm_start(); PMF.vortex_index = 1; PMF.vortexes = setmetatable({}, { __index = function() error("vortex accessor boom") end })
+		S = erec(1000); degraded_ok(S, "vortex accessor throws"); nd = nd + #S; PMF.started = false; PMF.vortexes = {}; PMF.vortex_index = 0
+		sm_start(); SMF.blowout_waves[1] = { effect = { playing = function() error("playing boom") end }, inited_time = 0, inited_pos = V(0, 0, 250) }
+		SIM_OFF = true; S = erec(1000); degraded_ok(S, "effect:playing throws"); nd = nd + #S
+		SMF.inited_time = nil; S = erec(500); degraded_ok(S, "inited_time missing"); nd = nd + #S
+	end)
+	finish(); expect(count(meta(), "\nEERR,") == 1, "EERR lines: " .. count(meta(), "\nEERR,")); expect(sum("eerr") == nd, "eerr " .. tostring(sum("eerr")) .. " want " .. nd)
+end)
+check("em_order", function()
+	add(101, "dog_weak", "m"); boot(); run(v4({ "k,101,dog_weak,0.100,0" }), 300)
+	local function order(s, want) local seq = {}
+		for l in string.gmatch(s, "[^\n]+") do local c = string.match(l, "^(%a+),"); if c and c ~= "o" and c ~= "a" and c ~= "seq" and c ~= "end" and seq[#seq] ~= c then seq[#seq + 1] = c end end
+		expect(table.concat(seq, " ") == want, "order " .. table.concat(seq, " ") .. " want " .. want) end
+	surge_manager.start_surge(); SMF.inited_time = CT(GAME_MS - 1240000); local S = rec(nil, 1500); order(S[#S], "r e w ns k")
+	SMF.started = false; TF = 6; psi_storm_manager.start_psi_storm(); PMF.inited_time = CT(GAME_MS - 400000); S = rec(nil, 8000); order(S[#S], "r e v ns k")
+end)
+check("em_force_absent", function()
+	boot(); local o0 = EM_OPENS; rec(nil, 3000)
+	append("surge\n"); rec(nil, 3000)   -- appears after game start: the test mode stays off
+	expect(o0 == 1, "game start probes emtest.txt " .. o0 .. " times (want 1)")
+	expect(EM_OPENS == o0, "emtest.txt opened " .. (EM_OPENS - o0) .. " times after game start without the file")
+	expect(EMC.surge == 0 and EMC.psi == 0, "a start function was called")
+	finish(); expect(not string.find(meta(), "EFORCE", 1, true), "EFORCE logged")
+end)
+check("em_force_lines", function()
+	append(""); boot(); local o0 = EM_OPENS
+	append("surge\n"); rec(nil, 1500)
+	expect(EMC.surge == 1, "surge start calls " .. EMC.surge)
+	expect(count(meta(), "\nEFORCE,%d+,surge,started\n") == 1, "EFORCE surge line")
+	local o1 = EM_OPENS; rec(nil, 3000)
+	expect(EMC.surge == 1, "the same surge line acted on again (" .. EMC.surge .. ")")
+	expect(EM_OPENS - o1 <= 4, "emtest.txt read " .. (EM_OPENS - o1) .. " times in 3 s")
+	append("bogus\npsi\n"); rec(nil, 1500)
+	expect(EMC.psi == 1 and EMC.surge == 1, "psi line: calls surge " .. EMC.surge .. " psi " .. EMC.psi)
+	expect(count(meta(), "\nEFORCE,%d+,psi,started\n") == 1 and count(meta(), "\nEFORCE,%d+,bogus,unknown\n") == 1, "EFORCE psi / unknown lines")
+	append("sur"); rec(nil, 2000); expect(EMC.surge == 1, "an incomplete line acted on")
+	append("ge\n"); rec(nil, 1500); expect(EMC.surge == 2, "the completed second surge line not acted on")
+end)
+check("em_force_throw", function()
+	append(""); boot(); EM_START_ERR = "start boom"
+	safe(function() append("surge\n"); rec(nil, 1500); append("psi\n"); rec(nil, 1500) end)
+	local S = rec(nil, 500); expect(#S > 0, "no snapshot after the throw")
+	expect(EMC.surge == 1 and EMC.psi == 1, "calls " .. EMC.surge .. "/" .. EMC.psi)
+	expect(count(meta(), "\nEFORCE,%d+,surge,error:start boom\n") == 1 and count(meta(), "\nEFORCE,%d+,psi,error:start boom\n") == 1, "EFORCE error lines")
+end)
+check("em_meta_once", function()
+	local S = timeline("surge", SPH, 222); finish(); local s = meta()
+	expect(count(s, "\nESTART,%d+,surge,") == 1 and count(s, "\nEEND,%d+,surge,") == 1, "ESTART/EEND not once")
+	local ph = {}; for p in string.gmatch(s, "\nEPHASE,%d+,surge,(%d+),") do ph[#ph + 1] = p end
+	expect(table.concat(ph, " ") == "1 2 3 4 5 6 7 8 9 10 11 12 13", "EPHASE sequence " .. table.concat(ph, " "))
+	local lt; for _, x in ipairs(S) do if string.find(x.s, "\ne,surge,") then lt = et(x.s) end end
+	expect(string.find(s, string.format("\nEEND,%%d+,surge,%.2f\n", lt or -1)), "EEND t not the last t seen (" .. tostring(lt) .. ")")
+	local st = string.match(s, "\nESTART,%d+,surge,([%d%.]+)\n"); expect(st and tonumber(st) < 0.2, "ESTART t " .. tostring(st))
+end)
+check("em_jump", function()   -- +20 s (a stop without the absorb): skipped phases are logged one by one, in order, at one time
+	boot(); surge_manager.start_surge(); SMF.inited_time = CT(GAME_MS - 1000000); erec(500)
+	NOW = NOW + 19950; GAME_MS = GAME_MS + 199500; erec(50); erec(500); finish()
+	local s = meta(); local L = {}; for a, p, t in string.gmatch(s, "\nEPHASE,(%d+),surge,(%d+),([%d%.]+)") do L[#L + 1] = { a, p, t } end
+	local n = #L; expect(n >= 3, "EPHASE lines " .. n)
+	if n >= 3 then expect(L[n - 1][2] == "6" and L[n][2] == "7" and L[n - 2][2] == "5", "phases around the jump " .. L[n - 2][2] .. " " .. L[n - 1][2] .. " " .. L[n][2])
+		expect(L[n - 1][1] == L[n][1] and L[n - 1][3] == L[n][3] and tonumber(L[n][3]) >= 120, "skipped phases not logged together at the jump") end
+end)
+check("em_backwards", function()   -- a restart (start_surge during an emission, or a new Lua state) puts t back
+	boot(); surge_manager.start_surge(); SMF.inited_time = CT(GAME_MS - 1500000); erec(500)
+	safe(function() surge_manager.start_surge(); erec(1000) end)   -- (a new Lua state starts a new meta file: nothing to carry)
+	finish(); local s = meta()
+	local e1 = string.match(s, "\nEEND,%d+,surge,([%d%.]+)\n"); expect(e1 and tonumber(e1) >= 150, "no EEND at the restart (" .. tostring(e1) .. ")")
+	expect(count(s, "\nESTART,%d+,surge,") == 2, "ESTART count " .. count(s, "\nESTART,%d+,surge,"))
+	expect(string.find(s, "\nEEND,%d+,surge,[%d%.]+\nESTART,%d+,surge,0%.%d%d\nEPHASE,%d+,surge,1,0%.%d%d\n"), "restart not EEND, ESTART, EPHASE 1")
+	expect(not string.find(s, "\nEPHASE,%d+,surge,1[^\n]*\nEPHASE,%d+,surge,0,"), "phase 0 logged")
+end)
+if MODE == "examples" then   -- lua5.1 kill6h_stub.lua examples <script> <dir>: the fixture text for kj3/emission-line-examples.txt
+	SCRIPT_UNDER_TEST = arg[2]; new_world(arg[3], arg[2]); F = {}
+	add(101, "dog_weak", "m"); boot(); run(v4({ "k,101,dog_weak,0.100,0" }), 300)
+	local function show(cap, s) io.write("## ", cap, "\n", s, "\n") end
+	show("(1) no event (factor 6)", one_snap())
+	surge_manager.start_surge()
+	local function walk(targets, kind)
+		local i = 1
+		while targets[i] do local x = erec(50)[1]
+			if x and et(x.s) and string.find(x.s, "\ne," .. kind .. ",") and et(x.s) >= targets[i][1] - 1e-9 then show(targets[i][2] .. " (t = " .. string.format("%.2f", et(x.s)) .. ")", x.s); i = i + 1 end end end
+	walk({ { 10, "(2a) emission, t = 10" }, { 125, "(2b) emission, wave 1 active" }, { 170, "(2c) emission, wave 2 only (the waves do not overlap: wave 1 stops near t = 153)" }, { 221, "(2d) emission, last second" } }, "surge")
+	erec(3000); psi_storm_manager.start_psi_storm()
+	walk({ { 40, "(3a) psi storm with pending vortices" }, { 60, "(3b) psi storm with pending vortices" } }, "psi")
+	erec(50000); surge_manager = nil; show("(4) degraded (surge_manager missing; factor 6)", one_snap())
+	os.exit(0)
 end
 
 if MODE == "checks" then for _, n in ipairs(ORDER) do print(n) end; os.exit(0) end

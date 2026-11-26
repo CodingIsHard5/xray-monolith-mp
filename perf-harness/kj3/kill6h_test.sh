@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # kj3 copy (kill6, review fixes 1-3: fourteen more checks, sixteen more mutants; see kill6h_stub.lua header and kj3/NOTES.md).
+# kj3 Stage 2: the same runner; the stub now also holds the emission-line checks (em_*) and mutants (m_em_*).
 # kj2 copy (kill5, joint amendment 138: eight more checks, fifteen more mutants; see kill5h_stub.lua header). Offline tests of the kill channel script: every check on the REAL script must PASS, every mutant must make its
 # check FAIL. Each run gets a fresh directory runs/r-<time>-<pid>/ beside this file (nothing is deleted).
 #   bash kill6h_test.sh [script] [lost3 script]

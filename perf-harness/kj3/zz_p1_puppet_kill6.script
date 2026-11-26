@@ -39,6 +39,13 @@
 --   does not clear it); no object still confirms; a replacement of the SAME section cannot be told apart; (3) ktab.txt rows
 --   carry kt, kn, ks, kx (kt as time_global, which runs on over a level change: TimerGlobal starts once per process); a
 --   kill5 row (no such fields) loads as before.
+--   Stage 2 (emission lines, kj3/NOTES.md, kj3/emission-phases.md; format version stays 4): every version-4 snapshot gets, after
+--   the r line and before the k lines: e,<kind>,<t>,<phase>,<tf> (one), w,<n>,<z> (per active wave), v,<n>,<x>,<y>,<z>,<s> (per
+--   pending psi vortex), ns,<surge_s>,<psi_s> (one). Read-only on the public fields of surge_manager.SurgeManager and
+--   psi_storm_manager.PsiStormManager; any failure degrades the whole group to e,none,0.00,0,<tf> + ns,-1,-1 (EERR logged once per
+--   Lua state, counted in the T2SUM key eerr, now the LAST key). Meta: ESTART EPHASE EEND. Test mode: if the bridge folder holds
+--   emtest.txt at game start, each new complete line `surge` / `psi` (at most one read per second) calls the manager's own start
+--   function once (EFORCE). Without that file at game start nothing of the test mode runs and no file is read.
 --   Track time t starts WAIT_MS after the first update (the actor holds the t=0 point meanwhile, t < 0), so GAMMA's
 --   auto_switch (1250 m for 10 s after load, then 450 m; configs\alife.ltx) has settled before the track starts.
 local cl = command_line and command_line() or ""
@@ -123,6 +130,84 @@ local function yaw(o) local d = o:direction(); return math.atan2(d.x, d.z) end
 
 -- kill5: does id read dead as this snapshot is built? Its o line's own alive() read if listed; else the game object; else
 -- the server object (an unreadable alive() is NOT dead); no object at all = dead
+-- Stage 2: emission / psi storm lines. Phase i = the highest i with ceil(t) >= PH[i] (ceil(t) is the scripts' own diff_sec,
+-- SM:676 / PSM:317); 0 = no event. Thresholds and their script lines: kj3/emission-phases.md.
+local SURGE_PH = { 0, 30, 47, 50, 80, 108, 120, 156, 168, 200, 212, 220, 222 }
+local PSI_PH = { 0, 10, 12, 30, 78, 103 }
+local em_kind, em_ph, em_t, eerr, em_logged = "none", 0, 0, 0, false
+local function em_phase(tab, d) local p = 0; for i = 1, #tab do if d >= tab[i] then p = i end end; return p end
+local function em_ns(M, last, gt)   -- game seconds to the next scheduled start (SM:266 / PSM:132); -1 while that event runs
+	if M.started then return -1 end
+	if type(M._delta) ~= "number" or type(last) ~= "userdata" and type(last) ~= "table" then error("schedule field missing", 0) end
+	local v = math.floor(M._delta - gt:diffSec(last)); if v < 0 then v = 0 end; return v
+end
+local function em_body(L, tf, now)
+	if type(tf) ~= "number" or tf <= 0 then error("time factor unreadable", 0) end
+	local sm, pm = surge_manager.SurgeManager, psi_storm_manager.PsiStormManager
+	if not sm then error("SurgeManager nil", 0) end; if not pm then error("PsiStormManager nil", 0) end
+	if type(sm.started) ~= "boolean" or type(pm.started) ~= "boolean" then error("started not boolean", 0) end
+	local gt = game.get_game_time()
+	local M, kind, t, ph = nil, "none", 0, 0
+	if sm.started then M, kind = sm, "surge" elseif pm.started then M, kind = pm, "psi" end
+	if M then t = gt:diffSec(M.inited_time) / tf; ph = em_phase(M == sm and SURGE_PH or PSI_PH, math.ceil(t)) end
+	L[#L + 1] = string.format("e,%s,%.2f,%d,%s", kind, t, ph, tostring(tf))
+	if M == sm then local W = sm.blowout_waves   -- SM:497 {effect, inited_time = diff_game_sec at the start, inited_pos}; z as SM:1065
+		local dgs = math.ceil(gt:diffSec(sm.inited_time) / 2)   -- SM:688
+		for n = 1, 2 do local wv = W[n]
+			if wv and wv.effect:playing() then L[#L + 1] = string.format("w,%d,%.3f", n, wv.inited_pos.z - (dgs - wv.inited_time) * 3) end end
+	elseif M == pm then local V, hi = pm.vortexes, pm.vortex_index   -- PSM:412, never pruned: this storm's vortices are V[lo..hi]
+		local lo = hi; while lo >= 1 and V[lo] ~= nil do lo = lo - 1 end
+		for i = lo + 1, hi do local v = V[i]
+			if v.hit == false then local p = v.particle_pos   -- strike at life_time = diff_sec - start_time >= 20 (PSM:373)
+				L[#L + 1] = string.format("v,%d,%.3f,%.3f,%.3f,%.2f", i, p.x, p.y, p.z, v.start_time + 20 - t) end end
+	end
+	L[#L + 1] = string.format("ns,%d,%d", em_ns(sm, sm.last_surge_time, gt), em_ns(pm, pm.last_psi_storm_time, gt))
+	-- meta: ESTART / EPHASE / EEND. Same kind with t back by more than 0.5 s = a restart: EEND then ESTART. Phases skipped by a
+	-- jump are logged one EPHASE each, in order, all with this snapshot's time and t.
+	if kind ~= em_kind or (M and t < em_t - 0.5) then
+		if em_kind ~= "none" then m(string.format("EEND,%d,%s,%.2f", now, em_kind, em_t)) end
+		if M then m(string.format("ESTART,%d,%s,%.2f", now, kind, t)) end
+		em_kind, em_ph = kind, 0
+	end
+	if M then
+		if ph > em_ph then for p = em_ph + 1, ph do m(string.format("EPHASE,%d,%s,%d,%.2f", now, kind, p, t)) end
+		elseif ph < em_ph then m(string.format("EPHASE,%d,%s,%d,%.2f", now, kind, ph, t)) end
+		em_ph, em_t = ph, t
+	end
+end
+local function em_snap(now, L)
+	local n0 = #L
+	local okf, tf = pcall(level.get_time_factor); if not okf or type(tf) ~= "number" then tf = nil end
+	local ok, err = pcall(em_body, L, tf, now)
+	if not ok then
+		for i = #L, n0 + 1, -1 do L[i] = nil end
+		eerr = eerr + 1
+		if not em_logged then em_logged = true; m(string.format("EERR,%d,%s", now, (string.gsub(tostring(err), "[,\r\n]", ";")))) end
+		L[#L + 1] = "e,none,0.00,0," .. (tf and tostring(tf) or "-1"); L[#L + 1] = "ns,-1,-1"
+	end
+end
+-- Stage 2 test mode (forced starts): em_test is set only at game start if emtest.txt exists then; em_done = complete lines
+-- already in the file then (a level change does not repeat them)
+local em_test, em_done, em_last = false, 0, -1e9
+local function em_start(k)
+	if k == "surge" then surge_manager.start_surge(); return surge_manager.SurgeManager.started end   -- SM:1673-1675
+	psi_storm_manager.start_psi_storm(); return psi_storm_manager.PsiStormManager.started   -- PSM:713-715
+end
+local function em_step(now)
+	if now - em_last < 1000 then return end; em_last = now
+	local f = io.open(DIR .. "emtest.txt", "rb"); if not f then return end
+	local s = f:read("*a") or ""; f:close()
+	local i = 0
+	for l in string.gmatch(s, "([^\n]*)\n") do l = string.gsub(l, "%s", "")
+		if l ~= "" then i = i + 1
+			if i > em_done then em_done = i
+				local r
+				if l == "surge" or l == "psi" then local ok, st = pcall(em_start, l)
+					r = ok and (st and "started" or "notstarted") or ("error:" .. string.gsub(tostring(st), "[,\r\n]", ";"))
+				else r = "unknown" end
+				m(string.format("EFORCE,%d,%s,%s", now, (string.gsub(l, ",", ";")), r)); if meta then meta:flush() end
+			end end end
+end
 local function k_dead_now(id, alv)
 	if alv[id] ~= nil then return not alv[id] end
 	local o = level.object_by_id(id); if o then return not o:alive() end
@@ -153,6 +238,7 @@ local function export_b1(now, t, tm)
 	for id in pairs(seen) do if not present[id] then m(string.format("OFF,%.2f,%d,%d", t, now, id)) end end
 	seen = present
 	if t2 and k_r then L[#L + 1] = "r," .. k_r end
+	if t2 then em_snap(now, L) end   -- Stage 2: e, w, v, ns (after r, before k)
 	if t2 then local ids = {}; for id in pairs(K) do ids[#ids + 1] = id end; table.sort(ids)   -- kill channel answers
 		for _, id in ipairs(ids) do local r = K[id]; local dn = k_dead_now(id, alv)
 			if r.kt and not r.dd and not r.kx then local cs = k_sec_now(id)   -- kill6: does the id still hold the creature of the kill call?
@@ -713,6 +799,7 @@ local function on_update()
 		if now - (g_last_g or -1e9) >= 1000 then g_last_g = now
 			m(string.format("G,%d,%d,%d,%.0f,%d", now, wall, device().frame, gtime(), alife():object_count())) end
 		if dmg_mode and t >= 0 then dmg_step(a, now, t) end
+		if em_test then em_step(now) end   -- Stage 2 test mode; off: this one test per frame
 		if t >= 0 then t2_pose(a, now, t) end
 		if do_export and now - last_exp >= 100 then last_exp = now; export(now, t) end
 		return
@@ -744,7 +831,7 @@ on_quit = function()
 		hits, cancels, refills, min_health, exp_n, exp_n > 0 and exp_sum / exp_n or 0, p99, exp_max))
 	if t2 then t2_disarm(time_global(), p_last, "end") end
 	if t2 then m(string.format("T2SUM,last_seq=%d,torn=%d,holds=%d,paused=%s,near=%d,guards=%d,lost=%d,epochs=%d", p_last, p_torn, p_holds, tostring(p_paused), p_near, t3_guards, p_lost_n, p_epochs)
-		.. string.format(",khits=%d,kdead_online=%d,kdead_offline=%d,kowed=%d,kstale=%d,kback=%d,krefused=%d,kclamped=%d,kver=%d,kdead_fail=%d,ktabfail=%d", kc.khits, kc.kdead_online, kc.kdead_offline, kc.kowed, kc.kstale, kc.kback, kc.krefused, kc.kclamped, kc.kver, kc.kdead_fail, kc.ktabfail)) end
+		.. string.format(",khits=%d,kdead_online=%d,kdead_offline=%d,kowed=%d,kstale=%d,kback=%d,krefused=%d,kclamped=%d,kver=%d,kdead_fail=%d,ktabfail=%d,eerr=%d", kc.khits, kc.kdead_online, kc.kdead_offline, kc.kowed, kc.kstale, kc.kback, kc.krefused, kc.kclamped, kc.kver, kc.kdead_fail, kc.ktabfail, eerr)) end
 	do local a = db.actor; local api = "na"
 		if a and a.get_actor_stance then local ok, v = pcall(a.get_actor_stance, a); api = ok and tostring(v) or "err" end
 		m(string.format("VITALS,min_health=%.3f,max_radiation=%.4f,max_bleeding=%.4f,unread=%d", min_health, vit_rad, vit_bleed, vit_na))
@@ -770,6 +857,9 @@ function on_game_start()
 	do local f = io.open(DIR .. "dmgtest.txt", "rb"); if f then local l = (f:read("*l") or ""):gsub("%s", ""); f:close()
 		if l == "prot" or l == "god_off" or l == "god_off_norefill" then dmg_mode, dmg_raw = l, l
 		elseif l == "god_off_norefill_norestore" then dmg_mode, dmg_raw, dmg_norestore = "god_off_norefill", l, true end end end   -- the mutation of section 49
+	if t2 then local f = io.open(DIR .. "emtest.txt", "rb")   -- Stage 2 test mode: only if the file is there at game start
+		if f then em_test = true; local s = f:read("*a") or ""; f:close()
+			for l in string.gmatch(s, "([^\n]*)\n") do if string.gsub(l, "%s", "") ~= "" then em_done = em_done + 1 end end end end
 	meta = io.open(DIR .. "meta_" .. tag .. ".csv", t3_crossed and "a" or "w")
 	if not meta then printf("p1: CANNOT OPEN META FILE"); active = false; return end
 	if k_note then m(k_note) end

@@ -1,0 +1,94 @@
+# Stage 2 emission lines: fixtures. Real bytes written by harness/zz_p1_puppet_kill6.script (sha256 f378512ced7950ba...; regenerated with that version: same bytes) into snap.txt
+# under the Lua 5.1 stub (kj3/kill6h_stub.lua, mode: lua5.1 kill6h_stub.lua examples <script> <dir>), 2026-11-26. NOT engine output.
+# Layout: a line '## <caption>' then the complete snapshot (LF line ends; snap.txt itself ends with 'end,<n>' + LF), then one blank line.
+# Fake world: actor at (1, 2.05, 3); one dog 101 with a v4 kill total 0.100 (so the r and k lines show the order r, e, w|v, ns, k).
+# Fake schedule: surge _delta 50000 s, psi _delta 90000 s from game second 0; the fake's vortex period cycles 4,3,6,5 s.
+
+## (1) no event (factor 6)
+seq,6,15401,0.40,l01_escape,1,4
+a,1.000,2.050,3.000,0.0000,1.0000
+o,101,dog_weak,m,10.000,0.000,10.000,0.0000,0.9000,1,-1,11.58
+r,1795000000000,6
+e,none,0.00,0,6
+ns,49907,89907
+k,101,0.100
+end,6
+
+## (2a) emission, t = 10 (t = 10.00)
+seq,106,25401,10.40,l01_escape,1,4
+a,1.000,2.050,3.000,0.0000,1.0000
+o,101,dog_weak,m,10.000,0.000,10.000,0.0000,0.9000,1,-1,11.58
+r,1795000000000,6
+e,surge,10.00,1,10
+ns,-1,89807
+k,101,0.100
+end,106
+
+## (2b) emission, wave 1 active (t = 125.00)
+seq,1256,140401,125.40,l01_escape,1,4
+a,1.000,2.050,3.000,0.0000,1.0000
+o,101,dog_weak,m,10.000,0.000,10.000,0.0000,0.9000,1,-1,11.58
+r,1795000000000,6
+e,surge,125.00,7,10
+w,1,172.000
+ns,-1,88657
+k,101,0.100
+end,1256
+
+## (2c) emission, wave 2 only (the waves do not overlap: wave 1 stops near t = 153) (t = 170.00)
+seq,1706,185401,170.40,l01_escape,1,4
+a,1.000,2.050,3.000,0.0000,1.0000
+o,101,dog_weak,m,10.000,0.000,10.000,0.0000,0.9000,1,-1,11.58
+r,1795000000000,6
+e,surge,170.00,9,10
+w,2,217.000
+ns,-1,88207
+k,101,0.100
+end,1706
+
+## (2d) emission, last second (t = 221.00)
+seq,2216,236401,221.40,l01_escape,1,4
+a,1.000,2.050,3.000,0.0000,1.0000
+o,101,dog_weak,m,10.000,0.000,10.000,0.0000,0.9000,1,-1,11.58
+r,1795000000000,6
+e,surge,221.00,12,10
+ns,-1,87697
+k,101,0.100
+end,2216
+
+## (3a) psi storm with pending vortices (t = 40.00)
+seq,2646,279401,264.40,l01_escape,1,4
+a,1.000,2.050,3.000,0.0000,1.0000
+o,101,dog_weak,m,10.000,0.000,10.000,0.0000,0.9000,1,-1,11.58
+r,1795000000000,6
+e,psi,40.00,4,10
+v,1,11.000,22.050,-4.000,14.00
+v,2,21.000,22.050,-11.000,17.00
+ns,59585,-1
+k,101,0.100
+end,2646
+
+## (3b) psi storm with pending vortices (t = 60.00)
+seq,2846,299401,284.40,l01_escape,1,4
+a,1.000,2.050,3.000,0.0000,1.0000
+o,101,dog_weak,m,10.000,0.000,10.000,0.0000,0.9000,1,-1,11.58
+r,1795000000000,6
+e,psi,60.00,4,10
+v,3,31.000,22.050,-18.000,3.00
+v,4,41.000,22.050,-25.000,8.00
+v,5,51.000,22.050,-32.000,12.00
+v,6,61.000,22.050,-39.000,15.00
+ns,59385,-1
+k,101,0.100
+end,2846
+
+## (4) degraded (surge_manager missing; factor 6)
+seq,3347,349501,334.50,l01_escape,1,4
+a,1.000,2.050,3.000,0.0000,1.0000
+o,101,dog_weak,m,10.000,0.000,10.000,0.0000,0.9000,1,-1,11.58
+r,1795000000000,6
+e,none,0.00,0,6
+ns,-1,-1
+k,101,0.100
+end,3347
+
