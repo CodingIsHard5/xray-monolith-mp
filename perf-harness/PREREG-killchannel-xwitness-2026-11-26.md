@@ -81,7 +81,11 @@ Tests run by me on these bytes: offline reader tests 33 checks pass, 38 mutants 
 selftest PASS (good = PASS; 13 mutant folders each fail exactly their own check; 3 NO VERDICT folders; 6 missing-file
 folders fail by name). ALL checker fixtures are made by the offline stub, none by the engine: the first real run is
 also the first time the checker reads real engine bytes (CRLF is stripped; a reader fault would show as a FAIL by
-name or a crash of the checker, which I report as "checker fault", fix, and re-score ONCE with the fix disclosed).
+name or a crash of the checker).
+Correction by the Overseer, written in before the boot (2026-11-26): there is NO re-score after a checker fix. If the
+registered checker faults on real bytes, its output stands as of record, or the run is NO VERDICT if it cannot
+produce one. A fixed checker's read of the same data is reported beside it, labelled POST-HOC DESCRIPTIVE. Any
+verdict that counts needs a new run under a re-registered checker.
 Run: `BENCH_DISPLAY=:141 tools/t3_kw1.sh out/kw1` (background task; env as d0: T2_EXE=Stance14.exe T2_FREEZE=sigstop
 T2_ABSORB=2000 T2_STALL_AT=99999 T2_KILL_AT=99999 T2_MAXRESTART=0, run length 125 engine seconds).
 Score, once: `python3 -I tools/t3_kw1_check.py out/kw1 out=out/kw1/t3_kw1_check.txt`.
