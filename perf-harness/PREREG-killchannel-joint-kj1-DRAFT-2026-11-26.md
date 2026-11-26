@@ -1,4 +1,4 @@
-# Kill channel, joint run "kj1", X side: DRAFT 6 (2026-11-26). NOT registered, nothing built, nothing run.
+# Kill channel, joint run "kj1", X side: DRAFT 7 (2026-11-26). NOT registered, nothing built, nothing run.
 
 Ordered by the Overseer after kw1 (PASS 12/12). No boot until the Overseer has reviewed the registered text.
 Limits first: a rig, not a player (itrzone's lever `kcrig` deals the damage); nobody looks; one stalker and one
@@ -119,6 +119,33 @@ frame. Their clock adds at most 0.25 s a frame, so a long frame makes their even
 earlier; in d2 the loss was nil. A hitch before 115 s moves the monster's kill toward the end of my stop, which the
 2 s NO VERDICT rule covers (10 s of room at the end, 8 at the start).
 Their run line: t2v=4 kcj=30 kcjs=0.6 kcjt=0.5 (defaults 40, 60, 85), no kcrig.
+### Draft 7 corrections (2026-11-26), from itrzone's readiness review, each checked by me in my code
+- MY SLIP, twice: the snapshot period is 100 ms, not 50 (reader line 673: an export every 100 ms; kw1's rows are
+  100 ms apart). Wherever this draft says 50 ms between snapshots or 20 snapshots a second, read 100 ms and 10 a
+  second. The chain of checks 7 and 10 is then pose 0.05 s + one frame + snapshot 0.10 s + read 0.05 s = 0.20 s plus
+  one frame; the 2.0 s bound still allows a stall of over 1.5 s. Check 6's "one snapshot step" is 100 ms; 0.02 is
+  still far under a hit and over 100 ms of healing (0.001). kw1's registered text has the same slip in two
+  derivations; its bounds and result do not move.
+- Stop timing: my runner reads no pose before its own first snapshot and then polls about once a second, so the
+  first play pose it reads is 1 to about 2.2 s after ITR2's clock 0. The stop starts about 106 to 108.3 s after
+  their clock 0, CONT up to about 128.3. Their kill at 115 is at least 6.7 s after STOP and about 11 s before CONT.
+  (Draft 4 said 105 to 107.)
+- What my `dead` line means for an ONLINE death: "the kill call was made", not "the creature was seen dead". The
+  reader sets the death time in the step of the call. Read in the engine: the call has no refusal but an object
+  already dying or being destroyed (Entity.cpp KillEntity); the death itself (health -1) is done when the death
+  event is handled, later in the frame or the next, so a read-back in the same step would be wrong. The
+  invulnerable flag of story characters is honoured in the hit path only (CustomMonster.cpp:854), not in the kill
+  path. So I expect a story character to die by the call too; NOT seen in a game. If a kill ever did not take:
+  check 11 fails, and after the 10 s hold the reader logs KSTALE alive_again and counts kstale (check 14 fails).
+  On a story character the near-zero hit is ignored by the engine (invulnerable), the direct health change is not.
+- Who is near the track's start: from kw1's boot dump (positions at boot, creatures move): stalkers about 27 m off
+  are devushka, the story character esc_2_12_stalker_fanat, and four sim_default_stalker_0 (one is kw1's S); Wolf
+  (esc_2_12_stalker_wolf) at 34 m. So S may be a story character. In a bench boot nothing is saved.
+- More pins (the runner's own dependencies): tools/run_noguard.sh 92729abc…, harness/zz_eperf_dump.script
+  2b79a817…, out/user.ltx.orig 3efd38ee….
+- New NO VERDICT rule, the same on both sides: S or M is not listed (offline or gone) in my kept snapshot at the
+  time of the first pose of one of its later steps. Then the channel's online path was not tested for that step.
+
 From their lever (`kcj`, built, not merged): if the picked creature's snapshot health is below 1 (say 0.95), a
 later kill reports total = the part hits + what was left, not a round number. So no check here names a death total.
 Proposed for the run, so both are judged in the engine: S gets 0.6 at 30 s and 0.5 at 70 s (total 1.100), kill at
