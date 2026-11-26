@@ -210,3 +210,39 @@ FAIL on my side only, and I say so.
 itrzone's text read by me as DRAFT: `kj1/itrzone-amendment-137-draft.txt`, sha256 c251d3e1…, 139 lines, 14646 bytes
 (desk-armd 75d1cf7). It is their half, not a joint format text; I checked every line that states something about my
 side (files, env, the stop, the death's look, the three shared NO VERDICT reasons) and found no contradiction.
+
+## 11. RESULT (2026-11-26, appended after the run; sections 1-10 unchanged, registered sha 8be749f5…)
+
+**X side, of record: NO VERDICT (checker rc 3). Scored once, registered checker 4b838850…, nothing re-scored.**
+Run: one boot on the Overseer's GO, booted by itrzone. X out dir /home/caden/Projects/ITRZone/out/runs/20261126-152750-t2kj1-xray
+(runner rc 0). Score text: kj1/kj1_xscore.txt, sha256 ac6e2dba…6eea (67 lines), written by the single scoring run.
+ITR2 side (itrzone's own scoring, theirs to state): FAIL 6 of 8, J6 and J7.
+
+Limits first:
+- NV3 fired, so by the registered rule checks 2-11 and 14 are untested, although each printed PASS. No verdict counts.
+- Why NV3 fired is a GAP IN MY CHECKER, not X-Ray's world hurting S or M. NV3 looks for a fall above 0.02 between two
+  snapshots with no K line of mine between them. Both falls are the death itself, one snapshot after my KDEAD line:
+  S snap 804 health 0.0000 (alive 0) -> 805 health -1.0000; M snap 963 health 0.0008 (alive 1) -> 964 health -1.0000.
+  The rule has no exemption for the step to -1 after a kill, and no fixture had the death spread over two snapshots.
+- My desk fact "the first snapshot after a kill reads alive 0, health -1" was WRONG for this run: the snapshot that first
+  carries the `dead` line showed S at health 0.0000 and M still alive 1 at 0.0008. The `dead` line means "kill call made".
+- That is also the cause of the ITR2-side FAIL: the mod confirmed M on the `dead` line while the same snapshot's `o` line
+  read alive, and spawned the puppet again for one snapshot (0.10 s). A real defect of the joint text, on my side's line.
+- POST-HOC DESCRIPTIVE (not a verdict): with the two death steps set aside, no NV rule would fire and all 14 checks
+  printed PASS, T2SUM 19 keys as expected (khits 5, kdead_online 2, all refusal counters 0).
+
+Story-character rule (10.2): `tr -d '\r' < boot0/watch/poses_all.txt | grep '^k,19425,' | cut -d, -f3 | sort | uniq -c`
+-> `1200 sim_default_stalker_0`. S's section is inside sim_default_, so S is scored. M: id 23183 flesh_03a_normal.
+
+Numbers reported (descriptive): S healed +0.357 between its hits (0.3999 -> 0.7571 in 40 s); the total above 1.000 was
+applied as the difference 0.500, not cut; S dead line 11 ms after the first dead pose; M's dead pose read 7.7 s after
+STOP and 12.3 s before CONT, nothing applied or written inside the 20.0 s stop; first snapshot 1 ms after CONT, M's dead
+line 25 ms later; actor health 1.0000 in all 1948 snapshots; both kills credited to the actor (KWHO killer 0).
+The margin-table unknown "first frame after CONT" measured 1 ms against the 5 s bound.
+
+My guess was PASS 25 / NO VERDICT 30 / FAIL 45. Outcome NO VERDICT, but not for a reason I listed: I expected NV from
+the scene (a creature hurt by the world), and it came from my own rule meeting a two-snapshot death.
+
+Next, needs the Overseer: (1) joint amendment: X-Ray writes the `dead` line only once the creature reads dead (alive 0)
+or is unlisted, and the mod confirms on that; (2) NV3 exempts the step to -1 after a KDEAD, with a fixture cut from this
+run; (3) a new run under the re-registered text and checker. No second boot without the Overseer.

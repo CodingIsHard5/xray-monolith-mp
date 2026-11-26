@@ -1,0 +1,67 @@
+KJ1 X side checker, run dir /home/caden/Projects/ITRZone/out/runs/20261126-152750-t2kj1-xray
+1 no crash, no FATAL, no Lua error naming the bridge script, runner rc 0, one boot: PASS (runner rc0 True (last line 'oots 1; unplanned restarts 0; stall 1; planned kill no; rc=0'), restart rows 0, Lua errors naming zz_p1_puppet 0 [], FATAL 0, engine log lines 11052, boots ['boot0'])
+2 step A: one KAPPLY each for S and M, difference = the pose total, after = before - difference +/- 0.0002: PASS (S 19425: pose total 0.600 first in pose seq 602; KAPPLY pose 602 d 0.600 applied 0.600 before 1.0000 after 0.4000: |d-total| 0.0000, |after-(before-d)| 0.0000, first KAPPLY of the id True, from pose >= first True | M 23183: pose total 0.300 first in pose seq 602; KAPPLY pose 602 d 0.300 applied 0.300 before 1.0000 after 0.7000: |d-total| 0.0000, |after-(before-d)| 0.0000, first KAPPLY of the id True, from pose >= first True)
+3 no second effect: no KAPPLY for an id while its total in poses_all.txt is unchanged: PASS (5 KAPPLY lines; a KAPPLY whose total is not a new pose total: 0 [])
+4 healing left alone: S between its part hits, M between its part hit and death: no KAPPLY, no fall > 0.02 with a K line of mine: PASS (S 19425: script time 51943..91888, 361 snapshots, largest fall 0.0000, change first->last +0.3572; other KAPPLY 0 []; falls > 0.02 with a K line of mine []; without (NV3, not FAIL) [] | M 23183: script time 51943..149258, 701 snapshots, largest fall 0.0000, change first->last +0.0277 (healing reported, judged on S only); other KAPPLY 0 []; falls > 0.02 with a K line of mine []; without (NV3, not FAIL) [])
+5 S healed (>= 0.15 between its part hits) and a total above 1.000 is applied with the pose difference, S alive above 0.02 after it: PASS (healing: snap 262 0.3999 -> snap 622 0.7571 = +0.3572 (floor 0.15); total above 1.000: pose 1.100 (seq 1401), previous total 0.600, expected difference 0.500; KAPPLY pose 1401 d 0.500 (not cut to 1.000: True) applied 1.100 before 0.7571 after 0.2571 (|after-(before-d)| 0.0000); next snapshot 623: alive 1 health 0.257 (must be alive and > 0.02); kclamped itself is judged in 14)
+6 only S and M change: no other creature within 10.0 m of S or M loses more than 0.02 across a KAPPLY/KDEAD: PASS (7 KAPPLY/KDEAD lines with a snapshot on each side (0 without one, each FAILS: []); falls > 0.02 within 10.0 m of S or M (judged): []; farther (reported): [])
+7 step C: one KDEAD online for S; its dead line read within 2.0 s of the first pose with dead = 1: PASS (S 19425: KDEAD online 1; first dead pose seq 1801 read 1795725117444; first snapshot with k,19425,...,dead seq 804 read 1795725117455; lag 11 ms (W clock both; allowed -50 .. 2000; -50 ms because the watcher polls the pose every 2 ms and may read it after the script took it and the snapshot was read))
+8 the kill is the actor's: one KWHO with killer 0 for S and for M: PASS (S 19425: KWHO ['KWHO,111891,19425,0'] | M 23183: KWHO ['KWHO,149258,23183,0'])
+9 step D: no KAPPLY or KDEAD inside the stop, no snapshot written inside the stop (stall.csv window): PASS (stop W 1795725134795..1795725154797 (20002 ms; edges +/- 100 ms because the STOP row is stamped before kill -STOP, the CONT row after kill -CONT, and the watcher reads up to ~2 ms late); snapshots read inside 0 []; the script's own record of the stop (RESUMED_GAP whose gap covers it) RESUMED_GAP,149258,1795725154,20,3165793060,129233,3165672910; RESUMED_GAP lines inside the stop []; KAPPLY/KDEAD with script time inside the stop in script time (between RESUMED_GAP's last frame before and first frame after) []; KAPPLY/KDEAD whose script time maps wholly inside the stop (via the newest G/RESUMED_GAP line, whole UTC seconds, error 0..+1000 ms) []; events with no anchor line before them 0)
+10 step D: one KDEAD online for M after the stop, its dead line in no snapshot before CONT, and read within 2.0 s of the first snapshot read at or after CONT: PASS (M 23183: KDEAD online 1 ['KDEAD,149258,2548,23183,online']; after the stop: True (script time 149258 >= 149258, the first frame after the gap (RESUMED_GAP field 2)); snapshots read before CONT with the dead line: 0 []; first kept snapshot read at or after CONT: seq 962, 1 ms after CONT (REPORTED, not judged); first snapshot with the dead line from it: seq 963, 25 ms after it (judged <= 2000, W clock both))
+11 dead in X-Ray: from 2.0 s after each dead line the id is alive 0 or not listed, to the end: PASS (S 19425: 1126 snapshots from 2.0 s after the first dead line (snap 804), alive in 0 [] | M 23183: 967 snapshots from 2.0 s after the first dead line (snap 963), alive in 0 [])
+12 the actor is unhurt: actor health in every snapshot = the first: PASS (first actor health 1.0000, differing in 0 [] of 1948 snapshots)
+13 the r line: present after the first pose taken, never back, within 2.0 s of the newest kept pose: PASS (1848 snapshots written at or after the first pose taken (P2 script time 34310); r absent 0 []; back or other session []; lag over the bound 0 [] (bound 2000 ms in pose time, the first snapshot after CONT 2000 + stop length); r names a pose later than the newest kept pose read by the snapshot's read by more than 50 ms 0 []; smallest lag 0 ms; inside the stop, not judged here 0)
+14 counters: every key of the last T2SUM judged against the checker's table, none skipped: PASS (1 T2SUM line(s), last one judged: 19 keys; failing: none)
+14.last_seq = 4755, expected 4749 .. 5027 (r seq of the final kept snapshot (seq 1948): 4749; highest seq in poses_all.txt 5027): PASS (seq of the last pose the script took (p_last). Expected: at least the r seq of the last kept snapshot (the script had processed that pose) and at most the highest seq in poses_all.txt (it cannot take a pose that was never written))
+14.torn = 0, expected 0: PASS (torn pose reads (prereg row 14))
+14.holds = 0, expected 0 (0 HOLD lines in the meta file): PASS (poses held off-mesh: must equal the HOLD lines in the meta file (the counter and its own log agree; how often the actor is held is not a kill-channel criterion))
+14.paused = false, expected false: PASS (device():pause in force at the end: false (the runner passes no -t2_pause; the stop is the runner's SIGSTOP))
+14.near = 0, expected 0 (0 NEAR + 0 P2ring lines in the meta file): PASS (poses grounded on a neighbouring AI cell: must equal NEAR lines + P2 lines with ring > 0 (the counter and its own log agree; not a kill-channel criterion))
+14.guards = 0, expected 0 (0 GUARD lines in the meta file): PASS (actor position guard fired: must equal the GUARD lines (the counter and its own log agree; not a kill-channel criterion))
+14.lost = 0, expected 0: PASS (pose LOST events (prereg row 14))
+14.epochs = 0, expected 0: PASS (new ITR2 sessions / v2 resets (prereg row 14: no restart of either side))
+14.khits = 5, expected 5 (derivation: 5 = id 19425: 0.600, 1.100, 1.511; id 23183: 0.300, 1.027): PASS (part hits applied = distinct (id, total) steps with a positive difference in the kept poses)
+14.kdead_online = 2, expected 2: PASS (S and M killed online (prereg row 14))
+14.kdead_offline = 0, expected 0: PASS (no offline creature (prereg row 14))
+14.kowed = 0, expected 0: PASS (no owed part hit (prereg row 14))
+14.kstale = 0, expected 0: PASS (no stale line (prereg row 14))
+14.kback = 0, expected 0: PASS (no falling total (prereg row 14))
+14.krefused = 0, expected 0: PASS (nothing refused (prereg row 14))
+14.kclamped = 0, expected 0: PASS (no single difference above 1.0 (prereg row 14))
+14.kver = 0, expected 0: PASS (no pose of a wrong version (prereg row 14))
+14.kdead_fail = 0, expected 0: PASS (no failed kill (prereg row 14))
+14.ktabfail = 0, expected 0: PASS (no failed table save (prereg row 14; unjudged in kw1, judged here))
+NV1 S and M not found: exactly two ids with k lines, one stalker and one monster: clear (S 19425, M 23183)
+NV2 S or M hurt by X-Ray's own world by more than 0.02 before step A, or killed before its step: clear (none)
+NV3 S or M lost more than 0.02 between two snapshots with no K line of mine (KAPPLY, KDEAD online/offline/failed) between them: FIRED (S 19425 snap 804->805 fell 1.0000; M 23183 snap 963->964 fell 1.0008); leaves untested: checks 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14
+NV4 M's first dead pose not read at least 2 s inside the stop at both ends: clear (M's first dead pose seq 2302 read 7696 ms after STOP and 12306 ms before CONT (each must be >= 2000))
+NV6 S or M not listed in X-Ray's snapshot at the first pose of a later step: clear (listed at every later step)
+reported: S 19425, M 23183; k-line ids ['19425', '23183'] kinds {'19425': ['s'], '23183': ['m']}
+reported: steps of 19425: 0.600@seq602, 1.100@seq1401, 1.511(dead)@seq1801
+reported: steps of 23183: 0.300@seq602, 1.027(dead)@seq2302
+reported: stall window W 1795725134795..1795725154797; inputs: 1948 snapshots, 5027 poses, 7960 meta lines
+reported: frame time start -> S 0.600 pose read: largest snapshot gap 1079 ms (snap 1->2), 261 gaps
+reported: frame time M 0.300 pose read -> S 1.100 pose read: largest snapshot gap 137 ms (snap 463->464), 361 gaps
+reported: frame time S 1.100 pose read -> S 1.511(dead) pose read: largest snapshot gap 134 ms (snap 682->683), 181 gaps
+reported: frame time S 1.511(dead) pose read -> STOP: largest snapshot gap 20123 ms (snap 961->962), 158 gaps
+reported: frame time CONT -> end: largest snapshot gap 146 ms (snap 1476->1477), 986 gaps
+reported: frame time around KAPPLY,51943,602,19425,0.600,0.600,1.0000,0.4000,hit: snap 261->262 gap 108 ms
+reported: frame time around KAPPLY,51943,602,23183,0.300,0.300,1.0000,0.7000,hit: snap 261->262 gap 108 ms
+reported: frame time around KAPPLY,91888,1401,19425,0.500,1.100,0.7571,0.2571,hit: snap 622->623 gap 114 ms
+reported: frame time around KAPPLY,111891,1801,19425,0.411,1.511,0.4106,0.0000,hit: snap 803->804 gap 115 ms
+reported: frame time around KDEAD,111891,1801,19425,online: snap 803->804 gap 115 ms
+reported: frame time around KAPPLY,149258,2548,23183,0.727,1.027,0.7278,0.0008,hit: snap 962->963 gap 25 ms
+reported: frame time around KDEAD,149258,2548,23183,online: snap 962->963 gap 25 ms
+reported: KAPPLY,51943,602,19425,0.600,0.600,1.0000,0.4000,hit
+reported: KAPPLY,51943,602,23183,0.300,0.300,1.0000,0.7000,hit
+reported: KAPPLY,91888,1401,19425,0.500,1.100,0.7571,0.2571,hit
+reported: KAPPLY,111891,1801,19425,0.411,1.511,0.4106,0.0000,hit
+reported: KAPPLY,149258,2548,23183,0.727,1.027,0.7278,0.0008,hit
+reported: KDEAD,111891,1801,19425,online
+reported: KDEAD,149258,2548,23183,online
+reported: KWHO,111891,19425,0
+reported: KWHO,149258,23183,0
+reported: last T2SUM: T2SUM,last_seq=4755,torn=0,holds=0,paused=false,near=0,guards=0,lost=0,epochs=0,khits=5,kdead_online=2,kdead_offline=0,kowed=0,kstale=0,kback=0,krefused=0,kclamped=0,kver=0,kdead_fail=0,ktabfail=0
+verdict: NO VERDICT rule(s) NV3 fired; failing checks none all within what they leave untested (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14)
+KJ1 X SIDE: NO VERDICT
