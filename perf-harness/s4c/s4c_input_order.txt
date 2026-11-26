@@ -1,0 +1,4 @@
+# S2 stage 4c part C (PREREG-S2-4c): the new build WITH input on (no -perf_noinput), tick 30 and 60. Run by tools/s4c_series.sh.
+# tag|exe|save|lowend|warm|frames|fixed|cfg   -- all-lowercase tags
+s4c_i30_1|SimTick17.exe|bench1|0|1500|6000|0|sim_tick=30
+s4c_i60_1|SimTick17.exe|bench1|0|1500|6000|0|sim_tick=60

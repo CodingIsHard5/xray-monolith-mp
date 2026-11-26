@@ -1,0 +1,12 @@
+# S2 stage 4c (PREREG-S2-4c): new build (SimTick17, first-person animation every frame) against the previous (SimTick16), tick 30 and 60, and off. Mirrored.
+# tag|exe|save|lowend|warm|frames|fixed|cfg   -- all-lowercase tags, as the bench names its folders
+s4c_n30_1|SimTick17.exe|bench1|0|3000|12000|0|sim_tick=30
+s4c_p30_1|SimTick16.exe|bench1|0|3000|12000|0|sim_tick=30
+s4c_p60_1|SimTick16.exe|bench1|0|3000|12000|0|sim_tick=60
+s4c_n60_1|SimTick17.exe|bench1|0|3000|12000|0|sim_tick=60
+s4c_noff_1|SimTick17.exe|bench1|0|3000|12000|0|
+s4c_poff_1|SimTick16.exe|bench1|0|3000|12000|0|
+s4c_n60_2|SimTick17.exe|bench1|0|3000|12000|0|sim_tick=60
+s4c_p60_2|SimTick16.exe|bench1|0|3000|12000|0|sim_tick=60
+s4c_p30_2|SimTick16.exe|bench1|0|3000|12000|0|sim_tick=30
+s4c_n30_2|SimTick17.exe|bench1|0|3000|12000|0|sim_tick=30
