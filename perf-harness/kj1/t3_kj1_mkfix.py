@@ -411,6 +411,20 @@ def nv6_mdeath_unlisted(F):   # M not listed in the snapshots read in the last 1
         if STOP_U - 1500 <= s['u'] < STOP_U: s['lines'] = [l for l in s['lines'] if not l.startswith(f'o,{M_ID},')]
 def nan_health(F):   # one snapshot's o line for S carries health nan
     s = mid_snap(F, 60); o_set(s, S_ID, 8, 'nan')
+def v5_pose(F):   # one kept pose with 8 header fields and version 5
+    p = F['poses'][1000]; h = p['lines'][0].split(','); h[7] = '5'; p['lines'][0] = ','.join(h)
+def m09_longgap(F):   # RESUMED_GAP's gap 20 s longer: its last frame before lies 20 s before STOP (a 40 s gap around the stop)
+    j = meta_idx(F, lambda f: f[0] == 'RESUMED_GAP'); f = F['meta'][j].split(','); f[3] = str(int(f[3]) + 20); F['meta'][j] = ','.join(f)
+def m13_ahead(F):   # the snapshots read from 60 s to 61 s carry the r line of the snapshot read at 61 s: they name a pose
+    # up to 1 s later than the newest kept pose read by then (r never goes back, so only the 'ahead' clause fails)
+    r1 = mid_snap(F, 61); r1 = r1['lines'][r_idx(r1)]
+    for s in F['snaps']:
+        if U0 + 60000 <= s['u'] < U0 + 61000: s['lines'][r_idx(s)] = r1
+def m06_noafter(F):   # a KDEAD,failed (another creature) 50 ms after the last snapshot was written: no snapshot after it
+    T = snap_tx(F['snaps'][-1]) + 50
+    n = [l.split(',')[1] for l in F['meta'] if l.startswith('P2,')][-1]
+    j = max(k for k, l in enumerate(F['meta']) if l.startswith(('W,', 'P2,', 'TICK,', 'ON,')))
+    F['meta'].insert(j + 1, f'KDEAD,{T},{n},23196,failed,alive')
 def bad_pose(F):
     p = F['poses'][1000]; p['lines'][-1] = 'end,1'
 def bad_kline(F):
@@ -547,6 +561,14 @@ def main():
         'deal M\'s death there (MULTI: a death inside the stop is also not after CONT)', '9,10')
     mut('m09_noanchor', 9, m09_noanchor, 'as m09_scripttime, and every G line before the event removed: no wall anchor precedes it '
         '(the script-time clause alone, which needs no anchor)')
+    mut('m09_longgap', 9, m09_longgap, 'RESUMED_GAP\'s gap 20 s longer (40 s, spanning the 20 s stop): its edges are not near STOP/CONT, it does not pair')
+    sim('m09_slowresume', kn(cont_delay=6500), 'X-Ray\'s first frame after CONT comes 6.5 s late: RESUMED_GAP\'s end edge is '
+        'later than CONT + RESUME_MAX_MS (5 s, the bridge\'s T2_LOST_MS) + WALL_ERR_MS (1 s), so X-Ray stalled on its own after '
+        'the stop and the gap is no longer "the stop": it does not pair, check 9 FAILS', '9')
+    F = copy.deepcopy(good); m13_ahead(F); F['readme'].append('MUTANT of good by m13_ahead: r lines 60-61 s name the pose read at 61 s')
+    W.write('m13_ahead', F, 'mutant', 'FAIL', 1, '13', '', 'more than 50 ms 10 |smallest lag -1000 ms', 'the snapshots read 60-61 s carry '
+            'the r line of the snapshot read at 61 s (up to 1 s ahead of the newest kept pose read by then; r never goes back)')
+    mut('m06_noafter', 6, m06_noafter, 'a KDEAD,failed (another creature) 50 ms after the last snapshot: no snapshot after it')
     mut('m10_late', 10, m10_late, 'M: its dead line first read 2.5 s after CONT')
     mut('m10_kdead_before', 10, m10_kdead_before, 'M: its KDEAD online line has a script time before the stop (snapshots unchanged)')
     mut('m10_late24', 10, m10_late24, 'M: its dead line first read 2.4 s after the first snapshot read at or after CONT')
@@ -615,10 +637,14 @@ def main():
     W.write('bad_snaprecord', F, 'unparsed', 'FAIL', 1, '*', '', 'UNPARSED boot0/watch/snaps_all.txt', 'one kept snapshot record cannot be parsed')
     for nm, f, note in (('bad_poserecord', bad_pose, 'one kept pose record whose end line does not match'),
                         ('bad_kline', bad_kline, 'S\'s first KAPPLY line cut to 7 fields'),
-                        ('bad_v3pose', v3_pose, 'one kept pose with a version-3 header (7 fields)')):
+                        ('bad_v3pose', v3_pose, 'one kept pose with a version-3 header (7 fields)'),
+                        ('bad_v5pose', v5_pose, 'one kept pose with 8 header fields and version 5')):
         F = copy.deepcopy(good); f(F); F['readme'].append(f'MUTANT of good: {note}')
         tgt = 'boot0/meta_t2.csv' if nm == 'bad_kline' else 'boot0/watch/poses_all.txt'
         W.write(nm, F, 'unparsed', 'FAIL', 1, '*', '', f'UNPARSED {tgt}', note)
+    F = copy.deepcopy(good); F['patch'] = [('stall.csv', b'utc_ms,event,seq,track_s', b'utc,event,seq,track_s')]
+    F['readme'].append('MUTANT of good: stall.csv header utc,event,seq,track_s (rows unchanged and valid)')
+    W.write('bad_stallheader', F, 'unparsed', 'FAIL', 1, '*', '', 'UNPARSED stall.csv: header', 'stall.csv with a wrong header, rows valid')
     F = copy.deepcopy(good); nan_health(F); F['readme'].append('MUTANT of good: one snapshot o line with health nan')
     W.write('bad_nan_health', F, 'unparsed', 'FAIL', 1, '*', '', 'UNPARSED boot0/watch/snaps_all.txt', 'one snapshot o line for S with health nan')
     F = copy.deepcopy(good); o_set(mid_snap(F, 60), S_ID, 8, 'XBADX')

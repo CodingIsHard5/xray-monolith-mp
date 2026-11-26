@@ -47,10 +47,12 @@ BOUNDS AND MARGINS (name = value: where it is used; reason). Copy-ready for the 
   HEAL_MIN       = 0.15    : 5 ; S's rise between its part hits: under half of kw1's 0.40 in 40 s, far over FALL (row 5)
   ALIVE_MIN      = 0.02    : 5 ; S's health after the hit that takes its total above 1.000: above the 0.01 stop (row 5)
   CONFIRM_MS     = 2000    : 7, 10 ; dead line read within 2.0 s: 0.15 s chain plus one frame, plus one 1.5 s stall (row 7)
-  EARLY_MS       = 50      : 7 ; the dead line may be read up to 50 ms BEFORE the watcher's first read of the dead pose:
+  EARLY_MS       = 50      : 7, 13 ; the dead line may be read up to 50 ms BEFORE the watcher's first read of the dead pose:
                              the watcher polls the pose file every 2 ms and reads the snapshot first in each poll, so
                              the script can take the pose (and the watcher read its snapshot) before the watcher reads
-                             the pose. NOT in the prereg: a build decision, printed in check 7's line
+                             the pose. NOT in the prereg: a build decision, printed in check 7's line. 13: an r line
+                             may name a pose at most 50 ms (pose time) later than the newest pose read by the
+                             snapshot's read, for the same reason; more FAILS 13, and the smallest lag is printed
   DEAD_AFTER_MS  = 2000    : 11 ; the death event is handled on a later frame (row 11)
   R_LAG_MS       = 2000    : 13 ; as 7 (row 13); the first snapshot at or after CONT gets R_LAG_MS + the stop length
   NEAR_M         = 10.0 m  : 6 ; other creatures judged within 10 m of S or M, reported beyond (row 6)
@@ -60,8 +62,18 @@ BOUNDS AND MARGINS (name = value: where it is used; reason). Copy-ready for the 
                              each), and the watcher reads up to ~2 ms after a write; far under the 20 s stop. NOT in the
                              prereg: a build decision, printed in check 9's line. Check 10 and NV4 use the exact stamps
   NV4_MS         = 2000    : NV4 ; M's first dead pose read >= 2 s after STOP and >= 2 s before CONT (section 1.1)
-  WALL_ERR_MS    = 1000    : 9 (d) ; os.time() in G/RESUMED_GAP is whole seconds: the W estimate of an event is the
-                             interval [wall*1000 + (T - tg), +1000); judged inside only if the whole interval is inside
+  WALL_ERR_MS    = 1000    : 9 (b, d) ; os.time() in G/RESUMED_GAP is whole seconds: the W estimate of an event is the
+                             interval [wall*1000 + (T - tg), +1000); judged inside only if the whole interval is inside.
+                             9 (b): RESUMED_GAP pairs only if its start edge (wall - gap)*1000 is within
+                             STOP_MARGIN_MS + WALL_ERR_MS (1100 ms) of STOP and its end edge wall*1000 lies in
+                             [CONT - 1100 ms, CONT + RESUME_MAX_MS + WALL_ERR_MS]; a gap that merely spans the stop
+                             (e.g. 40 s around a 20 s stop) does not pair: 9 FAILS
+  RESUME_MAX_MS  = 5000    : 9 (b) ; X-Ray's first frame after CONT may come up to 5 s late. 5 s is the bridge's own limit
+                             for calling a pose LOST (T2_LOST_MS=5000, kw1/t2_xray_kw.sh line 38): an X-Ray that needs
+                             longer than that for its first frame after CONT has stalled on its own, which is no longer
+                             "the stop". Up to 5 s the delay is REPORTED (check 10's CONT -> first snapshot), not judged.
+                             NOT in the prereg: agreed with the ITR2 side (a slow first frame after the unabsorbed jump
+                             fails neither side by itself)
   KILLER         = '0'     : 8 ; id 0 is the actor
 """
 import sys, os, re, bisect, math
@@ -79,7 +91,8 @@ DEAD_AFTER_MS = 2000  # 11
 R_LAG_MS = 2000       # 13
 NEAR_M = 10.0         # 6: judged for other creatures within 10 m of S or M (o-line positions)
 STOP_MARGIN_MS = 100  # 9 (a, b, d), 13, 10 fallback: see BOUNDS AND MARGINS in the docstring
-WALL_ERR_MS = 1000    # 9 (d): os.time() whole seconds
+WALL_ERR_MS = 1000    # 9 (b, d): os.time() whole seconds
+RESUME_MAX_MS = 5000  # 9 (b): X-Ray's first frame after CONT may come up to 5 s late (= the bridge's T2_LOST_MS); reported
 NV4_MS = 2000         # NV (section 1.1): M's first dead pose read >= 2 s after STOP and >= 2 s before CONT
 KILLER = '0'          # 8: id 0 is the actor
 LUA_BRIDGE = 'zz_p1_puppet'   # the bridge script's installed name (t2_xray_kw.sh copies kill4 to zz_p1_puppet.script)
@@ -108,7 +121,10 @@ def read_lines(path):
     # decoding: errors='replace' for EVERY file (never raises). A replaced byte inside a kept record's number makes that
     # record UNPARSED (FAIL); the engine and runner logs are only searched as text. Unreadable files are caught by
     # read_status() before this is called.
-    return open(path, 'rb').read().decode('utf-8', 'replace').replace('\r', '').split('\n')
+    return _BYTES[path].decode('utf-8', 'replace').replace('\r', '').split('\n')   # the bytes read_status() read: no second read
+
+
+_BYTES = {}   # path -> the bytes read once by read_status()
 
 
 def read_status(path):
@@ -118,6 +134,7 @@ def read_status(path):
         with open(path, 'rb') as f: data = f.read()
     except OSError as e:
         return f'unreadable: {e.strerror or e}'
+    _BYTES[path] = data
     return 'empty' if not data.strip() else None
 
 
@@ -288,6 +305,7 @@ def parse_pose(r):
     L = r['lines']; h = L[0].split(',') if L else []
     if not (len(h) == 8 and h[0] == 'seq' and h[1] == r['mseq'] and L[-1] == f'end,{h[1]}'):
         raise ValueError('header/end')
+    if h[7] != '4': raise ValueError(f'pose version {h[7]!r}, not 4')
     p = {'u': int(r['u']), 'seq': int(h[1]), 'pu': int(h[2]), 'state': h[3], 'level': h[4], 'aw': h[5], 'sess': h[6],
          'ver': h[7], 'k': {}}
     for l in L[1:-1]:
@@ -490,22 +508,23 @@ def full(run_dir):
 
     # stall window (W clock)
     stop = cont = None; stall_err = []
-    if stall_lines:
+    if stall_lines:   # exactly the header, then one STOP row, then one CONT row, integer utc; anything else is UNPARSED
         if stall_lines[0] != 'utc_ms,event,seq,track_s': stall_err.append(f'header {stall_lines[0]!r}')
         rows = [l.split(',') for l in stall_lines[1:]]
-        sr = [r for r in rows if len(r) == 4 and r[0].isdigit() and r[1] == 'STOP']
-        cr = [r for r in rows if len(r) == 4 and r[0].isdigit() and r[1] == 'CONT']
-        other = [r for r in rows if r not in sr and r not in cr]
-        if len(sr) != 1 or len(cr) != 1 or other: stall_err.append(f'{len(sr)} STOP, {len(cr)} CONT, {len(other)} other rows')
-        else:
-            stop, cont = int(sr[0][0]), int(cr[0][0])
-            if not (cont > stop and rows.index(sr[0]) < rows.index(cr[0])): stall_err.append(f'CONT {cont} not after STOP {stop}'); stop = cont = None
+        if not (len(rows) == 2 and all(len(r) == 4 and r[0].isdigit() for r in rows) and [r[1] for r in rows] == ['STOP', 'CONT']):
+            stall_err.append(f'rows {[",".join(r) for r in rows][:4]} (exactly one STOP row then one CONT row needed)')
+        elif int(rows[1][0]) <= int(rows[0][0]): stall_err.append(f'CONT {rows[1][0]} not after STOP {rows[0][0]}')
+        if not stall_err: stop, cont = int(rows[0][0]), int(rows[1][0])
+        else: unparsed.append(f'UNPARSED stall.csv: {"; ".join(stall_err)} (no stop window is formed)')
     inside = (lambda u: stop is not None and stop + STOP_MARGIN_MS < u < cont - STOP_MARGIN_MS)
-    # the script's own record of the stop: the RESUMED_GAP line whose last frame before the gap (wall - gap, whole s) is
-    # at or before STOP and whose first frame after (wall) is at or after CONT, each within STOP_MARGIN_MS + whole seconds
+    # the script's own record of the stop: the RESUMED_GAP line whose last frame before the gap (wall - gap, whole s) and
+    # first frame after (wall, whole s) lie near STOP and CONT: start within STOP_MARGIN_MS + WALL_ERR_MS of STOP; end no
+    # earlier than CONT - that, no later than CONT + RESUME_MAX_MS + WALL_ERR_MS (a slow first frame is reported, not judged)
     rg = None
     if stop is not None:
-        cands = [g for g in ev['RG'] if (g['wall'] - g['gap']) * 1000 <= stop + STOP_MARGIN_MS and g['wall'] * 1000 + 999 >= cont - STOP_MARGIN_MS]
+        tol = STOP_MARGIN_MS + WALL_ERR_MS
+        cands = [g for g in ev['RG'] if abs((g['wall'] - g['gap']) * 1000 - stop) <= tol
+                 and cont - tol <= g['wall'] * 1000 <= cont + RESUME_MAX_MS + WALL_ERR_MS]
         rg = cands[0] if cands else None
     # S dead at its second step (prereg C): the first pose that raises S's total after step A already has dead = 1
     s_dead2 = bool(S) and len(steps[S]) > 1 and steps[S][0]['dead'] == '0' and steps[S][1]['dead'] == '1' and steps[S][1]['rise']
@@ -680,7 +699,7 @@ def full(run_dir):
                 dm = min(d) if d else None
                 t = f'{o} {b["o"][o]["sec"]} fell {fl:.4f} (snap {b["seq"]}->{a["seq"]}, around {e["line"]}), {dm if dm is None else round(dm, 1)} m from S/M'
                 (judged if dm is not None and dm <= NEAR_M else rep).append(t)
-        return not judged, (f'{nev} KAPPLY/KDEAD lines with a snapshot on each side ({len(unj)} without: {unj[:2]}); '
+        return not judged and not unj, (f'{nev} KAPPLY/KDEAD lines with a snapshot on each side ({len(unj)} without one, each FAILS: {unj[:2]}); '
                             f'falls > {FALL} within {NEAR_M} m of S or M (judged): {judged[:3]}; farther (reported): {rep[:3]}')
     add(6, f'only S and M change: no other creature within {NEAR_M} m of S or M loses more than {FALL} across a KAPPLY/KDEAD', c6, (PO, SN, ME))
 
@@ -792,7 +811,7 @@ def full(run_dir):
             j = bisect.bisect_right(pseqs, q) - 1
             return pu_by_seq[pseqs[j]] if j >= 0 else None
         first_post = next((s for s in snaps if stop is not None and s['u'] >= cont), None)
-        absent, back, slow, notj, prev, n = [], [], [], 0, None, 0
+        absent, back, slow, ahead, notj, prev, n, minlag = [], [], [], [], 0, None, 0, None
         for s in snaps:
             if s['tx'] < T0: continue
             n += 1
@@ -808,10 +827,14 @@ def full(run_dir):
             pq = pu_of(q); lag = newest['pu'] - pq if pq is not None else None
             lim = R_LAG_MS + ((cont - stop) if s is first_post else 0)
             if lag is None or lag > lim: slow.append(f'{s["seq"]}:{lag}>{lim}')
-        return n > 0 and not absent and not back and not slow, (
+            if lag is not None:
+                minlag = lag if minlag is None else min(minlag, lag)
+                if lag < -EARLY_MS: ahead.append(f'{s["seq"]}:{lag}<-{EARLY_MS}')
+        return n > 0 and not absent and not back and not slow and not ahead, (
             f'{n} snapshots written at or after the first pose taken (P2 script time {T0}); r absent {len(absent)} {absent[:5]}; '
             f'back or other session {back[:3]}; lag over the bound {len(slow)} {slow[:4]} (bound {R_LAG_MS} ms in pose time, the '
-            f'first snapshot after CONT {R_LAG_MS} + stop length); inside the stop, not judged here {notj}')
+            f'first snapshot after CONT {R_LAG_MS} + stop length); r names a pose later than the newest kept pose read by the '
+            f'snapshot\'s read by more than {EARLY_MS} ms {len(ahead)} {ahead[:4]}; smallest lag {minlag} ms; inside the stop, not judged here {notj}')
     add(13, 'the r line: present after the first pose taken, never back, within 2.0 s of the newest kept pose', c13,
         ('stall.csv', PO, SN, ME))
 

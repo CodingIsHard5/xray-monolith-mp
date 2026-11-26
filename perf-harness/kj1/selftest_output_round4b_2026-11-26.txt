@@ -1,0 +1,119 @@
+selftest dir /home/caden/Projects/StalkerGameEngine/wt-render-split/perf-harness/kj1/selftest-runs/20261126-195343-4132209
+mkfix: 110 fixtures in /home/caden/Projects/StalkerGameEngine/wt-render-split/perf-harness/kj1/selftest-runs/20261126-195343-4132209/fixtures
+checker 4b8388505fa5847e  mkfix b1ebf71e42afb3ca  selftest ee74e8d127937231
+good (good): verdict PASS rc 0, failing [], NV fired [] -> OK
+good_slowframe (good): verdict PASS rc 0, failing [], NV fired [] -> OK
+good_crlf (good): verdict PASS rc 0, failing [], NV fired [] -> OK
+m01_fatal (mutant): verdict FAIL rc 1, failing [1], NV fired [] -> OK
+m01_lua (mutant): verdict FAIL rc 1, failing [1], NV fired [] -> OK
+m01_rc (mutant): verdict FAIL rc 1, failing [1], NV fired [] -> OK
+m01_restart (mutant): verdict FAIL rc 1, failing [1], NV fired [] -> OK
+m01_boot1 (mutant): verdict FAIL rc 1, failing [1], NV fired [] -> OK
+m02_after (mutant): verdict FAIL rc 1, failing [2], NV fired [] -> OK
+m02_diff (mutant): verdict FAIL rc 1, failing [2], NV fired [] -> OK
+m03_second (mutant): verdict FAIL rc 1, failing [3], NV fired [] -> OK
+m04_fall_with_k (mutant): verdict FAIL rc 1, failing [4], NV fired [] -> OK
+m05_nototal (mutant): verdict FAIL rc 1, failing [5], NV fired [] -> OK
+m05_deadsecond (mutant): verdict FAIL rc 1, failing [5], NV fired [] -> OK
+m05_noheal (mutant): verdict FAIL rc 1, failing [5], NV fired [] -> OK
+m05_slowheal (mutant): verdict FAIL rc 1, failing [5], NV fired [] -> OK
+m05_lowafter (mutant): verdict FAIL rc 1, failing [5], NV fired [] -> OK
+m05_clamped (mutant): verdict FAIL rc 1, failing [5], NV fired [] -> OK
+m06_near_drop (mutant): verdict FAIL rc 1, failing [6], NV fired [] -> OK
+m07_late (mutant): verdict FAIL rc 1, failing [7], NV fired [] -> OK
+m07_two (mutant): verdict FAIL rc 1, failing [7], NV fired [] -> OK
+m08_killer (mutant): verdict FAIL rc 1, failing [8], NV fired [] -> OK
+m09_leak (mutant): verdict FAIL rc 1, failing [9], NV fired [] -> OK
+m09_norg (mutant): verdict FAIL rc 1, failing [9], NV fired [] -> OK
+m09_snapinside (mutant): verdict FAIL rc 1, failing [9], NV fired [] -> OK
+m09_scripttime (mutant): verdict FAIL rc 1, failing [9], NV fired [] -> OK
+m09_eventinside (mutant): verdict FAIL rc 1, failing [9], NV fired [] -> OK
+m09_10_kill_in_stop (mutant): verdict FAIL rc 1, failing [9, 10], NV fired [] -> OK
+m09_noanchor (mutant): verdict FAIL rc 1, failing [9], NV fired [] -> OK
+m09_longgap (mutant): verdict FAIL rc 1, failing [9], NV fired [] -> OK
+m09_slowresume (mutant): verdict FAIL rc 1, failing [9], NV fired [] -> OK
+m13_ahead (mutant): verdict FAIL rc 1, failing [13], NV fired [] -> OK
+m06_noafter (mutant): verdict FAIL rc 1, failing [6], NV fired [] -> OK
+m10_late (mutant): verdict FAIL rc 1, failing [10], NV fired [] -> OK
+m10_kdead_before (mutant): verdict FAIL rc 1, failing [10], NV fired [] -> OK
+m10_late24 (mutant): verdict FAIL rc 1, failing [10], NV fired [] -> OK
+m10_two (mutant): verdict FAIL rc 1, failing [10], NV fired [] -> OK
+m11_alive (mutant): verdict FAIL rc 1, failing [11], NV fired [] -> OK
+m12_actor (mutant): verdict FAIL rc 1, failing [12], NV fired [] -> OK
+m13_back (mutant): verdict FAIL rc 1, failing [13], NV fired [] -> OK
+m13_absent (mutant): verdict FAIL rc 1, failing [13], NV fired [] -> OK
+m13_lag (mutant): verdict FAIL rc 1, failing [13], NV fired [] -> OK
+m14_final_nor (mutant): verdict FAIL rc 1, failing [13, 14], NV fired [], failing 14 keys ['last_seq'] -> OK
+good_mdeath_sametotal (good): verdict PASS rc 0, failing [], NV fired [] -> OK
+nv6_mdeath_unlisted (nv): verdict NO VERDICT rc 3, failing [], NV fired ['NV6'] -> OK
+c14_last_seq (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['last_seq'] -> OK
+c14_torn (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['torn'] -> OK
+c14_holds (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['holds'] -> OK
+c14_paused (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['paused'] -> OK
+c14_near (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['near'] -> OK
+c14_guards (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['guards'] -> OK
+c14_lost (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['lost'] -> OK
+c14_epochs (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['epochs'] -> OK
+c14_khits (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['khits'] -> OK
+c14_khits_minus (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['khits'] -> OK
+c14_kdead_online (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['kdead_online'] -> OK
+c14_kdead_offline (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['kdead_offline'] -> OK
+c14_kowed (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['kowed'] -> OK
+c14_kstale (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['kstale'] -> OK
+c14_kback (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['kback'] -> OK
+c14_krefused (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['krefused'] -> OK
+c14_kclamped (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['kclamped'] -> OK
+c14_kver (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['kver'] -> OK
+c14_kdead_fail (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['kdead_fail'] -> OK
+c14_ktabfail (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['ktabfail'] -> OK
+c14_unknown_kfoo (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['kfoo'] -> OK
+c14_missing_ktabfail (counter): verdict FAIL rc 1, failing [14], NV fired [], failing 14 keys ['ktabfail'] -> OK
+nv1_ids0 (nv): verdict NO VERDICT rc 3, failing [2, 4, 5, 6, 7, 8, 10, 11, 14], NV fired ['NV1'], failing 14 keys ['kdead_online'] -> OK
+nv1_ids1 (nv): verdict NO VERDICT rc 3, failing [2, 4, 5, 6, 7, 8, 10, 11, 14], NV fired ['NV1'], failing 14 keys ['kdead_online'] -> OK
+nv1_ids3 (nv): verdict NO VERDICT rc 3, failing [2, 4, 5, 6, 7, 8, 10, 11], NV fired ['NV1'] -> OK
+nv1_twostalkers (nv): verdict NO VERDICT rc 3, failing [2, 4, 5, 6, 7, 8, 10, 11], NV fired ['NV1'] -> OK
+nv1_kindunknown (nv): verdict NO VERDICT rc 3, failing [2, 4, 5, 6, 7, 8, 10, 11], NV fired ['NV1'] -> OK
+nv2_hurt_before_A (nv): verdict NO VERDICT rc 3, failing [], NV fired ['NV2', 'NV3'] -> OK
+nv2_killed_before_step (nv): verdict NO VERDICT rc 3, failing [4, 8, 10, 14], NV fired ['NV2', 'NV3', 'NV4'], failing 14 keys ['kdead_online'] -> OK
+nv3_fight (nv): verdict NO VERDICT rc 3, failing [], NV fired ['NV3'] -> OK
+nv4_early (nv): verdict NO VERDICT rc 3, failing [], NV fired ['NV4'] -> OK
+nv4_late (nv): verdict NO VERDICT rc 3, failing [], NV fired ['NV4'] -> OK
+nv6_unlisted (nv): verdict NO VERDICT rc 3, failing [5], NV fired ['NV6'] -> OK
+nv6_with7 (nv): verdict NO VERDICT rc 3, failing [5, 7], NV fired ['NV6'] -> OK
+nvf_nv4_12 (nvfail): verdict FAIL rc 1, failing [12], NV fired ['NV4'] -> OK
+nvf_nv3_13 (nvfail): verdict FAIL rc 1, failing [13], NV fired ['NV3'] -> OK
+miss_t2_xray.log (missing): verdict FAIL rc 1, failing [1], NV fired [] -> OK
+empty_t2_xray.log (empty): verdict FAIL rc 1, failing [1], NV fired [] -> OK
+unread_t2_xray.log (unreadable): verdict FAIL rc 1, failing [1], NV fired [] -> OK
+miss_restarts.csv (missing): verdict FAIL rc 1, failing [1], NV fired [] -> OK
+empty_restarts.csv (empty): verdict FAIL rc 1, failing [1], NV fired [] -> OK
+unread_restarts.csv (unreadable): verdict FAIL rc 1, failing [1], NV fired [] -> OK
+miss_stall.csv (missing): verdict FAIL rc 1, failing [9, 10, 13], NV fired [] -> OK
+empty_stall.csv (empty): verdict FAIL rc 1, failing [9, 10, 13], NV fired [] -> OK
+unread_stall.csv (unreadable): verdict FAIL rc 1, failing [9, 10, 13], NV fired [] -> OK
+miss_boot0_meta_t2.csv (missing): verdict FAIL rc 1, failing [2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14], NV fired ['NV3'] -> OK
+empty_boot0_meta_t2.csv (empty): verdict FAIL rc 1, failing [2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14], NV fired ['NV3'] -> OK
+unread_boot0_meta_t2.csv (unreadable): verdict FAIL rc 1, failing [2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14], NV fired ['NV3'] -> OK
+miss_boot0_tb_xray.log (missing): verdict FAIL rc 1, failing [1], NV fired [] -> OK
+empty_boot0_tb_xray.log (empty): verdict FAIL rc 1, failing [1], NV fired [] -> OK
+unread_boot0_tb_xray.log (unreadable): verdict FAIL rc 1, failing [1], NV fired [] -> OK
+miss_boot0_watch_snaps_all.txt (missing): verdict FAIL rc 1, failing [2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], NV fired ['NV1'] -> OK
+empty_boot0_watch_snaps_all.txt (empty): verdict FAIL rc 1, failing [2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], NV fired ['NV1'] -> OK
+unread_boot0_watch_snaps_all.txt (unreadable): verdict FAIL rc 1, failing [2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], NV fired ['NV1'] -> OK
+miss_boot0_watch_poses_all.txt (missing): verdict FAIL rc 1, failing [2, 3, 4, 5, 6, 7, 8, 10, 11, 13, 14], NV fired ['NV1'] -> OK
+empty_boot0_watch_poses_all.txt (empty): verdict FAIL rc 1, failing [2, 3, 4, 5, 6, 7, 8, 10, 11, 13, 14], NV fired ['NV1'] -> OK
+unread_boot0_watch_poses_all.txt (unreadable): verdict FAIL rc 1, failing [2, 3, 4, 5, 6, 7, 8, 10, 11, 13, 14], NV fired ['NV1'] -> OK
+bad_snaprecord (unparsed): verdict FAIL rc 1, failing [], NV fired [] -> OK
+bad_poserecord (unparsed): verdict FAIL rc 1, failing [], NV fired [] -> OK
+bad_kline (unparsed): verdict FAIL rc 1, failing [2, 4, 5], NV fired ['NV3'] -> OK
+bad_v3pose (unparsed): verdict FAIL rc 1, failing [], NV fired [] -> OK
+bad_v5pose (unparsed): verdict FAIL rc 1, failing [], NV fired [] -> OK
+bad_stallheader (unparsed): verdict FAIL rc 1, failing [9, 10], NV fired [] -> OK
+bad_nan_health (unparsed): verdict FAIL rc 1, failing [], NV fired [] -> OK
+bad_utf8_health (unparsed): verdict FAIL rc 1, failing [], NV fired [] -> OK
+refuse_overwrite: rc 2 -> OK
+co_good (counters-only): rc 0 -> OK
+co_badposes (counters-only): rc 1 -> OK
+co_badsnaps (counters-only): rc 1 -> OK
+co_final_nor (counters-only): rc 1 -> OK
+SELFTEST: PASS (110 folders: good 4/4; mutant 40/40; nv 13/13; counter 22/22; nvfail 2/2; missing 7/7; empty 7/7; unreadable 7/7; unparsed 8/8; counters-only 4/4; refuse-overwrite ok; reports in /home/caden/Projects/StalkerGameEngine/wt-render-split/perf-harness/kj1/selftest-runs/20261126-195343-4132209/reports)

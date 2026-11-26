@@ -1,6 +1,6 @@
-# Kill channel, joint run "kj1", X side: REGISTRATION TEXT, NOT YET REGISTERED (pins in section 9 are open)
+# Kill channel, joint run "kj1", X side: REGISTERED 2026-11-26, before any run
 
-It becomes REGISTERED when section 9 is filled and committed. No boot before the Overseer has reviewed this text and
+No boot before the Overseer has reviewed this text and
 itrzone's (their amendment 137) and given the GO. History of how it got here: the DRAFT file of the same name
 (drafts 1 to 7b); where the two differ, this text counts.
 
@@ -68,14 +68,14 @@ Every expected total comes from the kept poses; no check names 0.6, 0.5 or 0.3.
 | 3 | no second effect: every KAPPLY belongs to a NEW total in the kept poses | 0 others | the rule |
 | 4 | healing is left alone: between S's two hits, and between M's hit and its death step, no KAPPLY for the id and no fall of its snapshot health over the bound with a K line of mine between the two snapshots | 0.02 | one snapshot step is 100 ms; healing in it is 0.001, rounding 0.0001; my smallest hit is 0.3. A fall beyond it with no K line of mine is X-Ray's own world: NV3 |
 | 5 | S healed, and a total above 1.000 is applied: S's health in the last snapshot before its second KAPPLY is above its health in the first snapshot after the first by at least the bound; the second KAPPLY's difference = the pose difference (so it was not cut); S is alive after it above 0.02 | 0.15; 0.02 | kw1's rate gives 0.40 in 40 s; 0.15 is under half of it (a slower stalker still passes) and far over check 4's 0.02 (no healing cannot pass). 0.02 is above the 0.01 stop: the stop was not what kept S alive. S dead at the second hit, or no live total above 1.000: FAIL by name; S's later steps are then not judged, M's are |
-| 6 | only S and M change: no other creature within 10 m of S or M loses more than the bound across a KAPPLY or KDEAD (the snapshot before and the one after) | 0.02 | as 4. Within 10 m is judged because a hit of mine leaking to a neighbour would show there; farther creatures are reported (X-Ray's own fights) |
+| 6 | only S and M change: no other creature within 10 m of S or M loses more than the bound across a KAPPLY or KDEAD (the snapshot before and the one after; an event without a snapshot on each side FAILS by name) | 0.02 | as 4. Within 10 m is judged because a hit of mine leaking to a neighbour would show there; farther creatures are reported (X-Ray's own fights) |
 | 7 | S's death: one `KDEAD,…,online`; its `dead` line is read within the bound of the watcher's first read of the pose with dead = 1 | -0.05 to 2.0 s | chain: pose 0.05 s + one frame + snapshot 0.10 s + watcher 0.002 s = about 0.15 s plus a frame; 2.0 s allows a stall of over 1.5 s. -0.05: the watcher reads the snapshot before the pose in each 2 ms poll, so the script can have taken the pose first |
 | 8 | the kills are the actor's: one KWHO with killer 0 for S and for M | exact | the death callback's killer |
-| 9 | the stop held: no snapshot read inside the stop; the script's own RESUMED_GAP line matches it; no KAPPLY or KDEAD with a script time inside the gap | edges +/- 0.1 s | STOP is stamped just before the signal and CONT just after; 0.1 s is far over a process start and far under 20 s. The script-time clause uses the script's own last frame before and first frame after the gap, exact. A second, wall-clock form of it has an error of 0 to 1 s (whole seconds in the script's lines) and counts an event only if it lies wholly inside |
+| 9 | the stop held: no snapshot read inside the stop; the script's own RESUMED_GAP line matches it (its last frame before the gap within 1.1 s of STOP; its first frame after not before CONT - 1.1 s and not later than CONT + 6 s); no KAPPLY or KDEAD with a script time inside the gap | edges +/- 0.1 s; 1.1 s; 5 s + 1 s | STOP is stamped just before the signal and CONT just after; 0.1 s is far over a process start and far under 20 s. The script-time clause uses the script's own last frame before and first frame after the gap, exact. A second, wall-clock form of it has an error of 0 to 1 s (whole seconds in the script's lines) and counts an event only if it lies wholly inside. 1.1 s = the 0.1 s edge plus the 1 s of whole seconds. 5 s for the first frame after CONT: the bridge's own limit for calling a pose LOST (T2_LOST_MS); an X-Ray that needs longer has stalled on its own and that is no longer "the stop". Up to 5 s the delay is reported, not judged |
 | 10 | M's death after the stop: one `KDEAD,…,online` for M at or after the first frame after the gap; M's `dead` line in no snapshot read before CONT; and read within the bound of the first kept snapshot read at or after CONT | 2.0 s | after CONT the newest pose is on disk, so it is one script read and one snapshot write; 2.0 s as in 7. Counted from the first snapshot, not from CONT: a slow first frame after the 20 s jump is REPORTED (CONT to first snapshot) and fails neither side by itself (agreed with itrzone, whose J6 counts the same way) |
 | 11 | dead in X-Ray: from the bound after each `dead` line the id is alive 0 or not listed, to the end | 2.0 s | the kill call's death is handled on a later frame; kw1 showed alive 0 in the next snapshot |
 | 12 | the actor is unhurt: actor health in every snapshot = the first | exact | standing rule |
-| 13 | the `r` line: in every snapshot after the first pose was taken; never back; within the bound of the newest kept pose (pose header time); the first snapshot at or after CONT is allowed the stop's length more | 2.0 s | as 7; inside the stop there is no snapshot |
+| 13 | the `r` line: in every snapshot after the first pose was taken; never back; within the bound of the newest kept pose (pose header time); the first snapshot at or after CONT is allowed the stop's length more; an `r` line more than 0.05 s AHEAD of the poses the watcher had read fails too | 2.0 s; -0.05 s | as 7; inside the stop there is no snapshot |
 | 14 | counters: EVERY key of the last T2SUM line is judged against one table; a key without an expectation, or an expected key missing, FAILS by name. torn 0, lost 0, epochs 0, paused false, kdead_online 2, kdead_offline 0, kdead_fail 0, krefused 0, kstale 0, kback 0, kclamped 0, kver 0, kowed 0, ktabfail 0; khits = the number of (id, total) steps with a positive difference in the kept poses (5 by the plan: S 0.6, 1.1, death; M 0.3, death); last_seq between the last kept snapshot's `r` seq and the highest kept pose seq; holds, near and guards equal to the count of their own meta lines | exact | follows from the steps. holds, near and guards are not kill-channel outcomes: they are judged only for agreeing with their own log lines, so that no key is skipped |
 The `dead` line for an online death means "the kill call was made" (the reader sets it in that step; the engine
 handles the death later in the frame). That it really died is check 11's.
@@ -108,7 +108,7 @@ PASS 25 %, NO VERDICT 30 %, FAIL 45 %. Named risks:
   into the wounded state and heals differently or not at all (check 5: dead at the second hit);
 - M, hurt for 0.3, runs off and goes offline in the 85 s before its kill (NV6);
 - the 20 s clock jump after my stop: every timed script fires at once; a Lua error (check 1) or a very slow first
-  frame (reported); the first pose read after CONT is torn, which the reader counts as LOST (check 14);
+  frame (reported up to 5 s, a FAIL of check 9 beyond); the first pose read after CONT is torn, which the reader counts as LOST (check 14);
 - a GAMMA script names the weapon or nobody as the killer (check 8).
 
 ## 8. Process
@@ -118,24 +118,49 @@ gives none; a fixed checker's read is POST-HOC DESCRIPTIVE; a verdict that count
 re-registered checker (the Overseer's rule, kw1). Stop on a crash, timeout or failed preflight; no second boot
 without the Overseer.
 
-## 9. Pins (sha256). OPEN until the last review is in; then filled and the title changed to REGISTERED.
+## 9. Pins (sha256)
 | file | sha256 |
 |---|---|
-| tools/t2_xray_kj.sh (runner) | OPEN |
-| tools/t1_watch_keep.py (watcher) | OPEN |
-| tools/t3_kj1_check.py (checker) | OPEN |
-| kj1/t3_kj1_mkfix.py, kj1/t3_kj1_selftest.sh (fixtures, selftest) | OPEN |
-| tools/lib_engine_pids.sh | cb183b7b… (full at registration) |
-| tools/tb_run.sh | 1b8d103f… |
-| tools/run_noguard.sh | 92729abc… |
-| harness/zz_eperf_dump.script | 2b79a817… |
-| out/user.ltx.orig | 3efd38ee… |
+| tools/t2_xray_kj.sh (runner; = the kw1 runner plus the keep watcher and T2_STALL_PLAY) | 870d854ffcf80f24cc0e3dfcc74247743fcd4c96a1d90cb9bbc9fa4050f60af3 |
+| tools/t1_watch_keep.py (watcher) | 9df9c8e4eb2a34ec5b9059c0b26569b7d9e2e2886cc847c9630a8451e8240393 |
+| tools/t3_kj1_check.py (checker; copy `kj1/t3_kj1_check.py`) | 4b8388505fa5847e5b4de27d70904027456843b0310979ef5b1a7944b09027ee |
+| kj1/t3_kj1_mkfix.py (fixture maker) | b1ebf71e42afb3ca5debcaa4713280566a7e1928ce630194b39bf7f7d1e0c803 |
+| kj1/t3_kj1_selftest.sh | ee74e8d12793723199c1d52f75328b53d9c56c90b0c332e285e730fe67bd3602 |
+| tools/lib_engine_pids.sh | cb183b7b894eab3edb200e2c03a3a96f2e935cd2d1e1f402f48be7aad238ed6e |
+| tools/tb_run.sh | 1b8d103f2208befc554c48cf0b628830e67e0223cbe5c99ab1fcc34205363953 |
+| tools/run_noguard.sh | 92729abc420784053cee4b1b1832f5d112f74979a4760e2173d45578358455d5 |
+| harness/zz_eperf_dump.script | 2b79a817a08a1e7ff4e29007f76677dba698a2a5945374331dcc2ae2de874b45 |
+| out/user.ltx.orig | 3efd38eecbca504001cf03bd4c60bc6e837a3c3284e8517979a1bd9e1526de78 |
 | harness/zz_p1_puppet_kill4.script (the registered reader, unchanged) | f19b28c094dabaab99e64b71716f696bdee200d46d37aa366e32b7eba5ae33af |
 | run/bin/Stance14.exe | b4ce9c772ae5fa4bf5ddb955f2dfcb943627d6c2b2e4ce66e21eac1168646cbe |
 | run/appdata/savedgames/cordon1.scop | 6dea752bc652a45c748e1438e3bc8ffd2d8d89f24730177c792328aeb5d13f3e |
-Tests on these bytes, to be restated with the final hashes: checker selftest (104 folders at the last count: good,
-one mutant or more per check, one folder per counter off by one, an unknown and a missing counter, every NO VERDICT
-rule, NO VERDICT with an unrelated failure, every required file missing, empty and unreadable, unparsable records);
-the reader's offline tests with the check for a total above 1.000 (34 checks, 40 mutants).
-Not tested by the selftest: bounds exactly at their edges; several T2SUM lines; a session change; and no fixture's
-kept files come from the engine.
+| kj1/kill4h_stub.lua, kj1/kill4h_test.sh (reader's offline tests) | 15e43dab3ca6d26721928cfb79f4117bc0102a37415977f458e26007fa100226, 3909030dc94786a3159e62d9f83d0a71f9c7ea25af205f2f87d3db0d21048b43 |
+The boot script is itrzone's and checks these hashes before the claim. I score from the X out dir it sends me.
+
+Tests run by me on these bytes (2026-11-26):
+- Checker selftest: PASS, 110 folders (`kj1/selftest_output_round4b_2026-11-26.txt`): 4 good; 40 mutants, each failing
+  its own check and at least one for every check 1 to 14; 22 counter folders (every T2SUM key off by one fails
+  check 14 naming it; an unknown key `kfoo` and a removed key fail by name: the tests that fail on purpose, the
+  Overseer's point); 13 NO VERDICT folders; 2 where a NO VERDICT rule fires and an unrelated check fails (verdict
+  FAIL); every required file missing, empty and unreadable (7 each); 8 unparsable records; 4 counters-only cases.
+  The selftest itself fails if a deliberately bad folder passes.
+- The counter table on kw1's REAL meta file: reads the bytes without fault; `ktabfail` is judged; fails only on
+  krefused = 1, which kw1 had by design (`kj1/kw1_counters_only_v4_2026-11-26.txt`).
+- The reader's offline tests with the check for a total above 1.000: 34 checks pass, 40 mutants caught.
+- The runner copy: syntax check only. The watcher: tried on made-up files only. Neither has run with the engine.
+Not tested: bounds exactly at their edges; several T2SUM lines; a session change; and NO fixture's kept snapshots,
+poses or stall file come from the engine (the fixture maker writes them; each fixture's README says which lines are
+real kw1 bytes).
+
+CodeRabbit, two passes (2026-11-26), 28 findings. 16 taken into the checker and selftest, each with a fixture that
+fails without the fix. Among them: a death at an unchanged total was dropped; non-finite numbers were accepted; a pose of
+another version with 8 fields was accepted; a malformed stall file could still give a stop window; check 6 passed
+on missing snapshots; unreadable files gave a traceback. NOT changed, with the reason:
+- runner, code that ran arm D d0 to d2 unchanged (script install, claim check, cancel path, state reset at a
+  boot, the planned kill, which is off here): I keep the runner's diff to the stop trigger and the watcher name;
+- runner, the result of the STOP and CONT signals is not checked: a stop that did not hold fails check 9 on its outcome;
+- watcher, one time stamp for the snapshot and pose read of one 2 ms poll: millisecond scale against 2 s bounds,
+  and check 7's -0.05 s covers the order;
+- watcher, no drain of the last pose at the end: the watcher outlives the engine;
+- check 13's stop-length allowance: the watcher is never stopped, so a snapshot written before STOP is read before CONT;
+- fixture maker's fixed path to kw1's folder; a selftest argument for it.
