@@ -64,4 +64,29 @@ registered first; nothing is re-scored.
 - This is the one retry of d1 under section 6. It needs the Overseer's word (asked by itrzone).
 
 ## 7. Result
-(none yet)
+### 7.1 d1, the retry (2026-11-26, X out dir ITRZone out/runs/20261126-083206-t2d1-xray; scored once, checker b113d37d): FAIL, 9 of 10 conditions
+The one failing condition is the registered bound on the time without a pose, inside check 4:
+| check | result |
+|---|---|
+| 1 no crash, restart, Lua error, FATAL, damage line; runner rc 0 | PASS |
+| V health and stance read-back | PASS (11082 poses applied, 0 differ) |
+| 2 one LOST 5.0 to 5.6 s after the last pose | PASS (5004 ms) |
+| 3 nothing applied while lost | PASS (0) |
+| 4 one EPOCH, then one FOUND, gap inside 150 to 330 s | **FAIL: gap 129.8 s.** EPOCH and FOUND are there: one each, old session 1795700082172, new 1795700340489, taken on the new session's seq 1 |
+| 5 poses applied before and after | PASS (2316 before, 8766 after; no guard) |
+| 6 runner's own record | PASS |
+| 7 X-Ray never stopped | PASS |
+| 8 last summary lost=1, epochs=1 | PASS |
+| 9 first pose after the return within 5 m of the spot | PASS (0.0 m) |
+What it shows: against a real ITR2 that was stopped hard and came back as a new session, X-Ray lost the pose after
+5.0 s, ran on alone for 130 s applying nothing, took the new session on its first pose, and followed it again from
+the track's start for the rest of the run. No crash.
+Why it is a FAIL all the same: the bound 150 to 330 s came from itrzone's prediction of how long ITR2 needs to come
+back (200 s); it came back in 130 s. The bound was registered, the run is scored against it, and I do not move it
+after the fact. itrzone's side fails the same single condition (their D3, 131.9 s).
+My guess was PASS 60 %: wrong as scored. The risks I named (the long gap, a real ITR2's first poses, the spot check
+on real data) did not bite; the one that did was a bound I took over from itrzone's text without asking what a
+too-fast return should mean. A fast return is the better outcome for a player, not the worse.
+Stop gate: my infrastructure checks (check 1; the script loaded, T2SUM lines present) PASS. d2 does not run; the
+Overseer decides what follows (itrzone's stop gate names their D3 as an infrastructure check).
+Output: `armD-xray/d1_retry_xscore.txt`.

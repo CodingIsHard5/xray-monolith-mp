@@ -1,0 +1,20 @@
+1 rc 0, engine log present, no restart, no Lua error, no FATAL, no DMG line: PASS (rc0 True, engine log lines 11254, restart rows 0, lua errors 0, fatal 0, DMG lines 0)
+V 1 VITALS line(s), clean, no refill; stance, state and height on every P2: PASS (1 VITALS lines, clean and counted True, REFILL 0; P2 11082: stance differ 0, unread 0, height off 0)
+2 one LOST, age 5000..5600 ms, state play, policy keep: PASS (['LOST,121.00,155239,2569,5004,play,keep'])
+3 nothing applied between LOST and FOUND: PASS (lines between: 0)
+4 one EPOCH (new session, new seq <= 200), then one FOUND; runner gap 150..330 s: FAIL (EPOCH ['EPOCH,245.89,280138,1795700082172,1795700340489,2569,1']; FOUND ['FOUND,245.89,280138,1,129903']; gap 129.804 s)
+5 P2 >= 400 before LOST, >= 600 after FOUND; no GUARD; HOLD <= 15: PASS (P2 2316 before, 8766 after; GUARD 0, HOLD 9)
+6 runner: one lost.csv row with policy keep; one "lost end" line: PASS (lost.csv [['1795700216429', '5146', 'play', 'keep']]; "lost end" lines 1)
+7 no STOP row, no ABSORB_ARM: PASS (STOP 0, ABSORB_ARM 0)
+8 last T2SUM: lost=1, epochs=1: PASS ({'last_seq': '8789', 'torn': '0', 'holds': '9', 'paused': 'false', 'near': '674', 'guards': '0', 'lost': '1', 'epochs': '1'})
+9 first P2 after FOUND within 5 m of the spot: PASS (0.0 m)
+reported: LOST,121.00,155239,2569,5004,play,keep
+reported: EPOCH,245.89,280138,1795700082172,1795700340489,2569,1
+reported: FOUND,245.89,280138,1,129903
+reported: T2SUM,last_seq=8789,torn=0,holds=9,paused=false,near=674,guards=0,lost=1,epochs=1
+reported: VITALS,min_health=1.000,max_radiation=0.0000,max_bleeding=0.0000,unread=0
+reported: runner 2026-11-26 13:36:56.430Z LOST: no new pose for 5146 ms (limit 5000; last state play, policy keep)
+reported: runner 2026-11-26 13:39:01.088Z lost end: new pose (state play) after 124658 ms
+reported: runner 2026-11-26 13:46:31.019Z boot 0 end: tb_run rc=0 reason=engine run ended
+reported: runner 2026-11-26 13:46:31.020Z end: ran to the end; boots 1; unplanned restarts 0; stall no; planned kill no; rc=0
+R3 arm D (play, keep) X SIDE: FAIL
