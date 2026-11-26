@@ -220,6 +220,14 @@ CObject::CObject() :
     BulletCheckVisual = false;
 #endif
 
+	// S2 stage 4b: no capture, nothing handed to the renderer yet (the matrices are not read before the first capture)
+	sim_render.ptr = nullptr;
+	sim_render.tick = 0;
+	sim_render.epoch = 0;
+	sim_render.frame = 0;
+	sim_render.frame_counted = 0;
+	sim_render.have = false;
+
 #ifdef DEBUG
     dbg_update_shedule = u32(-1) / 2;
     dbg_update_cl = u32(-1) / 2;
@@ -451,6 +459,33 @@ CObject::SavedPosition CObject::ps_Element(u32 ID) const
 void CObject::renderable_Render(IDSGraphManager* DM)
 {
 	MakeMeCrow();
+}
+
+// S2 stage 4b: one capture per updated object per gated tick (CObjectList::SingleUpdate, after UpdateCL). Two matrix
+// copies and a few compares: the conversion to rotation + position is left to the draw, which only visible objects reach.
+// Known limit: a transform written after this point in the same tick (by the scheduler on the game thread, or a script)
+// is not in this capture; the next tick's capture takes it, so such a move is drawn up to one tick late.
+static const float sim_render_snap_dist = 5.f; // m between two tick positions: more is a teleport, no lerp across it
+
+void CObject::sim_render_capture()
+{
+	PROF_EVENT("sim_render_capture");
+	SimRenderState& s = sim_render;
+	const Fmatrix& x = renderable.xform;
+	if (s.have && s.epoch == g_sim_view_epoch && s.tick == g_sim_view_tick)
+	{
+		s.cur.set(x); // a second UpdateCL in the same tick (not expected): the newest state wins, the history stays
+		return;
+	}
+	if (!s.have || s.epoch != g_sim_view_epoch || s.tick + 1 != g_sim_view_tick ||
+		s.cur.c.distance_to_sqr(x.c) > sim_render_snap_dist * sim_render_snap_dist)
+		s.prev.set(x); // first capture, after a resync, not updated in the tick before, or a teleport: no history
+	else
+		s.prev.set(s.cur);
+	s.cur.set(x);
+	s.tick = g_sim_view_tick;
+	s.epoch = g_sim_view_epoch;
+	s.have = true;
 }
 
 CObject* CObject::H_SetParent(CObject* new_parent, bool just_before_destroy)

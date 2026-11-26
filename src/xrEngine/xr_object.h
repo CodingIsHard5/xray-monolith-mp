@@ -132,6 +132,25 @@ public:
 	u32 dwFrame_UpdateCL;
 	u32 dwFrame_AsCrow;
 
+	// S2 stage 4b (sim_tick gated mode only, see g_sim_render_lerp in device.h): XFORM() as UpdateCL left it in the two
+	// newest ticks (CObjectList::SingleUpdate captures it), and the matrix the renderer is handed in place of XFORM()
+	// on a gated frame (CGameObject::sim_render_world). Written and read on the main thread only; nothing here is read
+	// on a stock frame, and XFORM() itself is never written for rendering.
+	struct SimRenderState
+	{
+		Fmatrix prev; // XFORM() in tick `tick - 1`; == cur when there is no history (first capture, resync, gap, jump)
+		Fmatrix cur; // XFORM() in tick `tick`
+		Fmatrix draw; // the matrix drawn in frame `frame` when ptr == &draw
+		Fmatrix* ptr; // what renderable_Render hands to the renderer in frame `frame` (&draw or &XFORM()); 0 = none yet
+		u32 tick; // g_sim_view_tick of cur
+		u32 epoch; // g_sim_view_epoch of cur
+		u32 frame; // Device.dwFrame of ptr
+		u32 frame_counted; // Device.dwFrame of the last "sim_render_lerp" profiler count
+		bool have; // cur holds a capture
+	};
+	SimRenderState sim_render;
+	void sim_render_capture(); // in the tick, after UpdateCL; only while g_sim_view_gate is TRUE
+
 	// Crow-MODE
 	// if (object_is_visible)
 	// if (object_is_near)

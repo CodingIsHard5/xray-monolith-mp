@@ -432,6 +432,10 @@ static u32 s_st_tick_real_ms = 0;    // real time (TimerGlobal) at the start of 
 ENGINE_API BOOL g_sim_view_gate = FALSE;
 ENGINE_API u32 g_sim_view_epoch = 0;
 ENGINE_API sim_view_present_fn g_sim_view_present = nullptr;
+// S2 stage 4b: objects drawn between two ticks (declared in device.h)
+ENGINE_API u32 g_sim_view_tick = 0;
+ENGINE_API BOOL g_sim_render_lerp = FALSE;
+ENGINE_API float g_sim_render_alpha = 1.f;
 static u64 s_sv_last_ticks = 0;      // TimerGlobal ticks at the previous presentation step
 static u32 s_sv_last_epoch = 0;      // g_sim_view_epoch at the previous presentation step
 static float s_sv_dt = 0.f;          // smoothed real frame time handed to the presentation step
@@ -521,6 +525,7 @@ static void sim_tick_run(int n)
 			Device.seqParallelBeforRender.clear();
 		}
 		s_st_tick_real_ms = Device.GetTimerGlobal()->GetElapsed_ms();
+		g_sim_view_tick++; // S2 stage 4b: the number of this tick, read by the object captures inside it
 		s_sim_tick_now = true;
 		Device.FrameMove();
 		s_sim_tick_now = false;
@@ -565,6 +570,10 @@ static void sim_view_present(int n)
 	const double now_ms = double(now) * 1000.0 / double(CPU::qpc_freq);
 	float alpha = float((now_ms + s_sim_off - s_sim_ms) / (step * 1000.0));
 	clamp(alpha, 0.f, 1.f);
+	// S2 stage 4b: the same alpha for the objects drawn in this frame's render, with or without an actor hook (not
+	// reached when paused: that frame renders stock, as the paused frames after it do)
+	g_sim_render_alpha = alpha;
+	g_sim_render_lerp = TRUE;
 
 	const float saved_f = Device.fTimeDelta;
 	const u32 saved_dw = Device.dwTimeDelta;
@@ -687,7 +696,9 @@ void CRenderDevice::on_idle()
 	else
 	{
 		// S2 stage 4a, the view every frame: only on this branch (sim_n >= 0) is g_sim_view_gate TRUE, and only
-		// until the presentation step is done; with sim_n < 0 nothing below runs and the actor does what it did
+		// until the presentation step is done; with sim_n < 0 nothing below runs and the actor does what it did.
+		// S2 stage 4b: g_sim_render_lerp is FALSE here (cleared at the end of every frame) and only sim_view_present
+		// sets it, so a stock frame (sim_n < 0) renders every object at &XFORM()
 		g_sim_view_gate = TRUE;
 		sim_tick_run(sim_n);
 		sim_view_present(sim_n);
@@ -856,6 +867,7 @@ void CRenderDevice::on_idle()
 	Device.isRendering = false;
 
 	secondary_tasks.wait();
+	g_sim_render_lerp = FALSE; // S2 stage 4b: set by sim_view_present for this frame's render only; cleared after the join
 #ifdef XRCORE_PROFILER_AGG
 	xr_det_set_role(1); // render phase over: anything the main thread does outside it (level load, spawns) is gameplay
 #endif

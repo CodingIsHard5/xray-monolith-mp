@@ -134,6 +134,8 @@ void CObjectList::SingleUpdate(CObject* O)
 #ifdef DEBUG
 	VERIFY3(O->dbg_update_cl == Device.dwFrame, "Broken sequence of calls to 'UpdateCL'", *O->cName());
 #endif
+	if (g_sim_view_gate)
+		O->sim_render_capture(); // S2 stage 4b: only inside a gated tick (never TRUE on a stock frame)
 #if 0//ndef DEBUG
 	__try
 	{

@@ -571,6 +571,15 @@ extern ENGINE_API BOOL g_sim_view_gate;
 extern ENGINE_API u32 g_sim_view_epoch;
 typedef void (*sim_view_present_fn)(float dt, float alpha);
 extern ENGINE_API sim_view_present_fn g_sim_view_present;
+// S2 stage 4b (device.cpp, sim_tick gated mode only): objects drawn between their last two ticks. g_sim_view_tick counts
+// the gated ticks (+1 before each one), so a capture can tell whether the previous capture was the tick directly before.
+// g_sim_render_lerp is TRUE from the presentation step of a gated frame to the end of that frame's render, and only then;
+// it is FALSE on every stock frame (sim_tick 0, det_mode, rsConstantFPS, paused, loading) and on a gated frame paused
+// inside its ticks. g_sim_render_alpha is that frame's alpha (the value the presentation step computed), read only while
+// g_sim_render_lerp is TRUE.
+extern ENGINE_API u32 g_sim_view_tick;
+extern ENGINE_API BOOL g_sim_render_lerp;
+extern ENGINE_API float g_sim_render_alpha;
 
 typedef xr_delegate<bool()> LOADING_EVENT;
 extern ENGINE_API xr_list<LOADING_EVENT> g_loading_events;

@@ -68,7 +68,7 @@ void CAttachableItem::OnH_A_Chield()
 
 void CAttachableItem::renderable_Render(IDSGraphManager* DM)
 {
-	DM->add_Dynamic(object().Visual(), &object().XFORM());
+	DM->add_Dynamic(object().Visual(), object().sim_render_XFORM(DM)); // S2 stage 4b: &XFORM() on every stock frame
 	object().Visual()->getVisData().hom_frame = Device.dwFrame;
 }
 

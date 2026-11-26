@@ -37,6 +37,7 @@
 #include "CharacterPhysicsSupport.h"
 #include "debug_renderer.h"
 #include "../xrPhysics/PHElement.h"
+#include "Actor.h" // S2 stage 4b: g_actor, CActor::Holder
 
 extern MagicBox3 MagicMinBox(int iQuantity, const Fvector* akPoint);
 
@@ -763,7 +764,7 @@ void CGameObject::renderable_Render(IDSGraphManager* DM)
 {
 	inherited::renderable_Render(DM);
 	if (m_instance_holder && !m_instance_holder->ModelInstanceMultirender()) return;
-	DM->add_Dynamic(Visual(), &XFORM());
+	DM->add_Dynamic(Visual(), sim_render_XFORM(DM)); // S2 stage 4b: &XFORM() on every stock frame
 	Visual()->getVisData().hom_frame = Device.dwFrame;
 	RenderAttachments(DM);
 }
@@ -774,9 +775,110 @@ void CGameObject::RenderAttachments(IDSGraphManager* DM)
     {
         script_attachment* att = pair.second;
         if (att->GetType() != eSA_World) continue;
-        att->Render(Visual() ? Visual()->dcast_PKinematics() : nullptr, XFORM(), DM);
+        att->Render(Visual() ? Visual()->dcast_PKinematics() : nullptr, *sim_render_XFORM(DM), DM); // S2 stage 4b
     }
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// S2 stage 4b, slice 1: objects drawn between their last two ticks (sim_tick gated mode only; see g_sim_render_lerp in
+// device.h). Only reached through sim_render_XFORM while g_sim_render_lerp is TRUE. XFORM() is never written: the
+// renderer is handed a pointer to sim_render.draw, which stays unchanged until the next frame (computed once per
+// Device.dwFrame, on the main thread, from the first renderable_Render of the frame; the later passes of the frame
+// reuse it).
+
+// out = between a and b at t (position lerp, rotation slerp, axis scale lerp); false = not a plain rotation+scale
+// (mirrored or degenerate): the caller draws XFORM()
+static bool sim_render_interpolate(Fmatrix& out, const Fmatrix& a, const Fmatrix& b, float t)
+{
+	const Fvector sa = {a.i.magnitude(), a.j.magnitude(), a.k.magnitude()};
+	const Fvector sb = {b.i.magnitude(), b.j.magnitude(), b.k.magnitude()};
+	if (sa.x < EPS_S || sa.y < EPS_S || sa.z < EPS_S || sb.x < EPS_S || sb.y < EPS_S || sb.z < EPS_S)
+		return false;
+	Fmatrix ra, rb; // a and b without their axis scale: pure rotations
+	ra.identity();
+	ra.i.div(a.i, sa.x);
+	ra.j.div(a.j, sa.y);
+	ra.k.div(a.k, sa.z);
+	rb.identity();
+	rb.i.div(b.i, sb.x);
+	rb.j.div(b.j, sb.y);
+	rb.k.div(b.k, sb.z);
+	Fvector n;
+	if (n.crossproduct(ra.i, ra.j).dotproduct(ra.k) <= 0.f || n.crossproduct(rb.i, rb.j).dotproduct(rb.k) <= 0.f)
+		return false; // mirrored: no quaternion for it
+	Fquaternion qa, qb, q;
+	qa.set(ra);
+	qb.set(rb);
+	q.slerp(qa, qb, t);
+	q.normalize();
+	Fvector p;
+	p.lerp(a.c, b.c, t);
+	out.mk_xform(q, p);
+	Fvector s;
+	s.lerp(sa, sb, t);
+	out.i.mul(s.x);
+	out.j.mul(s.y);
+	out.k.mul(s.z);
+	return true;
+}
+
+// the renderer's matrix for this object in this frame: &XFORM() unless every condition below holds
+Fmatrix* CGameObject::sim_render_world()
+{
+	CObject::SimRenderState& s = sim_render;
+	if (s.ptr && s.frame == Device.dwFrame)
+		return s.ptr; // computed in this frame already: every pass of the frame draws the same matrix
+	s.frame = Device.dwFrame;
+	s.ptr = &XFORM();
+
+	// slice 1: the local player (body, shadow, and through the parent rule below everything it holds) stays stock, and
+	// so does the vehicle or mounted gun it is in (the view rides on it at tick rate: 4a has no presentation step there)
+	if (g_actor && (cast_actor() == g_actor || (g_actor->Holder() && cast_holder_custom() == g_actor->Holder())))
+		return s.ptr;
+
+	if (CObject* P = H_Parent())
+	{
+		// a child (a weapon in an NPC's hands, an attached torch): its XFORM() was computed during the tick (or by
+		// UpdateXForm just now) from the parent's XFORM() and bones; it follows the parent's drawn matrix:
+		// draw = parent_draw * inverse(parent XFORM()) * XFORM(). A parent drawn at its XFORM() means the child is too.
+		CGameObject* PG = P->cast_game_object();
+		Fmatrix* parent_draw = PG ? PG->sim_render_world() : &P->XFORM();
+		if (parent_draw == &P->XFORM())
+			return s.ptr;
+		const Fmatrix parent_xform = P->XFORM();
+		Fmatrix parent_inv, local;
+		parent_inv.invert(parent_xform); // 4x3 invert: handles scale
+		local.mul_43(parent_inv, XFORM());
+		s.draw.mul_43(*parent_draw, local);
+	}
+	else
+	{
+		// only an object captured in the newest tick, with a history (prev == cur means: no history, or not moving)
+		if (!s.have || s.epoch != g_sim_view_epoch || s.tick != g_sim_view_tick)
+			return s.ptr;
+		if (0 == memcmp(&s.prev, &s.cur, sizeof(Fmatrix)))
+			return s.ptr;
+		if (!sim_render_interpolate(s.draw, s.prev, s.cur, g_sim_render_alpha))
+			return s.ptr;
+	}
+	s.ptr = &s.draw;
+	return s.ptr;
+}
+
+// the hand-over from renderable_Render: the HUD pass (first-person hands, stage 4a's) is never changed
+Fmatrix* CGameObject::sim_render_lerp(IDSGraphManager* DM)
+{
+	if (DM->get_HUD() || DM->get_UI3D())
+		return &XFORM();
+	Fmatrix* m = sim_render_world();
+	if (m == &sim_render.draw && sim_render.frame_counted != Device.dwFrame)
+	{
+		sim_render.frame_counted = Device.dwFrame;
+		PROF_EVENT("sim_render_lerp"); // once per (object, frame) drawn at an interpolated matrix
+	}
+	return m;
+}
+// ---------------------------------------------------------------------------------------------------------------
 
 static void update_visbox(IKinematics* k)
 {

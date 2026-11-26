@@ -206,6 +206,12 @@ public:
 
 	virtual void renderable_Render(IDSGraphManager* DM);
 	virtual void RenderAttachments(IDSGraphManager* DM);
+	// S2 stage 4b: the matrix to hand to the renderer for this object's world visual. On every stock frame
+	// (g_sim_render_lerp FALSE) it is &XFORM(), as before; on a gated frame it may be a matrix between the last two ticks
+	// that stays unchanged to the end of the frame's render (see sim_render_world in GameObject.cpp)
+	IC Fmatrix* sim_render_XFORM(IDSGraphManager* DM) { return g_sim_render_lerp ? sim_render_lerp(DM) : &XFORM(); }
+	Fmatrix* sim_render_lerp(IDSGraphManager* DM);
+	Fmatrix* sim_render_world();
 	virtual void OnEvent(NET_Packet& P, u16 type);
 
 	virtual void Hit(SHit* pHDS)
