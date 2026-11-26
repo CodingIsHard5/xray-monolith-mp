@@ -1,0 +1,139 @@
+## Amendment 137 (DRAFT 2026-11-26): kj1, the kill channel's joint run with X-Ray, ITR2 side
+Pins: mod blob dfa240e8d08d079ba5c8567a060ceb68bc5523dc; `tools/kj1_check.py` sha256 f8583123a4e6f33f66a35c4e0886554520c8c2713d871bb765217b8f92b3c863; `tools/kc_feed.py` (offline stand-in only) sha256 bc0af58cc14b4d1e7c15336bc0b9f59a15dfa6e43b72216b592642c90e649eec.
+The first run of the kill channel against the real X-Ray (amendments 134 and 136). EnginePerf registers the X side in
+their own text (perf-harness, "kj1") and scores it themselves from files their watcher keeps; this amendment is our
+half. One boot of each side, Cordon, headless (ITR2 on :88, X-Ray on :141). No boot before the Overseer has reviewed
+both texts and given the GO. Scored once.
+
+**Limits, first.** A rig deals the damage, not a weapon in a hand. One stalker and one other creature. Nobody looks.
+No offline creature, no crossing, no restart of either side.
+
+**New in the mod since amendment 136**, all under `t2v=4` or the rig lever:
+- Log: a line `KC applied id= applied= total=` whenever X-Ray's applied count for one of our reports changes (first
+  200). The line `KC confirmed dead` now ends `snap=<health>`: what X-Ray's own creature line says in the snapshot
+  that confirmed the death (`unlisted` if it has none). `KC set` lines print 3 decimals and are never capped for a
+  creature that has a report of ours (others: first 200).
+- The rig picks the stalker by the snapshot's own kind field (`s`), not by the ITR2 class we show it with, and picks
+  only a puppet whose health has been matched to X-Ray's at least once (a puppet spawned a moment before could still
+  stand at full health while X-Ray's creature is hurt).
+- With every lever off the existing offline tests pass and the arm C, arm D and finer-clock witness logs are
+  byte-identical to master's (79dae83).
+
+**The run.** `scripts/boot_t2.sh kj1`. ITR2's levers: `hcheal=2 t2span=4 t2gap=0 t2v=4 t2rec0=1 t2fc=1 kcj=30
+kcjs=0.6 kcjt=0.5 t2stop=300 t2end=600`, away_sim keep.
+- The rig walks only the first 4 s of the Cordon track back and forth (as in kc1), so it stays at the track's start
+  and the picked creatures stay online in X-Ray. Which creatures are nearest there is not known in advance; the pick
+  line names them. A failed pick fails J1, except the no-verdict case below.
+- Play clock 0 is the first puppet tick with an accepted snapshot; no play pose is written before it. The clock adds
+  at most 0.25 s a frame, so our events can only come later on the wall, never earlier.
+- At 30 s the nearest stalker S and the nearest other creature M with snapshot health at least 0.9 are picked. S is
+  picked only among stalkers whose section in X-Ray's snapshot begins with `sim_default_` (the simulation squads'
+  ordinary stalkers; kw1's S was one). Any other stalker may be a story character, scripted or protected, and is
+  never picked (the Overseer's order after its review; agreed with EnginePerf, who state S's section from the kept
+  poses). The monster pick has no such rule. S
+  takes 0.6 of full health, M 0.3. At 70 s S takes 0.5 more (total 1.100; S lives only if X-Ray has healed it by more
+  than 0.1 in the 40 s; EnginePerf measured 0.40 in 40 s in kw1). At 90 s S is killed. At 115 s M is killed.
+- EnginePerf's runner stops X-Ray by signal for 20 s, 105 s after the first new play pose it reads. It reads no pose
+  before its own first snapshot and polls once a second, so on the wall the stop starts about 106 to 108.3 s after our
+  clock 0 and ends about 126 to 128.3 s after it. The kill at 115 is then at least 6.7 s after the stop's start and
+  11 s before its end. Our state stays play and the pose is written throughout. The stop is theirs and not made by
+  our pose: in the states where our pose stops X-Ray (away, dead) the mod has destroyed every puppet before the world
+  change, so there is nothing to hit; what a player can meet is X-Ray stalling while they shoot.
+- X-Ray ends first (240 engine seconds from its level load; in d2 its level load and our clock 0 were under 1 s
+  apart); ITR2 ends at play clock 300. With no snapshot arriving, none of our counters moves.
+- How a death looks from X-Ray (EnginePerf, from kw1's kept rows and the reader's code): the first snapshot after the
+  kill call carries the creature line with alive 0 and health -1.0000, and their `dead` line; the body stays listed.
+  Our reader takes alive 0 or health at or below 0 as dead, never spawns a listed dead creature, and does not wait
+  for the id to leave the list. Their `dead` line is written once their kill call was made; whether the creature is
+  dead in X-Ray is what `snap=` shows and what J5 and J6 require.
+- EnginePerf's files, checked by the boot script before the claim and again before their runner starts. The hashes
+  are FINAL (their message after their text was registered, perf/render-split 67c6e0c57; each one recomputed by us
+  on the files): `tools/t2_xray_kj.sh` 870d854f…, `tools/lib_engine_pids.sh` cb183b7b…, `tools/t1_watch_keep.py`
+  9df9c8e4…, `tools/tb_run.sh` 1b8d103f…, `tools/run_noguard.sh` 92729abc…, `harness/zz_eperf_dump.script`
+  2b79a817…, `out/user.ltx.orig` 3efd38ee…, `harness/zz_p1_puppet_kill4.script` f19b28c0… (the registered reader,
+  unchanged), `run/appdata/savedgames/cordon1.scop` 6dea752b… (their save),
+  `run/bin/Stance14.exe` b4ce9c77…. The full hashes are in `scripts/boot_t2.sh`. Their checker, which our boot
+  script does not call: `tools/t3_kj1_check.py` 4b838850…. Their text: `PREREG-killchannel-joint-kj1-2026-11-26.md`,
+  sha256 8696bbc9…. Their env: `T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STALL_AT=99999
+  T2_KILL_AT=99999 T2_MAXRESTART=0 T2_LOST_MS=5000 T2_LOSTX_MS=120000 T2_OVER_S=120 T2_STALL_PLAY=105 T2_STALL_S=20
+  T2_RUN_S=240 T2_WALL_S=700 BENCH_DISPLAY=:141`.
+
+**Checks** (`tools/kj1_check.py <our run dir> <X-Ray out dir>`; from our own log, plus the runner's `stall.csv` for
+J6 and nothing else of X-Ray's; PASS = all eight):
+
+| check | what must hold |
+|---|---|
+| J1 pick | one pick line for a stalker (class Mimic*, section `sim_default_*`) and one for a monster, snapshot health at least 0.9, at clock 30 to 40 |
+| J2 first | S lost 0.600 and M 0.300 of full (0.002); each read by the mod as that share within 0.2 s; X-Ray's applied count equals our total within 2.0 s of the hit |
+| J3 heal | S's health just before the second hit is at least 0.15 of full above its health just after the first, reached by at least 5 upward writes; upward writes on S or on M are never closer than 0.95 s |
+| J4 second | S lost 0.500 more and is alive; X-Ray's applied count 1.100 (0.002) within 2.0 s; S not dead before its kill |
+| J5 kill S | S killed by the rig; the death reported with a total above 1.000; confirmed by X-Ray's dead line within 2.0 s; the confirming snapshot shows S at health 0 or below, or not listed |
+| J6 kill M | M killed by the rig; no `KILL not applied` line in the run; the confirming snapshot shows M at health 0 or below, or not listed; M's death read at least 2.0 s after the runner's STOP and 2.0 s before its CONT; confirmed not before CONT and at most 2.5 s after our first accepted snapshot from CONT on |
+| J7 own | every hit read on S or M follows a rig event on it within 0.2 s, 5 in all; neither is spawned again after its confirmed death |
+| J8 clean | no Lua error (mod lines and raw log), no FAIL or ERR line, no dump; end line not_applied=0, unlisted=0, kdrop=0, stale=0, new_run_dropped=0, deaths = confirmed; pose write p99 at most 1000 us by the finer clock, whose `usable=1` end line must be there |
+
+J6 without a usable stop record (missing, not one STOP and one CONT 15 to 30 s apart, or more than 300 s from M's
+death on our log's clock, which is UTC): confirmed 2.0 to 16.0 s after the death, and the output says the derived
+window was used.
+Not mirrored here: EnginePerf's own check fails by name when X-Ray's first frame comes more than 5 s (plus 1 s for
+whole-second stamps) after CONT ("X-Ray stalled on its own after the stop"). Our J6 counts from our first accepted
+snapshot from CONT on, so it can pass in that case; the joint run is then a FAIL on their side.
+
+**NO VERDICT, decided before.** Three reasons, the same on both sides (agreed with EnginePerf):
+- No generic stalker near the rig: no stalker was picked, and the mod's failed-pick line says X-Ray listed no
+  `sim_default_` stalker with health 0.9 or more when the pick gave up (`generic_stalkers_listed=0`). Nothing was
+  tested. It leaves J1 to J7 untested. With one listed and none picked, J1 is a FAIL.
+- M's death not at least 2.0 s inside the stop at both ends (or, without the record, confirmed under 2.0 s after it):
+  the step did not test a kill inside a stop. It leaves J6 untested and nothing else.
+- S or M is not listed alive in X-Ray's snapshot at the time of one of its later steps (it went offline, left, or
+  X-Ray's own world killed it): our puppet is gone, the rig logs `KC rig skip … xray=unlisted` (or its health, 0 or
+  below), and the channel was not tested on it. It leaves J3 to J7 untested. EnginePerf judges the same from their
+  kept snapshots, in the words "S or M is not listed in X-Ray's snapshot at the time of the first pose of one of its
+  later steps". A skip while X-Ray still lists the creature alive is a FAIL, not a NO VERDICT.
+A NO VERDICT never hides a failure of a check its reason does not cover: then the run is a FAIL. And whatever else
+EnginePerf's text rules NO VERDICT on their side for S or M: then our side is not scored either. One retry needs the
+Overseer's GO.
+
+**Margins.** Every bound derived here except the one flagged.
+
+| bound | derivation | offline loop | expected in the game | margin |
+|---|---|---|---|---|
+| J1 clock 30 to 40 | the lever tries the pick each 50 ms pass for 10 s from 30 | 30.0 | 30.0 | 10 s |
+| J2, J4 share 0.002 | 3-decimal print; kc1 measured engine damage exact on all four classes; the hit is read in the same pass, before any health write | 0.0000 | under 0.001 | 0.001 |
+| J2 read within 0.2 s | the rig acts in the same 50 ms pass, before the read; kc1 measured 0.001 s | 0.000 | under 0.05 s | 0.15 s |
+| J2, J4, J5 within 2.0 s | chain: our pose within 50 ms, X-Ray's script once a frame, its snapshot every 100 ms, our read within 50 ms: about 0.25 s. EnginePerf measured their part at 0.101 s in kw1. 2.0 s allows one X-Ray frame of 1.5 s (their check 7) | 0.067 s | 0.1 to 0.5 s | 1.5 s |
+| J3 rise 0.15 | X-Ray's healing in 40 s at kw1's 0.01 a second is 0.40; the puppet lags by at most one second of healing (0.01); 0.15 is EnginePerf's floor for the same step, far above noise and under half of the expected | 0.391 | 0.35 to 0.40 | 0.20 |
+| J3 at least 5 writes | one upward write a second while X-Ray heals: about 40 in the 40 s; 5 shows the rise came in steps and not in one jump | 40 | 30 to 40 | 25 |
+| J3 0.95 s | the rule is one upward write a second per puppet on the game clock; 0.05 s for one pass of log time jitter | 1.000 | 1.00 or more | 0.05 s |
+| J5 total above 1.000 | 1.100 before the kill plus what S had left (over 0); a cap would give exactly 1.000 | 1.591 | 1.3 to 1.6 | 0.3 |
+| J6 2.0 s inside the stop | the kill is at 115 on our clock, 6.7 to 9 s after STOP and 11 to 13.3 s before CONT; a hitch on our side moves it later only | 10 s each | 6.7 to 9 and 11 to 13.3 s | 4.7 s after STOP, 9 s before CONT |
+| J6 2.5 s after the first snapshot from CONT on | that snapshot is the event EnginePerf's check 10 starts from (2.0 s for their script and dead line), seen by us at most one 50 ms read later; 0.5 s added | 0.02 s | 0.1 to 0.5 s | 2.0 s |
+| J6 fallback 2.0 to 16.0 s | CONT at most 128.3 s after clock 0, minus the kill at 115, plus X-Ray's first frame and their 2.0 s: 15.4 s at the extreme; 0.6 s added | 10.02 s | 11.3 to 13.6 s | 2.4 s at the expected |
+| J8 p99 1000 us | COPIED from amendments 125, 132 and 135 (same writer and clock). kc1 measured 144 us with up to 2 k lines; here at most 2 | (made up in the selftest) | under 250 us | 750 us |
+
+**What can fail honestly.** X-Ray heals S too little and the second hit kills it (J3, J4; EnginePerf registers the same
+outcome by name). Story characters stand at the track's start (EnginePerf's boot dump has one about 27 m off, beside four ordinary
+stalkers); the pick now leaves them out, so S is one of the ordinary ones or the run is a NO VERDICT. If X-Ray's
+kill call does not kill S, their `dead` line is still written, `snap=` shows it alive and J5 fails. ITR2's AI or another puppet hurts S or M (J7). A health write every second disturbs a puppet
+under ITR2's AI (not scored directly; a vanished or stuck puppet would show in J4 to J7 and in the reported lines).
+X-Ray is slow after its stop (J6, and their checks 9 and 10). No healthy monster near the track's start, or a generic
+stalker listed but without a synced puppet (J1).
+
+**Reported, not scored.** Hits read on other creatures; downward health writes (X-Ray's own world hurting a creature);
+the number of upward writes; body times; vanished puppets; how long after CONT the first snapshot came.
+
+**Self-tests** (all PASS on this tree): `tools/kj1_selftest.py`: the scorer on the offline loop in the joint mode (the
+real mod code against the stand-in with healing at kw1's rates and a 20 s stall 105 s after the first play pose): passes
+as it is, 9 boundary cases pass, 34 mutants each fail their check, the no-verdict case is recognised, 9 cases on the
+stop record, 7 on the verdict, 3 on a skipped step, 2 on a failed pick. `tools/kc_selftest.sh` (47 mutants), `tools/kc_feed_selftest.py`,
+`tools/kc1_selftest.py`: PASS. The stand-in is not X-Ray: it applies at once, heals linearly, its stall is exact, and
+it drops a dead creature from its list where X-Ray keeps the body listed. The loop has no finer clock; its end line is
+made up in the selftest.
+
+**Review.** One Opus readiness pass (no paid review): eight findings, all taken: a NO VERDICT could hide a failure;
+the stop window was derived 1 to 1.3 s too early; a `dead` line means "kill called", not "dead"; a creature going
+offline was not named as an honest failure; the coarse clock could decide J8 by rounding; J3's spacing was judged on
+all creatures and its lines could run into the log cap; a just-spawned puppet could be picked before its health was
+matched; three files the runner uses were not pinned.
+After it, on the Overseer's review of EnginePerf's text: the stalker pick leaves out story characters (test case 18
+with a nearer story stalker, mutants jstory, jstorym, jlisted; the scorer's J1 and the failed-pick rule).
