@@ -1,4 +1,4 @@
-# kj4p: second X-ONLY emission preflight, with the fixed reader kill7 (DRAFT until the supervisor has the sha)
+# kj4p: second X-ONLY emission preflight, with the fixed reader kill7 (REGISTERED 2026-11-27). No boot before the supervisor's GO.
 
 **claim class: EXCLUSIVE** (kept as ruled for kj3p: the checks have timing bounds of 0.5-2.5 s, and two margins are at 2x).
 
@@ -88,3 +88,9 @@ would FAIL; kept as registered, not widened after seeing data). `-0.00` at ESTAR
 | kj4/kill7h_stub.lua | de1b6f8b0ce66a9555f512a48bcbf70e7d95a21cabb8edda38d43bb2a8dc43a7 |
 | kj4/kill7h_test.sh | 783bc9bb0e6d8c05c903b181711a523e28d3b0e508914627670324d57eec15a9 |
 Every other pin inside kj4p_run.sh is kj3p's, unchanged (exe, save, tools).
+
+## 7. Stated at registration (EnginePerf, 2026-11-27)
+- Review: one CodeRabbit pass on the committed draft (d8f9bb147, all 10 files): no new findings
+  (plan-facts/cr_kj4p_2026-11-27.txt). No byte of a pinned file changed after that pass.
+- The pins of section 6 were recomputed from the committed bytes; the self-test line of section 5 is from those bytes.
+- This text's own sha256 is sent to the supervisor with the GO request and is not written here.
