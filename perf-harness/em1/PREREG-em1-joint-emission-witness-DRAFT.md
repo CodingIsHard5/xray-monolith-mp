@@ -1,4 +1,4 @@
-# em1: joint emission witness with one monster kill (alive near zero, held, then killed), X-RAY SIDE (DRAFT, NOT REGISTERED, 2026-11-27)
+# em1: joint emission witness with one monster kill (alive near zero, held, then killed), X-RAY SIDE (REGISTERED 2026-11-27 15:27 EST; no run before the Overseer's GO)
 
 Drafted at the desk by an Opus sub-worker for EnginePerf: no engine, no Wine, no display, no claim, no git, no review pass.
 Everything below about the engine comes from kj2 (joint, real), kj3p r1 and kj4p r1 (X-only, real) and the desk stub.
@@ -213,6 +213,22 @@ second call. Pinned checker hash: see em1_score.sh (CHK_SHA); re-tested in round
 | harness/zz_eperf_dump.script (tb_run.sh installs it; itrzone's hash matches) | 2b79a817a08a1e7ff4e29007f76677dba698a2a5945374331dcc2ae2de874b45 |
 | out/user.ltx.orig (tb_run.sh's settings source; itrzone's hash matches) | 3efd38eecbca504001cf03bd4c60bc6e837a3c3284e8517979a1bd9e1526de78 |
 itrzone pins its own mod blob, boot script and the runner/lib/reader/options source above in its half.
+
+**Registration (2026-11-27 15:27 EST).** This file keeps its name (`...-DRAFT.md`) because the pinned checker's header names it; the
+status is the title line. Its draft form was sha256 d40577d65f1ba8611c78e27ec72518e233e4f9c375195f83e626733f92a36205
+(commit d51b8a259); the only changes since are the title line and this paragraph. This registered form is pinned by its
+commit. itrzone's half, byte-matched by me on disk before registering (its desk commit a78411f):
+| itrzone file | pin |
+|---|---|
+| docs/design-notes/2026-11-27-em1-itr2-half-DRAFT.md (becomes its Amendment 143 verbatim) | sha256 5d0171521420b5accde09c1512b034d921e523dd5ea9d7ac7cb1c04b04431bc9 |
+| mod/ITRZone/Scripts/main.lua | git blob 9522c50a6dbb493988a1b5858978a12a73ebd027 |
+| scripts/boot_t2.sh | 11138eb7ec86885ec737b837b5b10d8163195732c59a003255ba87cf203c91ef |
+| tools/em1_check.py (its scorer) | 70c1ed7014029300cf96ce2986ae4d5a82fac79cccb7f8444790adbd65073e2b |
+| tools/em1_selftest.py | 3ac293c9358e855de98b034a18754c3053d3818b7a838089e8386771370468ae |
+| tools/kj1_check.py (imported) | f8583123a4e6f33f66a35c4e0886554520c8c2713d871bb765217b8f92b3c863 |
+Matched: the schedule (30 / 50 / 52 / 70 / 310 / 440), the arm levers, the runner env in boot_t2.sh's em1 arm against
+section 1 here, every X-side pin wired in that arm, the NO VERDICT table's last column against NV_UNTESTED, and the
+mirror constants (FALL 0.02, TOL_H 0.0002, EARLY_MS 50). Joint verdict = the worse of the two halves.
 
 Clock drift behind the +/- windows that mix the wall clock and the engine clock (measured, kj4p r1): wall minus engine
 +3 ms over the 222 s surge, +1 ms over the 103 s psi storm; one -2.1 s step, before play 0, so outside every judged window.
