@@ -36,6 +36,10 @@
 #include "Flashlight.h"
 #include "../xrPhysics/IElevatorState.h"
 #include "eatable_item.h"          // GammaVR backpack B2b
+#include "ai_space.h"              // GammaVR backpack B3b2 (the test spawn)
+#include "alife_simulator.h"
+#include "ai_object_location.h"
+#include "xrServer_Objects_ALife.h"
 #include "PhysicsShellHolder.h"
 #include "../xrPhysics/PhysicsShell.h"
 #include "../xrPhysics/IPHWorld.h"
@@ -1241,6 +1245,26 @@ int vr_bpt_near(CActor* A, const Fvector& p, float reach, LPSTR sect, Fmatrix& x
 	}
 	return best;
 }
+// B3b2: where is the item? 0 gone, 1 the actor's, 2 not the actor's (free in the world, or someone else's)
+int vr_bpt_where(CActor* A, int id)
+{
+	CObject* O = (A && id >= 0) ? Level().Objects.net_Find(u16(id)) : NULL;
+	if (!O || O->getDestroy())
+		return 0;
+	return (O->H_Parent() && O->H_Parent()->ID() == A->ID()) ? 1 : 2;
+}
+// B3b2: the item's own model name and its box (centre and size in its own frame)
+bool vr_bpt_shape(int id, LPSTR vis, Fvector& bc, Fvector& ext)
+{
+	CObject* O = id >= 0 ? Level().Objects.net_Find(u16(id)) : NULL;
+	if (!O || !O->Visual())
+		return false;
+	xr_strcpy(vis, 256, O->cNameVisual().c_str());
+	const Fbox& bb = O->Visual()->getVisData().box;
+	bb.getcenter(bc);
+	ext.set(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z);
+	return true;
+}
 bool vr_bpt_take(CActor* A, int id) // the game's own pick-up (the call behind the flat game's pick-up key)
 {
 	if (!A || id < 0)
@@ -1273,6 +1297,31 @@ int vr_bpt_use(CActor* A, int id) // the game's own use: -1 not ours any more, 0
 // From the first of these frames on, one line per VR frame for 600 frames: the dropped object, counts, weight, FDDA's dummy.
 void vr_bpx_probe_step(CActor* A, u32 frame, bool hand_valid, const Fvector& hand)
 {
+	{ // B3b2 (TEST ONLY): -vr_bpx_spawn <frame> <section>: one item of that section made in the world at the gun-side hand's place
+		static bool sp = false;
+		static u32 sf = 0;
+		static string128 ss = "";
+		if (!sp)
+		{
+			sp = true;
+			if (LPCSTR q = strstr(Core.Params, "-vr_bpx_spawn "))
+				if (sscanf(q + 14, "%u %127s", &sf, ss) != 2)
+					sf = 0;
+			if (sf)
+				Msg("* [vr15] B3b2 spawn (TEST ONLY): '%s' at frame %u", ss, sf);
+		}
+		if (sf && frame == sf && A)
+		{
+			if (!hand_valid || !pSettings->section_exist(ss) || !ai().get_alife())
+				Msg("* [vr15] frame %u spawn: NOT done (%s)", frame, !hand_valid ? "no valid hand pose" : !ai().get_alife() ? "no simulator" : "no such section");
+			else
+			{
+				CSE_Abstract* e = const_cast<CALifeSimulator&>(ai().alife()).spawn_item(ss, hand, A->ai_location().level_vertex_id(), A->ai_location().game_vertex_id(), ALife::_OBJECT_ID(-1));
+				Msg("* [vr15] frame %u spawn: '%s' id %d at %.4f %.4f %.4f (carried before: %d)", frame, ss, e ? int(e->ID) : -1, hand.x, hand.y, hand.z,
+					A->inventory().GetAny(ss) ? 1 : 0);
+			}
+		}
+	}
 	static bool parsed = false;
 	static u32 df = 0, uf = 0, cf = 0, first = 0;
 	static string128 ds = "", us = "";
