@@ -1,0 +1,140 @@
+2026-11-27 12:17:06 slice granted, wu3, display :141, load 1.32 2.03 2.26
+2026-11-27 12:17:06 settle wait=0s load=1.32 heavy=[] ok before wu3_prime
+2026-11-27 12:17:06 load wu3_prime arm=prime exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.32 2.03 2.26
+2026-11-27 12:19:14 load wu3_prime rc=0 VERDICT: CONFOUNDED (other heavy process present)
+2026-11-27 12:19:14 load wu3_prime PROBE wu3_prime ok
+2026-11-27 12:19:14 prime wu3_prime not clean: allowed, the prime is never re-run
+2026-11-27 12:22:29 settle wait=195s load=1.18 heavy=[] ok before wu3_01_on
+2026-11-27 12:22:31 load wu3_01_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.18 2.02 2.27
+2026-11-27 12:24:39 load wu3_01_on rc=0 VERDICT: CONFOUNDED (other heavy process present)
+2026-11-27 12:24:39 load wu3_01_on CHECK wu3_01_on ok
+2026-11-27 12:24:39 load wu3_01_on not clean (VERDICT: CONFOUNDED (other heavy process present)): re-run 1 of 8 as wu3_01_on_r1
+2026-11-27 12:25:09 settle wait=30s load=1.75 heavy=[] ok before wu3_01_on_r1
+2026-11-27 12:25:11 load wu3_01_on_r1 arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=2 display=:141 load 1.75 2.34 2.38
+2026-11-27 12:27:18 load wu3_01_on_r1 rc=0 VERDICT: clean
+2026-11-27 12:27:19 load wu3_01_on_r1 CHECK wu3_01_on_r1 ok
+2026-11-27 12:27:49 settle wait=30s load=1.61 heavy=[] ok before wu3_02_off
+2026-11-27 12:27:51 load wu3_02_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.61 2.40 2.43
+2026-11-27 12:29:59 load wu3_02_off rc=0 VERDICT: clean
+2026-11-27 12:29:59 load wu3_02_off CHECK wu3_02_off ok
+2026-11-27 12:30:29 settle wait=30s load=1.94 heavy=[] ok before wu3_03_off
+2026-11-27 12:30:29 load wu3_03_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.94 2.52 2.48
+2026-11-27 12:32:36 load wu3_03_off rc=0 VERDICT: clean
+2026-11-27 12:32:36 load wu3_03_off CHECK wu3_03_off ok
+2026-11-27 12:32:51 settle wait=15s load=1.88 heavy=[] ok before wu3_04_on
+2026-11-27 12:32:53 load wu3_04_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.88 2.43 2.46
+2026-11-27 12:34:56 load wu3_04_on rc=0 VERDICT: clean
+2026-11-27 12:34:56 load wu3_04_on CHECK wu3_04_on ok
+2026-11-27 12:35:11 settle wait=15s load=1.87 heavy=[] ok before wu3_05_on
+2026-11-27 12:35:13 load wu3_05_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.87 2.34 2.43
+2026-11-27 12:37:21 load wu3_05_on rc=0 VERDICT: clean
+2026-11-27 12:37:21 load wu3_05_on CHECK wu3_05_on ok
+2026-11-27 12:37:51 settle wait=30s load=1.60 heavy=[] ok before wu3_06_off
+2026-11-27 12:37:53 load wu3_06_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.60 2.24 2.38
+2026-11-27 12:40:01 load wu3_06_off rc=0 VERDICT: clean
+2026-11-27 12:40:01 load wu3_06_off CHECK wu3_06_off ok
+2026-11-27 12:40:16 settle wait=15s load=1.88 heavy=[] ok before wu3_07_off
+2026-11-27 12:40:19 load wu3_07_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.88 2.24 2.37
+2026-11-27 12:42:26 load wu3_07_off rc=0 VERDICT: clean
+2026-11-27 12:42:26 load wu3_07_off CHECK wu3_07_off ok
+2026-11-27 12:44:57 settle wait=151s load=1.91 heavy=[] ok before wu3_08_on
+2026-11-27 12:44:59 load wu3_08_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.91 2.33 2.39
+2026-11-27 12:47:07 load wu3_08_on rc=0 VERDICT: clean
+2026-11-27 12:47:07 load wu3_08_on CHECK wu3_08_on ok
+2026-11-27 12:49:07 settle wait=120s load=1.63 heavy=[] ok before wu3_09_on
+2026-11-27 12:49:09 load wu3_09_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.66 2.57 2.53
+2026-11-27 12:51:11 load wu3_09_on rc=0 VERDICT: clean
+2026-11-27 12:51:11 load wu3_09_on CHECK wu3_09_on ok
+2026-11-27 12:51:26 settle wait=15s load=1.87 heavy=[] ok before wu3_10_off
+2026-11-27 12:51:26 load wu3_10_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.87 2.48 2.51
+2026-11-27 12:53:34 load wu3_10_off rc=0 VERDICT: clean
+2026-11-27 12:53:34 load wu3_10_off CHECK wu3_10_off ok
+2026-11-27 12:54:19 settle wait=45s load=1.62 heavy=[] ok before wu3_11_off
+2026-11-27 12:54:19 load wu3_11_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.62 2.61 2.59
+2026-11-27 12:56:27 load wu3_11_off rc=0 VERDICT: clean
+2026-11-27 12:56:27 load wu3_11_off CHECK wu3_11_off ok
+2026-11-27 12:56:57 settle wait=30s load=1.62 heavy=[] ok before wu3_12_on
+2026-11-27 12:56:57 load wu3_12_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.62 2.35 2.50
+2026-11-27 12:59:05 load wu3_12_on rc=0 VERDICT: clean
+2026-11-27 12:59:05 load wu3_12_on CHECK wu3_12_on ok
+2026-11-27 12:59:35 settle wait=30s load=1.63 heavy=[] ok before wu3_13_on
+2026-11-27 12:59:35 load wu3_13_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.63 2.44 2.54
+2026-11-27 13:01:43 load wu3_13_on rc=0 VERDICT: clean
+2026-11-27 13:01:43 load wu3_13_on CHECK wu3_13_on ok
+2026-11-27 13:02:13 settle wait=30s load=1.70 heavy=[] ok before wu3_14_off
+2026-11-27 13:02:15 load wu3_14_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.56 2.40 2.53
+2026-11-27 13:04:22 load wu3_14_off rc=0 VERDICT: clean
+2026-11-27 13:04:22 load wu3_14_off CHECK wu3_14_off ok
+2026-11-27 13:04:52 settle wait=30s load=1.57 heavy=[] ok before wu3_15_off
+2026-11-27 13:04:55 load wu3_15_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.44 2.31 2.49
+2026-11-27 13:07:02 load wu3_15_off rc=0 VERDICT: clean
+2026-11-27 13:07:02 load wu3_15_off CHECK wu3_15_off ok
+2026-11-27 13:07:33 settle wait=31s load=1.67 heavy=[] ok before wu3_16_on
+2026-11-27 13:07:35 load wu3_16_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.54 2.31 2.48
+2026-11-27 13:09:42 load wu3_16_on rc=0 VERDICT: clean
+2026-11-27 13:09:42 load wu3_16_on CHECK wu3_16_on ok
+2026-11-27 13:09:57 settle wait=15s load=1.89 heavy=[] ok before wu3_17_on
+2026-11-27 13:09:59 load wu3_17_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.82 2.34 2.48
+2026-11-27 13:12:02 load wu3_17_on rc=0 VERDICT: clean
+2026-11-27 13:12:02 load wu3_17_on CHECK wu3_17_on ok
+2026-11-27 13:12:17 settle wait=15s load=1.95 heavy=[] ok before wu3_18_off
+2026-11-27 13:12:19 load wu3_18_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.87 2.30 2.45
+2026-11-27 13:14:26 load wu3_18_off rc=0 VERDICT: clean
+2026-11-27 13:14:26 load wu3_18_off CHECK wu3_18_off ok
+2026-11-27 13:14:41 settle wait=15s load=1.91 heavy=[] ok before wu3_19_off
+2026-11-27 13:14:42 load wu3_19_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.91 2.34 2.45
+2026-11-27 13:16:49 load wu3_19_off rc=0 VERDICT: clean
+2026-11-27 13:16:49 load wu3_19_off CHECK wu3_19_off ok
+2026-11-27 13:17:34 settle wait=45s load=1.96 heavy=[] ok before wu3_20_on
+2026-11-27 13:17:36 load wu3_20_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.81 2.62 2.58
+2026-11-27 13:19:39 load wu3_20_on rc=0 VERDICT: clean
+2026-11-27 13:19:39 load wu3_20_on CHECK wu3_20_on ok
+2026-11-27 13:20:09 settle wait=30s load=1.62 heavy=[] ok before wu3_21_on
+2026-11-27 13:20:11 load wu3_21_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.49 2.43 2.53
+2026-11-27 13:22:19 load wu3_21_on rc=0 VERDICT: clean
+2026-11-27 13:22:19 load wu3_21_on CHECK wu3_21_on ok
+2026-11-27 13:22:49 settle wait=30s load=1.69 heavy=[] ok before wu3_22_off
+2026-11-27 13:22:49 load wu3_22_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.69 2.33 2.49
+2026-11-27 13:24:57 load wu3_22_off rc=0 VERDICT: clean
+2026-11-27 13:24:57 load wu3_22_off CHECK wu3_22_off ok
+2026-11-27 13:25:42 settle wait=45s load=1.74 heavy=[] ok before wu3_23_off
+2026-11-27 13:25:44 load wu3_23_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.74 2.32 2.46
+2026-11-27 13:27:52 load wu3_23_off rc=0 VERDICT: clean
+2026-11-27 13:27:52 load wu3_23_off CHECK wu3_23_off ok
+2026-11-27 13:28:07 settle wait=15s load=1.78 heavy=[] ok before wu3_24_on
+2026-11-27 13:28:09 load wu3_24_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.78 2.30 2.44
+2026-11-27 13:30:12 load wu3_24_on rc=0 VERDICT: clean
+2026-11-27 13:30:12 load wu3_24_on CHECK wu3_24_on ok
+2026-11-27 13:30:42 settle wait=30s load=1.63 heavy=[] ok before wu3_25_on
+2026-11-27 13:30:44 load wu3_25_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.63 2.27 2.42
+2026-11-27 13:32:46 load wu3_25_on rc=0 VERDICT: clean
+2026-11-27 13:32:46 load wu3_25_on CHECK wu3_25_on ok
+2026-11-27 13:33:01 settle wait=15s load=1.81 heavy=[] ok before wu3_26_off
+2026-11-27 13:33:01 load wu3_26_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.81 2.29 2.42
+2026-11-27 13:35:09 load wu3_26_off rc=0 VERDICT: clean
+2026-11-27 13:35:09 load wu3_26_off CHECK wu3_26_off ok
+2026-11-27 13:35:39 settle wait=30s load=1.65 heavy=[] ok before wu3_27_off
+2026-11-27 13:35:41 load wu3_27_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.52 2.24 2.39
+2026-11-27 13:37:49 load wu3_27_off rc=0 VERDICT: clean
+2026-11-27 13:37:49 load wu3_27_off CHECK wu3_27_off ok
+2026-11-27 13:38:19 settle wait=30s load=1.58 heavy=[] ok before wu3_28_on
+2026-11-27 13:38:19 load wu3_28_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.58 2.20 2.37
+2026-11-27 13:40:21 load wu3_28_on rc=0 VERDICT: clean
+2026-11-27 13:40:21 load wu3_28_on CHECK wu3_28_on ok
+2026-11-27 13:40:36 settle wait=15s load=1.82 heavy=[] ok before wu3_29_on
+2026-11-27 13:40:36 load wu3_29_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.82 2.17 2.34
+2026-11-27 13:42:39 load wu3_29_on rc=0 VERDICT: clean
+2026-11-27 13:42:39 load wu3_29_on CHECK wu3_29_on ok
+2026-11-27 13:43:09 settle wait=30s load=1.68 heavy=[] ok before wu3_30_off
+2026-11-27 13:43:09 load wu3_30_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.68 2.18 2.33
+2026-11-27 13:45:11 load wu3_30_off rc=0 VERDICT: clean
+2026-11-27 13:45:11 load wu3_30_off CHECK wu3_30_off ok
+2026-11-27 13:45:27 settle wait=15s load=1.87 heavy=[] ok before wu3_31_off
+2026-11-27 13:45:29 load wu3_31_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.87 2.21 2.32
+2026-11-27 13:47:36 load wu3_31_off rc=0 VERDICT: clean
+2026-11-27 13:47:36 load wu3_31_off CHECK wu3_31_off ok
+2026-11-27 13:47:52 settle wait=16s load=1.84 heavy=[] ok before wu3_32_on
+2026-11-27 13:47:54 load wu3_32_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 attempt=1 display=:141 load 1.84 2.18 2.30
+2026-11-27 13:49:56 load wu3_32_on rc=0 VERDICT: clean
+2026-11-27 13:49:56 load wu3_32_on CHECK wu3_32_on ok
+2026-11-27 13:49:57 slice end: 34 loads done, 0 slots left, 1 of 8 re-runs, 2 not clean. class=done reason=list finished

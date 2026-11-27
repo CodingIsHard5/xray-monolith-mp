@@ -1,0 +1,198 @@
+wu3 alife_warmup lever (PREREG-wu3-alife-warmup, DRAFT)
+scorer /home/caden/Projects/StalkerGameEngine/wt-render-split/perf-harness/wu3/wu3_score.py sha256 b435a9ead5cdcf1d13af59f61ed4e5c20270dbd30de183464d3806ded94b8766
+order  /home/caden/Projects/StalkerGameEngine/wt-render-split/perf-harness/wu3/wu3_order.txt sha256 7360330ff8837e280736d4a8be3472dd938b1a9b8d75bee00a7cb36ad198c60c
+root   /home/caden/Projects/StalkerGameEngine/out
+stop   /home/caden/Projects/StalkerGameEngine/out/wu3_state/stop.txt
+constants window 30 s from the end of loading (headline; 15 s reported only), slow 20.0/33.3 ms, H1 worst ratio 0.50, H2 n20 drop >= 7, H3 price <= 2.0 s, min ON 8, min OFF-IN-PLAY 3, stock hitch >= 150 ms, stock train >= 7, legacy wide 50, N/M >= 0.90, P >= 3, clock tolerance 15 ms, countdown race 1 frame, re-runs <= 8, void-arm note > 4
+STOP RECORD class=done reason=list finished
+
+LOAD wu3_prime prime: not scored (VERDICT: CONFOUNDED (other heavy process present)); not clean is allowed for the prime: never re-run, not counted
+LOAD wu3_01_on ON VOID [not_clean] group=ON worst=39.1 n20=6 n33=2 span=0.74s worst_incl_save=39.1 save=#42 84 ms | 15s: worst=39.1 n20=6 n33=2 span=0.74s | loading=11.78 s in capture, engine clock 20.23 s
+    first attempt not clean: re-run wu3_01_on_r1 is scored in its place
+    not_clean: 'VERDICT: CONFOUNDED (other heavy process present)' (wu3: a not-clean scored load is re-run once as <tag>_r1)
+    full pass 955 of 955, frame 34, precache_left 54, 770.7 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 11777.6 ms, 10 of them > 20 ms, worst 5780.4 ms
+    load time: in capture 11777.6 ms (capture 0..70, frames file; H3's measure); engine clock time_global 20230 ms at capture 71 (from frame 135 T 20589 minus 359.3 ms; from the last countdown line 20230 ms; estimate: -5.9 / +5.6 ms = frame E 4.9 ms / frame 117 4.6 ms, + 1 ms)
+LOAD wu3_01_on_r1 ON VALID group=ON worst=45.1 n20=6 n33=4 span=6.36s worst_incl_save=45.1 save=#44 82 ms | 15s: worst=45.1 n20=6 n33=4 span=6.36s | loading=11.50 s in capture, engine clock 19.86 s
+    re-run of slot wu3_01_on, scored in its place (every per-load rule)
+    full pass 955 of 955, frame 34, precache_left 54, 778.1 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 11497.7 ms, 11 of them > 20 ms, worst 5697.1 ms
+    load time: in capture 11497.7 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19863 ms at capture 71 (from frame 132 T 20207 minus 343.7 ms; from the last countdown line 19864 ms; estimate: -5.6 / +6.5 ms = frame E 4.6 ms / frame 114 5.5 ms, + 1 ms)
+LOAD wu3_02_off OFF VALID group=OFF-IN-PLAY worst=320.7 n20=22 n33=9 span=20.37s worst_incl_save=320.7 save=#147 102 ms | 15s: worst=320.7 n20=9 n33=4 span=13.55s | loading=10.78 s in capture, engine clock 19.13 s
+    order: no wide pass; narrowed at frame 33 precache 56 (inside loading); wide passes logged 0; legacy P (max 0 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10776.8 ms, 10 of them > 20 ms, worst 5744.9 ms
+    load time: in capture 10776.8 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19132 ms at capture 71 (from frame 97 T 19173 minus 41.3 ms; from the last countdown line 19131 ms; estimate: -6.0 / +5.6 ms = frame E 5.0 ms / frame 79 4.6 ms, + 1 ms)
+LOAD wu3_03_off OFF VALID group=OFF-IN-PLAY worst=291.9 n20=20 n33=5 span=20.37s worst_incl_save=291.9 save=#161 95 ms | 15s: worst=291.9 n20=7 n33=3 span=13.56s | loading=10.80 s in capture, engine clock 19.10 s
+    order: no wide pass; narrowed at frame 33 precache 56 (inside loading); wide passes logged 0; legacy P (max 0 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10802.0 ms, 11 of them > 20 ms, worst 5746.7 ms
+    load time: in capture 10802.0 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19098 ms at capture 71 (from frame 99 T 19152 minus 54.1 ms; from the last countdown line 19098 ms; estimate: -8.1 / +6.9 ms = frame E 7.1 ms / frame 81 5.9 ms, + 1 ms)
+LOAD wu3_04_on ON VALID group=ON worst=53.3 n20=5 n33=1 span=6.76s worst_incl_save=80.8 save=#133 81 ms | 15s: worst=53.3 n20=5 n33=1 span=6.76s | loading=10.98 s in capture, engine clock 19.24 s
+    full pass 955 of 955, frame 32, precache_left 57, 681.7 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10980.7 ms, 10 of them > 20 ms, worst 5692.0 ms
+    load time: in capture 10980.7 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19241 ms at capture 71 (from frame 153 T 19692 minus 451.3 ms; from the last countdown line 19241 ms; estimate: -7.2 / +10.8 ms = frame E 6.2 ms / frame 135 9.8 ms, + 1 ms)
+LOAD wu3_05_on ON VALID group=ON worst=58.5 n20=4 n33=3 span=0.74s worst_incl_save=74.5 save=#121 75 ms | 15s: worst=58.5 n20=4 n33=3 span=0.74s | loading=10.91 s in capture, engine clock 19.25 s
+    full pass 955 of 955, frame 32, precache_left 57, 644.2 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10905.3 ms, 12 of them > 20 ms, worst 5726.5 ms
+    load time: in capture 10905.3 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19249 ms at capture 71 (from frame 140 T 19669 minus 420.5 ms; from the last countdown line 19248 ms; estimate: -6.8 / +6.0 ms = frame E 5.8 ms / frame 122 5.0 ms, + 1 ms)
+LOAD wu3_06_off OFF VALID group=OFF-IN-PLAY worst=306.1 n20=19 n33=4 span=20.36s worst_incl_save=306.1 save=#182 78 ms | 15s: worst=306.1 n20=6 n33=3 span=13.53s | loading=10.66 s in capture, engine clock 19.05 s
+    order: no wide pass; narrowed at frame 33 precache 56 (inside loading); wide passes logged 0; legacy P (max 0 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10662.3 ms, 8 of them > 20 ms, worst 5698.5 ms
+    load time: in capture 10662.3 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19048 ms at capture 71 (from frame 111 T 19157 minus 109.3 ms; from the last countdown line 19048 ms; estimate: -6.0 / +6.0 ms = frame E 5.0 ms / frame 93 5.0 ms, + 1 ms)
+LOAD wu3_07_off OFF VALID group=OFF-IN-PLAY worst=331.1 n20=18 n33=7 span=20.36s worst_incl_save=331.1 save=#161 106 ms | 15s: worst=331.1 n20=5 n33=2 span=13.55s | loading=10.66 s in capture, engine clock 18.85 s
+    order: no wide pass; narrowed at frame 33 precache 56 (inside loading); wide passes logged 0; legacy P (max 0 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10656.3 ms, 11 of them > 20 ms, worst 5703.7 ms
+    load time: in capture 10656.3 ms (capture 0..70, frames file; H3's measure); engine clock time_global 18846 ms at capture 71 (from frame 89 T 18846 minus 0.0 ms; from the last countdown line 18846 ms; estimate: -7.4 / +7.4 ms = frame E 6.4 ms / frame 71 6.4 ms, + 1 ms)
+LOAD wu3_08_on ON VALID group=ON worst=37.4 n20=6 n33=3 span=6.87s worst_incl_save=76.4 save=#130 76 ms | 15s: worst=37.4 n20=6 n33=3 span=6.87s | loading=10.95 s in capture, engine clock 19.25 s
+    full pass 955 of 955, frame 32, precache_left 57, 664.7 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10950.5 ms, 11 of them > 20 ms, worst 5659.4 ms
+    load time: in capture 10950.5 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19252 ms at capture 71 (from frame 151 T 19709 minus 456.6 ms; from the last countdown line 19253 ms; estimate: -5.6 / +5.7 ms = frame E 4.6 ms / frame 133 4.7 ms, + 1 ms)
+LOAD wu3_09_on ON VALID group=ON worst=42.9 n20=4 n33=3 span=0.73s worst_incl_save=42.9 save=#70 74 ms | 15s: worst=42.9 n20=4 n33=3 span=0.73s | loading=11.27 s in capture, engine clock 19.54 s
+    full pass 955 of 955, frame 34, precache_left 54, 762.7 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 11272.3 ms, 11 of them > 20 ms, worst 5636.7 ms
+    load time: in capture 11272.3 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19543 ms at capture 71 (from frame 89 T 19543 minus 0.0 ms; from the last countdown line 19543 ms; estimate: -9.7 / +9.7 ms = frame E 8.7 ms / frame 71 8.7 ms, + 1 ms)
+LOAD wu3_10_off OFF VALID group=OFF-IN-PLAY worst=302.0 n20=19 n33=8 span=20.22s worst_incl_save=302.0 save=#175 88 ms | 15s: worst=302.0 n20=6 n33=3 span=13.40s | loading=10.57 s in capture, engine clock 18.86 s
+    order: no wide pass; narrowed at frame 33 precache 56 (inside loading); wide passes logged 0; legacy P (max 0 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10574.3 ms, 11 of them > 20 ms, worst 5700.2 ms
+    load time: in capture 10574.3 ms (capture 0..70, frames file; H3's measure); engine clock time_global 18857 ms at capture 71 (from frame 102 T 18926 minus 69.2 ms; from the last countdown line 18856 ms; estimate: -6.4 / +6.3 ms = frame E 5.4 ms / frame 84 5.3 ms, + 1 ms)
+LOAD wu3_11_off OFF VALID group=OFF-IN-PLAY worst=324.4 n20=20 n33=3 span=20.38s worst_incl_save=324.4 save=#183 79 ms | 15s: worst=324.4 n20=7 n33=2 span=13.56s | loading=10.60 s in capture, engine clock 18.93 s
+    order: no wide pass; narrowed at frame 33 precache 56 (inside loading); wide passes logged 0; legacy P (max 0 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10596.9 ms, 9 of them > 20 ms, worst 5682.0 ms
+    load time: in capture 10596.9 ms (capture 0..70, frames file; H3's measure); engine clock time_global 18927 ms at capture 71 (from frame 108 T 19023 minus 95.8 ms; from the last countdown line 18927 ms; estimate: -5.8 / +5.2 ms = frame E 4.8 ms / frame 90 4.2 ms, + 1 ms)
+LOAD wu3_12_on ON VALID group=ON worst=49.3 n20=5 n33=3 span=6.46s worst_incl_save=49.3 save=#43 87 ms | 15s: worst=49.3 n20=5 n33=3 span=6.46s | loading=11.60 s in capture, engine clock 19.85 s
+    full pass 955 of 955, frame 34, precache_left 54, 799.1 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 11602.7 ms, 13 of them > 20 ms, worst 5665.3 ms
+    load time: in capture 11602.7 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19853 ms at capture 71 (from frame 132 T 20175 minus 322.2 ms; from the last countdown line 19852 ms; estimate: -19.5 / +5.0 ms = frame E 18.5 ms / frame 114 4.0 ms, + 1 ms)
+LOAD wu3_13_on ON VALID group=ON worst=70.0 n20=5 n33=1 span=6.40s worst_incl_save=70.0 save=#39 79 ms | 15s: worst=70.0 n20=5 n33=1 span=6.40s | loading=11.62 s in capture, engine clock 19.82 s
+    full pass 955 of 955, frame 34, precache_left 54, 758.3 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 11623.5 ms, 11 of them > 20 ms, worst 5642.6 ms
+    load time: in capture 11623.5 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19825 ms at capture 71 (from frame 149 T 20273 minus 448.4 ms; from the last countdown line 19824 ms; estimate: -6.2 / +10.8 ms = frame E 5.2 ms / frame 131 9.8 ms, + 1 ms)
+LOAD wu3_14_off OFF VALID group=OFF-IN-PLAY worst=297.1 n20=22 n33=6 span=20.40s worst_incl_save=297.1 save=#175 92 ms | 15s: worst=297.1 n20=9 n33=3 span=13.58s | loading=10.55 s in capture, engine clock 18.80 s
+    order: no wide pass; narrowed at frame 33 precache 56 (inside loading); wide passes logged 0; legacy P (max 0 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10554.8 ms, 10 of them > 20 ms, worst 5691.9 ms
+    load time: in capture 10554.8 ms (capture 0..70, frames file; H3's measure); engine clock time_global 18799 ms at capture 71 (from frame 94 T 18828 minus 28.6 ms; from the last countdown line 18799 ms; estimate: -7.2 / +5.3 ms = frame E 6.2 ms / frame 76 4.3 ms, + 1 ms)
+LOAD wu3_15_off OFF VALID group=OFF-IN-PLAY worst=300.5 n20=21 n33=7 span=20.30s worst_incl_save=300.5 save=#167 74 ms | 15s: worst=300.5 n20=8 n33=4 span=13.48s | loading=10.70 s in capture, engine clock 19.09 s
+    order: no wide pass; narrowed at frame 33 precache 56 (inside loading); wide passes logged 0; legacy P (max 0 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10702.9 ms, 13 of them > 20 ms, worst 5671.0 ms
+    load time: in capture 10702.9 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19091 ms at capture 71 (from frame 94 T 19127 minus 35.6 ms; from the last countdown line 19092 ms; estimate: -12.9 / +5.7 ms = frame E 11.9 ms / frame 76 4.7 ms, + 1 ms)
+LOAD wu3_16_on ON VALID group=ON worst=75.3 n20=5 n33=2 span=0.76s worst_incl_save=75.3 save=#50 89 ms | 15s: worst=75.3 n20=5 n33=2 span=0.76s | loading=11.42 s in capture, engine clock 19.65 s
+    full pass 955 of 955, frame 34, precache_left 54, 767.6 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 11424.0 ms, 12 of them > 20 ms, worst 5620.2 ms
+    load time: in capture 11424.0 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19655 ms at capture 71 (from frame 124 T 19970 minus 315.3 ms; from the last countdown line 19654 ms; estimate: -31.2 / +5.9 ms = frame E 30.2 ms / frame 106 4.9 ms, + 1 ms)
+LOAD wu3_17_on ON VALID group=ON worst=38.7 n20=5 n33=3 span=6.50s worst_incl_save=38.7 save=#46 85 ms | 15s: worst=38.7 n20=5 n33=3 span=6.50s | loading=11.54 s in capture, engine clock 19.74 s
+    full pass 955 of 955, frame 34, precache_left 54, 780.3 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 11538.1 ms, 11 of them > 20 ms, worst 5650.8 ms
+    load time: in capture 11538.1 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19741 ms at capture 71 (from frame 137 T 20108 minus 367.3 ms; from the last countdown line 19741 ms; estimate: -5.9 / +10.1 ms = frame E 4.9 ms / frame 119 9.1 ms, + 1 ms)
+LOAD wu3_18_off OFF VALID group=OFF-IN-PLAY worst=324.2 n20=19 n33=7 span=20.37s worst_incl_save=324.2 save=#158 80 ms | 15s: worst=324.2 n20=6 n33=4 span=9.47s | loading=10.70 s in capture, engine clock 18.93 s
+    order: no wide pass; narrowed at frame 33 precache 56 (inside loading); wide passes logged 0; legacy P (max 0 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10696.2 ms, 9 of them > 20 ms, worst 5643.1 ms
+    load time: in capture 10696.2 ms (capture 0..70, frames file; H3's measure); engine clock time_global 18929 ms at capture 71 (from frame 96 T 18969 minus 39.6 ms; from the last countdown line 18929 ms; estimate: -5.7 / +6.4 ms = frame E 4.7 ms / frame 78 5.4 ms, + 1 ms)
+LOAD wu3_19_off OFF VALID group=OFF-IN-LOADING worst=46.1 n20=4 n33=2 span=6.86s worst_incl_save=79.2 save=#120 79 ms | 15s: worst=46.1 n20=4 n33=2 span=6.86s | loading=11.00 s in capture, engine clock 19.23 s
+    order: wide pass at frame 32 precache 57 before intro_start (n 955 of 955); wide passes logged 1; legacy L (max 138 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10996.3 ms, 10 of them > 20 ms, worst 5774.0 ms
+    load time: in capture 10996.3 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19234 ms at capture 71 (from frame 91 T 19249 minus 15.4 ms; from the last countdown line 19234 ms; estimate: -6.2 / +5.1 ms = frame E 5.2 ms / frame 73 4.1 ms, + 1 ms)
+LOAD wu3_20_on ON VALID group=ON worst=32.6 n20=5 n33=0 span=0.71s worst_incl_save=83.0 save=#139 83 ms | 15s: worst=32.6 n20=5 n33=0 span=0.71s | loading=10.92 s in capture, engine clock 19.12 s
+    full pass 955 of 955, frame 32, precache_left 57, 658.3 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10917.8 ms, 11 of them > 20 ms, worst 5641.8 ms
+    load time: in capture 10917.8 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19116 ms at capture 71 (from frame 155 T 19502 minus 386.1 ms; from the last countdown line 19116 ms; estimate: -8.6 / +5.0 ms = frame E 7.6 ms / frame 137 4.0 ms, + 1 ms)
+LOAD wu3_21_on ON VALID group=ON worst=68.4 n20=4 n33=2 span=6.43s worst_incl_save=77.9 save=#151 78 ms | 15s: worst=68.4 n20=4 n33=2 span=6.43s | loading=10.88 s in capture, engine clock 19.10 s
+    full pass 954 of 954, frame 32, precache_left 57, 685.0 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10875.2 ms, 10 of them > 20 ms, worst 5644.8 ms
+    load time: in capture 10875.2 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19101 ms at capture 71 (from frame 95 T 19133 minus 32.2 ms; from the last countdown line 19101 ms; estimate: -6.9 / +5.3 ms = frame E 5.9 ms / frame 77 4.3 ms, + 1 ms)
+LOAD wu3_22_off OFF VALID group=OFF-IN-LOADING worst=56.2 n20=2 n33=2 span=0.19s worst_incl_save=89.9 save=#107 90 ms | 15s: worst=56.2 n20=2 n33=2 span=0.19s | loading=11.05 s in capture, engine clock 19.36 s
+    order: wide pass at frame 32 precache 57 before intro_start (n 954 of 954); wide passes logged 1; legacy L (max 133 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 11049.6 ms, 11 of them > 20 ms, worst 5739.4 ms
+    load time: in capture 11049.6 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19360 ms at capture 71 (from frame 133 T 19718 minus 358.4 ms; from the last countdown line 19360 ms; estimate: -5.4 / +9.9 ms = frame E 4.4 ms / frame 115 8.9 ms, + 1 ms)
+LOAD wu3_23_off OFF VALID group=OFF-IN-PLAY worst=302.9 n20=20 n33=4 span=20.21s worst_incl_save=302.9 save=#201 81 ms | 15s: worst=302.9 n20=7 n33=3 span=13.38s | loading=10.60 s in capture, engine clock 18.86 s
+    order: no wide pass; narrowed at frame 33 precache 56 (inside loading); wide passes logged 0; legacy P (max 0 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10596.5 ms, 9 of them > 20 ms, worst 5687.2 ms
+    load time: in capture 10596.5 ms (capture 0..70, frames file; H3's measure); engine clock time_global 18863 ms at capture 71 (from frame 101 T 18922 minus 59.2 ms; from the last countdown line 18863 ms; estimate: -5.6 / +5.6 ms = frame E 4.6 ms / frame 83 4.6 ms, + 1 ms)
+LOAD wu3_24_on ON VALID group=ON worst=53.9 n20=5 n33=2 span=6.88s worst_incl_save=84.3 save=#128 84 ms | 15s: worst=53.9 n20=5 n33=2 span=6.88s | loading=10.96 s in capture, engine clock 19.19 s
+    full pass 954 of 954, frame 32, precache_left 57, 682.8 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10963.7 ms, 11 of them > 20 ms, worst 5636.3 ms
+    load time: in capture 10963.7 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19187 ms at capture 71 (from frame 147 T 19624 minus 437.4 ms; from the last countdown line 19186 ms; estimate: -6.8 / +7.2 ms = frame E 5.8 ms / frame 129 6.2 ms, + 1 ms)
+LOAD wu3_25_on ON VALID group=ON worst=40.4 n20=4 n33=2 span=0.66s worst_incl_save=86.2 save=#125 86 ms | 15s: worst=40.4 n20=4 n33=2 span=0.66s | loading=10.85 s in capture, engine clock 19.14 s
+    full pass 954 of 954, frame 32, precache_left 57, 665.5 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10853.6 ms, 10 of them > 20 ms, worst 5650.7 ms
+    load time: in capture 10853.6 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19143 ms at capture 71 (from frame 144 T 19557 minus 414.3 ms; from the last countdown line 19142 ms; estimate: -5.5 / +5.9 ms = frame E 4.5 ms / frame 126 4.9 ms, + 1 ms)
+LOAD wu3_26_off OFF VALID group=OFF-IN-PLAY worst=300.4 n20=21 n33=5 span=20.40s worst_incl_save=300.4 save=#171 77 ms | 15s: worst=300.4 n20=8 n33=4 span=13.57s | loading=10.69 s in capture, engine clock 18.91 s
+    order: no wide pass; narrowed at frame 33 precache 56 (inside loading); wide passes logged 0; legacy P (max 0 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10686.9 ms, 11 of them > 20 ms, worst 5667.3 ms
+    load time: in capture 10686.9 ms (capture 0..70, frames file; H3's measure); engine clock time_global 18907 ms at capture 71 (from frame 92 T 18926 minus 19.5 ms; from the last countdown line 18907 ms; estimate: -6.6 / +5.3 ms = frame E 5.6 ms / frame 74 4.3 ms, + 1 ms)
+LOAD wu3_27_off OFF VALID group=OFF-IN-LOADING worst=41.5 n20=3 n33=2 span=0.71s worst_incl_save=101.8 save=#130 102 ms | 15s: worst=41.5 n20=3 n33=2 span=0.71s | loading=11.08 s in capture, engine clock 19.35 s
+    order: wide pass at frame 32 precache 57 before intro_start (n 954 of 954); wide passes logged 1; legacy L (max 131 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 11084.6 ms, 11 of them > 20 ms, worst 5774.7 ms
+    load time: in capture 11084.6 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19352 ms at capture 71 (from frame 149 T 19809 minus 456.9 ms; from the last countdown line 19353 ms; estimate: -7.5 / +11.5 ms = frame E 6.5 ms / frame 131 10.5 ms, + 1 ms)
+LOAD wu3_28_on ON VALID group=ON worst=52.8 n20=5 n33=2 span=6.47s worst_incl_save=52.8 save=#42 82 ms | 15s: worst=52.8 n20=5 n33=2 span=6.47s | loading=11.45 s in capture, engine clock 19.72 s
+    full pass 955 of 955, frame 34, precache_left 54, 757.9 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 11447.9 ms, 11 of them > 20 ms, worst 5626.3 ms
+    load time: in capture 11447.9 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19725 ms at capture 71 (from frame 138 T 20095 minus 370.4 ms; from the last countdown line 19725 ms; estimate: -5.9 / +5.7 ms = frame E 4.9 ms / frame 120 4.7 ms, + 1 ms)
+LOAD wu3_29_on ON VALID group=ON worst=40.7 n20=4 n33=2 span=0.60s worst_incl_save=76.2 save=#138 76 ms | 15s: worst=40.7 n20=4 n33=2 span=0.60s | loading=10.90 s in capture, engine clock 19.11 s
+    full pass 955 of 955, frame 32, precache_left 57, 674.9 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10898.9 ms, 9 of them > 20 ms, worst 5666.5 ms
+    load time: in capture 10898.9 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19114 ms at capture 71 (from frame 92 T 19134 minus 19.6 ms; from the last countdown line 19114 ms; estimate: -6.4 / +5.4 ms = frame E 5.4 ms / frame 74 4.4 ms, + 1 ms)
+LOAD wu3_30_off OFF VALID group=OFF-IN-LOADING worst=40.7 n20=6 n33=1 span=0.72s worst_incl_save=73.1 save=#135 73 ms | 15s: worst=40.7 n20=6 n33=1 span=0.72s | loading=10.74 s in capture, engine clock 19.10 s
+    order: wide pass at frame 32 precache 57 before intro_start (n 954 of 954); wide passes logged 1; legacy L (max 130 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10739.0 ms, 9 of them > 20 ms, worst 5623.0 ms
+    load time: in capture 10739.0 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19097 ms at capture 71 (from frame 100 T 19152 minus 54.9 ms; from the last countdown line 19097 ms; estimate: -5.9 / +5.3 ms = frame E 4.9 ms / frame 82 4.3 ms, + 1 ms)
+LOAD wu3_31_off OFF VALID group=OFF-IN-PLAY worst=321.5 n20=22 n33=5 span=20.21s worst_incl_save=321.5 save=#177 79 ms | 15s: worst=321.5 n20=9 n33=3 span=13.40s | loading=10.54 s in capture, engine clock 18.82 s
+    order: no wide pass; narrowed at frame 33 precache 56 (inside loading); wide passes logged 0; legacy P (max 0 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10543.1 ms, 10 of them > 20 ms, worst 5656.0 ms
+    load time: in capture 10543.1 ms (capture 0..70, frames file; H3's measure); engine clock time_global 18817 ms at capture 71 (from frame 101 T 18874 minus 57.0 ms; from the last countdown line 18817 ms; estimate: -5.7 / +10.9 ms = frame E 4.7 ms / frame 83 9.9 ms, + 1 ms)
+LOAD wu3_32_on ON VALID group=ON worst=52.9 n20=3 n33=1 span=0.75s worst_incl_save=69.4 save=#132 69 ms | 15s: worst=52.9 n20=3 n33=1 span=0.75s | loading=10.82 s in capture, engine clock 19.12 s
+    full pass 954 of 954, frame 32, precache_left 57, 658.3 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10822.8 ms, 11 of them > 20 ms, worst 5660.6 ms
+    load time: in capture 10822.8 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19118 ms at capture 71 (from frame 151 T 19570 minus 452.0 ms; from the last countdown line 19118 ms; estimate: -5.5 / +5.7 ms = frame E 4.5 ms / frame 133 4.7 ms, + 1 ms)
+
+SLOTS ON  16 slots: 16 valid, 0 void (0 of them not clean on every attempt), 0 failed, 0 not run; attempts run 17, not clean 1 (6 %)
+SLOTS OFF 16 slots: 16 valid, 0 void (0 of them not clean on every attempt), 0 failed, 0 not run; attempts run 16, not clean 0 (0 %)
+RE-RUNS 1 of R_MAX 8: wu3_01_on_r1
+
+GROUPS (valid loads; the two stock groups are never pooled): ON 16, OFF-IN-PLAY 12, OFF-IN-LOADING 4, OFF-OTHER 0 (reported only); void 0; failed 0
+  ON              worst_ms             median 51.06 min 32.57 max 75.26 n 16
+  ON              n20                  median 5.00 min 3.00 max 6.00 n 16
+  ON              n33                  median 2.00 min 0.00 max 4.00 n 16
+  ON              train_span_s         median 6.38 min 0.60 max 6.88 n 16
+  ON              worst_incl_save_ms   median 74.90 min 38.66 max 86.17 n 16
+  ON              worst15_ms           median 51.06 min 32.57 max 75.26 n 16
+  ON              n20_15               median 5.00 min 3.00 max 6.00 n 16
+  ON              n33_15               median 2.00 min 0.00 max 4.00 n 16
+  ON              loading_in_capture_s median 10.97 min 10.82 max 11.62 n 16
+  ON              engine_clock_load_s  median 19.25 min 19.10 max 19.86 n 16
+  ON              pass_ms              median 683.90 min 644.20 max 799.10 n 16
+  ON              held_frames          median 0.00 min 0.00 max 0.00 n 16
+  OFF-IN-PLAY     worst_ms             median 304.53 min 291.90 max 331.08 n 12
+  OFF-IN-PLAY     n20                  median 20.00 min 18.00 max 22.00 n 12
+  OFF-IN-PLAY     n33                  median 5.50 min 3.00 max 9.00 n 12
+  OFF-IN-PLAY     train_span_s         median 20.36 min 20.21 max 20.40 n 12
+  OFF-IN-PLAY     worst_incl_save_ms   median 304.53 min 291.90 max 331.08 n 12
+  OFF-IN-PLAY     worst15_ms           median 304.53 min 291.90 max 331.08 n 12
+  OFF-IN-PLAY     n20_15               median 7.00 min 5.00 max 9.00 n 12
+  OFF-IN-PLAY     n33_15               median 3.00 min 2.00 max 4.00 n 12
+  OFF-IN-PLAY     loading_in_capture_s median 10.66 min 10.54 max 10.80 n 12
+  OFF-IN-PLAY     engine_clock_load_s  median 18.92 min 18.80 max 19.13 n 12
+  OFF-IN-PLAY     pass_ms              n/a
+  OFF-IN-PLAY     held_frames          n/a
+  OFF-IN-LOADING  worst_ms             median 43.78 min 40.73 max 56.25 n 4
+  OFF-IN-LOADING  n20                  median 3.50 min 2.00 max 6.00 n 4
+  OFF-IN-LOADING  n33                  median 2.00 min 1.00 max 2.00 n 4
+  OFF-IN-LOADING  train_span_s         median 0.72 min 0.19 max 6.86 n 4
+  OFF-IN-LOADING  worst_incl_save_ms   median 84.54 min 73.05 max 101.80 n 4
+  OFF-IN-LOADING  worst15_ms           median 43.78 min 40.73 max 56.25 n 4
+  OFF-IN-LOADING  n20_15               median 3.50 min 2.00 max 6.00 n 4
+  OFF-IN-LOADING  n33_15               median 2.00 min 1.00 max 2.00 n 4
+  OFF-IN-LOADING  loading_in_capture_s median 11.02 min 10.74 max 11.08 n 4
+  OFF-IN-LOADING  engine_clock_load_s  median 19.29 min 19.10 max 19.36 n 4
+  OFF-IN-LOADING  pass_ms              n/a
+  OFF-IN-LOADING  held_frames          n/a
+
+LOAD TIME (H3's measure: in-capture loading time = sum of the frames file's ms of capture 0..E-1, QPC wall clock; the engine clock at E beside it)
+  loading takes 0.31 s longer with the lever (median in-capture loading time ON 10.97 s, OFF-IN-PLAY 10.66 s)
+  engine clock at E (estimate, reported only): median ON 19.25 s - median OFF-IN-PLAY 18.92 s = +0.33 s
+  difference of the two ON - OFF-IN-PLAY deltas (engine clock - in capture): +0.021 s; bound -0.042 / +0.024 s (the estimates' errors from the frame sizes, prereg 5.4) -> agree
+
+H1 worst frame (30 s): median ON 51.1 ms <= 0.50 x median OFF-IN-PLAY 304.5 ms = 152.3 (ok), and ON loads with worst >= 304.5 ms: 0 <= 1 (ok) -> ok
+H2 frames > 20 ms (30 s): median OFF-IN-PLAY 20.0 - median ON 5.0 = 15.0 >= 7 -> ok
+H3 load-time price (in-capture loading time): median ON 10.97 s - median OFF-IN-PLAY 10.66 s = +0.31 s <= 2.0 s -> ok
+SAME AS GOOD ORDER (reported only): worst ok, n20 ok, load (in-capture loading time) -0.05 s ok -> SAME
+
+WU3 RESULT: PASS
