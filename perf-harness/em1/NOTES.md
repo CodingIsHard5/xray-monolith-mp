@@ -1,96 +1,80 @@
-# em1 X side: notes for EnginePerf (desk draft, 2026-11-27 14:00-14:30 EST, Opus sub-worker)
+# em1 X side: notes for EnginePerf (desk draft, 2026-11-27, Opus sub-worker; round 2 14:29-14:45 EST)
 
 No engine boot, no git, no CodeRabbit, no network. Files written only under em1/. Everything else read only.
 
 ## Files
 | file | what |
 |---|---|
-| em1_check.py | the X-side checker (emission checks 1-13 from kj4p + kill checks k2..k15 from kj2 for one monster) |
-| em1_selftest.sh | selftest: one stub-made run, made fixtures, 44 checker mutants, real kj4p-r1 and kj2 folders, then the axr step test |
-| em1_stub.lua | kj4/kill7h_stub.lua + one fixture command `lag <ms>` (pending kill); diff = 3 lines |
-| t2_xray_em1.sh | X runner = kj4/t2_xray_kj4.sh + the axr_options restore step (exit 7) + the exit-code header line |
-| em1_axr_step_test.sh | desk test of that step alone, on a scratch layout (good / missing / wrong bytes) |
+| em1_check.py | the X-side checker (emission checks 1-13 from kj4p + kill checks ka k2..k15 for one monster, split death) |
+| em1_selftest.sh | selftest: two stub-made runs (kill lag 250 / 0), made fixtures, 45 checker mutants, real kj4p-r1 and kj2 folders, then the axr step test |
+| em1_stub.lua | kj4/kill7h_stub.lua + one fixture command `lag <ms>`; diff = 3 lines (unchanged in round 2) |
+| em1_score.sh | score once = kj4p_score.sh with em1 names; CHK_SHA = the round-2 checker |
+| t2_xray_em1.sh | X runner = kj4/t2_xray_kj4.sh + the axr_options restore step (exit 7), placed right after the claim check |
+| em1_axr_step_test.sh | desk test of that step alone, on a scratch layout (good / missing / wrong bytes) + its place in the runner |
 | PREREG-em1-joint-emission-witness-DRAFT.md | the draft text (limits, checks, NV, margin table, claim class) |
 
-## Decisions EnginePerf should confirm
-1. **What "the pending state" spans.** The brief said "from the hit until the kill call". The rig code says otherwise
-   (ITRZone main.lua STR.kcHealth: kcShort is called in the same pass as kcDeath, so the 0.005 short travels in the SAME
-   pose as dead = 1; kill7 then applies the difference and calls o:kill in the same Lua call, KAPPLY and KDEAD at one X
-   time). Between M's 0.3 hit (play 30) and play 50, M is at ~0.7, not near 0. So kp judges the window from the kill call
-   (KDEAD online) to the KCONF: M alive 1, health in [0.0020, 0.0200], plain k line. itrzone's draft em1_check.py reads the
-   pending path the same way ("X-Ray applied lines between the death and its confirmation"). If EnginePerf meant something
-   else, kp must change.
-2. **nvk7 is new** (not in the brief): if the engine puts the death into effect at once (KCONF 0 ms, as in kj2), there is
-   no pending snapshot and kp cannot be judged; nvk7 fires and leaves only kp untested. Alternative: make "no pending
-   snapshot" a plain FAIL of kp. I chose NO VERDICT because a kill that takes effect at once is not a fault of X-Ray.
-3. **kd judges the kill call's PLAY time** (50 +/- 5 s) via kj4p's X->W P2 map and the runner's play0. The +/- 5 s mirrors
-   itrzone's own +/- 5 s; the measured offset in kj2 is -1.04..-1.09 s (4.6x). The hit's play time is only reported (k2).
-4. **Missing / empty / unreadable required files FAIL by name** (kj2's principle, as the brief asked), exit 1, no check
-   computed. kj4p REFUSED (exit 2) instead. A score-once wrapper modelled on kj4p_score.sh would need to treat 1 as a score.
-5. **hits_t2.csv may be empty** (kj4p's rule kept; kj2 had an empty one). stall.csv must NOT exist (check 1).
-6. **Check 10 replaces kj2's check 12** (actor health = the first): 1.0000 in every snapshot implies it. k12 is dropped.
-7. **Check 11 vs k14.** The non-kill zeros (torn, lost, epochs, ktabfail, eerr, paused, key order) stay in 11, which is
-   always judged; every key (incl. those) is also in k14's table. So a kill-side NO VERDICT can never hide a torn pose or
-   eerr. eerr is judged twice (11 and k14): mutant m11 fails both.
-8. **The 10-of-12 rule for n != 12** is my generalisation: judged x 12 >= 10 x n. For n = 10 (the stub) 9 judged pass,
-   8 fail. The brief's text ("at least 10 of 12 judged") is exact only for 12 vortices.
-9. **The vortex gap uses the X clock** (snapshot header ms between the first v line's snapshot and the kept snapshot
-   before it). Measured on kj2: X-clock gaps p99 136 ms, watcher-clock p99 138 ms: the same in practice.
-10. **kp's band [0.0020, 0.0200]**: upper edge = FALL (0.02) and = 0.0056 + 1.5 s x 0.0096/s healing; lower edge 0.0020 is
-    a choice (2.2x under the derived 0.0044). A puppet whose health sits ABOVE X-Ray's (it is updated down at once, up once
-    a second) would leave M below 0.0044; I found no path for that in main.lua but did not prove there is none.
-11. **k6 excludes every k-line id**, not only M (kj2 excluded S and M); only matters when nvk1 fires.
-12. **Runner step order**: copy first, then hash the RESULT (as ordered). A wrong source therefore overwrites
-    configs/axr_options.ltx with wrong bytes before the refusal. Hashing the source before the copy would leave the configs
-    file untouched on a refusal; say if you want that instead. The step uses `log` (timestamped line into t2_xray.log and
-    stdout), as the runner's other REFUSED lines do.
-13. **No em1 driver.** As in kj2 (prereg sections 2 and 8), itrzone's boot script holds the box, starts ITR2 and then runs
-    the pinned X runner; so the restore lives in the runner, and em1_run.sh was not written (coordinator's ruling). What
-    itrzone's boot script must pass: the env of PREREG section 1 (T2_RUN_S 445, T2_WALL_S 1300, T2_OVER_S 120,
-    T2_STALL_PLAY 99999, T2_SURGE_PLAY 70, T2_PSI_PLAY 310, the rest as kj4p) and an EXCLUSIVE claim whose text the runner's
-    claim test accepts (`^HELD:.* EXCLUSIVE` or `B1-T2`). The runner's `cd "$(dirname "$0")/.."` assumes it is installed in
-    tools/ (from em1/ its RUN would point at perf-harness/run: never run it from em1/).
-14. **Disk/selftest**: each selftest run leaves ~31 MB under em1/selftest-runs/em1-st-*/ (the selftest deletes nothing;
-    the CRLF full copy is most of it). Left now: em1-st-20261127-142134-628419 (31 MB, the PASS run), axr-20261127-141154-*
-    (1 MB), adhoc-20261127-141100 (68 KB, the first kj2 symlink read). I removed my first, failed selftest run (12 MB).
+## Round 2 (2026-11-27): the split death and the review fixes
+- **Design (plan-facts/em1-pending-design-2026-11-27.md, Overseer ruling):** em1 is an "alive near zero, held, then killed" witness.
+  kcjh=2: play 50 a dead = 0 pose with total 0.995 (M held alive at kill7:476's 0.0100 floor), play 52 the dead = 1 pose
+  with total >= the hold's (itrzone wire values, blob 50cbbd22: hit 0.300, hold 0.995 at play 50.00..50.30, death
+  1.005 dead 1 at hold + 2.00 +/- 0.30 s; X-Ray: death KAPPLY d 0.010, after 0.0000, no floor, judged by ka and kd; the
+  stub's good run uses exactly these totals, with the stub creature's own section). The pending path is NOT forced: proven offline (kill7h stub tests) + the guard (KNOCONF at
+  2000 ms); seen live only if the engine defers. kp and nvk7 are gone.
+- **kh** (new): one dead = 0 total after the hit and one KAPPLY for it, play 50 +/- 5 s; d = pose difference, after =
+  max(before - d, 0.0100), each +/- 0.0002; then EVERY kept snapshot strictly after the hold KAPPLY and strictly before the
+  kill call (X) listing M: alive 1, health 0.0098..0.0300, plain k line; at least 5 of them. Choice: "at least 5" read as
+  "every one good AND >= 5" (a bad one fails, not only a short count). Strict edges: a snapshot at the KAPPLY's own X may
+  precede the apply in the same frame.
+- **kd**: one KDEAD (online) for M at play 52 +/- 5 s, after the hold KAPPLY, n >= first dead pose; dead pose total >= hold
+  total - 0.0002; total above the hold -> exactly one KAPPLY in the kill call with d = difference, after = max(before - d,
+  0); total equal -> none.
+- **kc** (new): exactly one KCONF for M, 0..2000 ms after the kill call (X and its ms field), no KNOCONF, first snapshot
+  listing M at or after KCONF alive 0. Pending snapshots reported only.
+- **k4** window: hit KAPPLY -> kill call; KAPPLY other than hit and hold FAIL; the fall across the hold KAPPLY is exempt
+  (only when the hold KAPPLY is the sole K line in between).
+- **B1 -> ka** (new, ALWAYS judged): every KAPPLY of any id: applied = total of the kept pose at or before its pose seq;
+  d = total - the id's previous applied total (cap 1, kill7's clamp); after = max(before - d, 0), floored at
+  min(before, 0.01) for a dead = 0 pose. It uses kill7's exact floor; kh uses the Overseer's max(before - d, 0.0100)
+  (equal while before >= 0.01).
+- **B2**: nvk2's "dead before its step" clause does not fire when M's first alive-0 snapshot follows a KAPPLY of mine with
+  after <= 0 or a KDEAD online; k2 is removed from every untested set once M has a KAPPLY (checker prints
+  `verdict: M has a KAPPLY: k2 judged whatever fired`). Fixture mk2_kill -> FAIL (k2, ka), nvk2 clear.
+- **B3 runner**: restore block moved after the claim check (runner line 56), lines 57-66, before run_noguard (line 67/68).
+  Before the claim check the runner writes only `mkdir -p "$O"` and log lines into $O (the out folder, kj4 unchanged).
+  The step test asserts RUN set < claim check < BEGIN..END < first later write to run/ or shm < first boot.
+- **B4 nve5 -> dropped** (coordinator 2026-11-27): it could never decide a verdict; nve5_cut (no v, no EEND psi) is a
+  plain FAIL (6p, 9). A storm that ended with no v line FAILS 9.
+- **Runner**: the source is now hashed against 27d54b9f before the copy (refusal, exit 7, leaves configs untouched); the
+  after-copy hash stays. Step test adds: wrong source -> 7 AND destination byte-identical to before (9/9).
+
+## Decisions kept from round 1 (confirm)
+1. kd/kh judge PLAY time via kj4p's X->W P2 map and the runner's play0 (+/- 5 s mirrors itrzone; kj2 offset -1.04..-1.09).
+2. Missing/empty/unreadable required file: FAIL by name, exit 1 (kj4p refused). em1_score.sh records 1 as a score.
+3. hits_t2.csv may be empty; stall.csv must not exist. Check 10 replaces kj2's 12. Non-kill zeros stay in 11 (always).
+4. 10-of-12 vortex rule for n != 12: judged x 12 >= 10 x n (my generalisation). Vortex gap on the X clock.
+5. k6 excludes every k-line id. No em1 driver: itrzone's boot script runs the pinned runner (installed in tools/; never run it from em1/).
 
 ## Guesses (not verified)
-- That ITR2's rig picks a monster at all in em1 (kj2 picked flesh 23183 at the same spot; with the actor moving the pick
-  may differ). No pick -> no k line -> nvk1.
-- That the surge at play 70 does not interfere with M (dead at ~49; body may be removed: allowed by k11).
-- That kill7's snapshot order is `a o* r? e (w|v)* ns k*` in the engine as in the script text (export_b1: em_snap after r,
-  k lines after it); the stub agrees; no real engine snapshot with both e and k lines exists yet.
-- That the play-end offset stays ~15 s in a joint run with emissions (kj2: 15.04 s without emissions).
-- That RUN_S 445 leaves the psi storm's EEND + 2 s inside the run (latest ~421 vs end ~430).
+- ITR2's rig picks a monster in em1 (kj2 picked flesh 23183 there). The hold band holds for em1's monster (rests on kj2's
+  flesh, one run: max 2 s rise 0.0009). The engine puts set_health_ex(0.0100) into the next snapshot's health as written.
+- Snapshot order `a o* r? e (w|v)* ns k*` in the engine; the play-end offset ~15 s with emissions; psi EEND + 2 s < ~430.
+- Stub: on o:kill health goes negative (fall 1.005 from 0.005): the death-step exemption needs alive 0 and h <= 0.
 
-## What was tested, and how
-- `nice -n 19 bash em1/em1_selftest.sh` (2026-11-27 14:21:34, after the QUIET-REQUIRED check printed nothing; ~10 s):
-  `EM1 SELFTEST: PASS`. In it: 1 stub-made run (real kill7 reader, stub with kill lag 250 ms, rig stand-in: M 301 hit
-  0.300, lethal 0.995 = 0.3 + 0.7 - 0.005, KAPPLY after 0.0050, 2 pending snapshots, KCONF 250 ms; 10 vortices) -> PASS;
-  47 made FAIL fixtures with exact failing sets (every check id at least once); 4 PASS fixtures at the new bounds
-  (dy 0.45, distance 151.0, one vortex unjudged by a 300 ms gap with dy 0.9, a falling neighbour 60 m away); 10 NO
-  VERDICT fixtures (every nve/nvk rule fires once; nvk1 by a stalker k line; nvk6 by M unlisted at the dead pose); one
-  NV-does-not-hide fixture (nvk7 + check 10 -> FAIL); 3 unparsable; 8 missing + 3 empty (FAIL by name) + empty hits (PASS);
-  CRLF copy (PASS); the checker writes nothing; 44 checker mutants (31 checks forced to pass, 10 rules never firing, 3
-  bound mutants: V_DY 0.05, no gap rule, no 10-of-12 rule): 44 of 44 give a different outcome on their fixture.
-- Real bytes, read in place: `out/kj4p-r1/run` -> NO VERDICT (nvk1: no k line), every emission check 1-13 PASS; check 9
-  PASS with 12 of 12 vortices judged (gaps 100 ms), vortex 8 at -0.064 m (kj4p's FAIL) now inside +/-0.50; check 1 play
-  end 449.3 >= 425. The kill checks fail exactly as "no k line at all" (k2 k4 k6 kp kd k7 k8 k11 k14), all inside nvk1.
-- kj2's real X folder: in place -> FAIL, `MISSING emforce.csv`. Through symlinks + a header-only emforce.csv -> FAIL;
-  emission checks all FAIL except 10 (actor unhurt) and 12 (no e lines in kill5). Kill checks it CAN exercise on real
-  bytes, M = flesh 23183: k2 PASS (0.300, exact), k3 PASS (5 KAPPLY), k4 PASS (689 snapshots, +0.0277 healing), k6 PASS,
-  k8 PASS, k11 PASS, k13 PASS (no stop allowance needed), k15 PASS (180 dead lines), nvk3's death-step exemption (950 ->
-  951). It CANNOT exercise: kp (no pending: KCONF 0 ms, lethal after 0.0000 -> nvk7 fires), kd (M's kill at play 125.7,
-  inside the 20 s stop), k7 (M's dead pose read inside the stop: 11839 ms), k14 (kdead_online 2, no eerr key in kill5,
-  2 KCONF), nvk1 fires (stalker 19425 has k lines). Asserted per check in the selftest.
-- `bash em1/em1_axr_step_test.sh` (also run by the selftest): 8/8 (marker once, order RUN < step < claim check < first
-  boot, no rm in the step, good -> continues and the hash holds, missing source -> 7 + one REFUSED line, wrong bytes -> 7
-  + one REFUSED line, bash -n of the runner, the real source file unchanged). Scratch layout under
-  em1/selftest-runs/.../axr/; the real run/ folder only read (its axr_options_play.ltx hashes to 27d54b9f... today).
+## What was tested (round 2)
+- QUIET-REQUIRED grep printed nothing at 14:35, 14:36, 14:37, 14:40, 14:42; `nice -n 19 bash em1/em1_selftest.sh`, final run (wire values 1.005)
+  14:42:09-14:42:54: `EM1 SELFTEST: PASS`, 101 ok lines, 0 BAD; 45 of 45 checker mutants caught (46 runs). Two earlier
+  runs FAILED on my own fixture expectations (mk3 now also fails ka; mkh_hi made an nvk3 fall; mkd_nokap no k14; mkc_alive
+  breaks the death-step exemption -> replaced by mkc_early; khits 3 not 2; stub lag 0 gives KCONF 50 ms, so a made
+  pkc_zero fixture proves 0 ms PASSES). Those run folders were deleted by literal path.
+- Stub `good`: M 301 hit 0.300 -> 0.7000; hold d 0.695 -> 0.0100, 20 hold snapshots; death d 0.010 -> 0.0000 (total 1.005); KCONF 250 ms,
+  2 pending snapshots (reported). `good_lag0` PASS (KCONF 50 ms, 0 pending). Made fixtures for every kh/kd/kc clause,
+  wrong hold d / wrong death d with no snapshot between -> FAIL (ka + kh / ka + kd), nvk2_heldkill (world kills M in the
+  hold -> NO VERDICT, kh), nve5_cut, m9_novortex (storm ended, no v -> FAIL 9).
+- Real: kj4p-r1 -> NO VERDICT (nvk1, no k line), every emission check PASS. kj2 links -> FAIL (emission, no e lines) and
+  ka, k2, k3, k6, kc (KCONF 0 ms), k8, k11, k13, k15 PASS; k4, kh, kd (no hold in kj2), k7 (stop), k14 FAIL; nvk1 fires.
+- em1_score.sh on kj4p-r1 into em1/selftest-runs/score-r2/: rc 3, second call REFUSED rc 2.
+- Left on disk: em1/selftest-runs/em1-st-20261127-144405-1013554 (50 MB; final, 14:44:05-14:44:49, 44/44 mutants, axr 9/9), adhoc-20261127-141100 (68 KB).
 
 ## Not tested / not done
-- The runner as a whole (bash -n only, plus its one step in isolation); the engine; ITR2; a moving actor during an
-  emission (moving-actor checks rest on made edits of the actor line); the pending path in the engine; bounds exactly at
-  their edges beyond the four PASS fixtures; a stub run with a moving actor (the stub's actor stands).
-- No CodeRabbit pass (not allowed in this task). No scorer (em1_score.sh) was written: open item.
-- Predictions and pins left for EnginePerf (PREREG sections 6-8).
+- The runner as a whole (bash -n + the step); the engine; ITR2; the hold, a moving actor during an emission, or the
+  pending path in the engine; a stub run with a moving actor. No CodeRabbit (not allowed). Predictions and pins: EnginePerf.

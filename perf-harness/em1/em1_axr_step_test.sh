@@ -22,8 +22,11 @@ awk '/^# em1 \(BEGIN axr restore\)/{f=1} f{print} /^# em1 \(END axr restore\)/{f
 chk $? "the step is marked exactly once in the runner and was cut out ($(wc -l < "$STEP") lines)"
 lb=$(grep -n '^# em1 (BEGIN axr restore)' "$RUNNER" | cut -d: -f1); lq=$(grep -n 'quiet-required.sh" check' "$RUNNER" | head -1 | cut -d: -f1)
 lt=$(grep -n 'tools/tb_run.sh' "$RUNNER" | head -1 | cut -d: -f1); lr=$(grep -n '^cd "$(dirname "$0")/.."; P=$PWD; RUN=$P/run' "$RUNNER" | cut -d: -f1)
-[ -n "$lb" ] && [ -n "$lq" ] && [ -n "$lt" ] && [ -n "$lr" ] && [ "$lr" -lt "$lb" ] && [ "$lb" -lt "$lq" ] && [ "$lb" -lt "$lt" ]
-chk $? "order: RUN set (line $lr) < restore step (line $lb) < claim check (line $lq) < first boot (line $lt)"
+le=$(grep -n '^# em1 (END axr restore)' "$RUNNER" | cut -d: -f1)
+# the first line after the claim check that writes to run/ or the shm folder (run_noguard, rm/cp/: > on $RUN or $SHM)
+lw=$(awk -v q="$lq" -v b="${lb:-0}" -v e="${le:-0}" 'NR > q && (NR < b || NR > e) && !/^ *#/ && /run_noguard|rm -f "\$SHM|rm -f "\$RUN|cp [^|]*"\$(RUN|SHM)|> "\$(SHM|RUN)/ {print NR; exit}' "$RUNNER")
+[ -n "$lb" ] && [ -n "$lq" ] && [ -n "$lt" ] && [ -n "$lr" ] && [ -n "$le" ] && [ -n "$lw" ] && [ "$lr" -lt "$lq" ] && [ "$lq" -lt "$lb" ] && [ "$le" -lt "$lw" ] && [ "$le" -lt "$lt" ]
+chk $? "order: RUN set (line $lr) < claim check (line $lq) < restore step (lines $lb..$le) < first other write to run/ or shm (line $lw) and < first boot (line $lt)"
 grep -q 'rm ' "$STEP"; [ $? != 0 ]; chk $? "the step contains no rm"
 
 run_case() {   # $1 name: makes $D/$1/run/{appdata,gamedata/configs}, runs the step, prints rc
@@ -47,8 +50,10 @@ rc=$(run_case missing)
 [ "$rc" = 7 ] && ! grep -q '^CONTINUED' "$D/missing/stdout.txt" && [ "$(grep -c 'REFUSED: axr_options restore: source .* missing' "$D/missing/stdout.txt")" = 1 ]
 chk $? "missing source: rc $rc, one REFUSED line: $(grep -o 'REFUSED.*' "$D/missing/stdout.txt" | cut -c1-90)"
 rc=$(run_case wrong)
-[ "$rc" = 7 ] && ! grep -q '^CONTINUED' "$D/wrong/stdout.txt" && [ "$(grep -c 'REFUSED: axr_options restore: sha256' "$D/wrong/stdout.txt")" = 1 ]
-chk $? "wrong bytes: rc $rc, one REFUSED line: $(grep -o 'REFUSED.*' "$D/wrong/stdout.txt" | cut -c1-90)"
+[ "$rc" = 7 ] && ! grep -q '^CONTINUED' "$D/wrong/stdout.txt" && [ "$(grep -c 'REFUSED: axr_options restore: sha256 of source' "$D/wrong/stdout.txt")" = 1 ]
+chk $? "wrong source bytes: rc $rc, one REFUSED line: $(grep -o 'REFUSED.*' "$D/wrong/stdout.txt" | cut -c1-90)"
+[ "$(printf 'version = 0 (stale, rewritten by an exe)\n' | sha256sum | cut -c1-64)" = "$(sha256sum < "$D/wrong/run/gamedata/configs/axr_options.ltx" | cut -c1-64)" ]
+chk $? "wrong source bytes: the destination is byte-identical to before (not overwritten)"
 bash -n "$RUNNER"; chk $? "bash -n t2_xray_em1.sh"
 [ "$(sha256sum < "$REALSRC" | cut -c1-64)" = "$WANT" ]; chk $? "the real source file is unchanged (read only)"
 [ $ok = $n ] && r=PASS || r=FAIL

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""em1: joint emission witness + one pending monster kill, X-RAY SIDE checker (em1/PREREG-em1-joint-emission-witness-DRAFT.md).
+"""em1: joint emission witness + one monster kill (alive near zero, held, then killed), X-RAY SIDE checker (em1/PREREG-em1-joint-emission-witness-DRAFT.md).
 DRAFT, NOT REGISTERED. Stdlib only, run with python3 -I:
   em1_check.py <run dir>
 <run dir> = the folder the X runner (em1/t2_xray_em1.sh, launched by itrzone's boot script) was given. Required, by name:
@@ -13,10 +13,10 @@ rule `<nv id> <text>: FIRED|clear (<values>)`, `reported:` lines, then `EM1 X SI
 Exit 0 PASS, 1 FAIL, 3 NO VERDICT, 2 usage.
 Verdict: missing or unparsable input -> FAIL. Else if NO VERDICT rules fired: NO VERDICT only if EVERY failing check lies in
 the union of the fired rules' untested sets (NV_UNTESTED); a failing check outside it -> FAIL, named. Else PASS only if
-every check passes. Always judged (in no untested set): 1, 2, 4n, 10, 11, 12, 13, k13, k15.
+every check passes. Always judged (in no untested set): 1, 2, 4n, 10, 11, 12, 13, ka, k13, k15; k2 too once M has a KAPPLY.
 
 Made from two registered checkers, parsing code reused:
-  * kj4/kj4p_check.py (b0b6d70f..., the emission checks 1..13, NV1..NV5 -> here nve1..nve5), with these changes only:
+  * kj4/kj4p_check.py (b0b6d70f..., the emission checks 1..13, NV1..NV4 -> here nve1..nve4; NV5 dropped), with these changes only:
     1: play end bound from RUN_S (below); the clause "no kept pose with a k line" removed (em1 has k lines); new clause
        "no stall.csv" (em1 has no stop: T2_STALL_PLAY=99999).
     9: vortex height +/-0.50 m and distance <= 151.5 m against the actor of the snapshot of the vortex's FIRST v line;
@@ -26,10 +26,16 @@ Made from two registered checkers, parsing code reused:
     11: the kill-channel T2SUM values moved to k14; 11 keeps the key list (20, eerr last) and the non-kill zeros.
     13: snapshot layout `a o* r? e (w|v)* ns k*` (kill7 writes k lines after ns: zz_p1_puppet_kill7.script export_b1).
   * kj2/t3_kj2_check.py (cf69899b..., kill checks 1..15, NV1..NV6) restricted to ONE monster M, no stalker, no stop:
-    kept k2 k3 k4 k6 k7 (for M) k8 k11 k13 k14 k15; new kp (the pending state) and kd (M's kill call at play 50);
+    kept k2 k3 k4 k6 k7 (for M) k8 k11 k13 k14 k15; new ka (every KAPPLY's arithmetic, ALWAYS judged), kh (the
+    "alive near zero, held, then killed" witness: itrzone's split death, kcjh=2: a dead = 0 pose with total full - kcjp at play 50
+    holds M alive at the 0.0100 floor of kill7:476, then the dead = 1 pose at play 52), kd (M's kill call at play 52),
+    kc (KCONF 0..2000 ms after the kill call; 0 ms PASSES: the pending path is NOT forced live, it stays proven offline
+    by the kill7h stub tests and by the guard KNOCONF at 2000 ms; pending snapshots are reported only).
     dropped 5 (stalker healing), 9 and 10 (the stop), 12 (actor health: check 10 here is stricter: 1.0000 everywhere).
-    NV -> nvk1 (one monster, no stalker), nvk2, nvk3 (kj2's death-step exemption), nvk6; NV4 dropped (no stop);
-    nvk7 NEW (the pending path did not occur), untested {kp} only.
+    NV -> nvk1 (one monster, no stalker), nvk2 (not for a death the bridge caused), nvk3 (kj2's death-step exemption),
+    nvk6; NV4 dropped (no stop). k2 leaves every untested set once M has a KAPPLY (round-2 review fix B2).
+    nve5 (kj4p NV5, no vortex) DROPPED: it could never decide a verdict (a storm cut short already fails 1/6p); no v line
+    is a FAIL of 9.
 
 CLOCKS. X = time_global() ms (snapshot header field 3, E*/K* field 2, P2 field 4). W = Linux realtime ms (watcher
 #snap/#pose stamps, emforce.csv, the runner's play0 = the header utc of the first play pose it read: t2_xray.log line
@@ -79,12 +85,13 @@ EV_SCRIPTS = ('surge_manager', 'psi_storm_manager')
 REF_KJ2 = ('kj2 X run /home/caden/Projects/ITRZone/out/runs/20261126-172548-t2kj2-xray (kill5, no e lines, 240 s): '
            'export_mean_us=795.8 export_p99_us=1558.1 export_max_us=15920.6, 1949 ticks')
 # ---- kill channel (kj2's bounds, re-derived for one monster; prereg margin table)
-M_HIT_PLAY, M_KILL_PLAY = 30, 50   # itrzone's levers kcj=30, kcjd=20 (kcjo=1: monster only)
+M_HIT_PLAY, M_HOLD_PLAY, M_KILL_PLAY = 30, 50, 52   # itrzone's levers kcj=30, kcjd=20, kcjh=2 (kcjo=1: monster only)
 KILL_PLAY_TOL_S = 5.0        # kj2 real: rig events at plan - 1.04..-1.09 s on this play clock (3 events); 4.6x
-KCJP = 0.005                 # itrzone's kcjp: the death is reported this share of full short
-PEND_LO, PEND_HI = 0.0020, 0.0200   # M's health while the kill call is pending: 0.005 -/+ 0.0005 (3-dec total) -/+ 0.00005
-                                    # (4-dec print) -> 0.0044..0.0056, + healing in the puppet's <= 1.5 s staleness
-                                    # (<= 0.0096/s, kj1/kj2 S) -> <= 0.0200 = FALL; lower edge 0.0020 = 0.0044 / 2.2
+HOLD_FLOOR = 0.0100          # kill7:476: a dead = 0 total holds health at max(hb - d, min(hb, 0.01))
+HOLD_LO, HOLD_HI = 0.0098, 0.0300   # M's health in the hold: 0.0100 - 0.0002 (print + rounding) .. 2.0x the expected top
+                                    # 0.0149 (0.0100 + hb regen <= 0.0040 + <= 0.0009 per 2 s: kj2 flesh 23183, one run)
+HOLD_MIN_SNAPS = 5           # expected ~18 snapshots in the 2.0 s hold (gap median 110 ms, kj2); 18 / 5 = 3.6x
+KCONF_MAX_MS = 2000          # kill call -> KCONF: kill7's own KNOCONF limit; 0 ms is a PASS
 TOL_H = 0.0002               # two 4-decimal roundings, doubled (kj2 row 2)
 FALL = 0.02                  # a fall not caused by a hit: far over rounding + healing per snapshot, far under 0.3
 CONFIRM_MS = 2000            # dead line within 2.0 s; = kill7's own KNOCONF limit
@@ -95,25 +102,24 @@ NEAR_M = 10.0
 KILLER = '0'
 MINE_KDEAD = ('online', 'offline', 'failed')
 
-KILL_ALL = {'k2', 'k3', 'k4', 'k6', 'kp', 'kd', 'k7', 'k8', 'k11', 'k14'}
+KILL_ALL = {'k2', 'k3', 'k4', 'k6', 'kh', 'kd', 'kc', 'k7', 'k8', 'k11', 'k14'}   # ka: in none (ALWAYS)
 NV_UNTESTED = {
     'nve1': {'3s', '3p', '4s', '4p', '5s', '5p', '6s', '6p', '7s', '7p', '8', '9'},   # an event the run did not force
     'nve2': {'3s', '4s', '5s', '6s', '7s', '8'},                                     # surge refused by the game
     'nve3': {'3p', '4p', '5p', '6p', '7p', '9'},                                     # psi storm refused by the game
     'nve4': {'3p', '4p', '5p', '6p', '7p', '9'},                                     # psi forced while the surge ran
-    'nve5': {'9'},                                                                   # no vortex at all
     'nvk1': set(KILL_ALL),                       # not exactly one monster with k lines, or a stalker with k lines
     'nvk2': set(KILL_ALL),                       # M hurt by the world before its hit, or killed before its step
     'nvk3': set(KILL_ALL),                       # M fell with no K line of mine (except its death step)
     'nvk6': KILL_ALL - {'k2'},                   # M not listed at the first pose of its later step
-    'nvk7': {'kp'},                              # the pending path did not occur (M read dead at once)
 }
 REQ = ('t2_xray.log', 'restarts.csv', 'emforce.csv', 'boot0/meta_t2.csv', 'boot0/hits_t2.csv', 'boot0/tb/xray.log',
        'boot0/watch/snaps_all.txt', 'boot0/watch/poses_all.txt')
 EMPTY_OK = {'boot0/hits_t2.csv'}
 ORDER_ID = ['1', '2', '3s', '3p', '4s', '4p', '4n', '5s', '5p', '6s', '6p', '7s', '7p', '8', '9', '10', '11', '12', '13',
-            'k2', 'k3', 'k4', 'k6', 'kp', 'kd', 'k7', 'k8', 'k11', 'k13', 'k14', 'k15']
-ALWAYS = {'1', '2', '4n', '10', '11', '12', '13', 'k13', 'k15'}
+            'ka', 'k2', 'k3', 'k4', 'k6', 'kh', 'kd', 'kc', 'k7', 'k8', 'k11', 'k13', 'k14', 'k15']
+ALWAYS = {'1', '2', '4n', '10', '11', '12', '13', 'ka', 'k13', 'k15'}
+JUDGED_IF_KAPPLY = {'k2'}    # removed from every untested set once M has a KAPPLY (B2: a hit is the bridge's, not the world's)
 
 _INT = re.compile(r'-?[0-9]+\Z')
 _NUM = re.compile(r'-?[0-9]+(\.[0-9]+)?\Z')
@@ -404,7 +410,7 @@ def counter_table(t2_lines, meta, ev, ctx):
 
 # ================================================================ the checker
 def full(run_dir):
-    out, unparsed = [f'EM1 X side checker (emission witness + one pending monster kill), run dir {run_dir}'], []
+    out, unparsed = [f'EM1 X side checker (emission witness + one monster kill: alive near zero, held, then killed), run dir {run_dir}'], []
     data, gone = {}, []
     for n in REQ:
         L, st = read(os.path.join(run_dir, n))
@@ -717,6 +723,31 @@ def full(run_dir):
     def need_M():
         if not M: raise RuntimeError(f'M not identified (no single monster with k lines: {kids} {kinds})')
     kconf = lambda i: [e for e in ev['KCONF'] if e['id'] == i]
+    def holds(i):   # the dead = 0 totals after M's hit (want exactly one: the hold pose of play 50)
+        return [s_ for s_ in steps[i][1:] if s_['dead'] == '0'] if steps.get(i) and steps[i][0]['dead'] == '0' else []
+    def hold_kap(i):
+        h = holds(i); return (h[0], kap_of(i, h[0]['tot'])) if len(h) == 1 else (None, [])
+    def play_of(T):
+        W = w_of(T); return None if W is None or play0 is None else (W - play0) / 1000
+
+    def cka():   # B1: every KAPPLY's arithmetic, for every id, in a check no NO VERDICT rule leaves untested
+        bad = []; pseq = [p['seq'] for p in poses]; prev = {}
+        for k in sorted(ev['KAPPLY'], key=lambda e: e['i']):
+            i = k['id']; j = bisect.bisect_right(pseq, k['n']) - 1
+            pk = poses[j]['k'].get(i) if j >= 0 else None
+            pa = prev.get(i, 0.0); prev[i] = k['ap']
+            if pk is None: bad.append(f'{k["line"]}: no kept pose at or before {k["n"]} with a k line for {i}'); continue
+            tot, dead = pk[2], pk[3]
+            wd = min(tot - pa, 1.0); hn = k['hb'] - k['d']
+            if dead != '1': hn = max(hn, min(k['hb'], HOLD_FLOOR))   # kill7:476
+            wa = max(hn, 0.0); e = (abs(k['ap'] - tot), abs(k['d'] - wd), abs(k['ha'] - wa))
+            if max(e) > TOL_H:
+                bad.append(f'{k["line"]}: pose total {tot:.3f} dead {dead}, applied before {pa:.3f}: want d {wd:.3f} after {wa:.4f} '
+                           f'(|ap-total| {e[0]:.4f} |d-diff| {e[1]:.4f} |after-want| {e[2]:.4f})')
+        return not bad, (f'{len(ev["KAPPLY"])} KAPPLY lines: applied = the pose total, d = total - the id\'s previous applied total (<= 1), '
+                         f'after = max(before - d, 0), floored at min(before, {HOLD_FLOOR}) for a dead = 0 total (kill7:476), each +/- {TOL_H}; '
+                         f'failing {len(bad)} {bad[:3]}')
+    add('ka', 'every KAPPLY\'s arithmetic (hit, hold, death; any id): difference and after as kill7 applies them', cka)
 
     def ck2():
         need_M(); i = M
@@ -747,21 +778,23 @@ def full(run_dir):
 
     def ck4():
         need_M(); i = M
-        a = steps[i][0] if steps[i] else None; ka = kap_of(i, a['tot']) if a else []; kd = kdead_on(i)
-        if not ka or not kd: return False, f'M {i}: step-A KAPPLY {len(ka)}, KDEAD online {len(kd)} (interval not found)'
-        ta, tb = ka[0]['T'], kd[0]['T']
-        extra = [k for k in kap(i) if ta < k['T'] < tb and k is not ka[0]]
+        a = steps[i][0] if steps[i] else None; ka = kap_of(i, a['tot']) if a else []; h, hk = hold_kap(i); kd = kdead_on(i)
+        if not ka or len(hk) != 1: return False, f'M {i}: hit KAPPLY {len(ka)}, hold KAPPLY {len(hk)} (interval not found)'
+        ta, th = ka[0]['T'], hk[0]['T']; tb = kd[0]['T'] if len(kd) == 1 else float('inf')
+        extra = [k for k in kap(i) if ta < k['T'] < tb and k is not ka[0] and k is not hk[0]]
         ss = [s for s in snaps if ta <= s['tx'] < tb and i in s['o']]; failf, nvf = [], []
         for p, q in zip(ss, ss[1:]):
             fl = p['o'][i]['h'] - q['o'][i]['h']
             if fl > FALL:
                 kl = [k for k in mine(i) if p['tx'] < k['T'] <= q['tx']]
+                if kl and all(k is hk[0] for k in kl): continue   # the hold's own drop (its arithmetic: ka, kh)
                 (failf if kl else nvf).append(f'{p["seq"]}->{q["seq"]} fall {fl:.4f}')
-        hs = [s['o'][i]['h'] for s in ss]
+        pre = [s['o'][i]['h'] for s in ss if s['tx'] < th]
         ok = not extra and not failf and len(ss) >= 2
-        return ok, (f'M {i}: script time {ta}..{tb}, {len(ss)} snapshots, change first->last {(hs[-1] - hs[0]) if hs else 0:+.4f} (healing, reported); '
-                    f'other KAPPLY {len(extra)} {[k["line"] for k in extra][:2]}; falls > {FALL} with a K line of mine {failf[:2]}; without (nvk3) {nvf[:2]}')
-    add('k4', 'healing left alone: M between its hit and its kill call: no KAPPLY, no fall > 0.02 with a K line of mine', ck4)
+        return ok, (f'M {i}: script time {ta}..hold {th}..kill call {tb if tb != float("inf") else None}, {len(ss)} snapshots, change from the hit to the hold '
+                    f'{(pre[-1] - pre[0]) if pre else 0:+.4f} (healing, reported); other KAPPLY {len(extra)} {[k["line"] for k in extra][:2]}; '
+                    f'falls > {FALL} with a K line of mine other than the hold {failf[:2]}; without (nvk3) {nvf[:2]}')
+    add('k4', 'healing left alone: M from its hit to the hold, and within the hold up to the kill call: no KAPPLY but the hold\'s, no fall > 0.02 with another K line of mine', ck4)
 
     def ck6():
         need_M(); judged, rep, unj, nev = [], [], [], 0; last_pos = {}
@@ -787,46 +820,64 @@ def full(run_dir):
     add('k6', 'only M changes: no other creature within 10 m of M loses more than 0.02 across a KAPPLY/KDEAD', ck6)
 
     pend_rep = []
-    def ckp():
-        need_M(); i = M; kd = kdead_on(i); fp = first_dead(i)
-        if len(kd) != 1 or not fp: return False, f'M {i}: KDEAD online {len(kd)}, first dead pose {fp["seq"] if fp else None}'
-        T = kd[0]['T']; prevtot = max([s_['tot'] for s_ in steps[i] if s_['dead'] == '0'], default=0.0)
-        want = fp['k'][i][2] - prevtot
-        lk = [k for k in kap(i) if k['T'] == T and k['i'] < kd[0]['i']]   # the lethal KAPPLY: same call, before the KDEAD
-        nums, ok = [], True
-        if len(lk) != 1: ok = False; nums.append(f'lethal KAPPLY in the kill call {len(lk)} (want 1)')
-        else:
-            k = lk[0]; dd = abs(k['d'] - want); dh = abs(k['ha'] - (k['hb'] - k['d']))
-            g = dd <= TOL_H and dh <= TOL_H and PEND_LO <= k['ha'] <= PEND_HI; ok = ok and g
-            nums.append(f'lethal KAPPLY d {k["d"]:.3f} (pose difference {want:.3f}, |.| {dd:.4f}), before {k["hb"]:.4f} after {k["ha"]:.4f} '
-                        f'(|after-(before-d)| {dh:.4f}; after must be in [{PEND_LO}, {PEND_HI}]: the {KCJP} short)')
-        kc = kconf(i); Tc = kc[0]['T'] if kc else None
-        P = [s for s in snaps if s['tx'] >= T and (Tc is None or s['tx'] < Tc) and i in s['o']]
-        badp = [f'snap {s["seq"]}: alive {s["o"][i]["alive"]} health {s["o"][i]["h"]:.4f} k {s["k"].get(i)}' for s in P
-                if not (s['o'][i]['alive'] == '1' and PEND_LO <= s['o'][i]['h'] <= PEND_HI and i in s['k'] and not s['k'][i][1] and not s['k'][i][2])]
-        if Tc is None: ok = False; nums.append('no KCONF for M (the pending kill was never confirmed)')
-        aft = snap_at_or_after(Tc, i) if Tc is not None else None
-        conf_ok = aft is not None and aft['o'][i]['alive'] == '0'
-        ok = ok and bool(P) and not badp and conf_ok
-        nums.append(f'snapshots from the kill call (X {T}) to KCONF (X {Tc}) listing M: {len(P)} (each alive 1, health in '
-                    f'[{PEND_LO}, {PEND_HI}], plain k line): failing {len(badp)} {badp[:3]}; first snapshot listing M at or after '
-                    f'KCONF: {"seq " + str(aft["seq"]) + " alive " + aft["o"][i]["alive"] if aft else None} (want alive 0)')
-        pend_rep.append(f'pending: {len(P)} kept snapshots, healths {sorted({s["o"][i]["h"] for s in P})[:6]}, KCONF ms {kc[0]["ms"] if kc else None}')
-        return ok, '; '.join(nums)
-    add('kp', 'the pending state: the kill call leaves M alive just above 0 (the 0.005 short) with a plain k line until X-Ray confirms it dead', ckp)
+    def ckh():
+        need_M(); i = M; hs = holds(i)
+        if len(hs) != 1: return False, f'M {i}: {len(hs)} dead = 0 total(s) after its hit {[x["ts"] for x in hs]} (want 1: the hold)'
+        h, hk = hold_kap(i)
+        if len(hk) != 1: return False, f'M {i}: {len(hk)} KAPPLY with applied {h["ts"]} (the hold total, first in pose seq {h["seq"]})'
+        k = hk[0]; want = h['tot'] - steps[i][0]['tot']; dd = abs(k['d'] - want); wa = max(k['hb'] - k['d'], HOLD_FLOOR); dh = abs(k['ha'] - wa)
+        pl = play_of(k['T']); kd = kdead_on(i); Te = kd[0]['T'] if len(kd) == 1 else None
+        okk = (dd <= TOL_H and dh <= TOL_H and k['n'] >= h['seq'] and pl is not None and abs(pl - M_HOLD_PLAY) <= KILL_PLAY_TOL_S)
+        win = [s for s in snaps if s['tx'] > k['T'] and (Te is None or s['tx'] < Te) and i in s['o']]
+        bad = [f'snap {s["seq"]}: alive {s["o"][i]["alive"]} health {s["o"][i]["h"]:.4f} k {s["k"].get(i)}' for s in win
+               if not (s['o'][i]['alive'] == '1' and HOLD_LO <= s['o'][i]['h'] <= HOLD_HI and i in s['k'] and not s['k'][i][1] and not s['k'][i][2])]
+        ok = okk and Te is not None and len(win) >= HOLD_MIN_SNAPS and not bad
+        hh = [s['o'][i]['h'] for s in win]
+        return ok, (f'M {i}: hold total {h["ts"]} (pose seq {h["seq"]}); KAPPLY pose {k["n"]} d {k["d"]:.3f} (pose difference {want:.3f}, |.| {dd:.4f}) '
+                    f'before {k["hb"]:.4f} after {k["ha"]:.4f} (want max(before - d, {HOLD_FLOOR}) = {wa:.4f}, |.| {dh:.4f}; each <= {TOL_H}); at play '
+                    f'{None if pl is None else round(pl, 2)} s (want {M_HOLD_PLAY} +/- {KILL_PLAY_TOL_S}); snapshots after it and before the kill call '
+                    f'(X {Te}) listing M: {len(win)} (want >= {HOLD_MIN_SNAPS}, each alive 1, health in [{HOLD_LO}, {HOLD_HI}], plain k line): '
+                    f'failing {len(bad)} {bad[:3]}; health {min(hh) if hh else None}..{max(hh) if hh else None}')
+    add('kh', 'alive near zero, held (then killed: kd, kc): one hold KAPPLY at play 50 leaves M alive at the 0.0100 floor with a plain k line, >= 5 snapshots, until the kill call', ckh)
 
     def ckd():
         need_M(); i = M; kd = kdead_on(i); fp = first_dead(i)
         allkd = [k['line'] for k in ev['KDEAD'] if k['id'] == i]
         if len(kd) != 1 or len(allkd) != 1: return False, f'M {i}: KDEAD lines {allkd} (want exactly one, online)'
-        a = steps[i][0] if steps[i] else None; ka = kap_of(i, a['tot']) if a else []
-        W = w_of(kd[0]['T']); pl = None if W is None or play0 is None else (W - play0) / 1000
-        ok = (pl is not None and abs(pl - M_KILL_PLAY) <= KILL_PLAY_TOL_S and bool(ka) and kd[0]['T'] > ka[0]['T']
+        h, hk = hold_kap(i); Tk = kd[0]['T']; pl = play_of(Tk); nums = []
+        ok = (pl is not None and abs(pl - M_KILL_PLAY) <= KILL_PLAY_TOL_S and len(hk) == 1 and Tk > hk[0]['T']
               and fp is not None and kd[0]['n'] >= fp['seq'])
-        return ok, (f'M {i}: {kd[0]["line"]} at play {pl if pl is None else round(pl, 2)} s (want {M_KILL_PLAY} +/- {KILL_PLAY_TOL_S}; X->W '
-                    f'by the P2 map), after the hit KAPPLY {bool(ka) and kd[0]["T"] > ka[0]["T"]}, from pose {kd[0]["n"]} >= first dead pose '
-                    f'{fp["seq"] if fp else None}')
-    add('kd', 'M\'s death: one KDEAD online, at the kill call of play 50, after its hit, from its first dead pose', ckd)
+        nums.append(f'M {i}: {kd[0]["line"]} at play {pl if pl is None else round(pl, 2)} s (want {M_KILL_PLAY} +/- {KILL_PLAY_TOL_S}; X->W by the P2 map), '
+                    f'after the hold KAPPLY {len(hk) == 1 and Tk > hk[0]["T"]}, from pose {kd[0]["n"]} >= first dead pose {fp["seq"] if fp else None}')
+        lk = [k for k in kap(i) if k['T'] == Tk and k['i'] < kd[0]['i']]   # a KAPPLY in the kill call itself (the death pose's new total)
+        if fp is None or h is None: return False, '; '.join(nums + [f'death pose {fp["seq"] if fp else None}, hold total {h["ts"] if h else None}'])
+        dt, ht = fp['k'][i][2], h['tot']
+        ok = ok and dt >= ht - TOL_H
+        if dt > ht + TOL_H:
+            if len(lk) != 1: ok = False; nums.append(f'death total {dt:.3f} > hold {ht:.3f}: KAPPLY in the kill call {len(lk)} (want 1)')
+            else:
+                k = lk[0]; dd = abs(k['d'] - min(dt - ht, 1.0)); wa = max(k['hb'] - k['d'], 0.0); dh = abs(k['ha'] - wa)
+                ok = ok and dd <= TOL_H and dh <= TOL_H and abs(k['ap'] - dt) <= TOL_H
+                nums.append(f'death KAPPLY d {k["d"]:.3f} (pose difference {dt - ht:.3f}, |.| {dd:.4f}) before {k["hb"]:.4f} after {k["ha"]:.4f} '
+                            f'(want max(before - d, 0) = {wa:.4f}, |.| {dh:.4f})')
+        else:
+            ok = ok and not lk
+            nums.append(f'death total {dt:.3f} = hold {ht:.3f}: KAPPLY in the kill call {len(lk)} (want 0)')
+        nums.append(f'death pose seq {fp["seq"]} dead 1 total {dt:.3f} (want >= the hold total {ht:.3f})')
+        return ok, '; '.join(nums)
+    add('kd', 'M\'s death: one KDEAD online, at the kill call of play 52, after the hold, from its first dead pose (dead = 1, total >= the hold\'s)', ckd)
+
+    def ckc():
+        need_M(); i = M; kd = kdead_on(i); kc = kconf(i); kn = [e['line'] for e in ev['KNOCONF'] if e['id'] == i]
+        if len(kd) != 1 or len(kc) != 1: return False, f'M {i}: KDEAD online {len(kd)}, KCONF {len(kc)} {[e["line"] for e in kc][:2]} (want 1 each); KNOCONF {kn}'
+        Tk, Tc = kd[0]['T'], kc[0]['T']; lag = Tc - Tk; aft = snap_at_or_after(Tc, i)
+        P = [s for s in snaps if Tk <= s['tx'] < Tc and i in s['o'] and s['o'][i]['alive'] == '1']
+        pend_rep.append(f'pending (reported only): KCONF {kc[0]["ms"]} ms after the kill call; kept snapshots between them listing M alive '
+                        f'{len(P)}, healths {sorted({s["o"][i]["h"] for s in P})[:6]}')
+        ok = 0 <= lag <= KCONF_MAX_MS and 0 <= kc[0]['ms'] <= KCONF_MAX_MS and not kn and aft is not None and aft['o'][i]['alive'] == '0'
+        return ok, (f'M {i}: KCONF at X {Tc}, {lag} ms after the kill call (line ms {kc[0]["ms"]}; want 0..{KCONF_MAX_MS}, 0 is a PASS); KNOCONF {kn}; '
+                    f'first snapshot listing M at or after KCONF: {"seq " + str(aft["seq"]) + " alive " + aft["o"][i]["alive"] if aft else None} (want alive 0)')
+    add('kc', 'X-Ray confirms the kill: exactly one KCONF for M, 0..2000 ms after the kill call, and the next snapshot reads M alive 0', ckc)
 
     def ck7():
         need_M(); i = M; on = kdead_on(i); fp = first_dead(i); ds = first_dead_line(i)
@@ -921,8 +972,6 @@ def full(run_dir):
         if not ef['psi'] or not ef['surge'] or not started['surge']: return False, 'not applicable'
         endn = en['surge'][0]['now'] if en['surge'] else None
         return endn is None or ef['psi'][0]['now'] < endn, f'EFORCE psi at X {ef["psi"][0]["now"]}, EEND surge at X {endn}'
-    def nve5():
-        return started['psi'] and bool(esn['psi']) and not vort, f'v lines {sum(len(s["v"]) for s in snaps)} in {len(esn["psi"])} psi snapshots'
     def nvk2():
         if not M: return False, 'not judged (no M)'
         out_ = []; i = M; a = steps[i][0] if steps[i] else None; ka = kap_of(i, a['tot']) if a else []
@@ -932,10 +981,13 @@ def full(run_dir):
         if pre and ref is not None and max(pre) - ref > FALL: out_.append(f'M hurt before its hit: max {max(pre):.4f}, at the hit {ref:.4f}')
         obs = [k['line'] for k in ev['KDEAD'] if k['id'] == i and k['kind'] not in MINE_KDEAD]
         if obs: out_.append(f'M death observed, not dealt: {obs[:2]}')
-        fd = first_dead(i)
+        fd = first_dead(i); s0 = next((s for s in snaps if i in s['o'] and s['o'][i]['alive'] == '0'), None)
+        mine0 = [k['line'] for k in kap(i) if k['ha'] <= 0 and s0 is not None and k['T'] <= s0['tx']] + \
+                [k['line'] for k in kdead_on(i) if s0 is not None and k['T'] <= s0['tx']]
         early = [s['seq'] for s in snaps if i in s['o'] and s['o'][i]['alive'] == '0' and (fd is None or s['u'] < fd['u'] - EARLY_MS)]
-        if early: out_.append(f'M dead in X-Ray before its death step: snaps {early[:3]}')
-        return bool(out_), '; '.join(out_) or 'none'
+        if early and not mine0: out_.append(f'M dead in X-Ray before its death step: snaps {early[:3]}')
+        elif early: out_.append(f'(not fired: M\'s first alive-0 snapshot {s0["seq"]} follows my {mine0[:1]}: a death the bridge caused is judged)')
+        return any(not x.startswith('(not fired') for x in out_), '; '.join(out_) or 'none'
     def death_step(i):   # kj2's NV3 exemption, unchanged (one step per id)
         kd = kdead_on(i)
         if not kd: return {'T': None, 'step': None}
@@ -961,23 +1013,14 @@ def full(run_dir):
             if not sb or M not in sb[-1]['o']:
                 out_.append(f'M not listed at the first pose of a later step ({st_["ts"]}{" dead" if st_["dead"] == "1" else ""}, pose seq {st_["seq"]})')
         return bool(out_), '; '.join(out_) or 'listed at every later step'
-    def nvk7():
-        if not M: return False, 'not judged (no M)'
-        kd = kdead_on(M)
-        if len(kd) != 1: return False, f'not judged ({len(kd)} KDEAD online)'
-        P = [s for s in snaps if s['tx'] >= kd[0]['T'] and M in s['o'] and s['o'][M]['alive'] == '1']
-        kc = kconf(M)
-        return not P, f'kept snapshots at or after the kill call listing M alive 1: {len(P)}; KCONF ms {kc[0]["ms"] if kc else None}'
     for k, t, fn in (('nve1', 'an event the run did not force (before the first EFORCE, with no EFORCE started before it, or twice)', nve1),
                      ('nve2', 'the forced surge was refused by the game (EFORCE surge,notstarted)', nveref('surge')),
                      ('nve3', 'the forced psi storm was refused by the game (EFORCE psi,notstarted)', nveref('psi')),
                      ('nve4', 'the psi storm was forced while the surge still ran (PSM:313 cancels it)', nve4),
-                     ('nve5', 'the psi storm made no vortex at all', nve5),
                      ('nvk1', 'not exactly one id with k lines, a monster (em1: no stalker)', lambda: (bool(nv1), '; '.join(nv1) or f'M {M}')),
                      ('nvk2', 'M hurt by X-Ray\'s own world by more than 0.02 before its hit, or killed before its step', nvk2),
                      ('nvk3', 'M lost more than 0.02 between two snapshots with no K line of mine between them, except its death step', nvk3),
-                     ('nvk6', 'M not listed in X-Ray\'s snapshot at the first pose of a later step', nvk6),
-                     ('nvk7', 'the pending path did not occur: no kept snapshot after the kill call lists M alive', nvk7)):
+                     ('nvk6', 'M not listed in X-Ray\'s snapshot at the first pose of a later step', nvk6)):
         try: f, d = fn()
         except Exception as e: f, d = False, f'not judged: error {e!r}'
         nv.append((k, t, f, d))
@@ -1020,7 +1063,9 @@ def full(run_dir):
     failing = {cid for cid in ORDER_ID if not res[cid][1]}
     if unparsed: verdict, code = 'FAIL', 1; out.append('verdict: unparsable input')
     elif fired:
-        U = set().union(*(NV_UNTESTED[k] for k in fired)); outside = failing - U
+        U = set().union(*(NV_UNTESTED[k] for k in fired))
+        if M and kap(M): U -= JUDGED_IF_KAPPLY; out.append(f'verdict: M has a KAPPLY: {", ".join(sorted(JUDGED_IF_KAPPLY))} judged whatever fired')
+        outside = failing - U
         if outside:
             verdict, code = 'FAIL', 1
             out.append(f'verdict: NO VERDICT rule(s) {", ".join(fired)} fired, but failing check(s) {", ".join(c for c in ORDER_ID if c in outside)} '

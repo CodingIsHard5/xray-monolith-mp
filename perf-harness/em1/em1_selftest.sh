@@ -6,9 +6,12 @@
 #  - ONE STUB-MADE run folder `good`: the REAL reader harness/zz_p1_puppet_kill7.script (read only, sha256 pinned below) in
 #    the Lua 5.1 fake engine em1/em1_stub.lua (= kj4/kill7h_stub.lua + one fixture command `lag <ms>`), in lockstep 50 ms a
 #    step with this file's stand-ins for itrzone's rig (Rig below: M = the nearest monster with health >= 0.9 at w 30, total
-#    0.300; at w 50 total = 0.300 + M's snapshot health - 0.005, dead 1: the kcjp short), for the runner (emtest.txt empty
-#    before the boot, surge / psi appended at play 70 / 310 on a 1 s poll, emforce.csv) and for the watcher. The fake kill
-#    takes effect 250 ms after the call (lag 250): M stays alive just above 0 for a few snapshots (the pending path).
+#    0.300; the split death of kcjh=2: at w 50 total 0.995 (full - kcjp) dead 0 = the hold (kill7 holds M at 0.0100); at
+#    w 52 total 1.005 dead 1 = the death pose: itrzone's wire values, blob 50cbbd22: 0.995 + the puppet's last 0.01;
+#    X-Ray applies d 0.010 with no floor, after 0.0000, then o:kill. Section = the stub creature's own (dog_weak), not flesh), for the runner (emtest.txt empty before the boot, surge / psi appended at
+#    play 70 / 310 on a 1 s poll, emforce.csv) and for the watcher. In `good` the fake kill takes effect 250 ms after the
+#    call (lag 250: pending snapshots, reported only); a second stub run `good_lag0` (lag 0: KCONF at the next 50 ms step,
+#    no pending snapshot) must PASS too, and a made KCONF of 0 ms (pkc_zero) PASSES.
 #    The actor STANDS in the stub (one-row track); the moving actor is exercised by MADE edits of the actor line (m9_*).
 #    Files no engine can make here (xray.log, t2_xray.log, restarts.csv) are stand-ins (STUB_MADE.txt says so).
 #  - MADE fixtures: one file of `good` changed (the others symlinks); each must give exactly its listed failing checks /
@@ -23,7 +26,7 @@
 #    kj2 bytes PASS and which they cannot).
 #  - missing / empty required files -> FAIL by name; CRLF copy of good -> PASS; unparsable rows -> FAIL; the checker
 #    writes nothing; then em1/em1_axr_step_test.sh (the runner's new step).
-# Output dir: em1/selftest-runs/em1-st-<time>-<pid>/ (nothing deleted; ~25 MB). Last line: EM1 SELFTEST: PASS|FAIL (...)
+# Output dir: em1/selftest-runs/em1-st-<time>-<pid>/ (nothing deleted; ~50 MB). Last line: EM1 SELFTEST: PASS|FAIL (...)
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"; P="$(cd "$HERE/../../.." && pwd)"
 SCRIPT="$P/harness/zz_p1_puppet_kill7.script"; SCRIPT_SHA=0d5e59279775498e54155bc7a1ef9ecc7d8fa4f9132f7a77827fb30e3d6d9b54
@@ -48,7 +51,7 @@ KJ2 = '/home/caden/Projects/ITRZone/out/runs/20261126-172548-t2kj2-xray'
 KJ4P = os.path.join(P, 'out/kj4p-r1/run')
 U0, SESS = 1795000000000, '1795000000000'
 SURGE_AT, PSI_AT, RUN_W = 70, 310, 432.0          # play end ~431 >= 425 (RUN_S 445 - 15 - 5)
-HIT_W, KILL_W, KCJP, LAG_MS, HOLD_S = 30.0, 50.0, 0.005, 250, 5.0
+HIT_W, HOLD_W, KILL_W, HOLD_TOT, DEATH_TOT, LAG_MS, DROP_S = 30.0, 50.0, 52.0, '0.995', '1.005', 250, 5.0
 NOTE = 'STUB-MADE (em1 checker selftest): no engine ran; em1_stub.lua fake engine + the em1 rig stand-in in lockstep'
 REQ = ['t2_xray.log', 'restarts.csv', 'emforce.csv', 'boot0/meta_t2.csv', 'boot0/hits_t2.csv', 'boot0/tb/xray.log',
        'boot0/watch/snaps_all.txt', 'boot0/watch/poses_all.txt']
@@ -60,9 +63,9 @@ def wfile(p, text, mode='w'):
     with open(p, mode) as f: f.write(text)
 
 class Rig:
-    """itrzone's rig with kcj=30 kcjo=1 kcjd=20 kcjp=0.005, as a stand-in (NOT itrzone's code): w = its own clock."""
+    """itrzone's rig with kcj=30 kcjo=1 kcjd=20 kcjp=0.005 kcjh=2, as a stand-in (NOT itrzone's code): w = its own clock."""
     def __init__(s, lvl):
-        s.lvl, s.n, s.M, s.lethal, s.dead_w, s.dropped, s.newest = lvl, 0, None, None, None, False, None
+        s.lvl, s.n, s.M, s.lethal, s.dead_w, s.dropped, s.newest = lvl, 0, None, DEATH_TOT, None, False, None
     def lines(s, w):
         if w < HIT_W or s.newest is None: return []
         if s.M is None:
@@ -70,11 +73,11 @@ class Rig:
             s.M = (min(c)[1], min(c)[2]) if c else '-'
         if s.M == '-' or s.dropped: return []
         i, sec = s.M
-        if w < KILL_W: return [f'k,{i},{sec},0.300,0']
-        if s.lethal is None: s.lethal = f'{0.3 + s.newest["o"][i][2] - KCJP:.3f}'
-        return [f'k,{i},{sec},{s.lethal},1']
+        if w < HOLD_W: return [f'k,{i},{sec},0.300,0']
+        if w < KILL_W: return [f'k,{i},{sec},{HOLD_TOT},0']
+        return [f'k,{i},{sec},{DEATH_TOT},1']
     def pose(s, w, u):
-        if s.dead_w is not None and w - s.dead_w >= HOLD_S: s.dropped = True
+        if s.dead_w is not None and w - s.dead_w >= DROP_S: s.dropped = True
         s.n += 1; x, y, z = TRACK[0][1:4]
         body = (f'seq,{s.n},{u},play,{s.lvl},keep,{SESS},4\np,{x:.3f},{y + 0.3:.3f},{z:.3f},0.0000,1.0,0\n'
                 + ''.join(l + '\n' for l in s.lines(w)) + f'end,{s.n}\n')
@@ -85,7 +88,7 @@ class Rig:
         if q and s.M not in (None, '-') and s.dead_w is None and q['k'].get(s.M[0], '').endswith(';dead'): s.dead_w = w
         return q
 
-def make_stub(name, force):
+def make_stub(name, force, lag=LAG_MS):
     O = os.path.join(D, name); R = os.path.join(O, 'run'); B = os.path.join(R, 'boot0'); shm = os.path.join(O, '_shm')
     os.makedirs(shm); os.makedirs(os.path.join(B, 'watch')); os.makedirs(os.path.join(B, 'tb'))
     open(os.path.join(shm, 'emtest.txt'), 'w').close()
@@ -97,7 +100,7 @@ def make_stub(name, force):
         return int(r.split()[1])
     r = pr.stdout.readline().strip()
     if not r.startswith('ready '): raise RuntimeError(f'{name}: fake engine did not start: {r!r}')
-    now = int(r.split()[1]); cmd(f'lag {LAG_MS}'); sp = os.path.join(shm, 'snap.txt')
+    now = int(r.split()[1]); cmd(f'lag {lag}'); sp = os.path.join(shm, 'snap.txt')
     s = kp.parse_snapshot(open(sp, 'rb').read())
     if not s or s['t_track'] < 0: raise RuntimeError(f'{name}: no snapshot with track time >= 0 after the boot')
     rig = Rig(s['level']); rig.newest = s
@@ -124,7 +127,7 @@ def make_stub(name, force):
     os.rename(os.path.join(shm, 'meta_t2.csv'), os.path.join(B, 'meta_t2.csv'))
     os.rename(os.path.join(shm, 'hits_t2.csv'), os.path.join(B, 'hits_t2.csv'))
     wfile(os.path.join(R, 'emforce.csv'), '\n'.join(ef) + '\n')
-    wfile(os.path.join(O, 'STUB_MADE.txt'), f'{NOTE}\nforced {force}; rig M {rig.M} lethal total {rig.lethal}; kill lag {LAG_MS} ms\n')
+    wfile(os.path.join(O, 'STUB_MADE.txt'), f'{NOTE}\nforced {force}; rig M {rig.M} hold total {HOLD_TOT} death total {rig.lethal}; kill lag {lag} ms\n')
     wfile(os.path.join(R, 't2_xray.log'), f'2026-11-27 00:00:00.000Z {NOTE}\n2026-11-27 00:00:00.000Z boot 0: run_id 1 engine_s 445\n'
           f'2026-11-27 00:00:01.000Z first play pose read: {play0_line} (stop planned 0 s after its utc_ms; 0 = none)\n'
           '2026-11-27 00:08:00.000Z boot 0 end: tb_run rc=0 reason=engine run ended\n'
@@ -164,7 +167,7 @@ CMUT = {}
 for cid in re.findall(r"^ORDER_ID = \[(.*?)\]", CT, re.M | re.S)[0].replace('\n', ' ').replace("'", '').split(','):
     cid = cid.strip()
     if cid: CMUT['chk_' + cid] = cmut('chk_' + cid, A1, f"        res[cid] = (text, bool(ok) or cid == {cid!r}, nums)\n")
-for k in ('nve1', 'nve2', 'nve3', 'nve4', 'nve5', 'nvk1', 'nvk2', 'nvk3', 'nvk6', 'nvk7'):
+for k in ('nve1', 'nve2', 'nve3', 'nve4', 'nvk1', 'nvk2', 'nvk3', 'nvk6'):
     CMUT['nv_' + k] = cmut('nv_' + k, A2, f"        nv.append((k, t, f and k != {k!r}, d))\n")
 CMUT['b_vdy'] = cmut('b_vdy', 'V_DY = 0.50 ', 'V_DY = 0.05 ')
 CMUT['b_nogap'] = cmut('b_nogap', 'V_GAP_MS = 250 ', 'V_GAP_MS = 10 ** 9 ')
@@ -181,7 +184,8 @@ GOOD = make_stub('good', [(SURGE_AT, 'surge'), (PSI_AT, 'psi')])
 listing = lambda R: sorted((os.path.relpath(os.path.join(a, f), R), os.lstat(os.path.join(a, f)).st_size, os.lstat(os.path.join(a, f)).st_mtime_ns)
                            for a, _, fs in os.walk(R) for f in fs)
 before = listing(GOOD)
-expect('good', GOOD, 0, 'PASS', [], [], [r'^kp .*: PASS \(.*snapshots from the kill call .* listing M: [1-9]'])
+expect('good', GOOD, 0, 'PASS', [], [], [r'^kh .*: PASS \(.*listing M: [1-9][0-9] ', r'^kd .*: PASS \(.*death KAPPLY d 0\.010 .* after 0\.0000',
+                                       r'^reported: pending \(reported only\): KCONF [1-9][0-9]* ms .* alive [1-9]'])
 if listing(GOOD) != before: print('BAD  checker changed the run folder'); bad.append('writes')
 else: print('ok   the checker wrote nothing into the run folder')
 GOOD_OUT = open(os.path.join(D, 'reports', 'good.txt')).read()
@@ -257,18 +261,21 @@ def drop_recs(t, js):
 FV = first_v_recs(G[S]); VN = sorted(FV); first_v = VN[0]; NV_ = len(VN)
 KAPS = [l for l in G[M_].split('\n') if l.startswith(f'KAPPLY,') and l.split(',')[3] == MID]
 KD = [l for l in G[M_].split('\n') if l.startswith('KDEAD,') and l.split(',')[3] == MID][0]
-TA, TK = int(KAPS[0].split(',')[1]), int(KD.split(',')[1])
+KCF = [l for l in G[M_].split('\n') if l.startswith('KCONF,') and l.split(',')[2] == MID][0]
+assert len(KAPS) == 3, KAPS   # hit, hold, death
+TA, TH, TK = int(KAPS[0].split(',')[1]), int(KAPS[1].split(',')[1]), int(KD.split(',')[1])
 SR = snap_recs(G[S])
 recs_txt = [G[S][a:b] for a, b in SR]
 J_after_hit = next(j for j, r in enumerate(recs_txt) if tx_of(r) >= TA)
+J_hold = [j for j, r in enumerate(recs_txt) if TH < tx_of(r) < TK and mo(r)]
 J_pend = [j for j, r in enumerate(recs_txt) if tx_of(r) >= TK and mo(r) and mo(r)[7] == '1']
-J_mid = next(j for j, r in enumerate(recs_txt) if tx_of(r) >= (TA + TK) // 2 and mo(r))
+J_mid = next(j for j, r in enumerate(recs_txt) if tx_of(r) >= (TA + TH) // 2 and mo(r))
 J_dead1 = next(j for j, r in enumerate(recs_txt) if re.search(rf'^k,{MID},[^,]+,dead$', r, re.M))
 U_dead1 = u_of(recs_txt[J_dead1])
 J_late = max(j for j, r in enumerate(recs_txt) if mo(r) and u_of(r) >= U_dead1 + 2500 and not re.search(rf'^k,{MID},', r, re.M))
 NEI = next(i for i, sec in re.findall(r'^o,(\d+),([^,]+),m,', recs_txt[J_after_hit], re.M) if i != MID)
-print(f'ok   good: M {MID}, {NV_} vortices, pending snapshots {len(J_pend)}, neighbour {NEI}', flush=True)
-if not J_pend: bad.append('no pending snapshot in good')
+print(f'ok   good: M {MID}, {NV_} vortices, hold snapshots {len(J_hold)}, pending snapshots {len(J_pend)}, neighbour {NEI}', flush=True)
+if len(J_hold) < 10 or not J_pend: bad.append('good: too few hold or pending snapshots')
 D_SURGE = int(re.search(r"surge: runner appended .* EFORCE 'started' at X \d+, (-?\d+) ms after", GOOD_OUT).group(1))
 p0 = int(re.search(r'first play pose read: seq,\d+,(\d+),', G['t2_xray.log']).group(1))
 def shift_play0(t, d): return t.replace(f',{p0},play,', f',{p0 + d},play,', 1)
@@ -290,7 +297,7 @@ def m9_actor(n, dy=None, r=None):
 MUT = [   # name, file, transform, expected failing checks  (all must FAIL with exactly these, no rule fired)
     ('m1_rc', 't2_xray.log', lambda t: resub(t, r'rc=0$', 'rc=6', n=0), ['1']),
     ('m1_lua', 'boot0/tb/xray.log', lambda t: t + '! [LUA] ...gameengine/run\\gamedata\\scripts\\zz_p1_puppet.script:812: attempt to index a nil value\n', ['1']),
-    ('m1_end', 't2_xray.log', lambda t: shift_play0(t, 10000), ['1', 'kd']),
+    ('m1_end', 't2_xray.log', lambda t: shift_play0(t, 10000), ['1', 'kh', 'kd']),
     ('m2_extra', M_, lambda t: resub(t, r'^(SUMMARY,)', r'EFORCE,19000,unexpected,unknown\n\1'), ['2']),
     ('m2_early', 'emforce.csv', lambda t: resub(t, r'^(\d+)(,[^,]+,surge,\d+)$', lambda m: f'{int(m.group(1)) + D_SURGE + 600}{m.group(2)}'), ['2']),
     ('m2_late', 'emforce.csv', lambda t: resub(t, r'^(\d+,[^,]+,surge,)\d+$', r'\g<1>73000'), ['2']),
@@ -310,6 +317,7 @@ MUT = [   # name, file, transform, expected failing checks  (all must FAIL with 
     ('m9_dy', S, m9_actor(first_v, dy=0.55), ['9']),
     ('m9_r', S, m9_actor(first_v, r=152.0), ['9']),
     ('m9_frac', S, lambda t: gap_before(t, gapv), ['9']),
+    ('m9_novortex', S, lambda t: resub(t, r'^v,[^\n]*\n', '', n=0), ['9']),          # the storm ran to its end (EEND): FAIL 9
     ('m10', S, lambda t: edit_snap(t, near('surge', 150.0), lambda r: resub(r, r'^(a,[^,]+,[^,]+,[^,]+,[^,]+,)1\.0000$', r'\g<1>0.9500')), ['10']),
     ('m10b', M_, lambda t: resub(t, r'^(VITALS,min_health=[^,]+,max_radiation=)0\.0000', r'\g<1>0.1000'), ['10']),
     ('m11', M_, lambda t: resub(t, r'^(T2SUM,.*,eerr=)0$', r'\g<1>1'), ['11', 'k14']),
@@ -318,20 +326,31 @@ MUT = [   # name, file, transform, expected failing checks  (all must FAIL with 
     ('m12', M_, lambda t: resub(t, r'^(SUMMARY,)', r'ENOTREADY,15001\n\1'), ['12']),
     ('m13', S, lambda t: edit_snap(t, near('surge', 30.5), lambda r: resub(r, r'^(e,[^\n]*)\n(ns,[^\n]*)$', r'\2\n\1')), ['13']),
     ('m13_k', S, lambda t: on_rec(t, J_mid, lambda r: resub(r, rf'^(e,[^\n]*\n)((?:[^\n]*\n)*?)(k,{MID},[^\n]*\n)', r'\3\1\2')), ['13']),
-    ('mk2', M_, lambda t: one(t, KAPS[0], KAPS[0].replace(',0.7000,', ',0.6900,')), ['k2']),
-    ('mk3', M_, lambda t: resub(t, r'^(SUMMARY,)', f'KAPPLY,{TA + 5000},1,{NEI},0.100,0.100,0.5000,0.4000,hit\n' + r'\1'), ['k3']),
+    ('mk2', M_, lambda t: one(t, KAPS[0], KAPS[0].replace(',0.7000,', ',0.6900,')), ['ka', 'k2']),
+    ('mka_n', M_, lambda t: one(t, KAPS[1], ','.join(KAPS[1].split(',')[:2] + ['1'] + KAPS[1].split(',')[3:])), ['ka', 'k3', 'kh']),
+    ('mk3', M_, lambda t: resub(t, r'^(SUMMARY,)', f'KAPPLY,{TA + 5000},1,{NEI},0.100,0.100,0.5000,0.4000,hit\n' + r'\1'), ['ka', 'k3']),
     ('mk6', S, lambda t: on_rec(t, J_after_hit, lambda r: resub(r, rf'^(o,{NEI},(?:[^,\n]*,){{6}})[-0-9.]+', r'\g<1>0.2000')), ['k6']),
-    ('mkp_band', S, lambda t: fold(t, J_pend, lambda r: set_mo(r, h='0.0300')), ['kp']),
-    ('mkp_dead', S, lambda t: on_rec(t, J_pend[0], lambda r: resub(r, rf'^(k,{MID},[0-9.]+)$', r'\1,dead')), ['kp', 'k15']),
-    ('mkp_lethal', M_, lambda t: one(t, KAPS[-1], re.sub(r',[0-9.]+,hit$', ',0.0000,hit', KAPS[-1])), ['kp']),
-    ('mkd', 't2_xray.log', lambda t: shift_play0(t, -7000), ['kd']),
+    ('mkh_hi', S, lambda t: on_rec(t, J_hold[-1], lambda r: set_mo(r, h='0.0301')), ['kh']),
+    ('mkh_lo', S, lambda t: on_rec(t, J_hold[1], lambda r: set_mo(r, h='0.0097')), ['kh']),
+    ('mkh_nok', S, lambda t: on_rec(t, J_hold[3], lambda r: resub(r, rf'^k,{MID},[^\n]*\n', '')), ['kh']),
+    ('mkh_stale', S, lambda t: on_rec(t, J_hold[3], lambda r: resub(r, rf'^(k,{MID},[0-9.]+)$', r'\1,stale')), ['kh', 'k15']),
+    ('mkh_few', S, lambda t: drop_recs(t, set(J_hold[4:])), ['kh']),
+    ('mkh_after', M_, lambda t: one(t, KAPS[1], re.sub(r',[0-9.]+,hit$', ',0.0200,hit', KAPS[1])), ['ka', 'kh']),
+    ('mkd', 't2_xray.log', lambda t: shift_play0(t, -7000), ['kh', 'kd']),
+    ('mkd_n', M_, lambda t: one(t, KD, re.sub(r'^(KDEAD,\d+,)(\d+)', lambda m: f'{m.group(1)}{int(m.group(2)) - 5}', KD)), ['kd']),
+    ('mkd_after', M_, lambda t: one(t, KAPS[2], re.sub(r',[0-9.]+,hit$', ',0.0080,hit', KAPS[2])), ['ka', 'kd']),
+    ('mkd_nokap', M_, lambda t: one(t, KAPS[2] + '\n', ''), ['kd']),
+    ('mkd_low', PO, lambda t: resub(t, rf'^(k,{MID},[^,]+,){DEATH_TOT},1$', r'\g<1>0.995,1', n=0), ['ka', 'k3', 'kd', 'k14']),
+    ('mkc_late', M_, lambda t: one(t, KCF, f'KCONF,{int(KCF.split(",")[1]) + 2500},{MID},{int(KCF.split(",")[3]) + 2500}'), ['kc', 'k14']),
+    ('mkc_none', M_, lambda t: one(t, KCF + '\n', ''), ['kc', 'k14']),
+    ('mkc_early', M_, lambda t: one(t, KCF, f'KCONF,{TK},{MID},0'), ['kc']),   # the snapshot after it still reads M alive
     ('mk7', S, lambda t: fold(t, [j for j, r in enumerate(recs_txt) if re.search(rf'^k,{MID},[^,]+,dead$', r, re.M) and u_of(r) <= U_dead1 + 2100],
                               lambda r: resub(r, rf'^(k,{MID},[0-9.]+),dead$', r'\1')), ['k7']),
     ('mk8', M_, lambda t: resub(t, rf'^(KWHO,\d+,{MID},)0$', r'\g<1>5'), ['k8']),
     ('mk11', S, lambda t: on_rec(t, J_late, lambda r: set_mo(r, alive='1')), ['k11']),
     ('mk13', S, lambda t: on_rec(t, J_mid, lambda r: resub(r, r'^r,[^\n]*\n', '')), ['k13']),
-    ('mk14', M_, lambda t: resub(t, r'^(T2SUM,.*,khits=)2,', r'\g<1>3,'), ['k14']),
-    ('mk14_kconf', M_, lambda t: resub(t, rf'^(KCONF,[^\n]*)$', r'\1\n\1'), ['k14']),
+    ('mk14', M_, lambda t: resub(t, r'^(T2SUM,.*,khits=)3,', r'\g<1>4,'), ['k14']),
+    ('mk14_kconf', M_, lambda t: resub(t, rf'^(KCONF,[^\n]*)$', r'\1\n\1'), ['kc', 'k14']),
     ('mk15_dup', S, lambda t: on_rec(t, J_mid, lambda r: resub(r, rf'^(o,{NEI},[^\n]*\n)', r'\1\1')), ['k15']),
     ('mk15_stale', S, lambda t: on_rec(t, J_mid, lambda r: resub(r, rf'^(k,{MID},[0-9.]+)$', r'\1,stale')), ['k15']),
 ]
@@ -347,11 +366,10 @@ NVM = [   # name, file, transform, rules that must fire, failing checks (exact; 
                                         lambda r: one(r, '\ne,none,0.00,0,6\n', '\ne,psi,5.00,1,10\n')), ['nve1'], None),
     ('nve2_ref', M_, lambda t: resub(t, r'^(EFORCE,\d+,surge,)started$', r'\1notstarted'), ['nve1', 'nve2'], None),
     ('nve3_ref', M_, lambda t: resub(t, r'^(EFORCE,\d+,psi,)started$', r'\1notstarted'), ['nve1', 'nve3'], None),
-    ('nve5_novortex', S, lambda t: resub(t, r'^v,[^\n]*\n', '', n=0), ['nve5'], ['9']),
     ('nvk1_stalker', PO, lambda t: resub(t, r'^(end,40)$', r'k,201,stalker_bandit,0.100,0\n\1'), ['nvk1'], ['k14']),
     ('nvk2_hurt', M_, lambda t: one(t, KAPS[0], KAPS[0].replace(',1.0000,0.7000,', ',0.9500,0.6500,')), ['nvk2'], []),
     ('nvk3_fall', S, lambda t: on_rec(t, J_mid, lambda r: set_mo(r, h='0.6000')), ['nvk3'], []),
-    ('nvk7_nopend', S, lambda t: drop_recs(t, set(J_pend)), ['nvk7'], ['kp']),
+    ('nvk2_heldkill', S, lambda t: on_rec(t, J_hold[2], lambda r: set_mo(r, alive='0')), ['nvk2'], ['kh']),
 ]
 for name, fn_, tr, want in MUT:
     R = work(fn_); wfile(os.path.join(R, fn_), tr(G[fn_]))
@@ -399,14 +417,38 @@ R = os.path.join(D, 'm1_stall', 'run')
 for n in REQ: os.makedirs(os.path.dirname(os.path.join(R, n)), exist_ok=True); os.symlink(os.path.join(GOOD, n), os.path.join(R, n))
 wfile(os.path.join(R, 'stall.csv'), 'utc_ms,event,seq,track_s\n1,STOP,1,1\n20001,CONT,1,1\n')
 expect('m1_stall', R, 1, 'FAIL', ['1'], [])
-# a NO VERDICT that does not hide an unexplained failure: nvk7 fixture + check 10 failing -> FAIL
-R = work(M_, '_nvfail'); wfile(os.path.join(R, M_), resub(G[M_], r'^(VITALS,min_health=[^,]+,max_radiation=)0\.0000', r'\g<1>0.1000'))
-R2 = os.path.join(D, 'nvfail', 'run')
-for n in REQ:
-    os.makedirs(os.path.dirname(os.path.join(R2, n)), exist_ok=True)
-    if n not in (M_, S): os.symlink(os.path.join(GOOD, n), os.path.join(R2, n))
-wfile(os.path.join(R2, M_), open(os.path.join(R, M_)).read()); wfile(os.path.join(R2, S), drop_recs(G[S], set(J_pend)))
-expect('nvfail_outside', R2, 1, 'FAIL', ['10', 'kp'], ['nvk7'], [r'^verdict: NO VERDICT rule\(s\) nvk7 fired, but failing check\(s\) 10 are outside'])
+def two(name, files):   # a run folder with these files replaced (dict name -> text), the others symlinks to good
+    R2 = os.path.join(D, name, 'run')
+    for n in REQ:
+        os.makedirs(os.path.dirname(os.path.join(R2, n)), exist_ok=True)
+        if n not in files: os.symlink(os.path.join(GOOD, n), os.path.join(R2, n))
+    for n, t in files.items(): wfile(os.path.join(R2, n), t)
+    return R2
+# a NO VERDICT that does not hide an unexplained failure: nvk3 fixture + check 10 failing -> FAIL
+R2 = two('nvfail', {M_: resub(G[M_], r'^(VITALS,min_health=[^,]+,max_radiation=)0\.0000', r'\g<1>0.1000'),
+                    S: on_rec(G[S], J_mid, lambda r: set_mo(r, h='0.6000'))})
+expect('nvfail_outside', R2, 1, 'FAIL', ['10'], ['nvk3'], [r'^verdict: NO VERDICT rule\(s\) nvk3 fired, but failing check\(s\) 10 are outside'])
+# B1 (reviewer's combination): a wrong hold d WITH no snapshot between the hold and the kill call -> FAIL (ka), never NV
+R2 = two('mkh_d_nosnap', {M_: one(G[M_], KAPS[1], re.sub(r'^((?:[^,]*,){4})[0-9.]+', r'\g<1>0.600', KAPS[1])), S: drop_recs(G[S], set(J_hold))})
+base = expect('mkh_d_nosnap', R2, 1, 'FAIL', ['ka', 'kh'], [])
+mut_caught('chk_ka', R2, base)
+# the same for the death KAPPLY: wrong d, no snapshot between the kill call and KCONF
+R2 = two('mkd_d_nosnap', {M_: one(G[M_], KAPS[2], re.sub(r'^((?:[^,]*,){4})[0-9.]+', r'\g<1>0.050', KAPS[2])), S: drop_recs(G[S], set(J_pend))})
+expect('mkd_d_nosnap', R2, 1, 'FAIL', ['ka', 'kd'], [])
+# B2: the hit KAPPLY kills M (1.0000 -> 0.0000; X-Ray reads it dead from then on) -> FAIL on k2 (and ka), nvk2 NOT fired
+JD = [j for j, r in enumerate(recs_txt) if j >= J_after_hit and mo(r)]
+R2 = two('mk2_kill', {M_: one(G[M_], KAPS[0], re.sub(r',[0-9.]+,hit$', ',0.0000,hit', KAPS[0])),
+                      S: fold(G[S], JD, lambda r: set_mo(r, h='0.0000', alive='0'))})
+expect('mk2_kill', R2, 1, 'FAIL', None, None, [r'^k2 .*: FAIL', r'^ka .*: FAIL', r'^nvk2 .*: clear \(\(not fired', r'^EM1 X SIDE: FAIL$'])
+# nve5 is dropped: a psi storm cut short (no v line, no EEND psi) is a plain FAIL (6p and 9 among the failing), no rule fired
+R2 = two('nve5_cut', {S: resub(G[S], r'^v,[^\n]*\n', '', n=0), M_: resub(G[M_], r'^EEND,\d+,psi,[^\n]*\n', '')})
+expect('nve5_cut', R2, 1, 'FAIL', None, [], [r'^6p .*: FAIL', r'^9 .*: FAIL', r'^verdict: failing checks'])
+# KCONF 0 ms is a PASS: a second stub run with lag 0
+G0 = make_stub('good_lag0', [(SURGE_AT, 'surge'), (PSI_AT, 'psi')], lag=0)
+expect('good_lag0', G0, 0, 'PASS', [], [], [r'^reported: pending \(reported only\): KCONF \d+ ms .* listing M alive 0,'])
+# KCONF 0 ms (as kj2's real bytes): KCONF at the kill call itself, the pending snapshots gone -> PASS
+R2 = two('pkc_zero', {M_: one(G[M_], KCF, f'KCONF,{TK},{MID},0'), S: drop_recs(G[S], set(J_pend))})
+expect('pkc_zero', R2, 0, 'PASS', [], [], [r'^kc .*: PASS \(.* 0 ms after the kill call'])
 # unparsable inputs
 R = work(M_, '_unp'); wfile(os.path.join(R, M_), resub(G[M_], r'^(EFORCE,\d+,surge,started)$', r'\1,x'))
 expect('unparsed_eforce', R, 1, 'FAIL', None, None, [r'^UNPARSED meta line \d+: EFORCE has 5 fields', r'^verdict: unparsable input'])
@@ -434,7 +476,7 @@ for n in REQ: wfile(os.path.join(R, n), G[n].replace('\n', '\r\n'))
 expect('good_crlf', R, 0, 'PASS', [], [])
 
 # ---------------------------------------------------------------------------------------------------- REAL bytes
-KILLF = ['k2', 'k4', 'k6', 'kp', 'kd', 'k7', 'k8', 'k11', 'k14']
+KILLF = ['k2', 'k4', 'k6', 'kh', 'kd', 'kc', 'k7', 'k8', 'k11', 'k14']
 if os.path.isdir(KJ4P):
     b4 = listing(KJ4P)
     expect('real_kj4p_r1', KJ4P, 3, 'NO VERDICT', KILLF, ['nvk1'],
@@ -450,8 +492,9 @@ if os.path.isdir(KJ2):
         os.makedirs(os.path.dirname(os.path.join(R, x)), exist_ok=True); os.symlink(os.path.join(KJ2, x), os.path.join(R, x))
     wfile(os.path.join(R, 'emforce.csv'), 'utc_ms,wall_utc,kind,ms_after_play0\n')
     EMF = ['1', '2', '3s', '3p', '4s', '4p', '4n', '5s', '5p', '6s', '6p', '7s', '7p', '8', '9', '11', '13']
-    expect('real_kj2_links', R, 1, 'FAIL', EMF + ['kp', 'kd', 'k7', 'k14'], ['nvk1', 'nvk7'],
+    expect('real_kj2_links', R, 1, 'FAIL', EMF + ['k4', 'kh', 'kd', 'k7', 'k14'], ['nvk1'],
            [r'^k2 .*: PASS \(M 23183: pose total 0\.300', r'^k15 .*: PASS \(1949 snapshots, 180 dead lines', r'^k13 .*: PASS',
+            r'^ka .*: PASS \(5 KAPPLY', r'^kc .*: PASS \(M 23183: KCONF at X 148725, 0 ms', r'^verdict: M has a KAPPLY: k2 judged',
             r'^nvk3 .*: clear \(none; exempt death step: \(950, 951\)', r'^k14\.eerr absent', r'^k7 .*lag 11839 ms'])
 else: print(f'BAD  kj2 folder missing: {KJ2}'); bad.append('kj2_missing')
 

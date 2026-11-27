@@ -53,17 +53,21 @@ LOST_MS=${T2_LOST_MS:-5000}; LOSTX_MS=${T2_LOSTX_MS:-120000}
 [ "${T2_V2RESET:-1}" = 1 ] && PFLAG="$PFLAG -t2_v2reset"
 mkdir -p "$O"; log() { echo "$(date -u '+%F %T.%3N')Z $*" | tee -a "$O/t2_xray.log"; }
 utc() { echo $(( $(date +%s%N) / 1000000 )); }
-# em1 (BEGIN axr restore): put the game's option file back before anything else (Overseer order 2026-11-27: each exe
-# rewrites its `version` line). A file copy over the pinned bytes, then their hash; any failure refuses with exit 7.
+"$HOME/.claude/overseer/tools/quiet-required.sh" check 2>/dev/null | grep -q '^HELD:.* EXCLUSIVE\|^HELD:.*B1-T2' || { log "REFUSED: no joint EXCLUSIVE claim held"; exit 2; }
+# em1 (BEGIN axr restore): put the game's option file back right after the claim check, before any other write to run/
+# or the shm folder and before the first boot (Overseer order 2026-11-27: each exe rewrites its `version` line).
+# The SOURCE is hashed first (a refusal leaves configs/axr_options.ltx untouched), then copied, then the result hashed;
+# any failure refuses with exit 7.
 AXR_SRC="$RUN/appdata/axr_options_play.ltx"; AXR_DST="$RUN/gamedata/configs/axr_options.ltx"
 AXR_SHA=27d54b9f59404d224258649598ca604ebfc174dd066be4a96ff392323244fb29
 [ -f "$AXR_SRC" ] || { log "REFUSED: axr_options restore: source $AXR_SRC missing"; exit 7; }
+AXR_GOT=$(sha256sum < "$AXR_SRC" 2>/dev/null | cut -c1-64)
+[ "$AXR_GOT" = "$AXR_SHA" ] || { log "REFUSED: axr_options restore: sha256 of source $AXR_SRC is ${AXR_GOT:-unreadable}, want $AXR_SHA"; exit 7; }
 cp "$AXR_SRC" "$AXR_DST" || { log "REFUSED: axr_options restore: copy to $AXR_DST failed"; exit 7; }
 AXR_GOT=$(sha256sum < "$AXR_DST" 2>/dev/null | cut -c1-64)
 [ "$AXR_GOT" = "$AXR_SHA" ] || { log "REFUSED: axr_options restore: sha256 of $AXR_DST is ${AXR_GOT:-unreadable}, want $AXR_SHA"; exit 7; }
 log "axr_options restored from $AXR_SRC (sha256 $AXR_SHA)"
 # em1 (END axr restore)
-"$HOME/.claude/overseer/tools/quiet-required.sh" check 2>/dev/null | grep -q '^HELD:.* EXCLUSIVE\|^HELD:.*B1-T2' || { log "REFUSED: no joint EXCLUSIVE claim held"; exit 2; }
 "$P/tools/run_noguard.sh" "$RUN" >/dev/null || { log "REFUSED: noguard"; exit 2; }
 # pre-flight E test mode (section 46): its control file may exist only when the pre-flight runner says so (T2_DMG_OK=1)
 [ "${T2_DMG_OK:-0}" = 1 ] || { [ -e "$SHM/dmgtest.txt" ] && { rm -f "$SHM/dmgtest.txt"; log "REMOVED a stale test-mode control file (dmgtest.txt)"; }; }

@@ -7,7 +7,7 @@
 # 3. The checker runs with stdout into the open report; its exit code goes to <report>.rc (no-clobber) only after it ran.
 # Exit: the checker's (0 PASS, 1 FAIL, 3 NO VERDICT, 2 REFUSED), or 2 when this script refuses.
 set -u
-CHK_SHA=5f8174aa6c3e238527766f8977e29cad3758bd399f806602aa4c3f5071622553
+CHK_SHA=83d4d482458a3ea833480bbf2771a125f9041c34efaf64fb22341b7a972f4be3
 K="$(cd "$(dirname "$0")" && pwd)"; CHK="$K/em1_check.py"
 [ $# -eq 2 ] && [ -n "$1" ] && [ -n "$2" ] || { echo "usage: em1_score.sh <run dir> <report file>" >&2; exit 2; }
 R=$1; REP=$2
