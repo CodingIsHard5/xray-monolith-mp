@@ -78,3 +78,14 @@ No engine boot, no git, no CodeRabbit, no network. Files written only under em1/
 ## Not tested / not done
 - The runner as a whole (bash -n + the step); the engine; ITR2; the hold, a moving actor during an emission, or the
   pending path in the engine; a stub run with a moving actor. No CodeRabbit (not allowed). Predictions and pins: EnginePerf.
+
+## Round 4 (EnginePerf, 2026-11-27 15:20 EST)
+- em1_check.py: freeze.csv and lost.csv are required files; check 1 fails by name on any data row or a wrong header
+  (FL_HEAD, FL_ROWS_MAX). Agreed with itrzone: a data row there = my check 1 FAIL = joint FAIL.
+- em1_selftest.sh: stub run writes both files with the runner's header; cases m1_freeze_row, m1_lost_row,
+  m1_freeze_head, m1_lost_head, miss_freeze.csv, miss_lost.csv; mutant b_flrows. Real folders (kj4p r1, kj2) have both
+  files header-only.
+- Self-test 15:20:33-15:21:28: PASS, 45 of 45 checker mutants caught, axr step test 9/9
+  (selftest-runs/em1-st-20261127-152033-2128855). em1_score.sh with the new CHK_SHA on kj4p-r1: rc 3, second call refused.
+- Pins added: harness/zz_eperf_dump.script, out/user.ltx.orig. Runner, stub, axr step test unchanged.
+- Not reviewed independently (CodeRabbit down); the change is one clause and two table entries.

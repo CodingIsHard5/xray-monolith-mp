@@ -3,7 +3,7 @@
 DRAFT, NOT REGISTERED. Stdlib only, run with python3 -I:
   em1_check.py <run dir>
 <run dir> = the folder the X runner (em1/t2_xray_em1.sh, launched by itrzone's boot script) was given. Required, by name:
-  t2_xray.log  restarts.csv  emforce.csv  boot0/meta_t2.csv  boot0/hits_t2.csv (may be empty: no hit)
+  t2_xray.log  restarts.csv  freeze.csv  lost.csv  emforce.csv  boot0/meta_t2.csv  boot0/hits_t2.csv (may be empty: no hit)
   boot0/tb/xray.log  boot0/watch/snaps_all.txt  boot0/watch/poses_all.txt   (tools/t1_watch_keep.py)
 A missing, unreadable or (except hits_t2.csv) empty required file FAILS BY NAME (kj2's principle; kj4p refused instead):
 `MISSING|EMPTY|UNREADABLE <name> (<path>)`, no check is computed, verdict FAIL, exit 1. Nothing is ever written by this
@@ -18,7 +18,8 @@ every check passes. Always judged (in no untested set): 1, 2, 4n, 10, 11, 12, 13
 Made from two registered checkers, parsing code reused:
   * kj4/kj4p_check.py (b0b6d70f..., the emission checks 1..13, NV1..NV4 -> here nve1..nve4; NV5 dropped), with these changes only:
     1: play end bound from RUN_S (below); the clause "no kept pose with a k line" removed (em1 has k lines); new clause
-       "no stall.csv" (em1 has no stop: T2_STALL_PLAY=99999).
+       "no stall.csv" (em1 has no stop: T2_STALL_PLAY=99999); new clause "freeze.csv and lost.csv hold their header and
+       no data row" (both are now required files).
     9: vortex height +/-0.50 m and distance <= 151.5 m against the actor of the snapshot of the vortex's FIRST v line;
        a vortex whose first v line follows a kept-snapshot gap > 250 ms (X clock) is reported, not judged, for height and
        distance; at least 10 of every 12 vortices must be judged (plan-facts/joint-emission-witness-carried-bounds-
@@ -113,9 +114,14 @@ NV_UNTESTED = {
     'nvk3': set(KILL_ALL),                       # M fell with no K line of mine (except its death step)
     'nvk6': KILL_ALL - {'k2'},                   # M not listed at the first pose of its later step
 }
-REQ = ('t2_xray.log', 'restarts.csv', 'emforce.csv', 'boot0/meta_t2.csv', 'boot0/hits_t2.csv', 'boot0/tb/xray.log',
+REQ = ('t2_xray.log', 'restarts.csv', 'freeze.csv', 'lost.csv', 'emforce.csv', 'boot0/meta_t2.csv', 'boot0/hits_t2.csv', 'boot0/tb/xray.log',
        'boot0/watch/snaps_all.txt', 'boot0/watch/poses_all.txt')
 EMPTY_OK = {'boot0/hits_t2.csv'}
+# the runner's freeze (SIGSTOP/CONT) and pose-LOST logs (t2_xray_em1.sh:91-92 write the headers, :156 and :183 the rows).
+# em1 has no stop (T2_STALL_PLAY=99999) and ITR2 ends with `end` poses (the lost rule skips them, :153-156): by the code
+# on both sides 0 rows. Any data row, or another header, fails check 1 by name (agreed with itrzone 2026-11-27).
+FL_HEAD = {'freeze.csv': 'utc_ms,event,state,pid,game_ms', 'lost.csv': 'utc_ms,age_ms,state,policy'}
+FL_ROWS_MAX = 0   # data rows allowed in each
 ORDER_ID = ['1', '2', '3s', '3p', '4s', '4p', '4n', '5s', '5p', '6s', '6p', '7s', '7p', '8', '9', '10', '11', '12', '13',
             'ka', 'k2', 'k3', 'k4', 'k6', 'kh', 'kd', 'kc', 'k7', 'k8', 'k11', 'k13', 'k14', 'k15']
 ALWAYS = {'1', '2', '4n', '10', '11', '12', '13', 'ka', 'k13', 'k15'}
@@ -482,12 +488,17 @@ def full(run_dir):
         lv = sorted({s['level'] for s in snaps}); runs = sorted({s['run'] for s in snaps})
         stall = os.path.lexists(os.path.join(run_dir, 'stall.csv'))
         span = (snaps[-1]['u'] - play0) / 1000 if snaps and play0 else None
-        ok = (rc0 and not restarts and not lua_b and not fatal and boots == ['boot0'] and lv == [LEVEL] and len(runs) == 1
+        fl = []
+        for n in ('freeze.csv', 'lost.csv'):
+            L = [l for l in data[n] if l.strip()]
+            if not L or L[0] != FL_HEAD[n]: fl.append(f'{n}: header {L[0] if L else None!r}, want {FL_HEAD[n]!r}')
+            elif len(L) - 1 > FL_ROWS_MAX: fl.append(f'{n}: {len(L) - 1} data row(s), want 0, first {L[1]!r}')
+        ok = (rc0 and not fl and not restarts and not lua_b and not fatal and boots == ['boot0'] and lv == [LEVEL] and len(runs) == 1
               and not stall and play0 is not None and span is not None and span >= END_PLAY_S)
         return ok, (f'runner rc0 {rc0}, restart rows {len(restarts)}, boots {boots}, FATAL {len(fatal)}, Lua errors naming '
                     f'{LUA_BRIDGE} {len(lua_b)} {lua_b[:1]}, levels {lv}, run ids {len(runs)}, stall.csv present {stall} (want none: no stop), '
-                    f'play0 {play0}, last snapshot at play {span if span is None else round(span, 1)} s (want >= {END_PLAY_S} = RUN_S {RUN_S} - {WARMUP_S} - {END_SLACK_S})')
-    add('1', 'one boot ran to the end on Cordon: rc 0, no restart, no FATAL, no bridge Lua error, no stop, play >= end', c1)
+                    f'freeze.csv / lost.csv header only: {"yes" if not fl else "NO: " + "; ".join(fl)}, play0 {play0}, last snapshot at play {span if span is None else round(span, 1)} s (want >= {END_PLAY_S} = RUN_S {RUN_S} - {WARMUP_S} - {END_SLACK_S})')
+    add('1', 'one boot ran to the end on Cordon: rc 0, no restart, no freeze, no lost pose, no FATAL, no bridge Lua error, no stop, play >= end', c1)
 
     def c2():
         nums, ok = [], True

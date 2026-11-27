@@ -69,7 +69,7 @@ BENCH_DISPLAY=:141` (option A, itrzone's choice 2026-11-27).
 Emission checks = kj4p's checks 1-13 with the changes marked **em1**; kill checks = kj2's restricted to M (prefix k).
 | id | outcome judged | bound |
 |---|---|---|
-| 1 | runner rc 0, no restart row, one boot, no FATAL, no bridge Lua error (three log forms), every snapshot on l01_escape with one run id, **em1: no stall.csv (no stop)**, last kept snapshot at play >= **425** (kj4p's "no kept pose with a k line" removed) | 425 s |
+| 1 | runner rc 0, no restart row, one boot, no FATAL, no bridge Lua error (three log forms), every snapshot on l01_escape with one run id, **em1: no stall.csv (no stop)**, **freeze.csv and lost.csv each hold their header line and no data row (round 4; any row fails, named)**, last kept snapshot at play >= **425** (kj4p's "no kept pose with a k line" removed) | 425 s |
 | 2 | forced starts: emforce rows [surge, psi]; one EFORCE each; result started/notstarted; append at play 70/310 + 0..2.5 s; EFORCE -250..+2500 ms after the append (X->W by the 10 s P2 minimum); no Lua error in the event scripts | 2.5 s; -0.25..2.5 s |
 | 3s / 3p | one ESTART 0..1000 ms after its EFORCE (X), t 0..1.0 | 1000 ms; 1.0 |
 | 4s / 4p / 4n | tf == 10 in every surge / psi snapshot, == 6 in every none snapshot | exact |
@@ -132,6 +132,7 @@ is the source's); `desk` = no real value yet; `rule` = the edge is the scripts' 
 | check | bound | derivation (em1) | real measured value(s), source | margin | flag |
 |---|---|---|---|---|---|
 | 1 play end | >= 425 s | play end = RUN_S - 15 s (offsets 15.04 kj2, 15.3 kj3p, 15.7 kj4p) = 430; minus 5 s slack; above the latest psi end 310 + 2.5 + 2.5 + 104 = 419 (+2 s for F5) | 224.96 of 240 (kj2), 449.7 (kj3p r1), 449.3 (kj4p r1) of 465 | 5 s slack / 0.7 s largest offset deviation = 7x | - |
+| 1 freeze / lost rows | 0 data rows in each | by the code on both sides 0: no stop is planned (T2_STALL_PLAY=99999, so no SIGSTOP and no freeze row); a lost row needs 5000 ms without a new pose line while the last state is not `end` (t2_xray_em1.sh:153-156), and ITR2 writes poses the whole run, then `end` poses from its stop at play 440 (first within 0.30 s, last line stays `end`: itrzone's half); the reader has stopped by play ~430 (RUN_S 445 - 15.3..15.7) | 0 rows in both files in kj2 (which had a stop of ITR2's own), kj3p r1, kj4p r1 | exact (a rule) | rule |
 | 2 runner append | plan + 0..2.5 s | runner loop `sleep 1` + body | +0.910/0.945 s (kj3p r1), +0.807/0.858 s (kj4p r1) | 2.6x | - |
 | 2 EFORCE late | <= 2.5 s | reader reads emtest.txt once per 1000 ms X + a frame; X->W map early <= ~70 ms | 240 ms (kj3p surge), 711 / 537 ms (kj4p) | 3.5x | - |
 | 2 EFORCE early | >= -250 ms | map error: freshest P2 age + drift over 10 s (<= 70 ms, kj2 P2) | min +240 ms | 490 ms from the edge; 3.6x over the 70 ms error | - |
@@ -191,12 +192,12 @@ em1_score.sh = kj4p_score.sh with the names and the checker hash changed: it ref
 pinned value, opens the report no-clobber before the checker runs, writes the exit code to `.rc` after, and refuses a
 second call. Pinned checker hash: see em1_score.sh (CHK_SHA); re-tested in round 2 (see NOTES.md).
 
-## 8. Pins (sha256, computed 2026-11-27 14:46 EST; the PREREG itself is pinned by its commit)
+## 8. Pins (sha256, round 4, computed 2026-11-27 15:25 EST; the PREREG itself is pinned by its commit)
 | file | sha256 |
 |---|---|
-| em1/em1_check.py | 83d4d482458a3ea833480bbf2771a125f9041c34efaf64fb22341b7a972f4be3 |
-| em1/em1_score.sh | cbb8f4c0e5baaad67a3c48597a375eb60bc7fda0ea3e55b5368f67fe69cf4c48 |
-| em1/em1_selftest.sh | e8bd3cbd4d17352afd253bf6988c82bdc51a971efe21ecfc9e8343dc358ca32d |
+| em1/em1_check.py | e3297a10283f5ede4cd5ab897b72e449067d4fb327d819506151636ba78298e3 |
+| em1/em1_score.sh | 9c06d1630a3e3e09f3a621f2061df86003693ba852717d0eff29b39d9aabee92 |
+| em1/em1_selftest.sh | d9ef42d0776d05dee9ec46d6836e7b565d38babc831b93243ec31a3998a36e9a |
 | em1/em1_stub.lua | cd6edfb5e2a35eac28fd71aeaced50e42289d8568e3b6eea4a3a7e06bbeb2f94 |
 | em1/em1_axr_step_test.sh | 96761a9e6974c3453b9e75639f838d381f3465b8befb0b35a57f962ad33235b5 |
 | tools/t2_xray_em1.sh (= em1/t2_xray_em1.sh; NEW: the runner itrzone launches) | b444d8e46f534683f4ca3bf7e5fa491bd4b84243943c6953228dcce9f5536989 |
@@ -209,7 +210,12 @@ second call. Pinned checker hash: see em1_score.sh (CHK_SHA); re-tested in round
 | run/bin/Stance14.exe (T2_EXE, kj4p, unchanged) | b4ce9c772ae5fa4bf5ddb955f2dfcb943627d6c2b2e4ce66e21eac1168646cbe |
 | run/appdata/savedgames/cordon1.scop (kj4p, unchanged) | 6dea752bc652a45c748e1438e3bc8ffd2d8d89f24730177c792328aeb5d13f3e |
 | run/appdata/savedgames/cordon1.scoc (not pinned before; hashed today) | a9f9a8a91b034de28a49be7f8029d823d057e46b4445f3f94d7255dbc77b0b6b |
+| harness/zz_eperf_dump.script (tb_run.sh installs it; itrzone's hash matches) | 2b79a817a08a1e7ff4e29007f76677dba698a2a5945374331dcc2ae2de874b45 |
+| out/user.ltx.orig (tb_run.sh's settings source; itrzone's hash matches) | 3efd38eecbca504001cf03bd4c60bc6e837a3c3284e8517979a1bd9e1526de78 |
 itrzone pins its own mod blob, boot script and the runner/lib/reader/options source above in its half.
+
+Clock drift behind the +/- windows that mix the wall clock and the engine clock (measured, kj4p r1): wall minus engine
++3 ms over the 222 s surge, +1 ms over the 103 s psi storm; one -2.1 s step, before play 0, so outside every judged window.
 
 ## 9. Tests on these bytes (2026-11-27, desk)
 See NOTES.md section "What was tested": em1_selftest.sh (stub-made run + made fixtures + checker mutants + real kj4p-r1 and

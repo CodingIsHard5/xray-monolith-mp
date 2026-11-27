@@ -53,7 +53,7 @@ U0, SESS = 1795000000000, '1795000000000'
 SURGE_AT, PSI_AT, RUN_W = 70, 310, 432.0          # play end ~431 >= 425 (RUN_S 445 - 15 - 5)
 HIT_W, HOLD_W, KILL_W, HOLD_TOT, DEATH_TOT, LAG_MS, DROP_S = 30.0, 50.0, 52.0, '0.995', '1.005', 250, 5.0
 NOTE = 'STUB-MADE (em1 checker selftest): no engine ran; em1_stub.lua fake engine + the em1 rig stand-in in lockstep'
-REQ = ['t2_xray.log', 'restarts.csv', 'emforce.csv', 'boot0/meta_t2.csv', 'boot0/hits_t2.csv', 'boot0/tb/xray.log',
+REQ = ['t2_xray.log', 'restarts.csv', 'freeze.csv', 'lost.csv', 'emforce.csv', 'boot0/meta_t2.csv', 'boot0/hits_t2.csv', 'boot0/tb/xray.log',
        'boot0/watch/snaps_all.txt', 'boot0/watch/poses_all.txt']
 bad = []; caught = []; ncm = 0
 
@@ -133,6 +133,8 @@ def make_stub(name, force, lag=LAG_MS):
           '2026-11-27 00:08:00.000Z boot 0 end: tb_run rc=0 reason=engine run ended\n'
           '2026-11-27 00:08:00.000Z end: ran to the end; boots 1; unplanned restarts 0; stall no; planned kill no; rc=0\n')
     wfile(os.path.join(R, 'restarts.csv'), 'utc_ms,boot,reason,planned\n')
+    wfile(os.path.join(R, 'freeze.csv'), 'utc_ms,event,state,pid,game_ms\n')   # the runner's own header lines (t2_xray_em1.sh:91-92)
+    wfile(os.path.join(R, 'lost.csv'), 'utc_ms,age_ms,state,policy\n')
     wfile(os.path.join(B, 'tb/xray.log'), f'{NOTE}\n* loading script surge_manager.script\n* loading script psi_storm_manager.script\n'
           '* loading script zz_p1_puppet.script\n')
     print(f'STUB-MADE {name}: forced {force}, play0 {play0}, rig M {rig.M} lethal {rig.lethal}', flush=True)
@@ -172,6 +174,7 @@ for k in ('nve1', 'nve2', 'nve3', 'nve4', 'nvk1', 'nvk2', 'nvk3', 'nvk6'):
 CMUT['b_vdy'] = cmut('b_vdy', 'V_DY = 0.50 ', 'V_DY = 0.05 ')
 CMUT['b_nogap'] = cmut('b_nogap', 'V_GAP_MS = 250 ', 'V_GAP_MS = 10 ** 9 ')
 CMUT['b_nofrac'] = cmut('b_nofrac', 'V_JUDGED = (10, 12)', 'V_JUDGED = (0, 12)')
+CMUT['b_flrows'] = cmut('b_flrows', 'FL_ROWS_MAX = 0 ', 'FL_ROWS_MAX = 10 ** 9 ')
 def mut_caught(mname, R, base):
     """the mutant must give a different outcome than the real checker on R (base = (rc, fails, fired, verdict))"""
     global ncm
@@ -417,6 +420,15 @@ R = os.path.join(D, 'm1_stall', 'run')
 for n in REQ: os.makedirs(os.path.dirname(os.path.join(R, n)), exist_ok=True); os.symlink(os.path.join(GOOD, n), os.path.join(R, n))
 wfile(os.path.join(R, 'stall.csv'), 'utc_ms,event,seq,track_s\n1,STOP,1,1\n20001,CONT,1,1\n')
 expect('m1_stall', R, 1, 'FAIL', ['1'], [])
+# a data row in freeze.csv / lost.csv (rows in the runner's own formats, t2_xray_em1.sh:183, :156), or another header: 1 fails by name
+for fn_, tag_, txt_, pat_ in (
+        ('freeze.csv', 'row', 'utc_ms,event,state,pid,game_ms\n1795000100000,STOP,play,4242,90000\n1795000120000,CONT,play,4242,90010\n', r'freeze\.csv: 2 data row\(s\)'),
+        ('lost.csv', 'row', 'utc_ms,age_ms,state,policy\n1795000100000,5012,play,resend\n', r'lost\.csv: 1 data row\(s\)'),
+        ('freeze.csv', 'head', 'utc_ms,event,state\n', r'freeze\.csv: header'),
+        ('lost.csv', 'head', 'utc_ms,age_ms,state\n', r'lost\.csv: header')):
+    R = work(fn_, '_' + tag_); wfile(os.path.join(R, fn_), txt_)
+    base = expect(f'm1_{fn_[:-4]}_{tag_}', R, 1, 'FAIL', ['1'], [], [rf'^1 one boot.*: FAIL \(.*{pat_}'])
+    if tag_ == 'row': mut_caught('b_flrows', R, base)
 def two(name, files):   # a run folder with these files replaced (dict name -> text), the others symlinks to good
     R2 = os.path.join(D, name, 'run')
     for n in REQ:
