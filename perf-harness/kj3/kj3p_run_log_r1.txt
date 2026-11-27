@@ -1,0 +1,6 @@
+2026-11-27 09:39:16 pre-boot selftest r1 on pinned bytes (run 101c8dab, selftest 1f87bf69, check 7fa0ccf1, score 1b24dc74): KJ3P SELFTEST: PASS (checker part rc 0; score-once states 7/7; driver functions offline 34/34)
+2026-11-27 09:39:19 want rc 0
+2026-11-27 10:11:14 slice granted, kj3p, display :141, load 1.75 2.14 2.67
+2026-11-27 10:19:32 t2_xray rc=0
+2026-11-27 10:19:35 released claim c1795792274.167954.15551 (rc 0)
+2026-11-27 10:19:35 slice end (exit 0; withdrew 0, claim tried 1, released 1)

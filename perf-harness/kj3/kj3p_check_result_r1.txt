@@ -1,0 +1,48 @@
+KJ3P X-only emission preflight checker, run dir out/kj3p-r1/run
+1 one boot ran to the end on Cordon: rc 0, no restart, no FATAL, no bridge Lua error, X-only (no k line), play >= end: PASS (runner rc0 True, restart rows 0, boots ['boot0'], FATAL 0, Lua errors naming zz_p1_puppet 0 [], levels ['l01_escape'], run ids 1, kept poses with k lines 0, play0 1795792312909, last snapshot at play 449.7 s (want >= 440))
+2 F1 forced starts: one EFORCE per runner append, in time, result started or notstarted (no error), no Lua error in the event scripts: PASS (Lua errors naming surge_manager/psi_storm_manager 0 []; surge: runner appended at play 70910 ms (want 70000..72500), EFORCE 'started' at X 102895, 240 ms after the append (want -250..2500); psi: runner appended at play 310945 ms (want 310000..312500), EFORCE 'started' at X 342998, 310 ms after the append (want -250..2500))
+3s surge started by the forced call: one ESTART soon after EFORCE, t near 0: PASS (ESTART 0 ms after EFORCE (want 0..1000), t -0.00 (want 0..1.0))
+3p psi storm started by the forced call: one ESTART soon after EFORCE, t near 0: FAIL (ESTART psi lines 0 (want 1), EFORCE 1)
+4s F2 time factor during the surge reads 10: PASS (2021 surge snapshots, printed forms ['10'], value != 10 in 0 [])
+4p F2 time factor during the psi storm reads 10: FAIL (no psi snapshot)
+4n F2 time factor outside events reads 6: FAIL (2190 none snapshots, printed forms ['10', '6'], value != 6 in 941 [2944, 2945, 2946])
+5s F2 t runs one unit per engine second through the surge: PASS (2021 snapshots, t -0.00..221.92, rate 1.00000 t/s, spread of t - X 0.010 s (want <= 0.5))
+5p F2 t runs one unit per engine second through the psi storm: FAIL (0 psi snapshots)
+6s F2 the surge ends as the desk table says (222 s): PASS (EEND t 221.92 (want 220.5..223.0), last surge snapshot t 221.92, 222.0 X s after ESTART; EEND t minus the snapshot clock at its X -0.104 s (want |.| <= 0.5), surge snapshots after EEND 0)
+6p F2 the psi storm ends as the desk table says (103 s): FAIL (EEND psi lines 0 (want 1))
+7s F2 surge phases 1..12 (13) once each, in order, each at its threshold: PASS (EPHASE [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] (want 1..12, 13 optional), outside (X-1, X-1+1.0]: [], snapshot phase != table in 0; t at each: 1@-0.00 2@29.07 3@46.02 4@49.02 5@79.02 6@107.06 7@119.03 8@155.04 9@167.09 10@199.09 11@211.04 12@219.06 13@221.04)
+7p F2 psi phases 1..5 (6) once each, in order, each at its threshold: FAIL (EPHASE [] (want 1..5, 6 optional), outside (X-1, X-1+1.0]: [], snapshot phase != table in 0; t at each: )
+8 F2 waves 1 and 2: w lines only in the surge, start at 120 / 168, 250 m north of the actor, 15 m/s south: PASS (w lines outside a surge 0, bad n 0; wave 1: first t 119.25 (want (119, 121.0]), z - actor z 247.0 (want 244.0..250.5), speed -15.00 m/s (want -16.5..-13.5), last t 182.57, 577 lines; wave 2: first t 167.64 (want (167, 169.0]), z - actor z 247.0 (want 244.0..250.5), speed -15.00 m/s (want -16.5..-13.5), last t 221.92, 496 lines)
+9 F2 vortices: v lines only in the psi storm, each from its start to its strike, s in range at the strike: FAIL (no v line)
+10 F3 the actor is unhurt through both events: health 1.0000 in every snapshot, VITALS clean, no refill: PASS (actor health values in 4211 snapshots ['1.0000'], snapshots without a line 0; VITALS VITALS,min_health=1.000,max_radiation=0.0000,max_bleeding=0.0000,unread=0; SUMMARY hits 0 cancelled 0 refills 0 min_health 1.000)
+11 F4 eerr = 0 at the end, no EERR line, no degraded snapshot; every other T2SUM counter as an X-only run: FAIL (T2SUM keys as registered (20, eerr last), eerr 941, nonzero ['eerr=941'], paused false, EERR lines 1 ['EERR,343066,! No such operator [__eq] defined in class [CPsiStormManager]'], degraded snapshots (e none + ns -1,-1) 941)
+12 F4 no ENOTREADY on a save load (desk prediction): PASS (ENOTREADY 0, EREADY 0)
+13 snapshot layout: one e and one ns in every v4 snapshot, w only in a surge, v only in a psi storm, no k line: PASS (4211 snapshots; not in the form a o* r? e (w|v)* ns: 0 [])
+NV1 an event the run did not force (before the first EFORCE, with no EFORCE started before it, or twice): clear (event snapshots before the first EFORCE 0, ESTART without its EFORCE [], kinds started twice {})
+NV2 the forced surge was refused by the game (EFORCE surge,notstarted: level, option or veto): clear (EFORCE surge result started)
+NV3 the forced psi storm was refused by the game (EFORCE psi,notstarted): clear (EFORCE psi result started)
+NV4 the psi storm was forced while the surge still ran (PSM:313 cancels it): clear (EFORCE psi at X 342998, EEND surge at X 324919)
+NV5 the psi storm made no vortex at all (PSM:361 `==` can end the chain before the first): clear (v lines 0 in 0 psi snapshots)
+F1 ANSWER: managers readable from the bridge NO (a non-degraded e/ns line seen: True; EERR 1); forced surge: started; forced psi storm: started
+reported: F2 printed tf forms: surge ['10'], psi [], none ['10', '6']
+reported: surge: ESTART ['ESTART,102895,surge,-0.00']; EEND ['EEND,324919,surge,221.92']
+reported: psi: ESTART []; EEND []
+reported: wave 1: first z 102.010, passes the actor at t 135.86, last z -845.990 at t 182.57
+reported: wave 2: first z 102.010, passes the actor at t 184.21, last z -710.990 at t 221.92
+reported: snapshots with both waves: 137 [2282, 2283, 2284]
+reported: ns at the first snapshot (game s to the next scheduled start): surge 44351, psi 84548 (real s at factor 6: 7392, 14091)
+reported: F3 actor hits seen by the bridge 0 lines; by (draftsman id, section, type): [] (under g_god none is expected: t3pfE3_prot had 0 in the same fields that gave 1230 with god off)
+reported: F3 pose points [('-220.990', '-19.610', '-144.990')] (1 distinct); actor x,z drift after the first 20 s 0.000 m (|dx|+|dz|, max); first actor position (-220.99, -19.885, -144.99)
+reported: F5 surge: online stalkers before 23, after (EEND + 2 s) not listed 0, listed but not alive 0; OFF lines for them in the event 0; new zombied ids ON in the event 0 []
+reported: F5 psi: no event
+reported: F6 export cost this run: SUMMARY,hits=0,cancelled=0,refills=0,min_health=1.000,export_ticks=4211,export_mean_us=595.6,export_p99_us=1060.7,export_max_us=6493.1; reference kj2 X run /home/caden/Projects/ITRZone/out/runs/20261126-172548-t2kj2-xray (kill5, no e lines, 240 s): export_mean_us=795.8 export_p99_us=1558.1 export_max_us=15920.6, 1949 ticks
+reported: F6 track 28..88 s: 546 exports, mean 633.8 us (overlaps surge)
+reported: F6 track 88..148 s: 547 exports, mean 659.9 us (overlaps surge)
+reported: F6 track 148..208 s: 546 exports, mean 616.1 us (overlaps surge)
+reported: F6 track 208..268 s: 547 exports, mean 559.5 us (overlaps surge)
+reported: F6 track 268..328 s: 547 exports, mean 564.1 us (overlaps surge)
+reported: F6 track 328..389 s: 549 exports, mean 584.1 us
+reported: F6 track 389..449 s: 551 exports, mean 557.4 us
+reported: inputs 4211 snapshots, 9033 poses, 13809 meta lines, 2 emforce rows
+verdict: failing checks 3p, 4p, 4n, 5p, 6p, 7p, 9, 11
+KJ3P: FAIL
