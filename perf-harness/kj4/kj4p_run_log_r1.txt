@@ -1,0 +1,11 @@
+2026-11-27 11:14:32 pre-boot selftest (attempt 1 after the reboot; out dir kj4p-r1) on pinned bytes (run c24279e6, selftest 307cff81, check b0b6d70f, score d29b06a4): KJ4P SELFTEST: PASS (checker part rc 0; score-once states 7/7; driver functions offline 34/34)
+2026-11-27 10:33:38 want rc 0
+2026-11-27 11:00:49 cancelled
+2026-11-27 11:00:49 no claim of this run found (token kj4p-20261127103336-1394794): nothing released
+2026-11-27 11:00:49 slice end (exit 143; withdrew 1, claim tried 1, released 0)
+--- attempt 1 (out/kj4p-r1) ---
+2026-11-27 11:23:50 want rc 0
+2026-11-27 12:01:53 slice granted, kj4p, display :141, load 2.18 1.88 2.09
+2026-11-27 12:10:18 t2_xray rc=0
+2026-11-27 12:10:21 released claim c1795798913.2345239.26988 (rc 0)
+2026-11-27 12:10:21 slice end (exit 0; withdrew 0, claim tried 1, released 1)
