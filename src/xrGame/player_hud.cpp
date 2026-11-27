@@ -4825,7 +4825,8 @@ static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
 					H.drop_t = 0.f;
 					H.drop_g = vr_bpt_gravity();
 					if (setd)
-						Msg("* [vr19] frame %u set down: '%s' id %d surface y %.4f gap %.4f hand_speed %.4f yaw %.2f", I.frame, e.sect.c_str(), id, surf, gap, spd, yaw);
+						Msg("* [vr19] frame %u set down: '%s' id %d surface y %.4f gap %.4f hand_speed %.4f yaw %.2f box %.4f %.4f %.4f", I.frame, e.sect.c_str(), id, surf, gap, spd,
+							yaw, e.ext.x, e.ext.y, e.ext.z);
 					else
 						Msg("* [vr17] frame %u release: id %d frames %d time %.5f v %.4f %.4f %.4f w %.4f %.4f %.4f gravity %.3f %s", I.frame, id, n, T, lv.x, lv.y, lv.z, av.x,
 							av.y, av.z, H.drop_g, H.vel_off ? "off" : capped ? "capped" : "free");
