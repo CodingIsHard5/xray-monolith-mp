@@ -2321,6 +2321,13 @@ void CActor::renderable_Render(IDSGraphManager* DM)
                 {
                     renderFrame = Device.dwFrame;
                     needAdjust = true;
+                    // S2 stage 4d-1 (sim_tick gated mode only; g_sim_render_lerp is FALSE on every stock frame): the
+                    // nudge below WRITES the held items' XFORM, and the items' update resets it once per tick, not
+                    // per rendered frame. On a render-only frame the nudge of the tick frame is still in place, so a
+                    // second one would add up (frame-rate dependent simulation state). Once per tick, as stock is
+                    // once per update.
+                    if (g_sim_render_lerp && g_sim_render_notick && (g_sim_4d_mask & SIM4D_NUDGE))
+                        needAdjust = false;
                 }
 
                 if (canRenderLegs(this, m_holder))

@@ -784,6 +784,11 @@ void CActor::sim_synth_witness()
 	g_sim_synth_wit.s2_draw.set(m->c);
 	g_sim_synth_wit.s2_xform.set(A->XFORM().c);
 	g_sim_synth_wit.s2_cam.set(A->m_sim_view_pos);
+	if (PIItem pItem = A->inventory().ActiveItem())
+	{
+		g_sim_synth_wit.s4 = true;
+		g_sim_synth_wit.s4_item.set(pItem->object().XFORM().c);
+	}
 }
 // ---------------------------------------------------------------------------------------------------------------
 

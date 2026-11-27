@@ -591,14 +591,18 @@ extern ENGINE_API double g_sim_hud_ms;
 // step only; read only while g_sim_render_lerp is TRUE. Device.fTimeDelta itself is never changed for the render.
 extern ENGINE_API float g_sim_render_dt;
 // S2 stage 4d-1: per-slice switch, console `sim_4d_mask` or start switch `-sim_4d_mask <m>` (read once at start).
-// Read only while g_sim_render_lerp is TRUE, so with sim_tick 0 it is never read. Bit 8 is reserved (minimap, dropped).
+// Read only while g_sim_render_lerp is TRUE, so with sim_tick 0 it is never read. Bit 8: see SIM4D_NUDGE.
 enum
 {
 	SIM4D_BODY = 1, // S2: player body, shadow root, legs
 	SIM4D_TRACERS = 2, // S3: tracers drawn between ticks
 	SIM4D_XHAIR = 4, // S1: crosshair easing with the render dt
+	SIM4D_NUDGE = 8, // the shadow pass's held-item nudge only on frames in which a tick ran (Actor.cpp)
 };
-extern ENGINE_API int g_sim_4d_mask; // default 7
+extern ENGINE_API int g_sim_4d_mask; // default 15
+// TRUE while g_sim_render_lerp is TRUE and this frame ran no tick (render-only frame); written by the presentation step,
+// cleared with g_sim_render_lerp. Read by the local player's shadow pass (Actor.cpp) under SIM4D_NUDGE.
+extern ENGINE_API BOOL g_sim_render_notick;
 // S2 stage 4d-1, TEST ONLY, every value below is 0 / FALSE / nullptr unless the engine was started with -det_mode:
 // g_sim_synth_k    -det_synth_k <K> (1..8): the "synthetic gated" lever; under det_mode the gate runs a fixed pattern
 //                  (one 33 ms tick, then K-1 render-only frames, alpha = j/K) instead of the wall clock
@@ -624,6 +628,8 @@ struct SimSynthWitness
 	float s1_dt; // the dt the crosshair easing used
 	Fvector s1_pos; // that crosshair's position after easing
 	float s1_opacity; // and its opacity
+	bool s4; // the s4 column is set: the local player has an active item
+	Fvector s4_item; // its XFORM().c (simulation state) after this frame's render
 };
 extern ENGINE_API SimSynthWitness g_sim_synth_wit;
 typedef void (*sim_synth_witness_fn)(); // fills the s2 columns of g_sim_synth_wit (set by xrGame while its actor exists)

@@ -486,7 +486,8 @@ static u32 s_sv_last_epoch = 0;      // g_sim_view_epoch at the previous present
 static float s_sv_dt = 0.f;          // smoothed real frame time handed to the presentation step
 // S2 stage 4d-1 (declared in device.h): render dt, slice mask, and the test-only synthetic gated lever
 ENGINE_API float g_sim_render_dt = 0.f;
-ENGINE_API int g_sim_4d_mask = SIM4D_BODY | SIM4D_TRACERS | SIM4D_XHAIR;
+ENGINE_API int g_sim_4d_mask = SIM4D_BODY | SIM4D_TRACERS | SIM4D_XHAIR | SIM4D_NUDGE;
+ENGINE_API BOOL g_sim_render_notick = FALSE;
 ENGINE_API int g_sim_synth_k = 0;    // 0 = lever off (always 0 without -det_mode)
 ENGINE_API BOOL g_sim_synth_tw = FALSE;
 ENGINE_API int g_sim_4d_break = 0;
@@ -557,6 +558,10 @@ static void sim_synth_witness_write(int n)
 		fprintf(f, " s1 %.6f %.5f %.5f %.5f %.6f |", w.s1_dt, w.s1_pos.x, w.s1_pos.y, w.s1_pos.z, w.s1_opacity);
 	else
 		fprintf(f, " s1 - - - - - |");
+	if (w.s4)
+		fprintf(f, " s4 %.5f %.5f %.5f |", w.s4_item.x, w.s4_item.y, w.s4_item.z);
+	else
+		fprintf(f, " s4 - - - |");
 	fprintf(f, " tw %u\n", w.tw_bad);
 	fflush(f); // the harness quits the game from a script: nothing may wait in the buffer
 }
@@ -780,6 +785,7 @@ static void sim_view_present(int n)
 	// reached when paused: that frame renders stock, as the paused frames after it do)
 	g_sim_render_alpha = alpha;
 	g_sim_render_lerp = TRUE;
+	g_sim_render_notick = n == 0 ? TRUE : FALSE; // S2 stage 4d-1: a render-only frame (no tick ran in it)
 	g_sim_render_dt = s_sv_dt; // S2 stage 4d-1: the render dt for render-side easing (S1)
 	s_synth_wit_j = s_synth_j;
 	s_synth_wit_alpha = alpha;
@@ -1090,6 +1096,7 @@ void CRenderDevice::on_idle()
 	if (g_sim_synth_k && sim_n >= 0 && g_sim_render_lerp)
 		sim_synth_witness_write(sim_n);
 	g_sim_render_lerp = FALSE; // S2 stage 4b: set by sim_view_present for this frame's render only; cleared after the join
+	g_sim_render_notick = FALSE; // S2 stage 4d-1: with it
 #ifdef XRCORE_PROFILER_AGG
 	xr_det_set_role(1); // render phase over: anything the main thread does outside it (level load, spawns) is gameplay
 #endif
