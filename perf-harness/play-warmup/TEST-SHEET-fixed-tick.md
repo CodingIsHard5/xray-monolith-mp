@@ -22,4 +22,5 @@
 ## Tell me
 - Which feels best: 30, 60 or off? Would you play at 30?
 - Anything that looked wrong, with which setting it was on.
+- If the held weapon's shadow jumps in sunlight (tick on), that's a known bug, fixed in the next pack.
 - Known and not fixed yet, no need to report: your own body and shadow, tracers, particles and lights on moving things, and NPC animation all still step at the tick rate.
