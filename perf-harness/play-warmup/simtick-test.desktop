@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=STALKER fixed-tick test
+Comment=EnginePerf test build (Warm18 = fixed tick + A-Life warm-up on) from its own run folder. Numpad 9 = 30, Numpad 6 = 60, Numpad 0 = off.
+Exec=sh -c 'DISPLAY=:0 setsid "$HOME/.claude/overseer/tools/display-launch.sh" "engineperf: Caden fixed-tick test" "$HOME/Projects/StalkerGameEngine/play/caden_simtick_play.sh" </dev/null >/tmp/simtick-play.log 2>&1 &'
+Terminal=false
+Categories=Game;
