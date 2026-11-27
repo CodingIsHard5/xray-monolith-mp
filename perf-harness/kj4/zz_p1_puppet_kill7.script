@@ -1,0 +1,917 @@
+-- P1 puppet probe (engine/perf-harness/PREREG-P1-puppet-2026-11-23.md). INERT unless the command line has -p1.
+--   -p1                 move the actor along gamedata\configs\p1_track.csv at 20 Hz (track time from the first teleport);
+--                       off-mesh points (node_dist < 0) hold the last on-mesh point; every hit on the actor is logged and
+--                       cancelled (invulnerable); health below 0.5 is refilled (backup, logged)
+--   -p1_export          also export online monsters/stalkers at 10 Hz
+--   -p1_tag <t>         file tag. Z:\dev\shm\p1\export_<t>.csv holds ONLY ITRZone's formats (no header):
+--                         a,t,x,y,z,health | o,t,id,section,kind,x,y,z,health,best_enemy,distance | h,t,hitter_id,hitter_section,hitter_kind,type,power,bone
+--                       (kind m = is_monster, s = is_stalker; hitter_kind also a = actor, x = other/none). Everything else
+--                       (start, ON/OFF, refills, ticks, summary) goes to Z:\dev\shm\p1\meta_<t>.csv.
+--   -b1_snap            B1-T1 (perf-harness/PREREG-B1-T1-2026-11-23.md): the 10 Hz export REWRITES
+--                       Z:\dev\shm\itrz_b1\snap.txt in place each tick (open "w", write, close; os.rename is removed):
+--                         seq,<seq>,<t_xray_ms>,<t_track_s> | a,x,y,z,yaw,health | o,id,section,kind,x,y,z,yaw,health,alive,best_enemy,dist | end,<seq>
+--                       instead of P1's CSV. Meta goes to Z:\dev\shm\itrz_b1\meta_<t>.csv (plus W,<seq>,<us> per tick) and
+--                       hit lines to hits_<t>.csv there. Implies -p1_export. Without -b1_snap, P1 behaves exactly as before.
+--   -t2_pose            B1-T2 (perf-harness/PREREG-B1-T2-xray-side-2026-11-23.md). Implies -b1_snap. The track is NOT
+--                       used: the actor follows Z:\dev\shm\itrz_b1\pose.txt (ITRZone's writer):
+--                         seq,<n>,<utc_ms>,<state>,<zone>,<keep|freeze> | p,x,y,z,yaw_rad,hp | k,<id>... | end,<n>
+--                       The snapshot header gains <level>,<run_id> (run_id from -t2_run <utc ms of launch>, set by the
+--                       driver on every start). Meta lines: P (pose applied), STALE/RESUME, HOLD (off-mesh), KILL, PAUSE.
+--                       -t2_pause allows device():pause on away/dead + freeze (only after the pre-flight boot check).
+--                       Without -t2_pose every path is exactly as in T1.
+--   Pose v4 / kill channel (ITRZone joint draft 5, 2026-11-26, sha256 345e7a8f): header field 8 = `4`; lines k,<id>,<section>,<total>,<dead>
+--   (0..64). 7 header fields = v3 (k lines counted, not applied); any other 8th field or > 8 fields: refused whole (kver).
+--   The old bare `k,<id>` kill is gone in every version. Snapshot header field 7 = `4`; k,<id>,<applied>[,dead] lines
+--   after the o lines. Table carried over a crossing in ktab.txt (same run id only). Meta: KAPPLY KDEAD KOWED KSTALE
+--   KBACK KREFUSED KWHO (killer id from the death callbacks, once per id with a row; -1 = none named) KTAB,savefail;
+--   counters at the end of T2SUM (ktabfail last). Inert unless a v4 pose with k lines arrives (except the snapshot mark).
+--   kill5 (joint amendment 138, pose/snapshot version stays 4; kj1 showed a creature still alive in the snapshot that first
+--   carried its `dead` line): k,<id>,<applied>,dead is written only when, as the snapshot is built, the creature reads dead
+--   (its o line alive 0; or, not listed, its object reads dead) or no object exists for the id. An online kill call not yet
+--   in effect gives the plain k,<id>,<applied> line. The death is CONFIRMED in the first snapshot that reads it dead (meta
+--   KCONF,<t>,<id>,<ms since the call>); the 10 s dead hold runs from there. Still alive 2.0 s after the call: KNOCONF,<t>,
+--   <id>,<ms> once, counted in kdead_fail, no retry (a later death is still confirmed). A stale id (another section, or alive
+--   again > 10 s after its confirmed death) answers k,<id>,<applied>,stale (kill4 wrote dead). KDEAD and KWHO: as kill4.
+--   kill6 (kj3 review fixes; format, T2SUM keys and amendment 138 unchanged): (1) a stale row with a pending kill gives only
+--   the stale answer: no KCONF, no KNOCONF, no kdead_fail; (2) the online kill call records the target's section (ks); each
+--   snapshot checks the section of whatever object now holds the id (game object, else server object) and a mismatch marks
+--   the row stale for good (kx: logged KSTALE,...,ident once unless the pose already marked it; a pose that omits the id
+--   does not clear it); no object still confirms; a replacement of the SAME section cannot be told apart; (3) ktab.txt rows
+--   carry kt, kn, ks, kx (kt as time_global, which runs on over a level change: TimerGlobal starts once per process); a
+--   kill5 row (no such fields) loads as before.
+--   Stage 2 (emission lines, kj3/NOTES.md, kj3/emission-phases.md; format version stays 4): every version-4 snapshot gets, after
+--   the r line and before the k lines: e,<kind>,<t>,<phase>,<tf> (one), w,<n>,<z> (per active wave), v,<n>,<x>,<y>,<z>,<s> (per
+--   pending psi vortex), ns,<surge_s>,<psi_s> (one). Read-only on the public fields of surge_manager.SurgeManager and
+--   psi_storm_manager.PsiStormManager; any failure degrades the whole group to e,none,0.00,0,<tf> + ns,-1,-1 (EERR logged once per
+--   Lua state, counted in the T2SUM key eerr, now the LAST key). Meta: ESTART EPHASE EEND. Test mode: if the bridge folder holds
+--   emtest.txt at game start, each new complete line `surge` / `psi` (at most one read per second) calls the manager's own start
+--   function once (EFORCE). Without that file at game start nothing of the test mode runs and no file is read.
+--   Stage 3 (stale rows, agreed with itrzone 2026-11-26; kj3/NOTES.md "Stage 3"; format version stays 4): (a) the stale
+--   answer is written only while the newest processed v4 pose carries a k line for the id that is stale (its section differs
+--   from the object's, or alive again > 10 s after a confirmed death), or carried the target's line before the identity
+--   check found another section under the id; (b) a line whose section equals the object's on a row whose recorded creature
+--   (ks, now recorded at every line taken) has another section starts a FRESH row (applied 0, pending kill and marks
+--   cleared; meta KSTALE,...,fresh, not counted); (c) a processed v4 pose that names no line for a stale row drops the row
+--   (meta KSTALE,...,drop,<applied>,<pending|->, not counted). Live rows are never dropped. An over-64 pose leaves rows and
+--   marks as they were. ktab.txt rows gain nm as a 10th field (a 9-field kill6 row or a kill5 row still loads; a 9-field row
+--   with kx counts as named until the first processed pose). Not ready (stage 2 review): a failure that IS a manager instance
+--   nil, before the first good read = degraded lines without eerr (meta ENOTREADY / EREADY); any other failure counts. The forced-start
+--   cursor is carried over a crossing in ktab.txt (line e,<n>, same run id only).
+--   Track time t starts WAIT_MS after the first update (the actor holds the t=0 point meanwhile, t < 0), so GAMMA's
+--   auto_switch (1250 m for 10 s after load, then 450 m; configs\alife.ltx) has settled before the track starts.
+local cl = command_line and command_line() or ""
+local active = string.find(cl, "-p1", 1, true) ~= nil
+if not active then return end
+local t2 = string.find(cl, "-t2_pose", 1, true) ~= nil
+local b1 = t2 or string.find(cl, "-b1_snap", 1, true) ~= nil
+local t2_run = string.match(cl, "%-t2_run%s+(%d+)") or "0"
+local t2_pause_ok = string.find(cl, "-t2_pause", 1, true) ~= nil
+-- B1-T2 freeze compensation (engine perf/freeze-absorb): -t2_absorb <ms> turns absorbing on (g_freeze_absorb_ms); the
+-- script ARMS it (g_freeze_absorb_armed 1) when the pose turns dead/away + freeze, BEFORE the bridge suspends the
+-- process (the bridge waits for the ABSORB_ARM line), and disarms on play. -t2_absorb_skip <k> leaves the first k
+-- freezes unarmed (pre-flight 3: the first freeze is the "absorb off" control).
+local t2_absorb = tonumber(string.match(cl, "%-t2_absorb%s+(%d+)") or "0")
+local t2_absorb_skip = tonumber(string.match(cl, "%-t2_absorb_skip%s+(%d+)") or "0")
+-- LOST (design note 2026-11-24): -t2_lost <ms> = the pose is LOST when no new complete pose came for that long after a
+-- play/dead/away pose; -t2_lostx <ms> = the same after a `cross` pose (and after a level change, until the first pose).
+-- 0 or no flag = off (the script then behaves as before). LOST is handled like `away`: no pose applied, protection on,
+-- and under `freeze` the absorb is armed so the bridge can stop X-Ray. Never after an `end` pose.
+local t2_lost_ms = tonumber(string.match(cl, "%-t2_lost%s+(%d+)") or "0")
+local t2_lostx_ms = tonumber(string.match(cl, "%-t2_lostx%s+(%d+)") or "0")
+-- -t2_v2reset (arm D, run d0): a writer of pose VERSION 2 has no session number, so a restarted one (seq from 1 again)
+-- was rejected until its seq had passed the old one: (old seq) / 20 seconds. With this flag, while the pose is LOST, a
+-- v2 pose with a seq BELOW the last one is taken as a restarted writer (logged RESET, counted with the epochs). Only
+-- when no pose of this run ever carried a session number; a v3 writer is never treated this way.
+local t2_v2reset = string.find(cl, "%-t2_v2reset") ~= nil
+local t2_nfreeze, t2_armed = 0, false
+local function gtime() local v = game.time(); if v < 0 then v = v + 4294967296 end; return v end   -- u32 game ms (pre-flight 2 printed it as a negative int)
+local do_export = b1 or string.find(cl, "-p1_export", 1, true) ~= nil
+local DIR = b1 and "Z:\\dev\\shm\\itrz_b1\\" or "Z:\\dev\\shm\\p1\\"
+local seq = 0
+local tag = string.match(cl, "%-p1_tag%s+(%S+)") or "p1"
+
+local trk_t, trk_x, trk_y, trk_z, trk_ok = {}, {}, {}, {}, {}
+local out, meta, t0 = nil, nil, nil
+local last_move, last_exp, idx, held = -1e9, -1e9, 1, false
+local hits, cancels, refills, min_health = 0, 0, 0, 1
+local exp_n, exp_sum, exp_max, exp_times = 0, 0, 0, {}
+local seen = {}
+-- kill channel table: K[id] = { ap = applied, dd = time_global of the death applied or seen, ow = KOWED logged,
+-- st = stale in the last v4 pose, was = st before it, kb = last KBACK total, ke = offline kill error logged,
+-- kt = time_global of the online kill call (kill5: dd is set only when the snapshot reads it dead), kn = KNOCONF logged,
+-- ks = section of the row's creature (kill6: at the kill call; stage 3: at every line taken), kx = id held by another
+-- section since the call (kill6; stage 3: stale only while nm, and the row is dropped by the next pose without its line),
+-- nm = named by a line of the newest processed v4 pose (stage 3) }
+-- kcre[id]: exported as monster/stalker in a snapshot (the offline creature test: no engine call needed)
+local K, kcre, klog, kver_n, k_note = {}, {}, {}, nil, nil
+local k_r = nil   -- "<session>,<seq>" of the newest v4 pose whose k lines were processed (snapshot line r)
+local kc = { khits = 0, kdead_online = 0, kdead_offline = 0, kowed = 0, kstale = 0, kback = 0, krefused = 0, kclamped = 0, kver = 0, kdead_fail = 0, ktabfail = 0 }
+local kwho, ktab_logged = {}, false   -- kwho[id]: KWHO logged (once per id that has a row in K); KTAB,savefail logged once
+local K_HOLD, K_MAX = 10000, 64
+local K_CONF_MS = 2000   -- kill5: an online kill still alive this long after the call is logged KNOCONF and counted in kdead_fail
+
+local WAIT_MS = 15000
+local function w(s) if out then out:write(s, "\n") end end
+local function m(s) if meta then meta:write(s, "\n") end end
+local function kind(o) if not o then return "x" end; if o:id() == 0 then return "a" end; if o:is_monster() then return "m" end; if o:is_stalker() then return "s" end; return "x" end
+
+local function load_track()
+	local f = io.open(getFS():update_path("$game_config$", "p1_track.csv"), "r")
+	if not f then printf("p1: NO TRACK FILE"); return false end
+	f:read("*l")
+	for line in f:lines() do
+		local t, x, y, z, nd = string.match(line, "([^,]+),([^,]+),([^,]+),([^,]+),([^,]+)")
+		if t then local n = #trk_t + 1
+			trk_t[n], trk_x[n], trk_y[n], trk_z[n], trk_ok[n] = tonumber(t), tonumber(x), tonumber(y), tonumber(z), tonumber(nd) >= 0 end
+	end
+	f:close(); printf("p1: track %d points, %.1f s", #trk_t, trk_t[#trk_t]); return #trk_t > 1
+end
+
+-- position at track time t: linear between samples; off-mesh -> last on-mesh point (held)
+local lx, ly, lz
+local function track_pos(t)
+	while idx < #trk_t and trk_t[idx + 1] <= t do idx = idx + 1 end
+	local a, b = idx, math.min(idx + 1, #trk_t)
+	if not (trk_ok[a] and trk_ok[b]) then held = true; return lx, ly, lz end
+	held = false
+	local f = (trk_t[b] > trk_t[a]) and math.max(0, math.min(1, (t - trk_t[a]) / (trk_t[b] - trk_t[a]))) or 0
+	lx, ly, lz = trk_x[a] + (trk_x[b] - trk_x[a]) * f, trk_y[a] + (trk_y[b] - trk_y[a]) * f, trk_z[a] + (trk_z[b] - trk_z[a]) * f
+	return lx, ly, lz
+end
+
+local function yaw(o) local d = o:direction(); return math.atan2(d.x, d.z) end
+
+-- kill5: does id read dead as this snapshot is built? Its o line's own alive() read if listed; else the game object; else
+-- the server object (an unreadable alive() is NOT dead); no object at all = dead
+-- Stage 2: emission / psi storm lines. Phase i = the highest i with ceil(t) >= PH[i] (ceil(t) is the scripts' own diff_sec,
+-- SM:676 / PSM:317); 0 = no event. Thresholds and their script lines: kj3/emission-phases.md.
+local SURGE_PH = { 0, 30, 47, 50, 80, 108, 120, 156, 168, 200, 212, 220, 222 }
+local PSI_PH = { 0, 10, 12, 30, 78, 103 }
+local em_kind, em_ph, em_t, eerr, em_logged = "none", 0, 0, 0, false
+local em_ready, em_nr = false, false   -- review: a good read seen in this Lua state; ENOTREADY logged
+local function em_phase(tab, d) local p = 0; for i = 1, #tab do if d >= tab[i] then p = i end end; return p end
+local function em_ns(M, last, gt)   -- game seconds to the next scheduled start (SM:266 / PSM:132); -1 while that event runs
+	if M.started then return -1 end
+	if type(M._delta) ~= "number" or type(last) ~= "userdata" and type(last) ~= "table" then error("schedule field missing", 0) end
+	local v = math.floor(M._delta - gt:diffSec(last)); if v < 0 then v = 0 end; return v
+end
+local function em_body(L, tf, now)
+	if type(tf) ~= "number" or tf <= 0 then error("time factor unreadable", 0) end
+	local sm, pm = surge_manager.SurgeManager, psi_storm_manager.PsiStormManager
+	if not sm then error("SurgeManager nil", 0) end; if not pm then error("PsiStormManager nil", 0) end
+	if type(sm.started) ~= "boolean" or type(pm.started) ~= "boolean" then error("started not boolean", 0) end
+	local gt = game.get_game_time()
+	local M, kind, t, ph = nil, "none", 0, 0
+	if sm.started then M, kind = sm, "surge" elseif pm.started then M, kind = pm, "psi" end
+	if M then t = gt:diffSec(M.inited_time) / tf; ph = em_phase(kind == "surge" and SURGE_PH or PSI_PH, math.ceil(t)) end
+	L[#L + 1] = string.format("e,%s,%.2f,%d,%s", kind, t, ph, tostring(tf))
+	if kind == "surge" then local W = sm.blowout_waves   -- kill7: by kind, never M == sm (object == between two script classes raises "No such operator [__eq]" in the engine; kj3p r1). SM:497 {effect, inited_time = diff_game_sec at the start, inited_pos}; z as SM:1065
+		local dgs = math.ceil(gt:diffSec(sm.inited_time) / 2)   -- SM:688
+		for n = 1, 2 do local wv = W[n]
+			if wv and wv.effect:playing() then L[#L + 1] = string.format("w,%d,%.3f", n, wv.inited_pos.z - (dgs - wv.inited_time) * 3) end end
+	elseif kind == "psi" then local V, hi = pm.vortexes, pm.vortex_index   -- PSM:412, never pruned: this storm's vortices are V[lo..hi]
+		local lo = hi; while lo >= 1 and V[lo] ~= nil do lo = lo - 1 end
+		for i = lo + 1, hi do local v = V[i]
+			if v.hit == false then local p = v.particle_pos   -- strike at life_time = diff_sec - start_time >= 20 (PSM:373)
+				L[#L + 1] = string.format("v,%d,%.3f,%.3f,%.3f,%.2f", i, p.x, p.y, p.z, v.start_time + 20 - t) end end
+	end
+	L[#L + 1] = string.format("ns,%d,%d", em_ns(sm, sm.last_surge_time, gt), em_ns(pm, pm.last_psi_storm_time, gt))
+	-- meta: ESTART / EPHASE / EEND. Same kind with t back by more than 0.5 s = a restart: EEND then ESTART. Phases skipped by a
+	-- jump are logged one EPHASE each, in order, all with this snapshot's time and t.
+	if kind ~= em_kind or (M and t < em_t - 0.5) then
+		if em_kind ~= "none" then m(string.format("EEND,%d,%s,%.2f", now, em_kind, em_t)) end
+		if M then m(string.format("ESTART,%d,%s,%.2f", now, kind, t)) end
+		em_kind, em_ph = kind, 0
+	end
+	if M then
+		if ph > em_ph then for p = em_ph + 1, ph do m(string.format("EPHASE,%d,%s,%d,%.2f", now, kind, p, t)) end
+		elseif ph < em_ph then m(string.format("EPHASE,%d,%s,%d,%.2f", now, kind, ph, t)) end
+		em_ph, em_t = ph, t
+	end
+end
+local function em_snap(now, L)
+	local n0 = #L
+	local okf, tf = pcall(level.get_time_factor); if not okf or type(tf) ~= "number" then tf = nil end
+	local ok, err = pcall(em_body, L, tf, now)
+	if ok and not em_ready then em_ready = true; if em_nr then m(string.format("EREADY,%d", now)) end end
+	if not ok then
+		for i = #L, n0 + 1, -1 do L[i] = nil end
+		-- not ready = THIS failure is a manager instance still nil (not created yet: a new game creates them at the scripts'
+		-- first 1 s update after the actor's first update) before the first good read; any other failure counts (review pass 2)
+		local nr = not em_ready and (err == "SurgeManager nil" or err == "PsiStormManager nil")
+		if nr then if not em_nr then em_nr = true; m(string.format("ENOTREADY,%d", now)) end   -- not ready: not an error
+		else eerr = eerr + 1
+		if not em_logged then em_logged = true; m(string.format("EERR,%d,%s", now, (string.gsub(tostring(err), "[,\r\n]", ";")))) end end
+		L[#L + 1] = "e,none,0.00,0," .. (tf and tostring(tf) or "-1"); L[#L + 1] = "ns,-1,-1"
+	end
+end
+-- Stage 2 test mode (forced starts): em_test is set only at game start if emtest.txt exists then; em_done = complete lines
+-- already in the file then (a level change does not repeat them). Review: after a crossing em_done is the carried
+-- cursor instead (lines appended during the level load are still acted on); a fresh process counts the file.
+local em_test, em_done, em_last = false, 0, -1e9
+local em_carry = nil   -- review: em_done of the Lua state before the crossing (ktab.txt line e, same run id), nil = none
+local function em_start(k)
+	if k == "surge" then surge_manager.start_surge(); return surge_manager.SurgeManager.started end   -- SM:1673-1675
+	psi_storm_manager.start_psi_storm(); return psi_storm_manager.PsiStormManager.started   -- PSM:713-715
+end
+local function em_step(now)
+	if now - em_last < 1000 then return end; em_last = now
+	local f = io.open(DIR .. "emtest.txt", "rb"); if not f then return end
+	local s = f:read("*a") or ""; f:close()
+	local i = 0
+	for l in string.gmatch(s, "([^\n]*)\n") do l = string.gsub(l, "%s", "")
+		if l ~= "" then i = i + 1
+			if i > em_done then em_done = i
+				local r
+				if l == "surge" or l == "psi" then local ok, st = pcall(em_start, l)
+					r = ok and (st and "started" or "notstarted") or ("error:" .. string.gsub(tostring(st), "[,\r\n]", ";"))
+				else r = "unknown" end
+				m(string.format("EFORCE,%d,%s,%s", now, (string.gsub(l, ",", ";")), r)); if meta then meta:flush() end
+			end end end
+end
+local function k_dead_now(id, alv)
+	if alv[id] ~= nil then return not alv[id] end
+	local o = level.object_by_id(id); if o then return not o:alive() end
+	local se = alife():object(id); if not se then return true end
+	local ok, al = pcall(function() return se:alive() end); return ok and not al
+end
+-- kill6: the section of the object holding id now (game object, else server object); nil = no object
+local function k_sec_now(id)
+	local o = level.object_by_id(id); if o then return o:section() end
+	local se = alife():object(id); if se then return se:section_name() end
+end
+-- B1-T1: build the whole snapshot, then rewrite snap.txt in place (the reader keeps it only if seq == end seq)
+local function export_b1(now, t, tm)
+	seq = seq + 1
+	local a = db.actor; local ap = a:position(); local present = {}; local alv = {}
+	local hdr = t2 and string.format("seq,%d,%d,%.2f,%s,%s,4", seq, now, t, level.name(), t2_run) or string.format("seq,%d,%d,%.2f", seq, now, t)
+	local L = { hdr, string.format("a,%.3f,%.3f,%.3f,%.4f,%.4f", ap.x, ap.y, ap.z, yaw(a), a.health) }
+	for id, st in pairs(db.storage) do
+		local o = st.object
+		if o and id ~= 0 and (o:is_monster() or o:is_stalker()) then
+			present[id] = true; kcre[id] = true
+			local p = o:position(); local be = o:best_enemy(); alv[id] = o:alive()   -- kill5: the k answer uses this same read
+			L[#L + 1] = string.format("o,%d,%s,%s,%.3f,%.3f,%.3f,%.4f,%.4f,%d,%d,%.2f", id, o:section(), kind(o), p.x, p.y, p.z, yaw(o),
+				o.health, alv[id] and 1 or 0, be and be:id() or -1, p:distance_to(ap))
+			if not seen[id] then m(string.format("ON,%.2f,%d,%d,%s,%.1f", t, now, id, o:section(), p:distance_to(ap))) end
+		end
+	end
+	for id in pairs(seen) do if not present[id] then m(string.format("OFF,%.2f,%d,%d", t, now, id)) end end
+	seen = present
+	if t2 and k_r then L[#L + 1] = "r," .. k_r end
+	if t2 then em_snap(now, L) end   -- Stage 2: e, w, v, ns (after r, before k)
+	if t2 then local ids = {}; for id in pairs(K) do ids[#ids + 1] = id end; table.sort(ids)   -- kill channel answers
+		for _, id in ipairs(ids) do local r = K[id]; local dn = k_dead_now(id, alv)
+			if r.kt and not r.dd and not r.kx then local cs = k_sec_now(id)   -- kill6: does the id still hold the creature of the kill call?
+				if r.ks and cs and cs ~= r.ks then r.kx = true
+					if not r.st then kc.kstale = kc.kstale + 1; m(string.format("KSTALE,%d,%d,%d,ident,%s,%s", now, tonumber(string.match(k_r or "", ",(%d+)$")) or 0, id, r.ks, cs)) end end end
+			local stl = r.st or r.kx   -- kill6: a stale row (pose or identity) gives the stale answer only
+			if r.kt and not r.dd and not stl then   -- kill5: an online kill call waiting for its effect (kill6: never on a stale row)
+				if dn then r.dd = now; m(string.format("KCONF,%d,%d,%d", now, id, now - r.kt))
+				elseif not r.kn and now - r.kt >= K_CONF_MS then r.kn = true; kc.kdead_fail = kc.kdead_fail + 1; m(string.format("KNOCONF,%d,%d,%d", now, id, now - r.kt)) end end
+			if r.st or (r.kx and r.nm) then L[#L + 1] = string.format("k,%d,%.3f,stale", id, r.ap)   -- stage 3 (a): only while named
+			elseif r.kx then   -- stage 3: identity gone, the newest pose names no line for it: no line; the next pose drops the row
+			elseif r.dd and now - r.dd <= K_HOLD and dn then L[#L + 1] = string.format("k,%d,%.3f,dead", id, r.ap)
+			elseif (r.ap > 0 or r.kt) and (not r.dd or now - r.dd <= K_HOLD) then L[#L + 1] = string.format("k,%d,%.3f", id, r.ap) end end end
+	L[#L + 1] = string.format("end,%d", seq)
+	local f = io.open(DIR .. "snap.txt", "wb")   -- binary: Windows text mode would write CRLF (T1 run 1 failure)
+	if f then f:write(table.concat(L, "\n"), "\n"); f:close() else m(string.format("WFAIL,%d", seq)) end
+	tm:stop(); local us = tm:time()
+	m(string.format("W,%d,%.0f", seq, us))
+	if out then out:flush() end; if meta then meta:flush() end
+	exp_n, exp_sum = exp_n + 1, exp_sum + us; if us > exp_max then exp_max = us end; exp_times[exp_n] = us
+end
+
+local function export(now, t)
+	local tm = profile_timer(); tm:start()
+	if b1 then return export_b1(now, t, tm) end
+	local a = db.actor; local ap = a:position(); local present = {}
+	w(string.format("a,%.2f,%.3f,%.3f,%.3f,%.4f", t, ap.x, ap.y, ap.z, a.health))
+	for id, st in pairs(db.storage) do
+		local o = st.object
+		if o and id ~= 0 and (o:is_monster() or o:is_stalker()) then
+			present[id] = true
+			local p = o:position(); local be = o:best_enemy()
+			w(string.format("o,%.2f,%d,%s,%s,%.3f,%.3f,%.3f,%.4f,%d,%.2f", t, id, o:section(), kind(o), p.x, p.y, p.z, o.health,
+				be and be:id() or -1, p:distance_to(ap)))
+			if not seen[id] then m(string.format("ON,%.2f,%d,%d,%s,%.1f", t, now, id, o:section(), p:distance_to(ap))) end
+		end
+	end
+	for id in pairs(seen) do if not present[id] then m(string.format("OFF,%.2f,%d,%d", t, now, id)) end end
+	seen = present
+	if out then out:flush(); meta:flush() end
+	tm:stop(); local us = tm:time()
+	exp_n, exp_sum = exp_n + 1, exp_sum + us; if us > exp_max then exp_max = us end; exp_times[exp_n] = us
+end
+
+-- B1-T2 pose reader: accept only seq,n ... end,n with n newer; strip \r (Wine CRLF); torn reads counted
+local p_last, p_last_t, p_stale, p_torn, p_holds, p_paused, p_lx, p_ly, p_lz = 0, nil, false, 0, 0, false, nil, nil, nil
+local p_xwait = false   -- L2: 1 from a level change until the first pose READ of this Lua state, then 2 until a pose is taken on a LATER read
+local p_state, p_aw, p_sess, p_lost, p_lost_n, p_epochs = nil, nil, nil, false, 0, 0   -- last good pose's state, policy and session number (pose v3); LOST flag and counts
+local T2_NEAR_CELLS, T2_NEAR_H, p_near = 2, 2.0, 0   -- on-mesh test: +-2 cells (1.4 m), +-2.0 m (prereg section 24)
+-- The pose is on the mesh if an AI node lies within +-T2_NEAR_CELLS cells (0.7 m each) in x and z and within T2_NEAR_H m
+-- in height. level.vertex_id picks the highest node at or below the y it is given (else the lowest above), so probing
+-- at y + H and requiring node y >= y - H means "any node in [y - H, y + H]". The pose's own cell is ring 0 and is
+-- tried first. Returns the ring found (0..T2_NEAR_CELLS) or nil. r1/r1b/r2: the old own-cell-only test held 9 % of
+-- an on-mesh track.
+-- T3 grounding (DESIGN-T3-xray-side-2026-11-24.md; prereg section 33). Pose v2 carries yfloor = ITR2 feet + 0.3 m, a hint
+-- that only picks the floor. X-Ray finds its own AI node: the highest node at or below yfloor + T3_PROBE_UP (else the
+-- lowest above), in the pose's cell or within +-T2_NEAR_CELLS cells, accepted if within T3_BAND m of the ITR2 feet.
+-- Returns ring, node id, node height; or nil.
+-- real movement state of the actor, as GAMMA's vision script reads it: 0 stand, 1 crouch, 2 low crouch, -1 = cannot read
+local mv_frames, mv_crouch, mv_low, mv_na = 0, 0, 0, 0
+local vit_rad, vit_bleed, vit_na = 0, 0, 0
+local function mvstate()
+	if not IsMoveState then return -1 end
+	local ok, cr = pcall(IsMoveState, 'mcCrouch'); if not ok then return -1 end
+	if not cr then return 0 end
+	local ok2, ac = pcall(IsMoveState, 'mcAccel'); return (ok2 and ac) and 2 or 1
+end
+local t3_cross_done, t3_crossed = false, nil
+local dmg_mode, dmg_hold = nil, false   -- pre-flight E test mode (see dmg_step); nil = off
+local dmg_raw, dmg_norestore, dmg_restored, dmg_endchecked = nil, false, false, false   -- E2 (section 49): end of the test
+-- true while the witness has the protection off: a witness mode, and the end-of-test restore has not happened yet
+local function dmg_open(m_) return dmg_mode ~= nil and dmg_mode ~= "prot" and not dmg_restored and (m_ == nil or dmg_mode == m_) end
+-- every level changer in the save: name, level it stands on, destination level, destination position / vertices
+local function t3_changers()
+	local L, sim, gg = {}, alife(), game_graph()
+	for id = 1, 65534 do
+		local se = sim:object(id)
+		if se and se:clsid() == clsid.level_changer_s then
+			local ok, dg = pcall(function() return se.dest_game_vertex_id end)
+			if ok and dg then
+				L[#L + 1] = { name = se:name(), from = sim:level_name(gg:vertex(se.m_game_vertex_id):level_id()), to = sim:level_name(gg:vertex(dg):level_id()),
+					pos = se.dest_position, lvid = se.dest_level_vertex_id, gvid = dg, at = se.position }
+			end
+		end
+	end
+	return L
+end
+-- with a name (pose line `c,<changer name>`, R3): only that changer, and only if it leads from here to <to>; no fallback
+local function t3_find_changer(to, name)
+	local here = level.name()
+	for _, c in ipairs(t3_changers()) do if c.from == here and c.to == to and (not name or c.name == name) then return c end end
+end
+local T3_PROBE_UP, T3_BAND, T3_LIFT, T3_YTOL, T3_GUARD = 0.7, 3.0, 0.05, 0.7, 5.0
+local t3_ray, t3_ray_warned, t3_ly
+local t3_gx, t3_gy, t3_gz, t3_guards, t3_stance_last, t3_stance_warned = nil, nil, nil, 0, nil, false
+local function t3_ground(x, yfloor, z)
+	local feet = yfloor - 0.3
+	for ring = 0, T2_NEAR_CELLS do
+		for dx = -ring, ring do
+			for dz = -ring, ring do
+				if math.max(math.abs(dx), math.abs(dz)) == ring then
+					local vid = level.vertex_id(vector():set(x + dx * 0.7, yfloor + T3_PROBE_UP, z + dz * 0.7))
+					if vid ~= 4294967295 then
+						local ny = level.vertex_position(vid).y
+						if math.abs(ny - feet) <= T3_BAND then return ring, vid, ny end
+					end
+				end
+			end
+		end
+	end
+	return nil
+end
+local function t2_near_ring(x, y, z)
+	for ring = 0, T2_NEAR_CELLS do
+		for dx = -ring, ring do
+			for dz = -ring, ring do
+				if math.max(math.abs(dx), math.abs(dz)) == ring then
+					local vid = level.vertex_id(vector():set(x + dx * 0.7, y + T2_NEAR_H, z + dz * 0.7))
+					if vid ~= 4294967295 and level.vertex_position(vid).y >= y - T2_NEAR_H then return ring end
+				end
+			end
+		end
+	end
+	return nil
+end
+local p_killed, p_torn_n = {}, nil
+local g_last_wall, g_f_until, g_last_g, p_fz_logged, g_prev_tg, g_prev_game = nil, nil, nil, false, nil, nil
+-- Absorb arming (prereg section 28). The engine flag g_freeze_absorb_armed may be 1 ONLY while the bridge is about to
+-- stop, or has stopped, X-Ray: pose state dead or away with `freeze` (exactly the bridge's own test in t2_xray.sh).
+-- It is cleared: on a play pose; on any pose that is not dead/away + freeze; when the pose is STALE and X-Ray is still
+-- running T2_ARM_STALE_MS after arming; T2_ARM_MAX_MS after arming if X-Ray is still running; and at game end.
+-- The bridge stops X-Ray within ~3 s of the ARM line (it waits at most 3 s for it), so X-Ray still running 4 s after
+-- arming means no stop is coming: bridge gone, or not freezing. While X-Ray is stopped no Lua runs, and the absorbed
+-- gap does not advance time_global, so a real freeze never reaches these limits. r2b: the old script armed on ITR2's last non-play pose, which the
+-- bridge does not treat as a freeze, and stayed armed ~6 min.
+local T2_ARM_MAX_MS, T2_ARM_STALE_MS, t2_eng_armed, t2_arm_tg = 10000, 4000, false, nil
+local function t2_disarm(now, n, why)
+	if not t2_eng_armed then return end
+	t2_eng_armed = false; get_console():execute("g_freeze_absorb_armed 0")
+	m(string.format("ABSORB_DISARM,%d,%d,%.0f,%s", now, n, gtime(), why)); if meta then meta:flush() end
+end
+-- Pose age. STALE after 1 s without a new complete pose (log only, as before). LOST after the limit: once per loss.
+local function t2_age(now, t)
+	if not p_last_t then return end
+	local age = now - p_last_t
+	if not p_stale and age >= 1000 then p_stale = true; m(string.format("STALE,%.2f,%d,%d", t, now, p_last)) end
+	if p_lost or p_state == "end" then return end
+	local lim = (p_state == "cross" or p_xwait) and t2_lostx_ms or t2_lost_ms
+	if lim > 0 and age >= lim then
+		p_lost = true; p_lost_n = p_lost_n + 1
+		m(string.format("LOST,%.2f,%d,%d,%d,%s,%s", t, now, p_last, age, tostring(p_state), tostring(p_aw)))
+		-- as for away + freeze: armed BEFORE the bridge stops X-Ray; one freeze counts once (an away freeze that
+		-- becomes LOST is already armed), and -t2_absorb_skip applies here as there
+		if p_aw == "freeze" and t2_absorb > 0 and not t2_armed then
+			t2_armed = true; t2_nfreeze = t2_nfreeze + 1
+			if t2_nfreeze > t2_absorb_skip then
+				get_console():execute("g_freeze_absorb_armed 1"); t2_eng_armed = true; t2_arm_tg = now
+				m(string.format("ABSORB_ARM,%d,%d,%.0f", now, p_last, gtime()))
+			else m(string.format("ABSORB_SKIP,%d,%d,%.0f", now, p_last, gtime())) end
+		end
+		if meta then meta:flush() end
+	end
+end
+-- Kill channel (pose v4). Refusals are counted and logged once per id and reason.
+local function kref(now, n, id, why)
+	local key = tostring(id) .. "," .. why; if klog[key] then return end
+	klog[key] = true; kc.krefused = kc.krefused + 1; m(string.format("KREFUSED,%d,%d,%s,%s", now, n, tostring(id), why))
+end
+local function k_line(a, now, n, line)
+	local ids, sec, tots, dead = string.match(line, "^k,(%d+),([^,]+),([^,]+),([01])$")
+	local id, tot = tonumber(ids), tots and string.match(tots, "^%d+%.?%d*$") and tonumber(tots)
+	if not id then return kref(now, n, string.match(line, "^k,([^,]*)") or "?", "form") end
+	if id == 0 then return kref(now, n, id, "actor") end
+	if id > 65534 then return kref(now, n, id, "id") end
+	if not tot then return kref(now, n, id, "total") end
+	local o, se, cur, alive = level.object_by_id(id), nil, nil, nil
+	if o then
+		if not (o:is_monster() or o:is_stalker()) then return kref(now, n, id, "kind") end
+		cur, alive = o:section(), o:alive()
+	else
+		se = alife():object(id)
+		if se then
+			if not (K[id] or kcre[id]) then return kref(now, n, id, "kind") end
+			cur = se:section_name(); local ok, al = pcall(function() return se:alive() end); alive = not ok or al
+		end
+	end
+	local r = K[id] or { ap = 0 }; K[id] = r; r.nm = true   -- stage 3: named by this pose
+	if not o and not se then   -- released: confirmed dead
+		if r.kt and not r.dd then return end   -- kill5: a pending kill call: the snapshot confirms it (KCONF, dd) as for any other
+		if not r.dd then m(string.format("KDEAD,%d,%d,%d,released", now, n, id)) end; r.dd = now; return end
+	if sec == cur and r.ks and r.ks ~= cur then   -- stage 3 (b): the row was another creature's; this line is the new one's
+		m(string.format("KSTALE,%d,%d,%d,fresh,%s,%s", now, n, id, r.ks, cur))
+		r = { ap = 0, nm = true }; K[id] = r; kwho[id] = nil end
+	if sec ~= cur or (r.dd and alive and now - r.dd > K_HOLD) then   -- stale: another creature has this id now
+		r.st = true
+		if not r.was and not r.kx then kc.kstale = kc.kstale + 1; m(string.format("KSTALE,%d,%d,%d,%s,%s,%s", now, n, id, sec ~= cur and "section" or "alive_again", sec, tostring(cur))) end
+		return end
+	r.ks = cur   -- stage 3: the section of the row's creature, recorded at every line taken
+	if r.dd then if not alive then r.dd = now end; return end   -- dead here already: keep confirming
+	if r.kt then return end   -- kill5: kill call made, its effect is confirmed by the snapshot (no second call, no part hit)
+	if not alive then r.dd = now; m(string.format("KDEAD,%d,%d,%d,seen", now, n, id)); return end
+	local diff = tot - r.ap
+	if diff < 0 then   -- totals never fall within a session: the total is ignored (a death still applies)
+		if tot ~= r.kb then r.kb = tot; kc.kback = kc.kback + 1; m(string.format("KBACK,%d,%d,%d,%.3f,%.3f", now, n, id, tot, r.ap)) end
+		diff = 0 end
+	if o then
+		if diff > 0 then
+			local d = diff; if d > 1 then d = 1; kc.kclamped = kc.kclamped + 1 end
+			local hb = o.health
+			local hok = pcall(function()   -- near-zero hit, the actor as source: "the player hit me"
+				local h = hit(); h.draftsman = a; h.type = hit.fire_wound; h.power = 0.0001; h.impulse = 0
+				local p, ap = o:position(), a:position(); h.direction = vector():set(p.x - ap.x, p.y - ap.y, p.z - ap.z):normalize()
+				o:hit(h) end)
+			local hn = hb - d; if dead ~= "1" then hn = math.max(hn, math.min(hb, 0.01)) end
+			o:set_health_ex(math.max(hn, 0))
+			r.ap = tot; kc.khits = kc.khits + 1
+			m(string.format("KAPPLY,%d,%d,%d,%.3f,%.3f,%.4f,%.4f,%s", now, n, id, d, r.ap, hb, o.health, hok and "hit" or "hit_error"))
+		end
+		if dead == "1" then o:kill(a); r.kt = now; kc.kdead_online = kc.kdead_online + 1; m(string.format("KDEAD,%d,%d,%d,online", now, n, id)) end
+	elseif dead == "1" then
+		-- the server object's own kill (sets health 0, leaves its group), as GAMMA's surge kills offline creatures;
+		-- NOT alife():kill_entity, which leaves health as it is. Confirmed only if the object now reads dead.
+		local ok, e = pcall(function() se:kill() end)
+		local ok2, al = pcall(function() return se:alive() end)
+		if ok and ok2 and not al then r.dd = now; kc.kdead_offline = kc.kdead_offline + 1; m(string.format("KDEAD,%d,%d,%d,offline", now, n, id)); m(string.format("KCONF,%d,%d,0", now, id))
+		elseif not r.ke then r.ke = true; kc.kdead_fail = kc.kdead_fail + 1; m(string.format("KDEAD,%d,%d,%d,failed,%s", now, n, id, ok and (ok2 and "alive" or "unread") or tostring(e))) end
+	elseif diff > 0 and not r.ow then r.ow = true; kc.kowed = kc.kowed + 1; m(string.format("KOWED,%d,%d,%d,%.3f,%.3f", now, n, id, tot, r.ap)) end
+end
+local function k_pose(a, now, n, v4, lines, sess)
+	if not v4 then for _, l in ipairs(lines) do kref(now, n, string.match(l, "^k,([^,]*)") or "?", "v3") end; return end
+	if #lines > K_MAX then kref(now, n, "-", "over64")   -- every k line refused; refused is processed, so r still advances
+	else   -- (stage 3: an over-64 pose leaves every row and mark as it was)
+		for _, r in pairs(K) do r.was, r.st, r.nm = r.st, false, nil end
+		for _, l in ipairs(lines) do k_line(a, now, n, l) end
+		for id, r in pairs(K) do if not r.nm and (r.was or r.kx) then   -- stage 3 (c): a stale row this pose does not name is dropped
+			K[id] = nil; kwho[id] = nil
+			m(string.format("KSTALE,%d,%d,%d,drop,%.3f,%s", now, n, id, r.ap, (r.kt and not r.dd) and "pending" or "-")) end end
+	end
+	k_r = string.format("%s,%d", tostring(sess or 0), n)
+end
+-- the table over a level change: written at the crossing request, read back at the resume when the run id matches
+-- true only if the open, every write and the close succeeded; a failure is logged once (KTAB,savefail) and counted
+-- (ktabfail). The crossing goes on either way. ap is written with 9 decimals so any total round-trips.
+local function k_savefail()
+	kc.ktabfail = kc.ktabfail + 1
+	if not ktab_logged then ktab_logged = true; m("KTAB,savefail," .. t2_run); if meta then meta:flush() end end
+	return false
+end
+local function k_save()
+	local f = io.open(DIR .. "ktab.txt", "wb"); if not f then return k_savefail() end
+	local ok = f:write("run,", t2_run, "\n") and true
+	for id, r in pairs(K) do ok = f:write(string.format("r,%d,%.9f,%s,%d,%d,%s,%d,%s,%d,%d\n", id, r.ap, r.dd and string.format("%d", r.dd) or "-", r.ow and 1 or 0, r.st and 1 or 0,
+		r.kt and string.format("%d", r.kt) or "-", r.kn and 1 or 0, r.ks or "-", r.kx and 1 or 0, r.nm and 1 or 0)) and ok end   -- stage 3: nm appended
+	for id in pairs(kcre) do ok = f:write(string.format("c,%d\n", id)) and ok end
+	if k_r then ok = f:write("s,", k_r, "\n") and ok end
+	if em_test then ok = f:write(string.format("e,%d\n", em_done)) and ok end   -- review: the forced-start cursor
+	ok = f:write("end\n") and ok; ok = f:close() and ok
+	if not ok then return k_savefail() end
+	return true
+end
+-- KWHO (witness kw1, check 9): the killer named by GAMMA's death callbacks, once per id that has a row in K. Nothing
+-- for any other death, so a v3 run (no rows) writes no line. Guarded: an error here must not break GAMMA's callback loop.
+local function k_who(victim, who)
+	local ok, id, wid = pcall(function() return victim:id(), who and who:id() or -1 end)
+	if not ok or not K[id] or kwho[id] then return end
+	kwho[id] = true; m(string.format("KWHO,%d,%d,%d", time_global(), id, wid)); if meta then meta:flush() end
+end
+local function k_load()
+	local f = io.open(DIR .. "ktab.txt", "rb"); if not f then return end
+	local s = string.gsub(f:read("*a") or "", "\r", ""); f:close()
+	local run = string.match(s, "^run,(%d+)\n"); local rows = 0
+	if not run or not string.find(s, "\nend\n$") then return end
+	for _ in string.gmatch(s, "\nr,") do rows = rows + 1 end
+	if run ~= t2_run then if rows > 0 then k_note = string.format("KTAB,skip,%s,%d", run, rows) end; return end
+	for id, ap, dd, ow, st, tl in string.gmatch(s, "\nr,(%d+),([%d%.]+),([%d%-]+),([01]),([01])([^\n]*)") do
+		local r = { ap = tonumber(ap), dd = tonumber(dd), ow = ow == "1" or nil, st = st == "1", was = st == "1" }
+		local kt, kn, ks, kx, nm = string.match(tl, "^,([%d%-]+),([01]),([^,]*),([01]),([01])$")   -- stage 3 row (nm last)
+		if not kt then kt, kn, ks, kx = string.match(tl, "^,([%d%-]+),([01]),([^,]*),([01])$"); nm = kx end   -- kill6 stage 1/2 row (no nm):
+		-- its reader wrote the identity stale in every snapshot, so kx stands for nm until the first processed pose (review pass 2)
+		if kt then r.kt = tonumber(kt); r.kn = kn == "1" or nil; r.ks = ks ~= "-" and ks or nil; r.kx = kx == "1" or nil; r.nm = nm == "1" or nil end
+		K[tonumber(id)] = r end
+	for id in string.gmatch(s, "\nc,(%d+)") do kcre[tonumber(id)] = true end
+	k_r = string.match(s, "\ns,(%d+,%d+)\n") or k_r
+	em_carry = tonumber(string.match(s, "\ne,(%d+)\n"))   -- review: only here, after the run id test
+	if rows > 0 then k_note = string.format("KTAB,read,%s,%d", run, rows) end
+end
+local function t2_pose(a, now, t)
+	if t2_eng_armed and t2_arm_tg then
+		if p_stale and now - t2_arm_tg >= T2_ARM_STALE_MS then t2_disarm(now, p_last, "stale")
+		elseif now - t2_arm_tg >= T2_ARM_MAX_MS then t2_disarm(now, p_last, "timeout") end
+	end
+	local xfirst = p_xwait == 1; if xfirst then p_xwait = 2 end   -- L2: this is the first read after a level change
+	local f = io.open(DIR .. "pose.txt", "rb"); if not f then t2_age(now, t); return end
+	local first = f:read("*l"); first = first and string.gsub(first, "\r", "")
+	-- pose v4: 8 header fields, the 8th is 4; it is cut off here so the v3 parsing below is unchanged. More than 7
+	-- fields in any other form: refused whole (kver).
+	local kv4, kbad = false, false
+	if first then local _, nc = string.gsub(first, ",", ",")
+		if nc >= 7 then if nc == 7 and string.sub(first, -2) == ",4" then kv4 = true; first = string.sub(first, 1, -3) else kbad = true end end end
+	local n = first and tonumber(string.match(first, "^seq,(%d+),"))
+	-- pose v3: an optional 7th field = ITR2's session number (its start time). A pose with ANOTHER session number is a
+	-- restarted ITR2: it is taken whatever its seq. Within one session the rule stays "seq must be higher".
+	local sess = first and string.match(first, "^seq,%d+,%d+,[^,]+,[^,]+,[^,]+,(%d+)$")
+	local epoch = sess and p_sess and sess ~= p_sess
+	local reset = t2_v2reset and p_lost and n and not sess and not p_sess and n < p_last
+	if not n or (n <= p_last and not epoch and not reset) then f:close()
+		t2_age(now, t)
+		return end
+	if kbad then f:close()
+		if n ~= kver_n then kver_n = n; kc.kver = kc.kver + 1; m(string.format("KREFUSED,%d,%d,-,ver", now, n)) end
+		t2_age(now, t)
+		return end
+	local rest = f:read("*a") or ""; f:close()
+	local _, utc, state, zone, aw = string.match(first, "^seq,(%d+),(%d+),([^,]+),([^,]+),([^,]+)$")
+	if not utc and sess then _, utc, state, zone, aw = string.match(first, "^seq,(%d+),(%d+),([^,]+),([^,]+),([^,]+),%d+$") end
+	local px, py, pz, pyaw, pstance, pchanger; local klines = {}; local endn
+	for line in string.gmatch(rest, "[^\r\n]+") do
+		local x, y, z, yw = string.match(line, "^p,([^,]+),([^,]+),([^,]+),([^,]+),")
+		if x then px, py, pz, pyaw = tonumber(x), tonumber(y), tonumber(z), tonumber(yw)
+			-- pose v2 (T3): p,x,yfloor,z,yaw,hp,stance  (6 fields after p; v1 has 5 and no stance)
+			pstance = tonumber(string.match(line, "^p,[^,]+,[^,]+,[^,]+,[^,]+,[^,]+,(%d+)$")) end
+		local cn = string.match(line, "^c,([%w_]+)$"); if cn then pchanger = cn end
+		if string.sub(line, 1, 2) == "k," then klines[#klines + 1] = line end   -- every form; the bare k,<id> kill is gone
+		local e = string.match(line, "^end,(%d+)$"); if e then endn = tonumber(e) end
+	end
+	if endn ~= n or not utc or not px then   -- torn: count and log once per seq; a file left torn still goes stale
+		if n ~= p_torn_n then p_torn_n = n; p_torn = p_torn + 1; m(string.format("TORN,%d,%d", now, n)) end
+		t2_age(now, t)
+		return end
+	if epoch then p_epochs = p_epochs + 1; t3_cross_done = false
+		for _, r in pairs(K) do r.ap, r.ow, r.kb = 0, nil, nil end   -- new ITR2 session: totals start at 0, owed parts dropped
+		m(string.format("EPOCH,%.2f,%d,%s,%s,%d,%d", t, now, p_sess, sess, p_last, n)) end
+	if reset then p_epochs = p_epochs + 1; t3_cross_done = false
+		m(string.format("RESET,%.2f,%d,%d,%d", t, now, p_last, n)) end
+	local age = p_last_t and (now - p_last_t) or 0
+	-- L2 (pre-flight L, cross: LOST came 15 s late): the FIRST pose read after a level change may be an old file that a
+	-- writer, now gone, still updated during the load. It is handled as any pose, but it does not prove a live writer:
+	-- the lost timer keeps running from the resume, under the cross limit, until a pose is taken on a LATER read (the
+	-- file changed between two reads, so somebody is writing).
+	if not xfirst then p_xwait = false end
+	p_last = n; if not xfirst then p_last_t = now end; p_state = state; p_aw = aw; if sess then p_sess = sess end
+	if p_lost then p_lost = false; m(string.format("FOUND,%.2f,%d,%d,%d", t, now, n, age)) end
+	if p_stale then p_stale = false; m(string.format("RESUME,%.2f,%d,%d", t, now, n)) end
+	-- R3 (T3): pose state `cross` with a zone that is not this level = ITR2's player crossed to that level. Find a
+	-- level changer on this level that leads there and change level through it. ChangeLevel acts at once and the Lua
+	-- state does not survive, so the log line and the marker file are written first. No arm, no stop.
+	if state == "cross" and zone ~= level.name() then
+		if not t3_cross_done then t3_cross_done = true
+			local ok, c = pcall(t3_find_changer, zone, pchanger)
+			if not ok then m(string.format("CROSS_ERROR,%d,%d,%s", now, n, tostring(c)))
+			elseif not c then m(string.format("CROSS_NOCHANGER,%d,%d,%s,%s,%s", now, n, level.name(), zone, tostring(pchanger)))
+			else
+				m(string.format("CROSS_REQ,%d,%d,%s,%s,%s,%.3f,%.3f,%.3f,%d,%d,%s", now, n, level.name(), zone, c.name, c.pos.x, c.pos.y, c.pos.z, c.lvid, c.gvid, utc))
+				if meta then meta:flush() end
+				local f = io.open(DIR .. "cross.txt", "wb"); if f then f:write(level.name(), ",", zone, ",", utc, "\n", "x,", tostring(aw), ",", tostring(sess or p_sess or 0), ",", tostring(n), "\n"); f:close() end   -- p_sess: a run that ever saw a session number keeps it over the level change (review 2026-11-25)
+				k_save()
+				ChangeLevel(c.pos, c.lvid, c.gvid, vector():set(0, 0, 0))
+			end
+		end
+		return
+	end
+	if zone ~= level.name() then m(string.format("ZONE_MISMATCH,%d,%d,%s", now, n, zone)); return end
+	if (kv4 or #klines > 0) and state ~= "cross" and not p_xwait then k_pose(a, now, n, kv4, klines, p_sess) end   -- not in a crossing, not on the first read after one
+	local hold_state = state ~= "play"
+	local fz_state = (state == "dead" or state == "away") and aw == "freeze"   -- the bridge's own freeze test
+	if fz_state and not t2_armed and t2_absorb > 0 then
+		t2_armed = true; t2_nfreeze = t2_nfreeze + 1
+		if t2_nfreeze > t2_absorb_skip then
+			get_console():execute("g_freeze_absorb_armed 1"); t2_eng_armed = true; t2_arm_tg = now
+			m(string.format("ABSORB_ARM,%d,%d,%.0f", now, n, gtime()))
+		else m(string.format("ABSORB_SKIP,%d,%d,%.0f", now, n, gtime())) end
+		if meta then meta:flush() end
+	elseif not fz_state and t2_armed then
+		t2_armed = false
+		if t2_eng_armed then t2_disarm(now, n, hold_state and "state" or "play")
+		else m(string.format("ABSORB_DISARM,%d,%d,%.0f,%s", now, n, gtime(), hold_state and "state_noop" or "play_noop")) end
+	end
+	if hold_state and aw == "freeze" and not p_paused then
+		if t2_pause_ok then device():pause(true); p_paused = true; m(string.format("PAUSE,%d,%d,%s", now, n, state))
+		elseif not p_fz_logged then p_fz_logged = true; m(string.format("FREEZE_UNSUPPORTED,%d,%d,%s", now, n, state)) end   -- once
+	elseif not hold_state and p_paused then device():pause(false); p_paused = false; m(string.format("UNPAUSE,%d,%d", now, n)) end
+	if hold_state or dmg_hold then return end
+	if pstance then   -- pose v2: X-Ray grounds its own actor
+		local ring, vid, ny = t3_ground(px, py, pz)
+		if not ring then p_holds = p_holds + 1; m(string.format("HOLD,%d,%d,nonode", now, n))
+			a:set_actor_direction(pyaw); return end
+		if ring > 0 then p_near = p_near + 1 end
+		-- height: the node height plus a small lift, on EVERY set. Pre-flight A (2026-11-24) showed the actor's height
+		-- never changes between sets (physics does not settle it), so "keep the current height" left it up to 0.78 m
+		-- under the node. snap = 1 only marks a height step larger than T3_YTOL (report).
+		local cur = a:position(); local ty = ny + T3_LIFT; local snap = 0
+		local drift = t3_ly and (cur.y - t3_ly) or 0; t3_ly = ty   -- how far the engine moved the height since the last set (report)
+		if math.abs(cur.y - ty) > T3_YTOL then snap = 1 end
+		-- measured only, never applied: a ray straight down onto static geometry from 1.2 m above the node
+		local ry = -9999
+		if ray_pick then
+			local ok, hit, dist = pcall(function()
+				t3_ray = t3_ray or ray_pick()
+				t3_ray:set_position(vector():set(px, ny + 1.2, pz)); t3_ray:set_direction(vector():set(0, -1, 0))
+				t3_ray:set_flags(2); t3_ray:set_range(3.0)
+				return t3_ray:query(), t3_ray:get_distance()
+			end)
+			if ok and hit and dist then ry = ny + 1.2 - dist elseif not ok and not t3_ray_warned then t3_ray_warned = true; m(string.format("RAY_ERROR,%d,%d,%s", now, n, tostring(hit))) end
+		end
+		a:set_actor_position(vector():set(px, ty, pz), true, snap == 0)   -- skip the collision corrector (r3: 90 m throws); keep fall speed unless snapping
+		a:set_actor_direction(pyaw)
+		if a.set_actor_stance then
+			if pstance ~= t3_stance_last then m(string.format("STANCE,%d,%d,%d", now, n, pstance)); t3_stance_last = pstance end
+			a:set_actor_stance(pstance)
+		elseif not t3_stance_warned then t3_stance_warned = true; m(string.format("STANCE_UNSUPPORTED,%d,%d", now, n)) end
+		local got = a:position(); local dxz = math.sqrt((got.x - px) ^ 2 + (got.z - pz) ^ 2); local d3 = got:distance_to(vector():set(px, ty, pz))
+		if d3 > T3_GUARD then   -- guard (Overseer): put the actor back to the last good position and log it
+			t3_guards = t3_guards + 1
+			m(string.format("GUARD,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f", now, n, d3, px, ty, pz, got.x, got.y, got.z))
+			if t3_gx then a:set_actor_position(vector():set(t3_gx, t3_gy, t3_gz), true) end
+		else t3_gx, t3_gy, t3_gz = got.x, got.y, got.z end
+		-- P2: seq, utc, tg, horizontal distance, pose yaw, actor yaw, target x,y,z, node id, node y, ring, snap, actor y after set, stance, ray ground y (-9999 = no hit; measured only), height drift since the last set, real movement state (0/1/2, -1 unread), get_actor_stance (-9 = no export)
+		m(string.format("P2,%d,%s,%d,%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%d,%.3f,%d,%d,%.3f,%d,%.3f,%.3f,%d,%d", n, utc, now, dxz, pyaw, yaw(a), px, ty, pz, vid, ny, ring, snap, got.y, pstance, ry, drift, mvstate(), a.get_actor_stance and a:get_actor_stance() or -9))
+		return
+	end
+	local v = vector():set(px, py, pz)
+	local how = t2_near_ring(px, py, pz)   -- on-mesh test, prereg section 24
+	if how then
+		p_lx, p_ly, p_lz = px, py, pz
+		if how > 0 then p_near = p_near + 1; m(string.format("NEAR,%d,%d,%d", now, n, how)) end
+	else p_holds = p_holds + 1; m(string.format("HOLD,%d,%d,nonear", now, n)) end
+	if p_lx then a:set_actor_position(vector():set(p_lx, p_ly, p_lz)) end
+	a:set_actor_direction(pyaw)   -- sign checked at the pre-flight boot
+	m(string.format("P,%d,%s,%d,%.3f,%.4f,%.4f", n, utc, now, a:position():distance_to(v), pyaw, yaw(a)))   -- pose yaw, actor yaw read back
+end
+
+local done_logged = false
+-- pre-flight E (prereg section 46): forced-damage test mode. ON only if the bridge tmpfs holds dmgtest.txt with
+-- prot | god_off | god_off_norefill (written and removed by tools/t2_preflight.sh only). Without the file nothing here runs.
+-- Phases by track time: rad 20-80 s (actor pinned at the nearest radiation field's centre), anom 80-140 s (nearest
+-- damaging anomaly), mut 150-240 s (three hostile mutants spawned 4 m from the actor, which the pose holds in place).
+local dmg_phase, dmg_tgt, dmg_last, dmg_spawned = nil, nil, 0, {}
+local dmg_ph = { hits0 = 0, minh = 1, maxr = 0, maxb = 0 }
+local DMG_T = { { "rad", 20, 80 }, { "anom", 80, 140 }, { "mut", 150, 240 } }   -- 10 s between anom and mut: the pose takes the actor home first
+local DMG_MUT = { "dog_strong_red", "boar_01a_hard", "cat_strong_a" }
+local function dmg_find(k)
+	local sim, gg, here, ap = alife(), game_graph(), level.name(), db.actor:position()
+	local best, bd
+	for id = 1, 65534 do
+		local se = sim:object(id)
+		if se then
+			local sec = se:section_name()
+			local hit = (k == "rad" and string.find(sec, "^zone_field_radioactive")) or (k == "anom" and string.find(sec, "^zone_mine_")
+				and (string.find(sec, "electr") or string.find(sec, "acid") or string.find(sec, "chem") or string.find(sec, "therm") or string.find(sec, "gravit")))
+			if hit and sim:level_name(gg:vertex(se.m_game_vertex_id):level_id()) == here then
+				local d = se.position:distance_to(ap)
+				if not bd or d < bd then best, bd = { id = id, name = se:name(), sec = sec, pos = se.position }, d end
+			end
+		end
+	end
+	return best, bd
+end
+local function dmg_end_phase(a, now)
+	if not dmg_phase then return end
+	m(string.format("DMG_PHASE_END,%s,%d,hits=%d,min_health=%.3f,max_radiation=%.4f,max_bleeding=%.4f", dmg_phase, now, hits - dmg_ph.hits0, dmg_ph.minh, dmg_ph.maxr, dmg_ph.maxb))
+	if dmg_mode ~= "prot" then   -- witnesses: each phase starts from full health and no radiation (retry, section 47)
+		local ok, r = pcall(function() local r0 = a.radiation; a:change_radiation(-r0); return r0 end)
+		a:set_health_ex(1.0); m(string.format("DMG_RESET,%s,%d,%s", dmg_phase, now, ok and string.format("%.4f", r) or "error"))
+	end
+	if dmg_phase == "mut" then   -- E2: the test ends here. Mutants removed, protection restored, bleeding and radiation cleared
+		local left = 0
+		for _, s in ipairs(dmg_spawned) do
+			local ok, e = pcall(function() local se = alife():object(s.id); if se then alife():release(se, true) end end)
+			m(string.format("DMG_REMOVE,%d,%d,%s,%s", now, s.id, s.sec, ok and "ok" or tostring(e))); if not ok then left = left + 1 end
+		end
+		if dmg_norestore then m(string.format("DMG_NORESTORE,%d", now))   -- mutation: the restore is skipped on purpose; the checker must fail this boot
+		else
+			-- ChangeBleeding SUBTRACTS its value from each wound size (Wound.cpp:97), it is not a fraction: `bleeding = 1` left big wounds open (E2, section 50).
+			-- So: a large value, repeated until bleeding reads back as zero; clear= reports the value read back, not just "the call did not error".
+			local ok, e = pcall(function() a:change_radiation(-a.radiation); for _ = 1, 5 do if a.bleeding <= 0 then break end; a.bleeding = 1000 end; if a.bleeding > 0.0001 or a.radiation > 0.0001 then error(string.format("left:bleeding=%.4f:radiation=%.4f", a.bleeding, a.radiation), 0) end end)
+			a:set_health_ex(1.0); get_console():execute("g_god on"); dmg_restored = true
+			m(string.format("DMG_RESTORE,%d,g_god=%s,clear=%s,remove_errors=%d", now, tostring(get_console():get_bool("g_god")), ok and "ok" or tostring(e), left))
+		end
+	end
+	dmg_hold = false; dmg_tgt = nil; dmg_phase = nil; if meta then meta:flush() end
+end
+local function dmg_step(a, now, t)
+	local cur
+	for _, p in ipairs(DMG_T) do if t >= p[2] and t < p[3] then cur = p[1] end end
+	if cur ~= dmg_phase then
+		dmg_end_phase(a, now)
+		if cur then
+			dmg_phase = cur; dmg_ph = { hits0 = hits, minh = a.health, maxr = 0, maxb = 0 }
+			if cur == "mut" then
+				local ap = a:position(); local off = { { 4, 0 }, { -4, 0 }, { 0, 4 } }
+				for i, sec in ipairs(DMG_MUT) do
+					local ok, se = pcall(function() return alife():create(sec, vector():set(ap.x + off[i][1], ap.y + 0.3, ap.z + off[i][2]), a:level_vertex_id(), a:game_vertex_id()) end)
+					if ok and se then dmg_spawned[#dmg_spawned + 1] = { id = se.id, sec = sec }; m(string.format("DMG_SPAWN,%d,%d,%s", now, se.id, sec))
+					else m(string.format("DMG_SPAWN_ERROR,%d,%s,%s", now, sec, tostring(se))) end
+				end
+			else
+				local ok, tg, d = pcall(dmg_find, cur)
+				if ok and tg then dmg_tgt = tg; dmg_hold = true
+					m(string.format("DMG_TARGET,%s,%d,%d,%s,%s,%.3f,%.3f,%.3f,%.1f", cur, now, tg.id, tg.name, tg.sec, tg.pos.x, tg.pos.y, tg.pos.z, d))
+				else m(string.format("DMG_NOTARGET,%s,%d,%s", cur, now, tostring(tg))) end
+			end
+			if meta then meta:flush() end
+		end
+	end
+	if not dmg_phase and not dmg_endchecked and t >= 250 then   -- E2: 10 s after the last phase
+		dmg_endchecked = true
+		local okv, r, b = pcall(function() return a.radiation, a.bleeding end); if not okv or not r or not b then r, b = -1, -1 end
+		local left = 0; for _, s in ipairs(dmg_spawned) do if level.object_by_id(s.id) or alife():object(s.id) then left = left + 1 end end
+		m(string.format("DMG_ENDCHECK,%d,alive=%d,health=%.4f,radiation=%.4f,bleeding=%.4f,mutants_left=%d,g_god=%s", now, a:alive() and 1 or 0, a.health, r, b, left, tostring(get_console():get_bool("g_god"))))
+		if meta then meta:flush() end
+	end
+	if not dmg_phase then return end
+	local h = a.health; local ok, r, b = pcall(function() return a.radiation, a.bleeding end); if not ok or not r or not b then r, b = -1, -1 end
+	if h < dmg_ph.minh then dmg_ph.minh = h end; if r > dmg_ph.maxr then dmg_ph.maxr = r end; if b > dmg_ph.maxb then dmg_ph.maxb = b end
+	if dmg_open("god_off_norefill") and h < 0.7 then m(string.format("DMG_FLOOR,%s,%d,%.3f", dmg_phase, now, h)); a:set_health_ex(1.0) end   -- a death ends the run (first try: died at floor 0.2)
+	if dmg_tgt then a:set_actor_position(vector():set(dmg_tgt.pos.x, dmg_tgt.pos.y, dmg_tgt.pos.z), true) end
+	if now - dmg_last < 1000 then return end
+	dmg_last = now
+	if dmg_tgt then
+		m(string.format("DMG_AT,%s,%d,%.2f,%d,%.4f,%.4f,%.4f", dmg_phase, now, a:position():distance_to(dmg_tgt.pos), level.object_by_id(dmg_tgt.id) and 1 or 0, h, r, b))
+	else
+		for _, s in ipairs(dmg_spawned) do
+			local o = level.object_by_id(s.id); local d, al, en = -1, -1, -2
+			if o then d = o:position():distance_to(a:position()); al = o:alive() and 1 or 0
+				local okb, be = pcall(function() return o:best_enemy() end); en = (okb and be) and be:id() or -1 end
+			m(string.format("DMG_MUT,%d,%d,%s,%.2f,%d,%d,%.4f,%.4f,%.4f", now, s.id, s.sec, d, al, en, h, r, b))
+		end
+	end
+end
+local on_quit
+local function on_update()
+	local a = db.actor; if not a then return end
+	local now = time_global()
+	do local ok, r, b = pcall(function() return a.radiation, a.bleeding end)   -- T3: "the actor takes no damage from anything" (report)
+		if ok and r and b then if r > vit_rad then vit_rad = r end; if b > vit_bleed then vit_bleed = b end else vit_na = vit_na + 1 end end
+	do local k = mvstate(); mv_frames = mv_frames + 1
+		if k == 1 then mv_crouch = mv_crouch + 1 elseif k == 2 then mv_low = mv_low + 1 elseif k < 0 then mv_na = mv_na + 1 end end
+	if not t0 then
+		if not t2 and not load_track() then active = false; return end
+		t0 = now + WAIT_MS
+		if t2 then   -- R3: the changers of this level, and the resume line after a level change
+			if t3_crossed then m(string.format("CROSS_RESUME,%d,%s,%s", now, level.name(), t3_crossed))
+				p_last_t = now; p_state = "cross"   -- LOST: the wait for ITR2's first pose on the new level is timed from here
+				if t2_lost_ms > 0 or t2_lostx_ms > 0 then p_xwait = 1 end
+			end
+			local ok, L = pcall(t3_changers)
+			if not ok then m("CHANGER_ERROR," .. tostring(L)) else for _, c in ipairs(L) do if c.from == level.name() or c.to == level.name() then
+				m(string.format("CHANGER,%s,%s,%s,%.3f,%.3f,%.3f,%d,%d", c.name, c.from, c.to, c.pos.x, c.pos.y, c.pos.z, c.lvid, c.gvid)) end end end
+		end
+		if dmg_mode then m("DMG_MODE," .. dmg_raw) end
+		get_console():execute((dmg_mode and dmg_mode ~= "prot") and "g_god off" or "g_god on")   -- retry amendment: engine-level god mode (registered with -dbg)
+		if t2 and t2_absorb > 0 then get_console():execute("g_freeze_absorb_ms " .. t2_absorb); m(string.format("ABSORB_ON,%d,%d", now, t2_absorb)) end
+		m(string.format("S,%d,actor_id=%d,switch_distance_at_load=%.1f,export=%s,wait_ms=%d,g_god=%s", now, a:id(), alife():switch_distance(), tostring(do_export), WAIT_MS, tostring(get_console():get_bool("g_god"))))
+	end
+	if a.health < min_health then min_health = a.health end
+	-- retry amendment: refill to 1.0 on EVERY update (god mode does not block set_health_ex, which GAMMA's balancer uses);
+	-- REFILL lines only for drops below 0.5
+	if not dmg_open("god_off_norefill") then
+	if a.health < 0.5 then refills = refills + 1; m(string.format("REFILL,%.2f,%d,%.3f", (now - t0) / 1000, now, a.health)) end
+	if a.health < 1.0 then a:set_health_ex(1.0) end
+	end
+	local t = (now - t0) / 1000
+	if t2 then   -- B1-T2: no track; the pose drives the actor once the warm-up is over (t >= 0)
+		-- long-stop check (Overseer, pre-flight 2): once a second G,<time_global>,<os.time>,<frame>,<game.time ms>,<alife objects>;
+		-- after a wall-clock gap >= 2 s between updates (a SIGSTOP), RESUMED_GAP plus F,<time_global>,<f_time_delta ms> for every
+		-- frame of the next 30 s of wall time
+		local wall = os.time()
+		if g_last_wall and wall - g_last_wall >= 2 then   -- >= 2 s so the 3 s hitch check (pre-flight 3) is seen too
+			m(string.format("RESUMED_GAP,%d,%d,%d,%.0f,%d,%.0f", now, wall, wall - g_last_wall, gtime(), g_prev_tg or -1, g_prev_game or -1)); if meta then meta:flush() end; g_f_until = wall + 30 end
+		g_last_wall = wall; g_prev_tg = now; g_prev_game = gtime()   -- this frame, for the next gap
+		if g_f_until and wall <= g_f_until then m(string.format("F,%d,%.1f", now, device().f_time_delta * 1000)) end
+		if now - (g_last_g or -1e9) >= 1000 then g_last_g = now
+			m(string.format("G,%d,%d,%d,%.0f,%d", now, wall, device().frame, gtime(), alife():object_count())) end
+		if dmg_mode and t >= 0 then dmg_step(a, now, t) end
+		if em_test then em_step(now) end   -- Stage 2 test mode; off: this one test per frame
+		if t >= 0 then t2_pose(a, now, t) end
+		if do_export and now - last_exp >= 100 then last_exp = now; export(now, t) end
+		return
+	end
+	if t > trk_t[#trk_t] then if not done_logged then done_logged = true; m(string.format("TRACK_END,%.2f,%d", t, now)); on_quit() end; return end
+	if now - last_move >= 50 then
+		last_move = now
+		local x, y, z = track_pos(math.max(0, t))
+		if x then a:set_actor_position(vector():set(x, y, z)) end
+	end
+	if do_export and now - last_exp >= 100 then last_exp = now; export(now, t) end
+end
+
+local function on_before_hit(s_hit, bone_id, flags)
+	hits = hits + 1
+	local d = s_hit and s_hit.draftsman
+	w(string.format("h,%.2f,%d,%s,%s,%d,%.4f,%s", t0 and (time_global() - t0) / 1000 or -1e9,
+		d and d:id() or -1, d and d:section() or "none", kind(d), s_hit and s_hit.type or -1, s_hit and s_hit.power or -1, tostring(bone_id)))
+	if out then out:flush() end
+	if dmg_open() then return end   -- pre-flight E witness: log only, the hit goes through
+	flags.ret_value = false; if s_hit then s_hit.power = 0 end; cancels = cancels + 1   -- as momo_multihit_fix.script
+end
+
+on_quit = function()
+	if not out then return end
+	table.sort(exp_times)
+	local p99 = exp_n > 0 and exp_times[math.max(1, math.ceil(exp_n * 0.99))] or 0
+	m(string.format("SUMMARY,hits=%d,cancelled=%d,refills=%d,min_health=%.3f,export_ticks=%d,export_mean_us=%.1f,export_p99_us=%.1f,export_max_us=%.1f",
+		hits, cancels, refills, min_health, exp_n, exp_n > 0 and exp_sum / exp_n or 0, p99, exp_max))
+	if t2 then t2_disarm(time_global(), p_last, "end") end
+	if t2 then m(string.format("T2SUM,last_seq=%d,torn=%d,holds=%d,paused=%s,near=%d,guards=%d,lost=%d,epochs=%d", p_last, p_torn, p_holds, tostring(p_paused), p_near, t3_guards, p_lost_n, p_epochs)
+		.. string.format(",khits=%d,kdead_online=%d,kdead_offline=%d,kowed=%d,kstale=%d,kback=%d,krefused=%d,kclamped=%d,kver=%d,kdead_fail=%d,ktabfail=%d,eerr=%d", kc.khits, kc.kdead_online, kc.kdead_offline, kc.kowed, kc.kstale, kc.kback, kc.krefused, kc.kclamped, kc.kver, kc.kdead_fail, kc.ktabfail, eerr)) end
+	do local a = db.actor; local api = "na"
+		if a and a.get_actor_stance then local ok, v = pcall(a.get_actor_stance, a); api = ok and tostring(v) or "err" end
+		m(string.format("VITALS,min_health=%.3f,max_radiation=%.4f,max_bleeding=%.4f,unread=%d", min_health, vit_rad, vit_bleed, vit_na))
+		m(string.format("MOVESUM,frames=%d,crouch=%d,low=%d,unread=%d,stance_api=%s", mv_frames, mv_crouch, mv_low, mv_na, api)) end
+	out:close(); meta:close(); out, meta = nil, nil
+end
+
+function on_game_start()
+	if not active then return end
+	out = io.open(DIR .. (b1 and "hits_" or "export_") .. tag .. ".csv", "w")
+	if not out then printf("p1: CANNOT OPEN EXPORT FILE"); active = false; return end
+	-- R3: a level change restarts the Lua state. The marker written before ChangeLevel says "continue the same log".
+	-- (the marker is emptied, not removed: an empty marker counts as none)
+	do local f = io.open(DIR .. "cross.txt", "rb"); if f then local l = (f:read("*l") or ""):gsub("\r", "")
+		local l2 = (f:read("*l") or ""):gsub("\r", ""); f:close()
+		-- policy, session and seq of the pose that asked for the crossing. With LOST on, the seq watermark is carried
+		-- over, so the SAME pose still on disk (a writer that died during the level change) is not taken as a new one
+		-- and cannot restart the cross timer. A live writer's seq has moved on; a restarted one has a new session.
+		do local xa, xs, xn = string.match(l2, "^x,([^,]+),(%d+),(%d+)$")
+			if xa then p_aw = xa; if xs ~= "0" then p_sess = xs end
+				if t2_lost_ms > 0 or t2_lostx_ms > 0 then p_last = tonumber(xn) end end end
+		if l ~= "" then t3_crossed = l; k_load(); f = io.open(DIR .. "cross.txt", "wb"); if f then f:close() end end end end
+	do local f = io.open(DIR .. "dmgtest.txt", "rb"); if f then local l = (f:read("*l") or ""):gsub("%s", ""); f:close()
+		if l == "prot" or l == "god_off" or l == "god_off_norefill" then dmg_mode, dmg_raw = l, l
+		elseif l == "god_off_norefill_norestore" then dmg_mode, dmg_raw, dmg_norestore = "god_off_norefill", l, true end end end   -- the mutation of section 49
+	if t2 then local f = io.open(DIR .. "emtest.txt", "rb")   -- Stage 2 test mode: only if the file is there at game start
+		if f then em_test = true; local s = f:read("*a") or ""; f:close()
+			if em_carry then em_done = em_carry   -- review: a crossing carries the cursor; a fresh process counts the file
+			else for l in string.gmatch(s, "([^\n]*)\n") do if string.gsub(l, "%s", "") ~= "" then em_done = em_done + 1 end end end end end
+	meta = io.open(DIR .. "meta_" .. tag .. ".csv", t3_crossed and "a" or "w")
+	if not meta then printf("p1: CANNOT OPEN META FILE"); active = false; return end
+	if k_note then m(k_note) end
+	RegisterScriptCallback("actor_on_update", on_update)
+	RegisterScriptCallback("actor_on_before_hit", on_before_hit)
+	RegisterScriptCallback("actor_on_hit_callback", function() if db.actor and db.actor.health < (dmg_open("god_off_norefill") and 0.7 or 1.0) then db.actor:set_health_ex(1.0) end end)  -- second refill point, after each hit
+	RegisterScriptCallback("on_before_level_changing", on_quit)
+	RegisterScriptCallback("actor_on_net_destroy", on_quit)   -- "on_game_end" is not a callback in this GAMMA build (prereg section 30)
+	if t2 then   -- KWHO: (victim, who) as axr_main.script lists them; monsters from bind_monster.script's death_callback
+		RegisterScriptCallback("npc_on_death_callback", k_who)
+		RegisterScriptCallback("monster_on_death_callback", k_who) end
+	-- summary also every 60 s of track time so a killed run keeps it
+	local last_sum = 0
+	RegisterScriptCallback("actor_on_update", function()
+		if t0 and time_global() - last_sum >= 60000 then last_sum = time_global()
+			m(string.format("TICK,%.2f,hits=%d,cancelled=%d,refills=%d,min_health=%.3f,export_ticks=%d,export_mean_us=%.1f,export_max_us=%.1f,held=%s",
+				(last_sum - t0) / 1000, hits, cancels, refills, min_health, exp_n, exp_n > 0 and exp_sum / exp_n or 0, exp_max, tostring(held))); if meta then meta:flush() end end
+	end)
+end
