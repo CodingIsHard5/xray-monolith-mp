@@ -770,6 +770,21 @@ void CActor::sim_view_present(float dt, float alpha)
 		g_player_hud->OnFramePose(); // near-wall offset, attachment transforms, hand IK: after update(), as in stock
 	}
 }
+
+// S2 stage 4d-1 lever (det_mode only; the device calls this only while g_sim_synth_k and g_sim_render_lerp, after the
+// render): the actor's drawn position (sim_render_world is a render-side per-frame cache, so this is the matrix the
+// render used, or the one it would have used), its XFORM and the camera position between ticks
+void CActor::sim_synth_witness()
+{
+	CActor* A = g_actor;
+	if (!A)
+		return;
+	const Fmatrix* m = A->sim_render_world();
+	g_sim_synth_wit.s2 = true;
+	g_sim_synth_wit.s2_draw.set(m->c);
+	g_sim_synth_wit.s2_xform.set(A->XFORM().c);
+	g_sim_synth_wit.s2_cam.set(A->m_sim_view_pos);
+}
 // ---------------------------------------------------------------------------------------------------------------
 
 // shot effector stuff

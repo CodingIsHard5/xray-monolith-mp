@@ -125,6 +125,14 @@ static bool is_occluded(Fvector pos)
 	return HUD().DoPick(op);
 }
 
+// S2 stage 4d-1, slice S1 (crosshair part): the easing's time step. On a gated frame (g_sim_render_lerp, sim_tick
+// gated mode only) Device.fTimeDelta is 0 on a render-only frame and a whole tick on a tick frame; the presentation
+// step's real frame time is used instead. On every stock frame: Device.fTimeDelta, as before.
+static float sim_4d_xhair_dt()
+{
+	return (g_sim_render_lerp && (g_sim_4d_mask & SIM4D_XHAIR)) ? g_sim_render_dt : Device.fTimeDelta;
+}
+
 void TargetCrosshair::IntegratePosition(const SPickParam& pp, float dist, bool is_far)
 {
 	// Transform ray start and direction into camera space
@@ -152,7 +160,7 @@ void TargetCrosshair::IntegratePosition(const SPickParam& pp, float dist, bool i
 	if (Is(CROSSHAIR_DISTANCE_LERP))
 	{
 		float fac = 1 - (target.z / pp.defs.range);
-		float t = Device.fTimeDelta * (fac + settings.distance_lerp_rate);
+		float t = sim_4d_xhair_dt() * (fac + settings.distance_lerp_rate); // S2 stage 4d-1 (stock: Device.fTimeDelta)
 		clamp(t, 0.f, 1.f);
 		pos.lerp(pos, target, t);
 	}
@@ -163,7 +171,16 @@ void TargetCrosshair::IntegratePosition(const SPickParam& pp, float dist, bool i
 void TargetCrosshair::IntegrateOpacity(const SPickParam& pp, float opacity_target)
 {
 	// Interpolate opacity offset toward target
-	opacity = lerp(opacity, opacity_target, Device.fTimeDelta * settings.occlusion_fade_rate);
+	const float dt = sim_4d_xhair_dt(); // S2 stage 4d-1 (stock: Device.fTimeDelta)
+	opacity = lerp(opacity, opacity_target, dt * settings.occlusion_fade_rate);
+	// S2 stage 4d-1 lever witness (det_mode only): the first crosshair eased in this frame, after its easing
+	if (g_sim_synth_k && g_sim_render_lerp && !g_sim_synth_wit.s1)
+	{
+		g_sim_synth_wit.s1 = true;
+		g_sim_synth_wit.s1_dt = dt;
+		g_sim_synth_wit.s1_pos.set(pos);
+		g_sim_synth_wit.s1_opacity = opacity;
+	}
 }
 
 void TargetCrosshair::Update(const SPickParam& pp, bool is_far)

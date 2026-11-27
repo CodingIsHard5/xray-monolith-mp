@@ -484,6 +484,88 @@ ENGINE_API double g_sim_hud_ms = 0.0;
 static u64 s_sv_last_ticks = 0;      // TimerGlobal ticks at the previous presentation step
 static u32 s_sv_last_epoch = 0;      // g_sim_view_epoch at the previous presentation step
 static float s_sv_dt = 0.f;          // smoothed real frame time handed to the presentation step
+// S2 stage 4d-1 (declared in device.h): render dt, slice mask, and the test-only synthetic gated lever
+ENGINE_API float g_sim_render_dt = 0.f;
+ENGINE_API int g_sim_4d_mask = SIM4D_BODY | SIM4D_TRACERS | SIM4D_XHAIR;
+ENGINE_API int g_sim_synth_k = 0;    // 0 = lever off (always 0 without -det_mode)
+ENGINE_API BOOL g_sim_synth_tw = FALSE;
+ENGINE_API int g_sim_4d_break = 0;
+ENGINE_API SimSynthWitness g_sim_synth_wit = {};
+ENGINE_API sim_synth_witness_fn g_sim_synth_witness_s2 = nullptr;
+static int s_synth_j = 0;            // lever: index of this frame in its cycle of K (0 = the tick frame)
+static bool s_synth_wallclock = false; // -det_synth_wallclock (must-fail): lever pattern for n, alpha and dt from the
+                                       // real clock
+static u64 s_synth_tick_real = 0;    // wallclock variant only: TimerGlobal ticks at the newest lever tick
+static int s_synth_wit_j = 0;        // witness: j, alpha of the presentation step of this frame
+static float s_synth_wit_alpha = 0.f;
+static FILE* s_synth_file = nullptr; // witness file, opened on the first line
+static bool s_synth_file_failed = false;
+
+ENGINE_API void sim_4d_tw_bad(const char* slice)
+{
+	g_sim_synth_wit.tw_bad++;
+	Msg("* tw %s BAD %u", slice, Device.dwFrame);
+}
+
+// lever: one witness line per gated frame whose presentation step ran (format: plan-facts/stage4d1-design, C.1, without
+// the s9 column; one "-" per absent value). Main thread, after the render's join; never read by the game.
+static void sim_synth_witness_write(int n)
+{
+	if (s_synth_file_failed)
+		return;
+	if (!s_synth_file)
+	{
+		string64 tag = "run";
+		if (LPCSTR p = strstr(Core.Params, "-det_tag "))
+		{
+			string64 t = "";
+			if (sscanf(p + xr_strlen("-det_tag "), "%63s", t) == 1 && t[0])
+				xr_strcpy(tag, t);
+		}
+		string_path fn, path;
+		xr_sprintf(fn, "synth_%s.txt", tag);
+		FS.update_path(path, "$logs$", fn);
+		s_synth_file = fopen(path, "wb");
+		if (!s_synth_file)
+		{
+			s_synth_file_failed = true;
+			Msg("! det_synth: cannot open witness file %s", path);
+			return;
+		}
+		Msg("* det_synth: K %d%s, witness %s", g_sim_synth_k, s_synth_wallclock ? " (wallclock)" : "", path);
+	}
+	if (g_sim_synth_witness_s2)
+		g_sim_synth_witness_s2(); // xrGame: the actor's draw matrix of this frame (a render-side cache)
+	const SimSynthWitness& w = g_sim_synth_wit;
+	FILE* f = s_synth_file;
+	fprintf(f, "F %u T %u j %d K %d n %d a %.6f dt %.6f hud %.3f |", Device.dwFrame, g_sim_view_tick, s_synth_wit_j,
+	        g_sim_synth_k, n, s_synth_wit_alpha, s_sv_dt, g_sim_hud_ms);
+	if (w.s2)
+		fprintf(f, " s2 %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f |", w.s2_draw.x, w.s2_draw.y, w.s2_draw.z,
+		        w.s2_xform.x, w.s2_xform.y, w.s2_xform.z, w.s2_cam.x, w.s2_cam.y, w.s2_cam.z);
+	else
+		fprintf(f, " s2 - - - - - - - - - |");
+	if (w.s3_drawn == u32(-1))
+		fprintf(f, " s3 - - - - - - - - - - - |");
+	else if (w.s3_drawn == 0)
+		fprintf(f, " s3 0 - - - - - - - - - - |");
+	else
+		fprintf(f, " s3 %u %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %.5f %d |", w.s3_drawn, w.s3_head.x, w.s3_head.y,
+		        w.s3_head.z, w.s3_pos.x, w.s3_pos.y, w.s3_pos.z, w.s3_start.x, w.s3_start.y, w.s3_start.z,
+		        w.s3_stamp_ok ? 1 : 0);
+	if (w.s1)
+		fprintf(f, " s1 %.6f %.5f %.5f %.5f %.6f |", w.s1_dt, w.s1_pos.x, w.s1_pos.y, w.s1_pos.z, w.s1_opacity);
+	else
+		fprintf(f, " s1 - - - - - |");
+	fprintf(f, " tw %u\n", w.tw_bad);
+	fflush(f); // the harness quits the game from a script: nothing may wait in the buffer
+}
+
+static void sim_synth_witness_reset()
+{
+	g_sim_synth_wit = SimSynthWitness();
+	g_sim_synth_wit.s3_drawn = u32(-1);
+}
 
 // simulated time advances by one tick; sets the four time values the update reads
 static void sim_tick_advance()
@@ -522,8 +604,56 @@ static int sim_tick_plan()
 			if (sscanf(p + xr_strlen("-sim_tick "), "%d", &hz) == 1 && hz > 0 && hz <= 240)
 				g_sim_tick_hz = hz;
 		}
+		// S2 stage 4d-1: the slice mask (any mode), read here once, after user.ltx; and the test-only switches, which
+		// are honoured only with -det_mode (without it they stay 0 and every branch on them is not taken)
+		if (LPCSTR p = strstr(Core.Params, "-sim_4d_mask "))
+		{
+			int m = 0;
+			if (sscanf(p + xr_strlen("-sim_4d_mask "), "%d", &m) == 1 && m >= 0 && m <= 15)
+				g_sim_4d_mask = m;
+		}
+		if (xr_det_mode())
+		{
+			if (LPCSTR p = strstr(Core.Params, "-det_synth_k "))
+			{
+				int k = 0;
+				if (sscanf(p + xr_strlen("-det_synth_k "), "%d", &k) == 1 && k >= 1 && k <= 8)
+					g_sim_synth_k = k;
+			}
+			s_synth_wallclock = g_sim_synth_k && strstr(Core.Params, "-det_synth_wallclock");
+			g_sim_synth_tw = strstr(Core.Params, "-det_synth_tw") ? TRUE : FALSE;
+			if (LPCSTR p = strstr(Core.Params, "-sim_4d_break "))
+			{
+				int m = 0;
+				if (sscanf(p + xr_strlen("-sim_4d_break "), "%d", &m) == 1 && m >= 0 && m <= 15)
+					g_sim_4d_break = m;
+			}
+			if (g_sim_synth_k || g_sim_synth_tw || g_sim_4d_break)
+				Msg("* det_synth: k %d wallclock %d tw %d break %d mask %d", g_sim_synth_k, s_synth_wallclock ? 1 : 0,
+				    g_sim_synth_tw ? 1 : 0, g_sim_4d_break, g_sim_4d_mask);
+		}
 	}
 	s_sim_hz = g_sim_tick_hz;
+	if (g_sim_synth_k)
+	{
+		// S2 stage 4d-1 lever (det_mode only): a fixed pattern instead of the wall clock. The same "not running" exits
+		// as below; the resync takes no real-time stamp; frame j = 0 of each cycle of K runs one tick, the others
+		// render only. The tick itself is det_mode's 33 ms step (FrameMove's rsConstantFPS branch).
+		if (Device.Paused() || !g_pGameLevel || !g_bLoaded || Device.dwPrecacheFrame)
+		{
+			s_sim_synced = false;
+			s_synth_j = 0;
+			return -1;
+		}
+		if (!s_sim_synced)
+		{
+			g_sim_view_epoch++;
+			s_sim_ms = double(Device.dwTimeGlobal);
+			s_synth_j = 0;
+			s_sim_synced = true;
+		}
+		return s_synth_j == 0 ? 1 : 0;
+	}
 	if (s_sim_hz < 10 || xr_det_mode() || psDeviceFlags.test(rsConstantFPS) || Device.Paused() || !g_pGameLevel ||
 		!g_bLoaded || Device.dwPrecacheFrame)
 	{
@@ -569,11 +699,22 @@ static void sim_tick_run(int n)
 			}
 			Device.seqParallelBeforRender.clear();
 		}
-		s_st_tick_real_ms = Device.GetTimerGlobal()->GetElapsed_ms();
+		if (g_sim_synth_k)
+		{
+			// S2 stage 4d-1 lever: the stat's tick stamp from simulated time (stat only); the real-time stamp is
+			// taken only by the must-fail wallclock variant, for its alpha
+			s_st_tick_real_ms = Device.dwTimeGlobal;
+			if (s_synth_wallclock)
+				s_synth_tick_real = Device.GetTimerGlobal()->GetElapsed_ticks();
+		}
+		else
+			s_st_tick_real_ms = Device.GetTimerGlobal()->GetElapsed_ms();
 		g_sim_view_tick++; // S2 stage 4b: the number of this tick, read by the object captures inside it
 		s_sim_tick_now = true;
 		Device.FrameMove();
 		s_sim_tick_now = false;
+		if (g_sim_synth_k)
+			s_sim_ms = double(Device.dwTimeGlobal); // lever: the newest tick's time (FrameMove's det 33 ms step)
 		if (i < n - 1)
 		{
 			// not the last tick of this frame: the game thread's half runs here, inline, and is joined
@@ -602,23 +743,46 @@ static void sim_view_present(int n)
 {
 	if (Device.Paused())
 		return; // paused inside this frame's ticks: no view step, the frame shows the last camera
-	const u64 now = Device.GetTimerGlobal()->GetElapsed_ticks();
-	const double step = 1.0 / double(s_sim_hz);
-	float frame = float(step); // first step after a resync: one tick's time, as a guess
-	if (s_sv_last_ticks && s_sv_last_epoch == g_sim_view_epoch && now > s_sv_last_ticks)
-		frame = float(double(now - s_sv_last_ticks) / double(CPU::qpc_freq));
-	const bool first = s_sv_last_epoch != g_sim_view_epoch;
-	s_sv_last_ticks = now;
-	s_sv_last_epoch = g_sim_view_epoch;
-	s_sv_dt = first ? frame : 0.1f * s_sv_dt + 0.9f * frame;
-	clamp(s_sv_dt, 0.001f, 0.1f);
-	const double now_ms = double(now) * 1000.0 / double(CPU::qpc_freq);
-	float alpha = float((now_ms + s_sim_off - s_sim_ms) / (step * 1000.0));
-	clamp(alpha, 0.f, 1.f);
+	// S2 stage 4d-1 lever (det_mode only): the step is det_mode's 33 ms tick (s_sim_hz is 0 there)
+	const double step = g_sim_synth_k ? 0.033 : 1.0 / double(s_sim_hz);
+	float alpha;
+	if (g_sim_synth_k && !s_synth_wallclock)
+	{
+		// lever: no wall clock; render dt = one tick / K, alpha = j / K
+		s_sv_dt = 0.033f / float(g_sim_synth_k);
+		alpha = float(s_synth_j) / float(g_sim_synth_k);
+	}
+	else
+	{
+		const u64 now = Device.GetTimerGlobal()->GetElapsed_ticks();
+		float frame = float(step); // first step after a resync: one tick's time, as a guess
+		if (s_sv_last_ticks && s_sv_last_epoch == g_sim_view_epoch && now > s_sv_last_ticks)
+			frame = float(double(now - s_sv_last_ticks) / double(CPU::qpc_freq));
+		const bool first = s_sv_last_epoch != g_sim_view_epoch;
+		s_sv_last_ticks = now;
+		s_sv_last_epoch = g_sim_view_epoch;
+		s_sv_dt = first ? frame : 0.1f * s_sv_dt + 0.9f * frame;
+		clamp(s_sv_dt, 0.001f, 0.1f);
+		if (g_sim_synth_k)
+		{
+			// lever, must-fail wallclock variant: alpha = real time past the newest lever tick, in ticks
+			alpha = now > s_synth_tick_real ?
+				float(double(now - s_synth_tick_real) / double(CPU::qpc_freq) / step) : 0.f;
+		}
+		else
+		{
+			const double now_ms = double(now) * 1000.0 / double(CPU::qpc_freq);
+			alpha = float((now_ms + s_sim_off - s_sim_ms) / (step * 1000.0));
+		}
+		clamp(alpha, 0.f, 1.f);
+	}
 	// S2 stage 4b: the same alpha for the objects drawn in this frame's render, with or without an actor hook (not
 	// reached when paused: that frame renders stock, as the paused frames after it do)
 	g_sim_render_alpha = alpha;
 	g_sim_render_lerp = TRUE;
+	g_sim_render_dt = s_sv_dt; // S2 stage 4d-1: the render dt for render-side easing (S1)
+	s_synth_wit_j = s_synth_j;
+	s_synth_wit_alpha = alpha;
 	// S2 stage 4c: the same point in simulated time for the HUD animation (s_sim_ms is the newest tick's time, the
 	// unrounded dwTimeGlobal) = clamp(real time on the tick clock, newest tick, newest tick + one step): it does not go
 	// back while the epoch stays (beyond float rounding of alpha; the reader ignores a step back)
@@ -628,19 +792,22 @@ static void sim_view_present(int n)
 	const u32 saved_dw = Device.dwTimeDelta;
 	Device.fTimeDelta = s_sv_dt;
 	Device.dwTimeDelta = _max(1u, u32(s_sv_dt * 1000.f + 0.5f));
-	if (n == 0 && pInput)
+	if (n == 0 && pInput && !g_sim_synth_k) // S2 stage 4d-1 lever: no per-frame input read (the only one)
 		pInput->MouseMoveOnly(); // no tick polled the input this frame: mouse motion only, buttons wait
 	if (g_sim_view_present)
 		g_sim_view_present(s_sv_dt, alpha);
 	Device.fTimeDelta = saved_f;
 	Device.dwTimeDelta = saved_dw;
+	if (g_sim_synth_k)
+		s_synth_j = (s_synth_j + 1) % g_sim_synth_k; // S2 stage 4d-1 lever: the next frame of the cycle
 }
 
 // statistics for the experiment, taken where the render starts (after the frame limiter): ticks per frame, dropped
 // ticks, age of the world state (time since the newest tick polled the input)
 static void sim_tick_stat(int n)
 {
-	const u32 now = Device.GetTimerGlobal()->GetElapsed_ms();
+	// S2 stage 4d-1 lever: simulated time (log line only; keeps the logs of two lever runs comparable)
+	const u32 now = g_sim_synth_k ? Device.dwTimeGlobal : Device.GetTimerGlobal()->GetElapsed_ms();
 	const u32 age = now - s_st_tick_real_ms;
 	s_st_frames++;
 	s_st_ticks += u32(n);
@@ -748,6 +915,8 @@ void CRenderDevice::on_idle()
 		// until the presentation step is done; with sim_n < 0 nothing below runs and the actor does what it did.
 		// S2 stage 4b: g_sim_render_lerp is FALSE here (cleared at the end of every frame) and only sim_view_present
 		// sets it, so a stock frame (sim_n < 0) renders every object at &XFORM()
+		if (g_sim_synth_k)
+			sim_synth_witness_reset(); // S2 stage 4d-1 lever (det_mode only): this frame's witness starts empty
 		g_sim_view_gate = TRUE;
 		sim_tick_run(sim_n);
 		sim_view_present(sim_n);
@@ -916,6 +1085,10 @@ void CRenderDevice::on_idle()
 	Device.isRendering = false;
 
 	secondary_tasks.wait();
+	// S2 stage 4d-1 lever (det_mode only): the witness line of this gated frame, after the render and its join, while
+	// g_sim_render_lerp still tells whether the presentation step ran (a frame paused inside its ticks writes none)
+	if (g_sim_synth_k && sim_n >= 0 && g_sim_render_lerp)
+		sim_synth_witness_write(sim_n);
 	g_sim_render_lerp = FALSE; // S2 stage 4b: set by sim_view_present for this frame's render only; cleared after the join
 #ifdef XRCORE_PROFILER_AGG
 	xr_det_set_role(1); // render phase over: anything the main thread does outside it (level load, spawns) is gameplay
@@ -1051,7 +1224,9 @@ void CRenderDevice::FrameMove()
 	dwTimeContinual = TimerMM.GetElapsed_ms() - app_inactive_time;
 	if (xr_det_mode())
 		dwTimeContinual = dwTimeGlobal + 33; // det_mode: no wall clock in script-visible time
-	if (s_sim_tick_now || (g_sim_tick_hz >= 10 && psDeviceFlags.test(rsConstantFPS) && !xr_det_mode()))
+	// S2 stage 4d-1: a lever tick (det_mode only) takes the rsConstantFPS branch below, so its time values are those of
+	// stock det_mode (fTimeGlobal += 0.033f, dwTimeGlobal += 33), not sim_tick_advance's
+	if ((s_sim_tick_now && !g_sim_synth_k) || (g_sim_tick_hz >= 10 && psDeviceFlags.test(rsConstantFPS) && !xr_det_mode()))
 	{
 		// S2 prototype: one fixed tick of 1/hz (set by sim_tick_run, or every frame under rsConstantFPS)
 		PROF_EVENT("Sim tick");

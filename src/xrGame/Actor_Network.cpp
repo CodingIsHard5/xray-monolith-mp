@@ -532,6 +532,7 @@ BOOL CActor::net_Spawn(CSE_Abstract* DC)
 	{
 		g_actor = this;
 		g_sim_view_present = &CActor::sim_view_present; // S2 stage 4a: called by the device only in sim_tick gated mode
+		g_sim_synth_witness_s2 = &CActor::sim_synth_witness; // S2 stage 4d-1: called by the device only under the det lever
 	}
 
 	VERIFY(m_pActorEffector == NULL);
@@ -767,6 +768,7 @@ void CActor::net_Destroy()
 	{
 		g_actor = NULL;
 		g_sim_view_present = nullptr; // S2 stage 4a
+		g_sim_synth_witness_s2 = nullptr; // S2 stage 4d-1
 	}
 
 	Engine.Sheduler.Unregister(this);

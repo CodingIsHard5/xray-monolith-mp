@@ -586,6 +586,61 @@ extern ENGINE_API float g_sim_render_alpha;
 // an epoch). Written by the presentation step only; read only while g_sim_render_lerp is TRUE, by the animated models
 // xrGame marked with IKinematicsAnimated::LL_SetSimHudClock (UpdateTracks in SkeletonAnimated.cpp).
 extern ENGINE_API double g_sim_hud_ms;
+// S2 stage 4d-1 (device.cpp, sim_tick gated mode only): the real frame time of the presentation step (s_sv_dt), for
+// render-side easing that would otherwise see Device.fTimeDelta = 0 on a render-only frame. Written by the presentation
+// step only; read only while g_sim_render_lerp is TRUE. Device.fTimeDelta itself is never changed for the render.
+extern ENGINE_API float g_sim_render_dt;
+// S2 stage 4d-1: per-slice switch, console `sim_4d_mask` or start switch `-sim_4d_mask <m>` (read once at start).
+// Read only while g_sim_render_lerp is TRUE, so with sim_tick 0 it is never read. Bit 8 is reserved (minimap, dropped).
+enum
+{
+	SIM4D_BODY = 1, // S2: player body, shadow root, legs
+	SIM4D_TRACERS = 2, // S3: tracers drawn between ticks
+	SIM4D_XHAIR = 4, // S1: crosshair easing with the render dt
+};
+extern ENGINE_API int g_sim_4d_mask; // default 7
+// S2 stage 4d-1, TEST ONLY, every value below is 0 / FALSE / nullptr unless the engine was started with -det_mode:
+// g_sim_synth_k    -det_synth_k <K> (1..8): the "synthetic gated" lever; under det_mode the gate runs a fixed pattern
+//                  (one 33 ms tick, then K-1 render-only frames, alpha = j/K) instead of the wall clock
+// g_sim_synth_tw   -det_synth_tw: tripwires (checksum of the simulation fields a slice's new code could reach, taken
+//                  before and after it; a difference is logged as "* tw <slice> BAD <frame>")
+// g_sim_4d_break   -sim_4d_break <mask>: must-fail breaks (SIM4D_BODY: the actor's draw matrix is written into its
+//                  XFORM at render; SIM4D_TRACERS: the drawn tracer head is written into bullet_pos)
+extern ENGINE_API int g_sim_synth_k;
+extern ENGINE_API BOOL g_sim_synth_tw;
+extern ENGINE_API int g_sim_4d_break;
+// the witness of one gated frame under the lever (written to $logs$/synth_<det_tag>.txt by the device after the
+// render); xrGame fills its slice columns during the render, only while g_sim_synth_k != 0. Reset by the device
+// before every gated frame. Never read by the game.
+struct SimSynthWitness
+{
+	u32 tw_bad; // tripwire BAD count in this frame
+	bool s2; // the s2 columns are set
+	Fvector s2_draw, s2_xform, s2_cam; // actor: drawn position, XFORM().c, camera position between ticks (4a)
+	u32 s3_drawn; // tracers drawn in this frame; u32(-1) = CBulletManager::Render not called
+	Fvector s3_head, s3_pos, s3_start; // first drawn tracer: drawn head, bullet_pos, tracer_start_position
+	bool s3_stamp_ok; // the bullets were stepped in the newest tick
+	bool s1; // the s1 columns are set (first crosshair eased in this frame)
+	float s1_dt; // the dt the crosshair easing used
+	Fvector s1_pos; // that crosshair's position after easing
+	float s1_opacity; // and its opacity
+};
+extern ENGINE_API SimSynthWitness g_sim_synth_wit;
+typedef void (*sim_synth_witness_fn)(); // fills the s2 columns of g_sim_synth_wit (set by xrGame while its actor exists)
+extern ENGINE_API sim_synth_witness_fn g_sim_synth_witness_s2;
+ENGINE_API void sim_4d_tw_bad(const char* slice); // tripwire report: count it in the witness, log one line
+// FNV-1a over raw bytes (tripwire checksums)
+static const u64 sim_4d_hash_seed = 14695981039346656037ull;
+IC u64 sim_4d_hash(u64 h, const void* p, size_t n)
+{
+	const u8* b = static_cast<const u8*>(p);
+	for (size_t i = 0; i < n; ++i)
+	{
+		h ^= b[i];
+		h *= 1099511628211ull;
+	}
+	return h;
+}
 
 typedef xr_delegate<bool()> LOADING_EVENT;
 extern ENGINE_API xr_list<LOADING_EVENT> g_loading_events;

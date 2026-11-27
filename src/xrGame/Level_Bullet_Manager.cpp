@@ -321,6 +321,10 @@ void CBulletManager::UpdateWorkload()
 	u32 const time_delta = Device.dwTimeDelta;
 	if (!time_delta)
 		return;
+	// S2 stage 4d-1: which tick stepped the bullets (unconditional: on a gated tick frame this half can run after the
+	// gate flag is cleared; with sim_tick 0 the tick count stays 0 and nobody reads the field but Render, under the mask)
+	m_sim_step_tick = g_sim_view_tick;
+	m_sim_step_epoch = g_sim_view_epoch;
 
 	collide::rq_result dummy;
 
@@ -1109,6 +1113,26 @@ float SqrDistancePointToSegment(const Fvector& pt, const Fvector& orig, const Fv
 	return diff.square_magnitude();
 }
 
+// S2 stage 4d-1 tripwire (test-only, -det_mode -det_synth_tw): checksum of every simulation field of the bullets that
+// the S3 render code could reach, plus their count; reads only
+static u64 sim_4d_tw_hash_bullets(const xr_vector<SBullet>& bullets)
+{
+	u64 h = sim_4d_hash_seed;
+	const u32 n = u32(bullets.size());
+	h = sim_4d_hash(h, &n, sizeof(n));
+	for (const SBullet& b : bullets)
+	{
+		h = sim_4d_hash(h, &b.bullet_pos, sizeof(Fvector));
+		h = sim_4d_hash(h, &b.tracer_start_position, sizeof(Fvector));
+		h = sim_4d_hash(h, &b.start_position, sizeof(Fvector));
+		h = sim_4d_hash(h, &b.dir, sizeof(Fvector));
+		h = sim_4d_hash(h, &b.speed, sizeof(float));
+		h = sim_4d_hash(h, &b.fly_dist, sizeof(float));
+		h = sim_4d_hash(h, &b.life_time, sizeof(float));
+	}
+	return h;
+}
+
 BOOL g_render_short_tracers = 1;
 void CBulletManager::Render()
 {
@@ -1152,9 +1176,25 @@ void CBulletManager::Render()
 	}
 #endif
 
+	if (g_sim_synth_k && g_sim_render_lerp)
+		g_sim_synth_wit.s3_drawn = 0; // S2 stage 4d-1 lever witness (det_mode only): Render was called in this frame
 	if (m_Bullets.empty()) return;
 	xrCriticalSectionGuard guard(&m_Lock);
 	u32 bullet_num = m_Bullets.size();
+
+	// S2 stage 4d-1, slice S3: tracers drawn between ticks (sim_tick gated mode only; g_sim_render_lerp is FALSE on
+	// every stock frame, so then sim_lerp is false and every expression below is the stock one with head = bullet_pos).
+	// The head is drawn at lerp(tracer_start_position, bullet_pos, alpha): the segment of the newest step, one tick
+	// behind like the bodies. If the newest tick's step has not run yet (its game-thread half can run beside the render
+	// with mtBullets), the stamp is old and the head is drawn at bullet_pos (alpha 1). Nothing here writes a bullet,
+	// except the test-only must-fail break.
+	const bool sim_lerp = g_sim_render_lerp && (g_sim_4d_mask & SIM4D_TRACERS);
+	const bool sim_stamp_ok = m_sim_step_tick == g_sim_view_tick && m_sim_step_epoch == g_sim_view_epoch;
+	const float sim_a = (sim_lerp && sim_stamp_ok) ? g_sim_render_alpha : 1.f;
+	const bool sim_tw = g_sim_synth_tw && g_sim_render_lerp; // test-only tripwire (-det_mode -det_synth_tw)
+	const u64 sim_tw_before = sim_tw ? sim_4d_tw_hash_bullets(m_Bullets) : 0;
+	const bool sim_wit = g_sim_synth_k && g_sim_render_lerp; // test-only witness (det_mode lever)
+	u32 sim_drawn = 0;
 
 	UIRender->StartPrimitive(bullet_num * 12, IUIRender::ptTriList, IUIRender::pttLIT);
 
@@ -1168,6 +1208,10 @@ void CBulletManager::Render()
 
 		if (!bullet.CanBeRenderedNow())
 			continue;
+
+		Fvector head = bullet.bullet_pos; // S2 stage 4d-1: the drawn head (bullet_pos on every stock frame)
+		if (sim_lerp)
+			head.lerp(bullet.tracer_start_position, bullet.bullet_pos, sim_a);
 
 		Fvector const tracer = Fvector().sub(bullet.bullet_pos, bullet.tracer_start_position);
 		float length = tracer.magnitude();
@@ -1185,8 +1229,16 @@ void CBulletManager::Render()
 		if (length > m_fTracerLengthMax)
 			length = m_fTracerLengthMax;
 
+		if (sim_lerp)
+		{
+			// S2 stage 4d-1: no tail behind the start of the trajectory
+			const float back = head.distance_to(bullet.start_position);
+			if (length > back)
+				length = back;
+		}
+
 		float width = m_fTracerWidth;
-		float dist2segSqr = SqrDistancePointToSegment(Device.vCameraPosition, bullet.bullet_pos, tracer);
+		float dist2segSqr = SqrDistancePointToSegment(Device.vCameraPosition, head, tracer);
 		//---------------------------------------------
 		float MaxDistSqr = 1.0f;
 		float MinDistSqr = 0.09f;
@@ -1196,20 +1248,37 @@ void CBulletManager::Render()
 
 			width *= _sqrt(dist2segSqr / MaxDistSqr);
 		}
-		if (Device.vCameraPosition.distance_to_sqr(bullet.bullet_pos) < (length * length))
+		if (Device.vCameraPosition.distance_to_sqr(head) < (length * length))
 		{
-			length = Device.vCameraPosition.distance_to(bullet.bullet_pos) - 0.3f;
+			length = Device.vCameraPosition.distance_to(head) - 0.3f;
 		}
 
 		Fvector center;
-		center.mad(bullet.bullet_pos, tracer_direction, -length * .5f);
+		center.mad(head, tracer_direction, -length * .5f);
 		bool bActor = false;
 		if (Level().CurrentViewEntity())
 		{
 			bActor = (bullet.parent_id == Level().CurrentViewEntity()->ID());
 		}
-		tracers.Render(bullet.bullet_pos, center, tracer_direction, length, width, bullet.m_u8ColorID, bullet.speed, bActor);
+		tracers.Render(head, center, tracer_direction, length, width, bullet.m_u8ColorID, bullet.speed, bActor);
+
+		if (sim_wit && 0 == sim_drawn++)
+		{
+			g_sim_synth_wit.s3_head.set(head);
+			g_sim_synth_wit.s3_pos.set(bullet.bullet_pos);
+			g_sim_synth_wit.s3_start.set(bullet.tracer_start_position);
+			g_sim_synth_wit.s3_stamp_ok = sim_stamp_ok;
+		}
+		// S2 stage 4d-1 must-fail break (test-only; g_sim_4d_break is 0 unless -det_mode): the drawn head is written
+		// into the simulation's bullet position, a deliberate Rule One breach the tripwire must catch
+		if (sim_lerp && (g_sim_4d_break & SIM4D_TRACERS))
+			bullet.bullet_pos = head;
 	}
+
+	if (sim_tw && sim_4d_tw_hash_bullets(m_Bullets) != sim_tw_before)
+		sim_4d_tw_bad("s3");
+	if (sim_wit)
+		g_sim_synth_wit.s3_drawn = sim_drawn;
 
 	UIRender->CacheSetCullMode(IUIRender::cmNONE);
 	UIRender->CacheSetXformWorld(Fidentity);

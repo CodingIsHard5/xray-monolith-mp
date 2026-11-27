@@ -24,6 +24,7 @@ private:
     std::optional<float> m_fwd_offset = std::nullopt;
     float                   m_y_offset = 0.f;
     Fmatrix                 m_legs_transform;
+    Fmatrix                 m_legs_draw; // S2 stage 4d-1: render-only, the legs drawn between ticks (render())
     bool                    m_first_frame = true;
     xr_vector<Fmatrix>      m_prev_bones;
     bool                    m_has_prev = false;

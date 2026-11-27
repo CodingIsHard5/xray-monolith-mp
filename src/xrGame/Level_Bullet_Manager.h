@@ -152,6 +152,9 @@ protected:
 	xrCriticalSection		m_Lock				;
 
 	BulletVec m_Bullets; // working set, locked
+	// S2 stage 4d-1: g_sim_view_tick of the newest UpdateWorkload step (under m_Lock); render-only, read by Render alone
+	u32 m_sim_step_tick = 0;
+	u32 m_sim_step_epoch = 0; // g_sim_view_epoch of that step: a stamp from before a pause or resync is old
 	xr_vector<_event> m_Events;
 
 #ifdef DEBUG

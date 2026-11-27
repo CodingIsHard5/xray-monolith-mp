@@ -2266,6 +2266,22 @@ bool canRenderLegs(CActor* actor, CHolderCustom* m_holder) noexcept
         && !actor->m_FPCam;
 };
 
+// S2 stage 4d-1 tripwire (test-only): the simulation fields the S2 render code could reach, as raw bytes. Called only
+// with g_sim_synth_tw (FALSE unless -det_mode -det_synth_tw); reads only (getters).
+u64 CActor::sim_4d_tw_hash()
+{
+	u64 h = sim_4d_hash_seed;
+	h = sim_4d_hash(h, &XFORM(), sizeof(Fmatrix));
+	h = sim_4d_hash(h, &XFORMShadow, sizeof(Fmatrix));
+	if (PIItem pItem = inventory().ActiveItem())
+		h = sim_4d_hash(h, &pItem->object().XFORM(), sizeof(Fmatrix));
+	for (const auto& I : m_attached_objects)
+		h = sim_4d_hash(h, &I->object().XFORM(), sizeof(Fmatrix));
+	if (PIItem bI = inventory().ItemFromSlot(BOLT_SLOT))
+		h = sim_4d_hash(h, &bI->object().XFORM(), sizeof(Fmatrix));
+	return h;
+}
+
 void CActor::renderable_Render(IDSGraphManager* DM)
 {
 	VERIFY(_valid(XFORM()));

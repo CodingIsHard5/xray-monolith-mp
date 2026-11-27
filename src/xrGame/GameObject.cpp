@@ -822,8 +822,22 @@ static bool sim_render_interpolate(Fmatrix& out, const Fmatrix& a, const Fmatrix
 	return true;
 }
 
-// the renderer's matrix for this object in this frame: &XFORM() unless every condition below holds
+// the renderer's matrix for this object in this frame: &XFORM() unless every condition in sim_render_world_calc holds.
+// S2 stage 4d-1 tripwire (test-only; g_sim_synth_tw is FALSE unless -det_mode -det_synth_tw): for the local actor and
+// its direct children, a checksum of the actor-side simulation fields S2 could reach (CActor::sim_4d_tw_hash) is taken
+// before and after; any difference is reported. Without the switch this is one not-taken branch.
 Fmatrix* CGameObject::sim_render_world()
+{
+	if (!g_sim_synth_tw || !g_actor || (cast_actor() != g_actor && H_Parent() != g_actor))
+		return sim_render_world_calc();
+	const u64 before = g_actor->sim_4d_tw_hash();
+	Fmatrix* m = sim_render_world_calc();
+	if (g_actor->sim_4d_tw_hash() != before)
+		sim_4d_tw_bad("s2");
+	return m;
+}
+
+Fmatrix* CGameObject::sim_render_world_calc()
 {
 	CObject::SimRenderState& s = sim_render;
 	if (s.ptr && s.frame == Device.dwFrame)
@@ -831,9 +845,12 @@ Fmatrix* CGameObject::sim_render_world()
 	s.frame = Device.dwFrame;
 	s.ptr = &XFORM();
 
-	// slice 1: the local player (body, shadow, and through the parent rule below everything it holds) stays stock, and
-	// so does the vehicle or mounted gun it is in (the view rides on it at tick rate: 4a has no presentation step there)
-	if (g_actor && (cast_actor() == g_actor || (g_actor->Holder() && cast_holder_custom() == g_actor->Holder())))
+	// slice 1: the local player's vehicle or mounted gun stays stock (the view rides on it at tick rate: 4a has no
+	// presentation step there), and so does the local player in one. S2 stage 4d-1: the local player on foot (body,
+	// shadow, and through the parent rule below everything it holds) is drawn between ticks as every other object,
+	// unless the mask's body bit is off (then stock, as in 4b). This line is reached only while g_sim_render_lerp.
+	if (g_actor && ((cast_actor() == g_actor && (g_actor->Holder() || !(g_sim_4d_mask & SIM4D_BODY)))
+		|| (g_actor->Holder() && cast_holder_custom() == g_actor->Holder())))
 		return s.ptr;
 
 	if (CObject* P = H_Parent())
@@ -860,6 +877,10 @@ Fmatrix* CGameObject::sim_render_world()
 			return s.ptr;
 		if (!sim_render_interpolate(s.draw, s.prev, s.cur, g_sim_render_alpha))
 			return s.ptr;
+		// S2 stage 4d-1 must-fail break (test-only; g_sim_4d_break is 0 unless -det_mode): the actor's draw matrix is
+		// written into its XFORM at render, a deliberate Rule One breach the tripwire above must catch
+		if ((g_sim_4d_break & SIM4D_BODY) && g_actor && cast_actor() == g_actor)
+			XFORM().set(s.draw);
 	}
 	s.ptr = &s.draw;
 	return s.ptr;

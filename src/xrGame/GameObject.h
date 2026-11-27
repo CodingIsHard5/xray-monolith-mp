@@ -212,6 +212,7 @@ public:
 	IC Fmatrix* sim_render_XFORM(IDSGraphManager* DM) { return g_sim_render_lerp ? sim_render_lerp(DM) : &XFORM(); }
 	Fmatrix* sim_render_lerp(IDSGraphManager* DM);
 	Fmatrix* sim_render_world();
+	Fmatrix* sim_render_world_calc(); // S2 stage 4d-1: the body of sim_render_world (which adds the test-only tripwire)
 	virtual void OnEvent(NET_Packet& P, u16 type);
 
 	virtual void Hit(SHit* pHDS)

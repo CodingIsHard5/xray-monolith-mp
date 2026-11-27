@@ -1120,6 +1120,7 @@ float g_AimLookFactor = 1.f;
 
 int ps_framelimiter = 0;
 extern int g_sim_tick_hz; // S2 prototype (device.cpp): fixed simulation tick in Hz, 0 = off
+extern ENGINE_API int g_sim_4d_mask; // S2 stage 4d-1 (device.cpp): per-slice switch, see device.h
 extern u32 g_crosshair_color;
 float g_freelook_z_offset;
 float g_ironsights_factor = 1.25f;
@@ -1359,6 +1360,7 @@ void CCC_Register()
 
 	CMD4(CCC_Integer, "r__framelimit", &ps_framelimiter, 0, 500);
 	CMD4(CCC_Integer, "sim_tick", &g_sim_tick_hz, 0, 240);
+	CMD4(CCC_Integer, "sim_4d_mask", &g_sim_4d_mask, 0, 15); // S2 stage 4d-1: 1 body, 2 tracers, 4 crosshair
 	CMD3(CCC_Mask, "rs_refresh_60hz", &psDeviceFlags, rsRefresh60hz);
 	CMD3(CCC_Mask, "dbg_ph_shapes", &psDeviceFlags2, rsDBGDrawPHShapes);
 	CMD3(CCC_Mask, "dbg_ph_bones", &psDeviceFlags2, rsDBGDrawPHBones);

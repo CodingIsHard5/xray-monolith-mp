@@ -2063,9 +2063,14 @@ public:
 
 	virtual void Execute(LPCSTR args)
 	{
-		Msg("* det_rng_state %s: Random=%d Random32=%u alife=%u crt_next=%d frame=%u time_ms=%u", args ? args : "",
+		// S2 stage 4d-1: under the synthetic gated lever (det_mode only) a tick is K frames, so the line also gives the
+		// tick count; without the lever the suffix is empty and the line is byte-identical to before
+		string64 tick_suffix = "";
+		if (g_sim_synth_k)
+			xr_sprintf(tick_suffix, " tick=%u", g_sim_view_tick);
+		Msg("* det_rng_state %s: Random=%d Random32=%u alife=%u crt_next=%d frame=%u time_ms=%u%s", args ? args : "",
 		    (int)::Random.seed(), ::Random32.seed(), ai().get_alife() ? const_cast<CALifeSimulator&>(ai().alife()).random().seed() : 0u,
-		    rand(), Device.dwFrame, Device.dwTimeGlobal);
+		    rand(), Device.dwFrame, Device.dwTimeGlobal, tick_suffix);
 	}
 };
 

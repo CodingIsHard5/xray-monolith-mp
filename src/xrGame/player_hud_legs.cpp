@@ -256,5 +256,32 @@ void player_legs_controller::render(IDSGraphManager* DM, bool isShadowPass)
     if (!visual)
         return;
 
-    DM->add_Dynamic(visual, &m_legs_transform);
+    // S2 stage 4d-1 (sim_tick gated mode only, g_sim_render_lerp FALSE on every stock frame): the legs follow the
+    // actor's body drawn between ticks. The rule of update() is applied to the drawn matrix into m_legs_draw, a
+    // render-only matrix; update(), m_legs_transform and actor->XFORMShadow keep their stock values, so the shadow
+    // pass's own writes (Actor.cpp, held items nudged by XFORMShadow - XFORM) do not change value.
+    Fmatrix* m = &m_legs_transform;
+    if (g_sim_render_lerp && (g_sim_4d_mask & SIM4D_BODY) && !actor->Holder())
+    {
+        const u64 tw_before = g_sim_synth_tw ? actor->sim_4d_tw_hash() : 0; // test-only tripwire (-det_synth_tw)
+        Fmatrix* w = actor->sim_render_world();
+        if (w != &actor->XFORM())
+        {
+            m_legs_draw.set(*w);
+            if (legs_attach_to_camera && pDemoRecords.empty())
+                m_legs_draw.c.set(Device.vCameraPosition.x, m_legs_draw.c.y, Device.vCameraPosition.z);
+
+            Fvector fwd = m_legs_draw.k;
+            fwd.y = 0.f;
+            fwd.normalize_safe();
+
+            const float offset = m_fwd_offset.has_value() ? m_fwd_offset.value() : legs_fwd_offset;
+            m_legs_draw.c.mad(fwd, offset);
+            m = &m_legs_draw;
+        }
+        if (g_sim_synth_tw && actor->sim_4d_tw_hash() != tw_before)
+            sim_4d_tw_bad("s2");
+    }
+
+    DM->add_Dynamic(visual, m);
 }

@@ -390,9 +390,13 @@ protected:
 	// rendered frame in sim_view_present, not in UpdateCL; the camera sits between the last two tick positions
 public:
 	bool sim_view_gated() const; // public: player_hud::OnFrame asks (stage 4c)
+	// S2 stage 4d-1 tripwire (test-only, -det_mode -det_synth_tw): checksum of the actor-side simulation fields the S2
+	// render code could reach (XFORM, XFORMShadow, active item, attachments, bolt); reads only
+	u64 sim_4d_tw_hash();
 protected:
 	void sim_view_tick();
 	static void sim_view_present(float dt, float alpha);
+	static void sim_synth_witness(); // S2 stage 4d-1 lever (det_mode only): the s2 columns of the device's witness
 	Fvector m_sim_view_pos_prev; // actor position (XFORM().c) at the tick before the newest one
 	Fvector m_sim_view_pos_new; // ... at the newest tick, read where cam_Update read it in UpdateCL
 	Fvector m_sim_view_pos; // the position cam_Update uses while m_sim_view_presenting
