@@ -194,15 +194,22 @@ _FRAME = re.compile(r'^\s*\.\.\. .*\(line: \d+\) in function')
 
 
 def noise_frames(xlog):
-    """indexes of the traceback FRAME lines of axr_main's callback-registration diagnostics (out/wu1_prime/xray.log:5845):
-    '![axr_main callback_set] callback <x> doesn't exist!' or '... to nil function!', then '~ ----', '~ STACK TRACEBACK:', a
-    blank line, '\t... <f>.script (line: N) in function ...' frames, '~ ----'. A block ends at the first other line; only its
-    frame lines are excused, never an error line ('...script:812: attempt ...') inside or after it."""
-    out, blk = set(), False
+    """indexes of the traceback FRAME lines of axr_main's callback-registration diagnostics. Real bytes (kj2 X run
+    boot0/tb/xray.log:5843-5853, also out/wu1_prime/xray.log:5845): '![axr_main callback_set] callback <x> doesn't exist!'
+    (or '... to nil function!'), '~ ' + 72 '-', '~ STACK TRACEBACK:', a blank line, '\t... <f>.script (line: N) in function
+    ...' frames, '~ ' + 72 '-'. The block ENDS at that second delimiter (review pass 2 #1: a later traceback is not
+    excused), or at the first line of any other form; only its frame lines are excused, never an error line."""
+    out, blk, seps = set(), False, 0
     for i, l in enumerate(xlog):
-        if l.startswith('![axr_main callback_set]') and ("doesn't exist" in l or 'nil function' in l): blk = True; continue
-        if blk and _FRAME.match(l): out.add(i); continue
-        if blk and (l.startswith('~ ') or l.strip() == ''): continue
+        if l.startswith('![axr_main callback_set]') and ("doesn't exist" in l or 'nil function' in l):
+            blk, seps = True, 0; continue
+        if not blk: continue
+        if l.startswith('~ -'):
+            seps += 1
+            if seps >= 2: blk = False   # the closing delimiter: the diagnostic is over
+            continue
+        if l == '~ STACK TRACEBACK:' or l.strip() == '': continue
+        if seps == 1 and _FRAME.match(l): out.add(i); continue
         blk = False
     return out
 

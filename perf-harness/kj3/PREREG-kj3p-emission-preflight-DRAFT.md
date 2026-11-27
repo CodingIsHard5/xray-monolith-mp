@@ -145,7 +145,8 @@ Flagged: two bounds at exactly 2x (8 first z, 9 integer start); four edges set b
 margin (7 and 8 lower edges, 9 first-s upper edge, 9 distance). Copied, not derived for this run: kj2's runner flags (env
 row of section 2) and the 3..16 gap range taken from the two script settings. The Lua-log noise filter is no longer kj2's
 8-line rule (review #10): only the traceback FRAME lines of an `![axr_main callback_set] ... doesn't exist` / `... nil
-function` block (out/wu1_prime/xray.log:5845 shape) are excused; an error line inside or after such a block counts. No bound is copied from another arm's table.
+function` block (real bytes: kj2 X run boot0/tb/xray.log:5843-5853) are excused, and the block ends at its closing `~ ----`
+delimiter (pass 2): an error line, or a later traceback, inside or after such a block counts. No bound is copied from another arm's table.
 
 ## 7. Stop rules
 - The driver refuses on any pin mismatch, a PIN_ME pin, a display that is :0 or exists, an engine already running, a left
@@ -155,12 +156,18 @@ function` block (out/wu1_prime/xray.log:5845 shape) are excused; an error line i
   display, the engine and the title again before either child starts.
 - During the run: T2_MAXRESTART=0 (a crash, 120 s without a first snapshot, 30 s without a new seq, or the over-run limit
   ends the run, no restart); tb_run's wall limit 900 s from launch; the watchdog stops the run within 10 s if a protected title
-  or Sober starts or the title check fails: it kills the engine of THIS run itself (the runner's TERM trap does not stop
-  the engine: t2_xray_kj3.sh:66 only exits, its cleanup CONTs and removes files), then TERMs the runner; exit 4 wins over
-  every other outcome, not a run of record. Only a process of this run is killed (its DISPLAY is the run's display, or its
-  command line has `-t2_run <this run id>`); `wineserver -k` only when no other engine is left.
+  or Sober starts or the title check fails: it TERMs the runner and waits until it is gone (KILL after 5 s), then stops
+  everything of THIS run itself (the runner's TERM trap does not stop the engine: t2_xray_kj3.sh:66 only exits, its cleanup
+  CONTs and removes files): this run's launcher tb_run FIRST (KILL: its own TERM cleanup, tools/tb_run.sh:33, would run a
+  prefix-wide `wineserver -k`), then this run's Wine processes, scanned again after 2 s until two scans in a row are empty,
+  then its Xvfb / openbox and watcher. Exit 4 wins over every other outcome, decided after the watchdog is reaped; not a run
+  of record. Only a process of this run is ever killed (DISPLAY or BENCH_DISPLAY in its environment is the run's display,
+  or its command line has `-t2_run <this run id>`). The driver never runs `wineserver -k`.
 - After: stop on a crash, timeout, refusal or stop; no second boot without the supervisor; at most the one retry of section 5.
-  The driver gives back only what this invocation took (withdraw if it queued, release if it claimed).
+  The driver gives back only what this invocation took: withdraw if it queued; the claim by its `claim-id` receipt, or, with
+  no receipt (a claim cut off after its commit), only if the box flag shows a claim by `engineperf` carrying this run's
+  unique token in its <what>. It does not claim while another `engineperf` claim is held (claim would renew or nest into
+  it). The claim is released only when no process of this run is left; else it is kept and lapses by its 30 minutes.
 
 ## 8. Duration (against a 30 min claim)
 Boot to level ~29 s (kj2) + 465 engine s + quit and Wine teardown ~10 s = ~8.5 min. Claim 30 min; the worst case the runner
@@ -201,10 +208,11 @@ and swapped out by its EXIT trap (:37-38). So only the pinned configs/axr_option
 that wrapper's lock (run/.caden-play.lock) names a live process, and re-checks every pin after the claim.
 
 ## 12. Tests on these bytes
-`nice -n 19 bash wt-render-split/perf-harness/kj3/kj3p_selftest.sh` (2026-11-26 20:40:18-20:40:34, checker b29400ec…,
-run dir kj3/runs/kj3p-st-20261126-204018-2425251, 20 MB): `KJ3P SELFTEST: PASS (checker part rc 0; score-once states 7/7;
-driver functions offline 21/21)`; its checker part: `fixtures: 2 STUB-MADE runs; good PASS True; mutants failing exactly
-their checks 32/32; made NO VERDICT 4/4; missing-file REFUSED 8/8; real kj2 bytes ok`.
+`nice -n 19 bash wt-render-split/perf-harness/kj3/kj3p_selftest.sh` (2026-11-26 20:59:03-20:59:31, checker 4e4443ba…,
+run dir kj3/runs/kj3p-st-20261126-205903-3056122, 20 MB): `KJ3P SELFTEST: PASS (checker part rc 0; score-once states 7/7;
+driver functions offline 28/28)`; its checker part: `fixtures: 2 STUB-MADE runs; good PASS True; mutants failing exactly
+their checks 33/33; made NO VERDICT 4/4; missing-file REFUSED 8/8; real kj2 bytes ok`. Pass 2 added m1_lua_after (the real
+kj2 block, then a later traceback naming the bridge: FAIL 1) and the driver tests listed in the triage file, pass 2.
 Checker fixtures: two STUB-MADE runs of the real kill6 reader (forced surge + psi; no force + two MADE `notstarted` lines),
 32 MADE mutants each failing exactly its listed check(s) (at least one per check 1 to 13; the review round added
 m2_extra, m2_early, m1_lua_noise, m6s_x, m9b, m10c), 4 MADE NO VERDICT fixtures (NV1, NV2+NV3, NV4, NV5), two unparsable
@@ -219,8 +227,8 @@ kj3p_run.sh, offline (sourced with KJ3P_FUNCS_ONLY=1, stub quiet-required.sh / p
 claim, no engine, no display): title_state (playing / clear / helper error / helper missing / pgrep error), disp_free,
 make_out (new / exists / parent not writable / parent missing), pin, final_rc (the marker wins), finish (gives back only
 what was taken), acquire (want, claim, withdraw, release), TERM during want / during a claim that succeeds / fails, a
-failing title check while queued, kill_own on three harmless shells (ours by display, ours by run id, not ours), watch_once
-(playing / check failed / clear), the FUNCS_ONLY guard, the order of the main body, and kill -KILL only in kill_own.
-Not tested: the driver's main body end to end (needs the box), kill_own on a real Wine engine and `wineserver -k`,
-kill_watcher, the runner's new lines (`bash -n` only, kj3 Stage 2); any e/w/v/ns/E* byte the engine wrote; bounds exactly
+failing title check while queued, stop_run on three fake engines (ours by display, ours by run id, not ours), watch_once
+(playing / check failed / clear), the FUNCS_ONLY guard, the order of the main body, kill -KILL only on this run's own lists and no `wineserver -k`.
+Not tested: the driver's main body end to end (needs the box), stop_run on a real Wine engine / tb_run / Xvfb (tested
+on fake processes only), kill_watcher, the user.ltx put-back after a KILLed tb_run, the runner's new lines (`bash -n` only, kj3 Stage 2); any e/w/v/ns/E* byte the engine wrote; bounds exactly
 at their edges.

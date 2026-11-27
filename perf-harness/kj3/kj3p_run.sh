@@ -77,29 +77,48 @@ title_state() {   # 0 = a protected title or Sober is playing; 1 = clear; 2 = ca
   [ $r = 0 ] && return 0; [ $r = 1 ] || return 2   # pgrep: 0 found, 1 none, else error
   return 1
 }
-is_own() {   # <pid>: 1 unless the process belongs to THIS run: its DISPLAY is ours (refused at start if it existed), or
-             # its command line has -t2_run <this run's id> (t2_xray_kj3.sh:92 passes it to the engine)
+is_own() {   # <pid>: 1 unless the process belongs to THIS run: DISPLAY or BENCH_DISPLAY in its environment is ours (the
+             # display was refused at start if it existed; tb_run exports DISPLAY, the driver BENCH_DISPLAY), or its
+             # command line has -t2_run <this run's id> (t2_xray_kj3.sh:92 passes it to tb_run and the engine)
   local p=$1
-  [ -r "/proc/$p/environ" ] && tr '\0' '\n' < "/proc/$p/environ" 2>/dev/null | grep -Fxq "DISPLAY=$DISP" && return 0
-  [ -n "${RID:-}" ] && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -Eq -- "(^| )-t2_run $RID( |\$)" && return 0
+  [ -r "/proc/$p/environ" ] && tr '\0' '\n' 2>/dev/null < "/proc/$p/environ" | grep -Eqx -- "(BENCH_)?DISPLAY=$DISP" && return 0
+  [ -n "${RID:-}" ] && tr '\0' ' ' 2>/dev/null < "/proc/$p/cmdline" | grep -Eq -- "(^| )-t2_run $RID( |\$)" && return 0
   return 1
 }
-cand_pids() { engine_pids Stance14.exe; }   # the selftest replaces this; the real one needs lib_engine_pids.sh
+# candidate lists (the selftest replaces them with its fake processes); a candidate is killed only if is_own says so
+wine_pids() { local d; for d in /proc/[0-9]*; do case "$(readlink "$d/exe" 2>/dev/null)" in *wine*) echo "${d#/proc/}" ;; esac; done; }
+launch_pids() { pgrep -u "$(id -u)" -f 'tools/tb_run\.sh' 2>/dev/null; }
+xsrv_pids() { pgrep -u "$(id -u)" -x Xvfb 2>/dev/null; pgrep -u "$(id -u)" -x openbox 2>/dev/null; }
+own_of() { local p; for p in $("$@"); do [ "$p" = "$$" ] || [ "$p" = "${BASHPID:-}" ] && continue; is_own "$p" && echo "$p"; done; }
 run_id() { RID=$(sed -n 's/^.* boot 0: run_id \([0-9][0-9]*\) .*$/\1/p' "$O/run/t2_xray.log" 2>/dev/null | head -1); }
-kill_own() {   # kill every engine process of this run; wineserver -k only if no other Wine process is left in the prefix
-  local p mine="" other=""
+stop_run() {   # 0 = no process of this run is left. LAUNCHER FIRST (tb_run of this run, KILL: its TERM would run its EXIT
+               # cleanup, whose wineserver -k hits the whole shared prefix), then every Wine process of this run (engine,
+               # explorer, helpers; its wineserver gets TERM), scanned again after a wait until two scans in a row are empty;
+               # then this run's Xvfb / openbox and watcher. No prefix-wide wineserver -k here (pass 2, #2).
+  local i clean=0 l e s x
   run_id
-  for p in $(cand_pids); do if is_own "$p"; then mine="$mine $p"; else other="$other $p"; fi; done
-  [ -z "$mine" ] && return 0
-  log "ENGINE OF THIS RUN pid$mine: killed${other:+ (not touched, not ours:$other)}"; kill -KILL $mine 2>/dev/null
-  [ -n "$other" ] && { log "wineserver -k skipped: another engine runs"; return 0; }
-  [ "${KJ3P_NO_WINESERVER:-0}" = 1 ] && return 0   # selftest only (no Wine there)
-  sleep 1; WINEPREFIX="$P/run/prefix" wineserver -k >/dev/null 2>&1; return 0
+  for i in 1 2 3 4 5 6 7 8; do
+    l=$(own_of launch_pids | tr '\n' ' '); e=""; s=""
+    for x in $(own_of wine_pids); do case "$(cat "/proc/$x/comm" 2>/dev/null)" in wineserver*) s="$s $x" ;; *) e="$e $x" ;; esac; done
+    if [ -z "$l$e$s" ]; then clean=$((clean + 1)); [ $clean -ge 2 ] && break
+    else clean=0
+      [ -n "$l" ] && { log "LAUNCHER of this run (tb_run) pid $l: KILL"; kill -KILL $l 2>/dev/null; KILLED_LAUNCHER=1; }
+      [ -n "$e" ] && { log "WINE processes of this run pid$e: KILL"; kill -KILL $e 2>/dev/null; }
+      [ -n "$s" ] && { log "wineserver of this run pid$s: TERM"; kill -TERM $s 2>/dev/null; }
+    fi
+    sleep "${KJ3P_SCAN_S:-2}"
+  done
+  x=$(own_of xsrv_pids | tr '\n' ' '); [ -n "$x" ] && { log "Xvfb / openbox of this run pid $x: TERM"; kill -TERM $x 2>/dev/null; }
+  kill_watcher
+  # tb_run's own cleanup (tools/tb_run.sh:33) puts the pristine user.ltx back; a KILLed tb_run did not, so do it here
+  [ "${KILLED_LAUNCHER:-0}" = 1 ] && [ -n "${P:-}" ] && [ -f "$P/out/user.ltx.orig" ] && [ -d "$P/run/appdata" ] && cp -f "$P/out/user.ltx.orig" "$P/run/appdata/user.ltx"
+  [ $clean -ge 2 ] && return 0
+  log "LEFT ALIVE after 8 scans: launcher [$l] wine [$e$s]"; return 1
 }
 kill_watcher() {   # the runner's watcher (t1_watch_keep.py) outlives a runner that was TERMed: kill the one writing OUR run dir
   local p
   for p in $(pgrep -u "$(id -u)" -f t1_watch_keep.py 2>/dev/null); do
-    tr '\0' '\n' < "/proc/$p/cmdline" 2>/dev/null | grep -Fxq "$O/run/boot0/watch" && kill "$p" 2>/dev/null
+    tr '\0' '\n' 2>/dev/null < "/proc/$p/cmdline" | grep -Fxq "$O/run/boot0/watch" && kill "$p" 2>/dev/null
   done; return 0
 }
 make_out() {   # the out dir is NEW and writable, made exclusively (mkdir without -p: two drivers cannot both get it)
@@ -111,51 +130,76 @@ log() { echo "$(date '+%F %T') $*" | tee -a "$O/preflight.log"; }
 utc() { echo $(( $(date +%s%N) / 1000000 )); }
 on_sig() { log "cancelled"; rc=143; finish; }
 qr() { "$T/quiet-required.sh" "$@" >/dev/null 2>&1; }
-# want / claim with TERM and INT held over the call: the signal is acted on right AFTER it, once the flag says what this
-# invocation now holds (bash runs a trap only after the foreground command anyway; this keeps the flag in step)
-held_call() {   # <flag var> <qr args...>: sets the flag to 1 when the call ran (want) / succeeded (claim)
+# Ownership read of the box flag. quiet-required.sh has no exit-code way to say who holds a slot or with which <what>
+# (triage, extra); its `check` TEXT (HELD: / SLOTn: <date> <time> <worker> <mins> <what>) is used for this test ONLY.
+flag_lines() { "$T/quiet-required.sh" check 2>/dev/null | sed -n 's/^\(HELD\|SLOT[0-9]*\): //p'; }
+w_holds() { flag_lines | awk -v w="$W" '$3 == w {f = 1} END {exit !f}'; }                     # any claim under our name
+mine_held() { flag_lines | awk -v w="$W" -v t="$TOKEN" '$3 == w && index($0, t) {f = 1} END {exit !f}'; }   # OUR claim
+# want / claim with TERM and INT held over the call: the signal is acted on right AFTER it, once the flags say what this
+# invocation now may hold. A claim can be committed although the call returns non-zero or is cut off (pass 2, #3), so
+# CLAIMTRY=1 from the moment the call starts; release_mine decides from the claim's receipt or the flag what to give back.
+held_call() {   # <flag var> <qr args...>
   local v=$1 r; shift
   SIGPEND=0; trap 'SIGPEND=1' TERM INT
-  qr "$@"; r=$?
-  case "$v" in WANTED) WANTED=1 ;; CLAIMED) [ $r = 0 ] && CLAIMED=1 ;; esac
+  case "$v" in
+    WANTED) qr "$@"; r=$?; WANTED=1 ;;
+    CLAIMED) CLAIMTRY=1; "$T/quiet-required.sh" "$@" >> "$O/claim_calls.txt" 2>&1; r=$?; [ $r = 0 ] && CLAIMED=1 ;;
+  esac
   trap on_sig TERM INT; [ "$SIGPEND" = 1 ] && on_sig
   return $r
 }
+release_mine() {   # after ANY claim call: release the claim this run made, never another claim under the same name
+  [ "$CLAIMTRY" = 1 ] || return 0
+  local id; id=$(sed -n 's/^claim-id: \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' "$O/claim_calls.txt" 2>/dev/null | tail -1)
+  if [ -n "$id" ]; then qr release $W "$id"; log "released claim $id (rc $?)"; RELEASED=1; return 0; fi
+  if mine_held; then qr release $W; log "released a claim with this run's token $TOKEN but no receipt (rc $?)"; RELEASED=1; return 0; fi
+  log "no claim of this run found (token $TOKEN): nothing released"; return 0
+}
 acquire() {   # queue, then claim when no title plays; 0 = claimed; 2 = refused (time out or title check failed)
-  local w0 ts
+  local w0 ts said=""
   held_call WANTED want $W EXCLUSIVE; log "want rc $?"
   w0=$(date +%s)
   while :; do
     title_state; ts=$?
     [ $ts = 2 ] && { log "REFUSED: the protected-title check failed (cannot tell): not clear"; return 2; }
-    [ $ts = 1 ] && held_call CLAIMED claim $W 30 "$WHAT" && break
+    if [ $ts = 1 ] && w_holds; then   # `claim` would renew / nest into that claim (quiet-required.sh:1007, :1116)
+      [ -n "$said" ] || { log "waiting: a claim under '$W' is already held (not this run's); not claiming beside it"; said=1; }
+    elif [ $ts = 1 ]; then held_call CLAIMED claim $W 30 "$WHAT" && break; fi
     [ $(( $(date +%s) - w0 )) -ge $(( WAITMIN * 60 )) ] && { log "REFUSED: no slice in $WAITMIN min"; return 2; }
     sleep "${KJ3P_POLL_S:-60}"
   done
   qr withdraw $W; WANTED=0   # the claim is held; leave the queue
   return 0
 }
-watch_once() {   # 0 = go on; 1 = stop (marker written, engine of this run killed, runner TERMed)
-  local ts; title_state; ts=$?
+watch_once() {   # 0 = go on; 1 = stop: marker, runner TERMed and gone (KILL after 5 s), then everything of this run stopped
+  local ts i; title_state; ts=$?
   [ $ts = 1 ] && return 0
-  echo "$(date '+%F %T') STOP: $([ $ts = 0 ] && echo 'a protected title or Sober started' || echo 'the protected-title check failed (not clear)'); engine of this run killed, runner $XP sent TERM" >> "$O/preflight.log"
-  echo stop > "$O/.title_stop"; kill_own; [ -n "${XP:-}" ] && kill -TERM "$XP" 2>/dev/null
+  echo "$(date '+%F %T') STOP: $([ $ts = 0 ] && echo 'a protected title or Sober started' || echo 'the protected-title check failed (not clear)'); runner $XP sent TERM, then this run's launcher and engine stopped" >> "$O/preflight.log"
+  echo stop > "$O/.title_stop"
+  if [ -n "${XP:-}" ]; then kill -TERM "$XP" 2>/dev/null   # the runner first: it must not launch tb_run after the scan
+    for i in $(seq 1 25); do kill -0 "$XP" 2>/dev/null || break; sleep 0.2; done; kill -KILL "$XP" 2>/dev/null; fi
+  stop_run
   return 1
 }
 final_rc() {   # <rc>: the watchdog stop wins over every other outcome
   [ -e "$O/.title_stop" ] && { log "run STOPPED by the watchdog (protected title / Sober / failed title check): not a run of record" >&2; echo 4; return; }
   echo "$1"
 }
-# ONE way out, also when cancelled: watchdog and writer killed, runner stopped and reaped (it CONTs and removes what it
-# installed, emtest.txt included), the engine of this run stopped, and only then what THIS invocation holds given back.
+# ONE way out, also when cancelled: the watchdog stopped and reaped FIRST and the exit status decided only then (a late
+# stop marker gives 4, pass 2 #4); writer killed; runner stopped and reaped (it CONTs and removes what it installed); every
+# process of this run stopped (stop_run); only then what THIS invocation holds given back, the claim only if nothing of
+# this run is left alive (else it is kept and lapses after its 30 min: never a free box under a live engine).
 finish() { trap - EXIT TERM INT
+  local left=0
   [ -n "$WD" ] && { kill $WD 2>/dev/null; wait $WD 2>/dev/null; }
+  rc=$(final_rc "$rc")
   [ -n "$PW" ] && { kill -KILL $PW 2>/dev/null; wait $PW 2>/dev/null; }
   [ -n "$XP" ] && kill -0 $XP 2>/dev/null && { kill -TERM $XP 2>/dev/null; wait $XP 2>/dev/null; }
-  [ "$LAUNCHED" = 1 ] && { kill_own; kill_watcher; rm -f $SHM/pose.txt $SHM/cross.txt; }
+  [ "$LAUNCHED" = 1 ] && { stop_run || left=1; [ "$SHM" = /dev/shm/itrz_b1 ] && rm -f /dev/shm/itrz_b1/pose.txt /dev/shm/itrz_b1/cross.txt; }
   [ "$WANTED" = 1 ] && qr withdraw $W
-  [ "$CLAIMED" = 1 ] && qr release $W
-  log "slice end (exit $rc; withdrew $WANTED, released $CLAIMED)"; exit $rc; }
+  if [ $left = 1 ]; then log "CLAIM KEPT: a process of this run is still alive (see LEFT ALIVE); the claim lapses by its minutes"
+  else release_mine; fi
+  log "slice end (exit $rc; withdrew $WANTED, claim tried $CLAIMTRY, released $RELEASED)"; exit $rc; }
 
 [ "${KJ3P_FUNCS_ONLY:-0}" = 1 ] && { return 0 2>/dev/null; echo "REFUSED: KJ3P_FUNCS_ONLY=1 is for source only" >&2; exit 2; }
 
@@ -163,7 +207,8 @@ finish() { trap - EXIT TERM INT
 K="$(cd "$(dirname "$0")" && pwd)"; cd "$K/../../.." || exit 2; P=$PWD
 T="$HOME/.claude/overseer/tools"; W=engineperf; O=${1:?out dir}; XROOT=/tmp
 TRK=$HOME/Projects/ITRZone/out/p1/cordon_full_track.csv; TRK1=$K/kj3p_track_start.csv
-PW=""; XP=""; WD=""; rc=2; WANTED=0; CLAIMED=0; LAUNCHED=0; SIGPEND=0; RID=""; SHM=/dev/shm/itrz_b1
+PW=""; XP=""; WD=""; rc=2; WANTED=0; CLAIMED=0; CLAIMTRY=0; RELEASED=0; KILLED_LAUNCHER=0; LAUNCHED=0; SIGPEND=0; RID=""; SHM=/dev/shm/itrz_b1
+TOKEN="kj3p-$(date +%Y%m%d%H%M%S)-$$"   # unique per invocation: in the claim's <what>, so only THIS run's claim is ever released
 # hash preflight. Every pinned file or nothing starts; missing = refused by name; PIN_ME_* = not registered yet = refused.
 bad=0; pins_ok || bad=1
 [ "$bad" = 0 ] && . "$P/tools/lib_engine_pids.sh"   # sourced only once its hash matched
@@ -181,7 +226,7 @@ export BENCH_DISPLAY=$DISP
 # engine seconds from the level load: 15 s warm-up (WAIT_MS, the writer's first pose at track time >= 0) + 440 s of the
 # plan + 10 s so the last T2SUM comes after play 440 (registration section 2)
 RUN_S=465; WALL_S=900
-WHAT="EXCLUSIVE: headless X-Ray-only B1-T2 kj3p emission preflight boot (one engine)"
+WHAT="EXCLUSIVE: headless X-Ray-only B1-T2 kj3p emission preflight boot (one engine) $TOKEN"
 trap finish EXIT; trap on_sig TERM INT   # BEFORE the want: a cancel while queued leaves the queue
 # the slice: queue (want), then claim; every branch on EXIT CODES only (quiet-required.sh header: the exit code is the API)
 acquire || { rc=2; finish; }
@@ -205,9 +250,8 @@ env T2_MAXRESTART=0 T2_EXE=Stance14.exe T2_FREEZE=sigstop T2_ABSORB=2000 T2_STAL
 echo "utc_ms,event,detail" > "$O/writer_events.csv"
 until [ "$(wc -l < "$O/pose_written.csv" 2>/dev/null || echo 0)" -ge 2 ] || ! kill -0 $XP 2>/dev/null || ! kill -0 $PW 2>/dev/null; do sleep 0.2; done
 if [ "$(wc -l < "$O/pose_written.csv" 2>/dev/null || echo 0)" -lt 2 ]; then
-  log "NO FIRST POSE: the writer or the runner ended before it (writer log: $(tail -1 "$O/pose_writer.log" 2>/dev/null))"; rc=$(final_rc 3); finish; fi
+  log "NO FIRST POSE: the writer or the runner ended before it (writer log: $(tail -1 "$O/pose_writer.log" 2>/dev/null))"; rc=3; finish; fi
 echo "$(utc),first_write,session $SESS1 pick 99999 track $TRK1" >> "$O/writer_events.csv"
 wait $XP; rc=$?; XP=""
 log "t2_xray rc=$rc"
-rc=$(final_rc $rc)
-finish
+finish   # finish decides 4 if the watchdog stopped the run (after reaping it)

@@ -200,9 +200,16 @@ def vort_mid(t, n, val):   # set s of vortex n in its middle snapshot to val
     if len(recs) < 3: raise RuntimeError('vortex too short for a middle sample')
     a, b = recs[len(recs) // 2]
     return t[:a] + re.sub(rf'^(v,{n},[^,]+,[^,]+,[^,]+,)[-0-9.]+$', lambda m: m.group(1) + val, t[a:b], count=1, flags=re.M) + t[b:]
-NOISE = ("![axr_main callback_set] callback on_fddar_consumable_anim_start doesn't exist!\n~ " + '-' * 72 + "\n~ STACK TRACEBACK:\n\n"
-         "\t... axr_main.script (line: 267) in function 'callback_set'\n\t... zz_p1_puppet.script (line: 44) in function 'on_game_start'\n"
-         "~ " + '-' * 72 + "\n")
+# the real callback-registration block, read in place from the kj2 X run's engine log (CRLF kept: the checker strips CR)
+def real_block():
+    L = open(os.path.join(KJ2, 'boot0/tb/xray.log'), 'rb').read().decode('utf-8', 'replace').split('\n')
+    a = next(k for k, l in enumerate(L) if l.startswith('![axr_main callback_set]') and "doesn't exist" in l)
+    seps = [k for k in range(a + 1, a + 30) if L[k].startswith('~ -')]
+    return '\n'.join(L[a:seps[1] + 1]) + '\n', a + 1
+REAL_BLOCK, REAL_AT = real_block()
+FR = re.search(r'^\t\.\.\. liz_[^\n]*\(line: 44\) in function [^\n]*$', REAL_BLOCK, re.M).group(0)
+NOISE = REAL_BLOCK.replace(FR, "\t... zz_p1_puppet.script (line: 44) in function 'on_game_start'\r", 1)   # its frame names the bridge
+AFTER = "~ STACK TRACEBACK:\n\n\t... zz_p1_puppet.script (line: 812) in function 'update'\n~ " + '-' * 72 + "\n"   # a later traceback
 GOOD_OUT = open(os.path.join(D, 'reports', 'good.txt')).read()
 D_SURGE = int(re.search(r"surge: runner appended .* EFORCE 'started' at X \d+, (-?\d+) ms after", GOOD_OUT).group(1))
 MUT = [   # name, file, transform, expected failing checks
@@ -211,6 +218,7 @@ MUT = [   # name, file, transform, expected failing checks
     ('m1_lua', 'boot0/tb/xray.log', lambda t: t + '! [LUA] ...gameengine/run\\gamedata\\scripts\\zz_p1_puppet.script:812: attempt to index a nil value\n', ['1']),
     ('m2_extra', M, lambda t: resub(t, r'^(SUMMARY,)', r'EFORCE,19000,unexpected,unknown\n\1'), ['2']),
     ('m2_early', 'emforce.csv', lambda t: resub(t, r'^(\d+)(,[^,]+,surge,\d+)$', lambda m: f'{int(m.group(1)) + D_SURGE + 600}{m.group(2)}'), ['2']),
+    ('m1_lua_after', 'boot0/tb/xray.log', lambda t: t + REAL_BLOCK + AFTER, ['1']),
     ('m1_lua_noise', 'boot0/tb/xray.log', lambda t: t + NOISE + '! [LUA] ...gameengine/run\\gamedata\\scripts\\zz_p1_puppet.script:812: attempt to index a nil value\n', ['1']),
     ('m6s_x', M, lambda t: resub(t, r'^EEND,(\d+),surge,', lambda m: f'EEND,{int(m.group(1)) + 10000},surge,'), ['6s']),
     ('m9b', S, lambda t: vort_mid(t, first_v, '99.00'), ['9']),
@@ -358,7 +366,15 @@ exit \$(cat "$DV/tcode" 2>/dev/null || echo 1)
 EOS
 cat > "$DV/tools/quiet-required.sh" <<EOS
 #!/bin/bash
+# stub: check prints the fake flag ($DV/held); claim modes in $DV/cmode: ok (flag + receipt), commit_sig (flag written,
+# then killed by TERM before any receipt), refuse (rc 2, nothing written); every other verb is only logged
+if [ "\$1" = check ]; then [ -s "$DV/held" ] && { cat "$DV/held"; exit 0; }; echo clear; exit 1; fi
 echo "\$*" >> "$DV/qr.log"; [ -e "$DV/qsleep_\$1" ] && sleep "\$(cat "$DV/qsleep_\$1")"
+if [ "\$1" = claim ]; then case "\$(cat "$DV/cmode" 2>/dev/null)" in
+  commit_sig) echo "HELD: 2026-11-27 00:00:00 \$2 \$3 \$4" > "$DV/held"; kill -TERM \$\$; sleep 5 ;;
+  refuse) echo "REFUSED: stub" >&2; exit 2 ;;
+  *) echo "HELD: 2026-11-27 00:00:00 \$2 \$3 \$4" > "$DV/held"; echo "claimed: stub"; echo "claim-id: c1795.42.7"; exit 0 ;;
+esac; fi
 exit \$(cat "$DV/qcode_\$1" 2>/dev/null || echo 0)
 EOS
 cat > "$DV/bin/pgrep" <<EOS
@@ -366,15 +382,25 @@ cat > "$DV/bin/pgrep" <<EOS
 [ "\$1" = -x ] && [ "\$2" = sober ] && exit \$(cat "$DV/pcode" 2>/dev/null || echo 1)
 exec /usr/bin/pgrep "\$@"
 EOS
-chmod +x "$DV/tools/protected-title-check.sh" "$DV/tools/quiet-required.sh" "$DV/bin/pgrep"
-# each test: a fresh subshell that sources the driver's functions only and sets the variables the main body would set
-fx() { ( KJ3P_FUNCS_ONLY=1; . "$HERE/kj3p_run.sh"; PATH="$DV/bin:$PATH"; T="$DV/tools"; W=engineperf; XROOT="$DV/x"; DISP=:4242
-         P="$DV"; K="$HERE"; SHM="$DV/shm"; WAITMIN=1; WHAT="EXCLUSIVE: test"; PW=""; XP=""; WD=""; rc=0; WANTED=0; CLAIMED=0
-         LAUNCHED=0; SIGPEND=0; RID=""; O="$DV/o"; KJ3P_NO_WINESERVER=1; KJ3P_POLL_S=1; mkdir -p "$O"; eval "$1" ) >> "$DV/fx.log" 2>&1; }
-setq() { local v; for v in want claim withdraw release; do echo 0 > "$DV/qsleep_$v"; echo 0 > "$DV/qcode_$v"; done; : > "$DV/qr.log"; }   # stub state reset (no file removed)
-fxb() { ( KJ3P_FUNCS_ONLY=1; . "$HERE/kj3p_run.sh"; PATH="$DV/bin:$PATH"; T="$DV/tools"; W=engineperf; XROOT="$DV/x"; DISP=:4242
-          P="$DV"; K="$HERE"; SHM="$DV/shm"; WAITMIN=1; WHAT="EXCLUSIVE: test"; PW=""; XP=""; WD=""; rc=0; WANTED=0; CLAIMED=0
-          LAUNCHED=0; SIGPEND=0; RID=""; O="$DV/o"; KJ3P_NO_WINESERVER=1; KJ3P_POLL_S=1; eval "$1" ) >> "$DV/fx.log" 2>&1 & FXP=$!; }   # in the background, FXP = the subshell that holds the traps
+mkdir -p "$DV/fk/tools"
+cat > "$DV/fk/tools/tb_run.sh" <<'EOS'
+#!/bin/bash
+# fake launcher: starts a fake engine (argv0 fakewine) after $1 s, as tb_run.sh starts wine after Xvfb + openbox
+sleep "$1"; exec -a fakewine sleep 30
+EOS
+chmod +x "$DV/tools/protected-title-check.sh" "$DV/tools/quiet-required.sh" "$DV/bin/pgrep" "$DV/fk/tools/tb_run.sh"
+# each test: a fresh subshell that sources the driver's functions only and sets the variables the main body would set;
+# the candidate lists are the fake processes' (argv0 fakewine), never the box's real Wine / Xvfb processes
+SETV='PATH="$DV/bin:$PATH"; T="$DV/tools"; W=engineperf; XROOT="$DV/x"; DISP=:4242; P="$DV"; K="$HERE"; SHM="$DV/shm"; WAITMIN=1
+  TOKEN=tok1; WHAT="EXCLUSIVE: test tok1"; PW=""; XP=""; WD=""; rc=0; WANTED=0; CLAIMED=0; CLAIMTRY=0; RELEASED=0; KILLED_LAUNCHER=0
+  LAUNCHED=0; SIGPEND=0; RID=""; O="$DV/o"; KJ3P_POLL_S=1; KJ3P_SCAN_S=0.4; mkdir -p "$O"
+  wine_pids() { local d; for d in /proc/[0-9]*; do [ "$(tr "\0" "\n" 2>/dev/null < $d/cmdline | head -1)" = fakewine ] && echo "${d#/proc/}"; done; }
+  xsrv_pids() { :; }'
+fx() { ( KJ3P_FUNCS_ONLY=1; . "$HERE/kj3p_run.sh"; eval "$SETV"; eval "$1" ) >> "$DV/fx.log" 2>&1; }
+fxb() { ( KJ3P_FUNCS_ONLY=1; . "$HERE/kj3p_run.sh"; eval "$SETV"; eval "$1" ) >> "$DV/fx.log" 2>&1 & FXP=$!; }   # FXP = the subshell that holds the traps
+setq() { local v; for v in want claim withdraw release; do echo 0 > "$DV/qsleep_$v"; echo 0 > "$DV/qcode_$v"; done; : > "$DV/qr.log"; : > "$DV/held"; echo ok > "$DV/cmode"; }   # stub reset (no file removed)
+q() { tr '\n' '|' < "$DV/qr.log"; }
+fakes() { for d in /proc/[0-9]*; do [ "$(tr '\0' '\n' 2>/dev/null < $d/cmdline | head -1)" = fakewine ] && echo "${d#/proc/}"; done; }
 ts() { echo "$1" > "$DV/tcode"; echo "$2" > "$DV/pcode"; fx 'title_state'; echo $?; }
 [ "$(ts 0 1)" = 0 ] && [ "$(ts 1 1)" = 1 ] && [ "$(ts 1 0)" = 0 ] && [ "$(ts 2 1)" = 2 ] && [ "$(ts 1 3)" = 2 ]; dok "title_state: playing 0, clear 1, helper rc 2 -> 2, pgrep error -> 2" $?
 fx 'T="$DV/notools"; title_state'; [ $? = 2 ]; dok "title_state: helper missing -> 2 (not clear)" $?
@@ -390,38 +416,64 @@ fx "pin '$DV/pinf' $ps"; a=$?; fx "pin '$DV/pinf' ${ps/a/b}0"; b=$?; fx "pin '$D
 [ $a = 0 ] && [ $b = 1 ] && [ $c = 1 ] && [ $d = 1 ]; dok "pin: match ok; other hash / missing / PIN_ME refused ($a$b$c$d)" $?
 fx 'O="$DV/o_fr"; mkdir -p "$O"; [ "$(final_rc 3)" = 3 ] && [ "$(final_rc 0)" = 0 ] && echo stop > "$O/.title_stop" && [ "$(final_rc 3)" = 4 ] && [ "$(final_rc 0)" = 4 ]'
 dok "final_rc: the watchdog marker wins (3 -> 4, 0 -> 4), else unchanged" $?
+# pass 2 #4: a stop marker written while finish reaps the watchdog, on the normal and on the cancel path, gives 4
+mkdir -p "$DV/o_late1" "$DV/o_late2"
+fx 'O="$DV/o_late1"; bash -c "trap \"echo stop > $DV/o_late1/.title_stop; exit 0\" TERM; while :; do sleep 0.1; done" & WD=$!; sleep 0.3; rc=0; finish'; a=$?
+fx 'O="$DV/o_late2"; bash -c "trap \"echo stop > $DV/o_late2/.title_stop; exit 0\" TERM; while :; do sleep 0.1; done" & WD=$!; sleep 0.3; on_sig'; b=$?
+fx 'O="$DV/o_late3"; mkdir -p "$O"; sleep 5 & WD=$!; rc=0; finish'; c=$?
+[ $a = 4 ] && [ $b = 4 ] && [ $c = 0 ]; dok "finish: a marker written while the watchdog is reaped gives 4 (normal $a, cancel $b); none keeps the status ($c)" $?
 setq; fx 'finish'; a=$?; [ ! -s "$DV/qr.log" ] && [ $a = 0 ]; dok "finish with nothing taken: no withdraw, no release" $?
-setq; fx 'WANTED=1; rc=2; finish'; a=$?; [ "$(cat "$DV/qr.log")" = "withdraw engineperf" ] && [ $a = 2 ]; dok "finish after a want only: withdraw only" $?
-setq; fx 'CLAIMED=1; finish'; [ "$(cat "$DV/qr.log")" = "release engineperf" ]; dok "finish after a claim: release only" $?
+setq; fx 'WANTED=1; rc=2; finish'; a=$?; [ "$(q)" = "withdraw engineperf|" ] && [ $a = 2 ]; dok "finish after a want only: withdraw only" $?
+setq; fx 'CLAIMTRY=1; echo "claim-id: c9.9.9" > "$O/claim_calls.txt"; finish'; [ "$(q)" = "release engineperf c9.9.9|" ]; dok "finish after a claim with a receipt: release by that id only" $?
 echo 1 > "$DV/tcode"; echo 1 > "$DV/pcode"
-setq; fx 'trap finish EXIT; trap on_sig TERM INT; acquire; echo "acq $?" >> "$O/acq"; finish'
-[ "$(tr '\n' '|' < "$DV/qr.log")" = "want engineperf EXCLUSIVE|claim engineperf 30 EXCLUSIVE: test|withdraw engineperf|release engineperf|" ]; dok "acquire: want, claim, withdraw; finish releases" $?
+CL="claim engineperf 30 EXCLUSIVE: test tok1"
+setq; fx 'O="$DV/o_a1"; mkdir -p "$O"; trap finish EXIT; trap on_sig TERM INT; acquire; finish'
+[ "$(q)" = "want engineperf EXCLUSIVE|$CL|withdraw engineperf|release engineperf c1795.42.7|" ]; dok "acquire: want, claim, withdraw; finish releases by the receipt id" $?
+# pass 2 #3: a claim committed by a helper that dies (TERM) before its receipt; a refused claim beside another engineperf claim
+setq; echo commit_sig > "$DV/cmode"; fx 'O="$DV/o_a2"; mkdir -p "$O"; held_call CLAIMED claim $W 30 "$WHAT"; echo "rc $?" >> "$O/rc"; finish'
+[ "$(q)" = "$CL|release engineperf|" ] && grep -q 'rc 143' "$DV/o_a2/rc"; dok "claim committed, helper killed before its receipt (rc 143): found by its token, released" $?
+setq; echo refuse > "$DV/cmode"; echo "HELD: 2026-11-27 00:00:00 engineperf 60 EXCLUSIVE: another engineperf job" > "$DV/held"
+fx 'O="$DV/o_a3"; mkdir -p "$O"; held_call CLAIMED claim $W 30 "$WHAT"; finish'; [ "$(q)" = "$CL|" ]; dok "claim refused while ANOTHER engineperf claim is held: nothing released" $?
+setq; echo "HELD: 2026-11-27 00:00:00 engineperf 60 EXCLUSIVE: another engineperf job" > "$DV/held"
+fx 'O="$DV/o_a4"; mkdir -p "$O"; WAITMIN=0; trap finish EXIT; trap on_sig TERM INT; acquire; rc=$?; finish'; [ "$(q)" = "want engineperf EXCLUSIVE|withdraw engineperf|" ]; dok "an engineperf claim already held: no claim beside it (would renew it), queue left, nothing released" $?
 setq; echo 2 > "$DV/qsleep_want"
-fxb 'trap finish EXIT; trap on_sig TERM INT; acquire; finish'; sleep 0.7; kill -TERM $FXP; wait $FXP; a=$?
-[ $a = 143 ] && [ "$(tr '\n' '|' < "$DV/qr.log")" = "want engineperf EXCLUSIVE|withdraw engineperf|" ]; dok "TERM during want: exit 143 ($a), leaves the queue, claims nothing, releases nothing" $?
+fxb 'O="$DV/o_t1"; mkdir -p "$O"; trap finish EXIT; trap on_sig TERM INT; acquire; finish'; sleep 0.7; kill -TERM $FXP; wait $FXP; a=$?
+[ $a = 143 ] && [ "$(q)" = "want engineperf EXCLUSIVE|withdraw engineperf|" ]; dok "TERM during want: exit 143 ($a), leaves the queue, claims nothing, releases nothing" $?
 setq; echo 2 > "$DV/qsleep_claim"
-fxb 'trap finish EXIT; trap on_sig TERM INT; acquire; finish'; sleep 0.7; kill -TERM $FXP; wait $FXP; a=$?
-[ "$(tr '\n' '|' < "$DV/qr.log")" = "want engineperf EXCLUSIVE|claim engineperf 30 EXCLUSIVE: test|withdraw engineperf|release engineperf|" ]; dok "TERM during a claim that succeeds: the claim is released" $?
-setq; echo 1 > "$DV/qcode_claim"; echo 2 > "$DV/qsleep_claim"
-fxb 'trap finish EXIT; trap on_sig TERM INT; acquire; finish'; sleep 0.7; kill -TERM $FXP; wait $FXP; a=$?
-[ "$(tr '\n' '|' < "$DV/qr.log")" = "want engineperf EXCLUSIVE|claim engineperf 30 EXCLUSIVE: test|withdraw engineperf|" ]; dok "TERM during a claim that fails: no release" $?
+fxb 'O="$DV/o_t2"; mkdir -p "$O"; trap finish EXIT; trap on_sig TERM INT; acquire; finish'; sleep 0.7; kill -TERM $FXP; wait $FXP; a=$?
+[ "$(q)" = "want engineperf EXCLUSIVE|$CL|withdraw engineperf|release engineperf c1795.42.7|" ]; dok "TERM during a claim that succeeds: released by its id" $?
+setq; echo refuse > "$DV/cmode"; echo 2 > "$DV/qsleep_claim"
+fxb 'O="$DV/o_t3"; mkdir -p "$O"; trap finish EXIT; trap on_sig TERM INT; acquire; finish'; sleep 0.7; kill -TERM $FXP; wait $FXP; a=$?
+[ "$(q)" = "want engineperf EXCLUSIVE|$CL|withdraw engineperf|" ]; dok "TERM during a claim that fails: no release" $?
 setq; echo 2 > "$DV/tcode"
-fx 'trap finish EXIT; trap on_sig TERM INT; acquire; a=$?; [ $a = 2 ] && rc=2; finish'
-[ "$(tr '\n' '|' < "$DV/qr.log")" = "want engineperf EXCLUSIVE|withdraw engineperf|" ]; dok "title check failing while queued: refused, no claim, queue left" $?
+fx 'O="$DV/o_t4"; mkdir -p "$O"; trap finish EXIT; trap on_sig TERM INT; acquire; a=$?; [ $a = 2 ] && rc=2; finish'
+[ "$(q)" = "want engineperf EXCLUSIVE|withdraw engineperf|" ]; dok "title check failing while queued: refused, no claim, queue left" $?
 echo 1 > "$DV/tcode"
-# own-engine kill on three harmless shells: one on our display, one with -t2_run <our run id>, one neither
+# own-process kill on three fake engines (argv0 fakewine): ours by display, ours by run id, not ours
 mkdir -p "$DV/o/run"; echo "2026-11-27 00:00:00.000Z boot 0: run_id 777 engine_s 465 load 0 0 0" > "$DV/o/run/t2_xray.log"
-alive=$( { env DISPLAY=:4242 bash -c 'sleep 20; :' >/dev/null & p1=$!; env DISPLAY=:4243 bash -c 'sleep 20; :' x -t2_run 777 >/dev/null & p2=$!
-  env DISPLAY=:4243 bash -c 'sleep 20; :' x -t2_run 7770 >/dev/null & p3=$!
-  sleep 0.3; fx "cand_pids() { echo $p1 $p2 $p3; }; kill_own"; sleep 0.3
-  for q in $p1 $p2 $p3; do kill -0 $q 2>/dev/null && printf 1 || printf 0; done; kill $p3; wait $p1 $p2 $p3; } 2>/dev/null )   # job notices dropped
-a=${alive:0:1}; b=${alive:1:1}; c=${alive:2:1}
-[ $a = 0 ] && [ $b = 0 ] && [ $c = 1 ]; dok "kill_own: kills our display's and our run id's process, leaves the other (alive $a$b$c)" $?
+alive=$( { env DISPLAY=:4242 bash -c "exec -a fakewine bash -c 'sleep 20; :'" >/dev/null & p1=$!; env DISPLAY=:4243 bash -c "exec -a fakewine bash -c 'sleep 20; :' x -t2_run 777" >/dev/null & p2=$!
+  env DISPLAY=:4243 bash -c "exec -a fakewine bash -c 'sleep 20; :' x -t2_run 7770" >/dev/null & p3=$!
+  sleep 0.3; fx 'stop_run'; echo "sr $?" >> "$DV/o/sr"
+  for x in $p1 $p2 $p3; do kill -0 $x 2>/dev/null && printf 1 || printf 0; done; kill $p3; wait $p1 $p2 $p3; } 2>/dev/null )   # job notices dropped
+[ "$alive" = 001 ]; dok "stop_run: kills our display's and our run id's process, leaves the other (alive $alive)" $?
+# pass 2 #5: the launcher is stopped BEFORE it can start an engine; an engine that appears after the first scan is caught
+# by the rescan; the claim is given back only after both, and kept if something of this run cannot be stopped
+setq; mkdir -p "$DV/o_l1/run"; cp "$DV/o/run/t2_xray.log" "$DV/o_l1/run/"; echo "claim-id: c5.5.5" > "$DV/o_l1/claim_calls.txt"
+fx 'O="$DV/o_l1"; env BENCH_DISPLAY=:4242 "$DV/fk/tools/tb_run.sh" 1.0 -t2_run 777 >/dev/null 2>&1 & sleep 0.2; LAUNCHED=1; CLAIMTRY=1; finish'; sleep 1.3
+n=$(fakes | while read -r x; do tr '\0' '\n' 2>/dev/null < /proc/$x/environ | grep -qx 'BENCH_DISPLAY=:4242' && echo $x; done | grep -c .)
+lk=$(grep -n 'LAUNCHER of this run' "$DV/o_l1/preflight.log" | head -1 | cut -d: -f1); rl=$(grep -n 'released claim c5.5.5' "$DV/o_l1/preflight.log" | cut -d: -f1)
+[ "$n" = 0 ] && [ -n "$lk" ] && [ -n "$rl" ] && [ "$lk" -lt "$rl" ] && [ "$(q)" = "release engineperf c5.5.5|" ]; dok "launcher killed before its engine start, no engine of this run 1.3 s later, released after (launcher line $lk < release line $rl)" $?
+setq; mkdir -p "$DV/o_l2/run"; cp "$DV/o/run/t2_xray.log" "$DV/o_l2/run/"
+fx 'O="$DV/o_l2"; ( sleep 0.1; exec env BENCH_DISPLAY=:4242 bash -c "exec -a fakewine sleep 30" ) >/dev/null 2>&1 & LAUNCHED=1; finish'; sleep 0.2
+n=$(fakes | while read -r x; do tr '\0' '\n' 2>/dev/null < /proc/$x/environ | grep -qx 'BENCH_DISPLAY=:4242' && echo $x; done | grep -c .)
+[ "$n" = 0 ] && grep -q 'WINE processes of this run' "$DV/o_l2/preflight.log"; dok "an engine of this run that appears after the first scan is caught by the rescan" $?
+setq; mkdir -p "$DV/o_l3"; echo "claim-id: c6.6.6" > "$DV/o_l3/claim_calls.txt"
+fx 'O="$DV/o_l3"; stop_run() { return 1; }; LAUNCHED=1; CLAIMTRY=1; finish'; [ ! -s "$DV/qr.log" ] && grep -q 'CLAIM KEPT' "$DV/o_l3/preflight.log"; dok "a process of this run left alive: the claim is kept, not released" $?
 # watchdog: playing / check failed -> marker, runner TERMed, stop; clear -> go on
 for code in 0 2; do echo $code > "$DV/tcode"; sleep 20 & xp=$!
-  mkdir -p "$DV/o_w$code"; fx "O=\"\$DV/o_w$code\"; cand_pids() { :; }; XP=$xp; watch_once"; a=$?; sleep 0.2; k=0; kill -0 $xp 2>/dev/null && k=1; kill $xp 2>/dev/null; wait $xp 2>/dev/null
-  [ $a = 1 ] && [ -e "$DV/o_w$code/.title_stop" ] && [ $k = 0 ]; dok "watch_once title rc $code: stop marker, runner TERMed" $?; done
-echo 1 > "$DV/tcode"; mkdir -p "$DV/o_wc"; fx 'O="$DV/o_wc"; cand_pids() { :; }; watch_once'; a=$?; [ $a = 0 ] && [ ! -e "$DV/o_wc/.title_stop" ]; dok "watch_once clear: goes on, no marker" $?
+  mkdir -p "$DV/o_w$code"; fx "O=\"\$DV/o_w$code\"; XP=$xp; watch_once"; a=$?; k=0; kill -0 $xp 2>/dev/null && k=1; kill $xp 2>/dev/null; wait $xp 2>/dev/null
+  [ $a = 1 ] && [ -e "$DV/o_w$code/.title_stop" ] && [ $k = 0 ]; dok "watch_once title rc $code: stop marker, runner TERMed and gone before the scan" $?; done
+echo 1 > "$DV/tcode"; mkdir -p "$DV/o_wc"; fx 'O="$DV/o_wc"; watch_once'; a=$?; [ $a = 0 ] && [ ! -e "$DV/o_wc/.title_stop" ]; dok "watch_once clear: goes on, no marker" $?
 # source guard and the order of the main body (static: line numbers in the file)
 r=$(t env KJ3P_FUNCS_ONLY=1 bash "$HERE/kj3p_run.sh" "$DV/should_not_exist"); [ "$r" = 2 ] && [ ! -e "$DV/should_not_exist" ]; dok "KJ3P_FUNCS_ONLY=1 run as a program: refused, nothing made" $?
 ln_() { grep -n -F -- "$1" "$HERE/kj3p_run.sh" | grep -v '^[0-9]*: *#' | tail -1 | cut -d: -f1; }
@@ -429,7 +481,9 @@ L1=$(ln_ 'make_out || exit 2'); L2=$(ln_ 'trap finish EXIT; trap on_sig TERM INT
 L5=$(ln_ 'SESS1=$(utc); LAUNCHED=1'); L6=$(ln_ 'python3 -I tools/t2_kill_pose.py'); L7=$(ln_ 'tools/t2_xray_kj3.sh "$O/run"')
 [ -n "$L1" ] && [ -n "$L7" ] && [ "$L1" -lt "$L2" ] && [ "$L2" -lt "$L3" ] && [ "$L3" -lt "$L4" ] && [ "$L4" -lt "$L5" ] && [ "$L5" -lt "$L6" ] && [ "$L6" -lt "$L7" ]
 dok "main body order: out dir ($L1) < traps ($L2) < claim ($L3) < pins again ($L4) < launch ($L5-$L7)" $?
-nk=$(grep -c -- 'kill -KILL' "$HERE/kj3p_run.sh"); grep -q -- 'kill -KILL \$mine' "$HERE/kj3p_run.sh" && [ "$nk" = 2 ]; dok "kill -KILL only on this run's engine (kill_own) and the writer ($nk lines)" $?
+kk=$(grep -o -- 'kill -KILL [^ ;]*' "$HERE/kj3p_run.sh" | LC_ALL=C sort -u | tr '\n' ' ')
+[ "$kk" = 'kill -KILL "$XP" kill -KILL $PW kill -KILL $e kill -KILL $l ' ] && ! grep -v '^ *#' "$HERE/kj3p_run.sh" | grep -q 'wineserver -k'
+dok "kill -KILL only on this run's own lists / children ($kk); no wineserver -k" $?
 echo "driver offline tests: $nd passed${dbad:+, BAD:$dbad}; score states: $ns passed${sbad:+, BAD:$sbad}"
 fin=PASS; [ "$pyrc" = 0 ] && [ -z "$sbad" ] && [ -z "$dbad" ] || fin=FAIL
 echo "end $(date '+%F %T')"

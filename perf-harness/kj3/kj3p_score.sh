@@ -7,7 +7,7 @@
 # 3. The checker runs with stdout into the open report; its exit code goes to <report>.rc (no-clobber) only after it ran.
 # Exit: the checker's (0 PASS, 1 FAIL, 3 NO VERDICT, 2 REFUSED), or 2 when this script refuses.
 set -u
-CHK_SHA=b29400ec625ac45d73243878d9902ee1254b24b69715631dcf1b2ba5e633ad9b
+CHK_SHA=4e4443baa21b7c1802edb8d5e3cac9a0c58515f9879d491103303acb5fb2d5ac
 K="$(cd "$(dirname "$0")" && pwd)"; CHK="$K/kj3p_check.py"
 [ $# -eq 2 ] && [ -n "$1" ] && [ -n "$2" ] || { echo "usage: kj3p_score.sh <run dir> <report file>" >&2; exit 2; }
 R=$1; REP=$2
