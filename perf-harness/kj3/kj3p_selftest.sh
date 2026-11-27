@@ -210,6 +210,8 @@ REAL_BLOCK, REAL_AT = real_block()
 FR = re.search(r'^\t\.\.\. liz_[^\n]*\(line: 44\) in function [^\n]*$', REAL_BLOCK, re.M).group(0)
 NOISE = REAL_BLOCK.replace(FR, "\t... zz_p1_puppet.script (line: 44) in function 'on_game_start'\r", 1)   # its frame names the bridge
 AFTER = "~ STACK TRACEBACK:\n\n\t... zz_p1_puppet.script (line: 812) in function 'update'\n~ " + '-' * 72 + "\n"   # a later traceback
+_k = REAL_BLOCK.rstrip('\n').rfind('\n') + 1   # start of the closing delimiter line
+SECOND = REAL_BLOCK[:_k] + "~ STACK TRACEBACK:\r\n\r\n\t... zz_p1_puppet.script (line: 812) in function 'update'\r\n" + REAL_BLOCK[_k:]   # a 2nd traceback inside
 GOOD_OUT = open(os.path.join(D, 'reports', 'good.txt')).read()
 D_SURGE = int(re.search(r"surge: runner appended .* EFORCE 'started' at X \d+, (-?\d+) ms after", GOOD_OUT).group(1))
 MUT = [   # name, file, transform, expected failing checks
@@ -219,6 +221,7 @@ MUT = [   # name, file, transform, expected failing checks
     ('m2_extra', M, lambda t: resub(t, r'^(SUMMARY,)', r'EFORCE,19000,unexpected,unknown\n\1'), ['2']),
     ('m2_early', 'emforce.csv', lambda t: resub(t, r'^(\d+)(,[^,]+,surge,\d+)$', lambda m: f'{int(m.group(1)) + D_SURGE + 600}{m.group(2)}'), ['2']),
     ('m1_lua_after', 'boot0/tb/xray.log', lambda t: t + REAL_BLOCK + AFTER, ['1']),
+    ('m1_lua_second', 'boot0/tb/xray.log', lambda t: t + SECOND, ['1']),
     ('m1_lua_noise', 'boot0/tb/xray.log', lambda t: t + NOISE + '! [LUA] ...gameengine/run\\gamedata\\scripts\\zz_p1_puppet.script:812: attempt to index a nil value\n', ['1']),
     ('m6s_x', M, lambda t: resub(t, r'^EEND,(\d+),surge,', lambda m: f'EEND,{int(m.group(1)) + 10000},surge,'), ['6s']),
     ('m9b', S, lambda t: vort_mid(t, first_v, '99.00'), ['9']),
@@ -395,7 +398,8 @@ SETV='PATH="$DV/bin:$PATH"; T="$DV/tools"; W=engineperf; XROOT="$DV/x"; DISP=:42
   TOKEN=tok1; WHAT="EXCLUSIVE: test tok1"; PW=""; XP=""; WD=""; rc=0; WANTED=0; CLAIMED=0; CLAIMTRY=0; RELEASED=0; KILLED_LAUNCHER=0
   LAUNCHED=0; SIGPEND=0; RID=""; O="$DV/o"; KJ3P_POLL_S=1; KJ3P_SCAN_S=0.4; mkdir -p "$O"
   wine_pids() { local d; for d in /proc/[0-9]*; do [ "$(tr "\0" "\n" 2>/dev/null < $d/cmdline | head -1)" = fakewine ] && echo "${d#/proc/}"; done; }
-  xsrv_pids() { :; }'
+  xsrv_pids() { local d; for d in /proc/[0-9]*; do [ "$(tr "\0" "\n" 2>/dev/null < $d/cmdline | head -1)" = fakexvfb ] && echo "${d#/proc/}"; done; }
+  LOCKF="$DV/state/driver.lock"'
 fx() { ( KJ3P_FUNCS_ONLY=1; . "$HERE/kj3p_run.sh"; eval "$SETV"; eval "$1" ) >> "$DV/fx.log" 2>&1; }
 fxb() { ( KJ3P_FUNCS_ONLY=1; . "$HERE/kj3p_run.sh"; eval "$SETV"; eval "$1" ) >> "$DV/fx.log" 2>&1 & FXP=$!; }   # FXP = the subshell that holds the traps
 setq() { local v; for v in want claim withdraw release; do echo 0 > "$DV/qsleep_$v"; echo 0 > "$DV/qcode_$v"; done; : > "$DV/qr.log"; : > "$DV/held"; echo ok > "$DV/cmode"; }   # stub reset (no file removed)
@@ -458,11 +462,30 @@ alive=$( { env DISPLAY=:4242 bash -c "exec -a fakewine bash -c 'sleep 20; :'" >/
 [ "$alive" = 001 ]; dok "stop_run: kills our display's and our run id's process, leaves the other (alive $alive)" $?
 # pass 2 #5: the launcher is stopped BEFORE it can start an engine; an engine that appears after the first scan is caught
 # by the rescan; the claim is given back only after both, and kept if something of this run cannot be stopped
+mkdir -p "$DV/out" "$DV/run/appdata"; echo pristine > "$DV/out/user.ltx.orig"; echo changed > "$DV/run/appdata/user.ltx"
 setq; mkdir -p "$DV/o_l1/run"; cp "$DV/o/run/t2_xray.log" "$DV/o_l1/run/"; echo "claim-id: c5.5.5" > "$DV/o_l1/claim_calls.txt"
 fx 'O="$DV/o_l1"; env BENCH_DISPLAY=:4242 "$DV/fk/tools/tb_run.sh" 1.0 -t2_run 777 >/dev/null 2>&1 & sleep 0.2; LAUNCHED=1; CLAIMTRY=1; finish'; sleep 1.3
 n=$(fakes | while read -r x; do tr '\0' '\n' 2>/dev/null < /proc/$x/environ | grep -qx 'BENCH_DISPLAY=:4242' && echo $x; done | grep -c .)
 lk=$(grep -n 'LAUNCHER of this run' "$DV/o_l1/preflight.log" | head -1 | cut -d: -f1); rl=$(grep -n 'released claim c5.5.5' "$DV/o_l1/preflight.log" | cut -d: -f1)
 [ "$n" = 0 ] && [ -n "$lk" ] && [ -n "$rl" ] && [ "$lk" -lt "$rl" ] && [ "$(q)" = "release engineperf c5.5.5|" ]; dok "launcher killed before its engine start, no engine of this run 1.3 s later, released after (launcher line $lk < release line $rl)" $?
+grep -q 'tb_run pid' "$DV/o_l1/.restore_user_ltx.done" 2>/dev/null && cmp -s "$DV/out/user.ltx.orig" "$DV/run/appdata/user.ltx"; dok "launcher KILL: marker written first, user.ltx put back from it" $?
+# pass 3 #5: the watchdog wrote the marker (killed tb_run) and was stopped before it put user.ltx back: finish does it
+echo changed > "$DV/run/appdata/user.ltx"; mkdir -p "$DV/o_r1"
+fx 'O="$DV/o_r1"; bash -c "echo killed > $DV/o_r1/.restore_user_ltx; sleep 30" & WD=$!; sleep 0.3; finish'
+cmp -s "$DV/out/user.ltx.orig" "$DV/run/appdata/user.ltx" && [ -e "$DV/o_r1/.restore_user_ltx.done" ] && [ ! -e "$DV/o_r1/.restore_user_ltx" ]; dok "marker left by a stopped watchdog: parent finish puts user.ltx back" $?
+# pass 3 #1: this run's Xvfb that takes 0.5 s to exit is waited for; one that cannot be stopped keeps the claim
+setq; mkdir -p "$DV/o_x1/run" "$DV/o_x2/run"; echo "claim-id: c7.7.7" > "$DV/o_x2/claim_calls.txt"
+fx 'O="$DV/o_x1"; env DISPLAY=:4242 bash -c "exec -a fakexvfb bash -c '"'"'trap \"sleep 0.5; exit 0\" TERM; while :; do sleep 0.1; done'"'"'" >/dev/null 2>&1 & sleep 0.3; stop_run'; a=$?
+n=$(for d in /proc/[0-9]*; do [ "$(tr '\0' '\n' 2>/dev/null < $d/cmdline | head -1)" = fakexvfb ] && echo x; done | grep -c .)
+[ $a = 0 ] && [ "$n" = 0 ]; dok "stop_run waits for this run's Xvfb (exits 0.5 s after TERM): none left, rc $a" $?
+env DISPLAY=:4242 bash -c "exec -a fakexvfb bash -c 'while :; do sleep 0.1; done'" >/dev/null 2>&1 & px=$!; sleep 0.3
+fx "O=\"\$DV/o_x2\"; STUCK=$px; kill() { local a o=(); for a in \"\$@\"; do [ \"\$a\" = \"\$STUCK\" ] || o+=(\"\$a\"); done; builtin kill \"\${o[@]}\"; }; LAUNCHED=1; CLAIMTRY=1; finish"
+k=0; kill -0 $px 2>/dev/null && k=1; { kill -KILL $px; wait $px; } 2>/dev/null
+[ $k = 1 ] && [ ! -s "$DV/qr.log" ] && grep -q 'LEFT ALIVE.*'"$px" "$DV/o_x2/preflight.log" && grep -q 'CLAIM KEPT' "$DV/o_x2/preflight.log"; dok "an Xvfb of this run that cannot be stopped: LEFT ALIVE, claim kept, nothing released" $?
+# pass 3 #2: a second kj3p driver cannot take the lock while the first holds it; it can once the first is gone
+fxb 'take_lock && { echo got > "$DV/lk1"; sleep 2; }'; sleep 0.5
+fx 'take_lock'; a=$?; grep -q 'REFUSED: another kj3p driver holds' "$DV/fx.log"; b=$?; wait $FXP; fx 'take_lock'; c=$?
+[ -e "$DV/lk1" ] && [ $a = 1 ] && [ $b = 0 ] && [ $c = 0 ]; dok "driver lock: second instance refused by name while the first holds it ($a), taken after ($c)" $?
 setq; mkdir -p "$DV/o_l2/run"; cp "$DV/o/run/t2_xray.log" "$DV/o_l2/run/"
 fx 'O="$DV/o_l2"; ( sleep 0.1; exec env BENCH_DISPLAY=:4242 bash -c "exec -a fakewine sleep 30" ) >/dev/null 2>&1 & LAUNCHED=1; finish'; sleep 0.2
 n=$(fakes | while read -r x; do tr '\0' '\n' 2>/dev/null < /proc/$x/environ | grep -qx 'BENCH_DISPLAY=:4242' && echo $x; done | grep -c .)
@@ -482,7 +505,7 @@ L5=$(ln_ 'SESS1=$(utc); LAUNCHED=1'); L6=$(ln_ 'python3 -I tools/t2_kill_pose.py
 [ -n "$L1" ] && [ -n "$L7" ] && [ "$L1" -lt "$L2" ] && [ "$L2" -lt "$L3" ] && [ "$L3" -lt "$L4" ] && [ "$L4" -lt "$L5" ] && [ "$L5" -lt "$L6" ] && [ "$L6" -lt "$L7" ]
 dok "main body order: out dir ($L1) < traps ($L2) < claim ($L3) < pins again ($L4) < launch ($L5-$L7)" $?
 kk=$(grep -o -- 'kill -KILL [^ ;]*' "$HERE/kj3p_run.sh" | LC_ALL=C sort -u | tr '\n' ' ')
-[ "$kk" = 'kill -KILL "$XP" kill -KILL $PW kill -KILL $e kill -KILL $l ' ] && ! grep -v '^ *#' "$HERE/kj3p_run.sh" | grep -q 'wineserver -k'
+[ "$kk" = 'kill -KILL "$XP" kill -KILL $PW kill -KILL $e kill -KILL $l kill -KILL $x ' ] && ! grep -v '^ *#' "$HERE/kj3p_run.sh" | grep -q 'wineserver -k'
 dok "kill -KILL only on this run's own lists / children ($kk); no wineserver -k" $?
 echo "driver offline tests: $nd passed${dbad:+, BAD:$dbad}; score states: $ns passed${sbad:+, BAD:$sbad}"
 fin=PASS; [ "$pyrc" = 0 ] && [ -z "$sbad" ] && [ -z "$dbad" ] || fin=FAIL

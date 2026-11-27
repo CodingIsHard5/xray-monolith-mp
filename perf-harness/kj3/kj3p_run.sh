@@ -19,6 +19,10 @@
 #   run/ (the runner's folder: t2_xray.log, restarts.csv, emforce.csv, lost.csv, freeze.csv, boot0/...).
 # Score ONCE (registration section 10): bash wt-render-split/perf-harness/kj3/kj3p_score.sh <out>/run <out>/kj3p_check.txt
 # Exit status: the runner's; 2 = refused; 3 = no first pose; 4 = stopped for a protected title / Sober / failed title check.
+# Pass 3: one kj3p driver at a time (flock on out/kj3p_state/driver.lock, refused by name). It does NOT serialize against
+# EnginePerf's other drivers (wu2_run.sh etc.): stated limit "EnginePerf never starts kj3p while another of its drivers is
+# queued or running"; the refusal to claim while any engineperf claim is held stays. Xvfb / openbox / watcher are waited
+# for and counted in the final "nothing of this run left" check; user.ltx is put back from a run-local marker.
 # KJ3P_FUNCS_ONLY=1 with `source`: defines the functions below and returns (the selftest's offline tests); nothing runs.
 set -u
 
@@ -94,32 +98,51 @@ run_id() { RID=$(sed -n 's/^.* boot 0: run_id \([0-9][0-9]*\) .*$/\1/p' "$O/run/
 stop_run() {   # 0 = no process of this run is left. LAUNCHER FIRST (tb_run of this run, KILL: its TERM would run its EXIT
                # cleanup, whose wineserver -k hits the whole shared prefix), then every Wine process of this run (engine,
                # explorer, helpers; its wineserver gets TERM), scanned again after a wait until two scans in a row are empty;
-               # then this run's Xvfb / openbox and watcher. No prefix-wide wineserver -k here (pass 2, #2).
-  local i clean=0 l e s x
+               # then this run's Xvfb / openbox and watcher: TERM, a bounded wait, KILL, and a FINAL check over all five
+               # classes (pass 3 #1): anything of this run still alive = 1 (finish then keeps the claim). No prefix-wide
+               # wineserver -k here (pass 2, #2).
+  local i clean=0 l e s x left
   run_id
   for i in 1 2 3 4 5 6 7 8; do
     l=$(own_of launch_pids | tr '\n' ' '); e=""; s=""
     for x in $(own_of wine_pids); do case "$(cat "/proc/$x/comm" 2>/dev/null)" in wineserver*) s="$s $x" ;; *) e="$e $x" ;; esac; done
     if [ -z "$l$e$s" ]; then clean=$((clean + 1)); [ $clean -ge 2 ] && break
     else clean=0
-      [ -n "$l" ] && { log "LAUNCHER of this run (tb_run) pid $l: KILL"; kill -KILL $l 2>/dev/null; KILLED_LAUNCHER=1; }
+      # the marker is written BEFORE the kill: whoever runs cleanup next (this subshell or the parent) restores user.ltx
+      [ -n "$l" ] && { echo "$(date '+%F %T') tb_run pid $l KILLed: put out/user.ltx.orig back" > "$O/.restore_user_ltx"
+                       log "LAUNCHER of this run (tb_run) pid $l: KILL"; kill -KILL $l 2>/dev/null; }
       [ -n "$e" ] && { log "WINE processes of this run pid$e: KILL"; kill -KILL $e 2>/dev/null; }
       [ -n "$s" ] && { log "wineserver of this run pid$s: TERM"; kill -TERM $s 2>/dev/null; }
     fi
     sleep "${KJ3P_SCAN_S:-2}"
   done
-  x=$(own_of xsrv_pids | tr '\n' ' '); [ -n "$x" ] && { log "Xvfb / openbox of this run pid $x: TERM"; kill -TERM $x 2>/dev/null; }
-  kill_watcher
-  # tb_run's own cleanup (tools/tb_run.sh:33) puts the pristine user.ltx back; a KILLed tb_run did not, so do it here
-  [ "${KILLED_LAUNCHER:-0}" = 1 ] && [ -n "${P:-}" ] && [ -f "$P/out/user.ltx.orig" ] && [ -d "$P/run/appdata" ] && cp -f "$P/out/user.ltx.orig" "$P/run/appdata/user.ltx"
-  [ $clean -ge 2 ] && return 0
-  log "LEFT ALIVE after 8 scans: launcher [$l] wine [$e$s]"; return 1
+  x=$(rest_pids); [ -n "$x" ] && { log "Xvfb / openbox / watcher of this run pid $x: TERM"; kill -TERM $x 2>/dev/null; }
+  for i in $(seq 1 25); do [ -z "$(rest_pids)" ] && break; sleep 0.2; done   # <= 5 s
+  x=$(rest_pids); [ -n "$x" ] && { log "Xvfb / openbox / watcher of this run pid $x: still alive after 5 s, KILL"; kill -KILL $x 2>/dev/null; sleep 0.5; }
+  restore_ltx
+  left="$(own_of launch_pids | tr '\n' ' ')$(own_of wine_pids | tr '\n' ' ')$(rest_pids)"
+  [ -z "${left// /}" ] && return 0
+  log "LEFT ALIVE (launcher / Wine / Xvfb / openbox / watcher of this run): $left"; return 1
 }
-kill_watcher() {   # the runner's watcher (t1_watch_keep.py) outlives a runner that was TERMed: kill the one writing OUR run dir
+watch_pids() {   # the runner's watcher (t1_watch_keep.py) writing OUR run dir: it outlives a runner that was TERMed
   local p
   for p in $(pgrep -u "$(id -u)" -f t1_watch_keep.py 2>/dev/null); do
-    tr '\0' '\n' 2>/dev/null < "/proc/$p/cmdline" | grep -Fxq "$O/run/boot0/watch" && kill "$p" 2>/dev/null
+    tr '\0' '\n' 2>/dev/null < "/proc/$p/cmdline" | grep -Fxq "$O/run/boot0/watch" && echo "$p"
   done; return 0
+}
+rest_pids() { { own_of xsrv_pids; watch_pids; } | tr '\n' ' '; }
+restore_ltx() {   # tb_run's own cleanup (tools/tb_run.sh:33) puts the pristine user.ltx back; a KILLed tb_run did not.
+                  # Driven by the run-local marker, so it also happens when the watchdog subshell did the kill (pass 3 #5).
+  [ -e "$O/.restore_user_ltx" ] || return 0
+  if [ -f "$P/out/user.ltx.orig" ] && [ -d "$P/run/appdata" ] && cp -f "$P/out/user.ltx.orig" "$P/run/appdata/user.ltx"; then
+    mv -f "$O/.restore_user_ltx" "$O/.restore_user_ltx.done"; log "user.ltx put back from out/user.ltx.orig"
+  else log "user.ltx NOT put back (copy failed): marker kept"; fi
+}
+take_lock() {   # one kj3p driver at a time (pass 3 #2): exclusive, non-blocking flock on a fixed file in the main project's
+                # state area, held on fd 9 for the driver's whole life (children inherit it: it ends with the last of them)
+  mkdir -p "$(dirname "$LOCKF")" 2>/dev/null || { echo "REFUSED: cannot make $(dirname "$LOCKF")"; return 1; }
+  exec 9>>"$LOCKF" || { echo "REFUSED: cannot open $LOCKF"; return 1; }
+  flock -n 9 || { echo "REFUSED: another kj3p driver holds $LOCKF"; exec 9>&-; return 1; }
 }
 make_out() {   # the out dir is NEW and writable, made exclusively (mkdir without -p: two drivers cannot both get it)
   [ -e "$O" ] && { echo "REFUSED: $O exists, not overwriting"; return 1; }
@@ -197,6 +220,7 @@ finish() { trap - EXIT TERM INT
   [ -n "$XP" ] && kill -0 $XP 2>/dev/null && { kill -TERM $XP 2>/dev/null; wait $XP 2>/dev/null; }
   [ "$LAUNCHED" = 1 ] && { stop_run || left=1; [ "$SHM" = /dev/shm/itrz_b1 ] && rm -f /dev/shm/itrz_b1/pose.txt /dev/shm/itrz_b1/cross.txt; }
   [ "$WANTED" = 1 ] && qr withdraw $W
+  restore_ltx   # also when the watchdog subshell killed tb_run and was itself stopped before it put user.ltx back
   if [ $left = 1 ]; then log "CLAIM KEPT: a process of this run is still alive (see LEFT ALIVE); the claim lapses by its minutes"
   else release_mine; fi
   log "slice end (exit $rc; withdrew $WANTED, claim tried $CLAIMTRY, released $RELEASED)"; exit $rc; }
@@ -206,8 +230,8 @@ finish() { trap - EXIT TERM INT
 # ------------------------------------------------------------------------------------------------ the run
 K="$(cd "$(dirname "$0")" && pwd)"; cd "$K/../../.." || exit 2; P=$PWD
 T="$HOME/.claude/overseer/tools"; W=engineperf; O=${1:?out dir}; XROOT=/tmp
-TRK=$HOME/Projects/ITRZone/out/p1/cordon_full_track.csv; TRK1=$K/kj3p_track_start.csv
-PW=""; XP=""; WD=""; rc=2; WANTED=0; CLAIMED=0; CLAIMTRY=0; RELEASED=0; KILLED_LAUNCHER=0; LAUNCHED=0; SIGPEND=0; RID=""; SHM=/dev/shm/itrz_b1
+TRK=$HOME/Projects/ITRZone/out/p1/cordon_full_track.csv; TRK1=$K/kj3p_track_start.csv; LOCKF=$P/out/kj3p_state/driver.lock
+PW=""; XP=""; WD=""; rc=2; WANTED=0; CLAIMED=0; CLAIMTRY=0; RELEASED=0; LAUNCHED=0; SIGPEND=0; RID=""; SHM=/dev/shm/itrz_b1
 TOKEN="kj3p-$(date +%Y%m%d%H%M%S)-$$"   # unique per invocation: in the claim's <what>, so only THIS run's claim is ever released
 # hash preflight. Every pinned file or nothing starts; missing = refused by name; PIN_ME_* = not registered yet = refused.
 bad=0; pins_ok || bad=1
@@ -221,6 +245,7 @@ WAITMIN=${KJ3P_WAIT_MIN:-240}; case "$WAITMIN" in ''|*[!0-9]*) echo "REFUSED: KJ
 title_state; [ $? = 2 ] && { echo "REFUSED: the protected-title check failed (cannot tell)"; bad=1; }
 [ "$bad" = 0 ] || exit 2
 [ "${2:-}" = "--preflight-only" ] && { echo "preflight ok"; exit 0; }
+take_lock || exit 2                      # before the out dir and any claim (pass 3 #2)
 make_out || exit 2                       # before any claim: nothing is queued or claimed for a folder we cannot use
 export BENCH_DISPLAY=$DISP
 # engine seconds from the level load: 15 s warm-up (WAIT_MS, the writer's first pose at track time >= 0) + 440 s of the

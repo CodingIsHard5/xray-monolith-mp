@@ -198,17 +198,21 @@ def noise_frames(xlog):
     boot0/tb/xray.log:5843-5853, also out/wu1_prime/xray.log:5845): '![axr_main callback_set] callback <x> doesn't exist!'
     (or '... to nil function!'), '~ ' + 72 '-', '~ STACK TRACEBACK:', a blank line, '\t... <f>.script (line: N) in function
     ...' frames, '~ ' + 72 '-'. The block ENDS at that second delimiter (review pass 2 #1: a later traceback is not
-    excused), or at the first line of any other form; only its frame lines are excused, never an error line."""
-    out, blk, seps = set(), False, 0
+    excused), at a SECOND '~ STACK TRACEBACK:' before that delimiter (pass 3 #4: another traceback), or at the first line of
+    any other form; only the frame lines of its one traceback are excused, never an error line."""
+    out, blk, seps, traced = set(), False, 0, False
     for i, l in enumerate(xlog):
         if l.startswith('![axr_main callback_set]') and ("doesn't exist" in l or 'nil function' in l):
-            blk, seps = True, 0; continue
+            blk, seps, traced = True, 0, False; continue
         if not blk: continue
         if l.startswith('~ -'):
             seps += 1
             if seps >= 2: blk = False   # the closing delimiter: the diagnostic is over
             continue
-        if l == '~ STACK TRACEBACK:' or l.strip() == '': continue
+        if l == '~ STACK TRACEBACK:':
+            if traced: blk = False; continue   # a second traceback inside the block: not the registration diagnostic's
+            traced = True; continue
+        if l.strip() == '': continue
         if seps == 1 and _FRAME.match(l): out.add(i); continue
         blk = False
     return out

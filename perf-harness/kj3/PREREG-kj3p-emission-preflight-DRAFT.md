@@ -146,9 +146,13 @@ margin (7 and 8 lower edges, 9 first-s upper edge, 9 distance). Copied, not deri
 row of section 2) and the 3..16 gap range taken from the two script settings. The Lua-log noise filter is no longer kj2's
 8-line rule (review #10): only the traceback FRAME lines of an `![axr_main callback_set] ... doesn't exist` / `... nil
 function` block (real bytes: kj2 X run boot0/tb/xray.log:5843-5853) are excused, and the block ends at its closing `~ ----`
-delimiter (pass 2): an error line, or a later traceback, inside or after such a block counts. No bound is copied from another arm's table.
+delimiter (pass 2) or at a second `~ STACK TRACEBACK:` inside it (pass 3): an error line, or another traceback, inside or
+after such a block counts. No bound is copied from another arm's table.
 
 ## 7. Stop rules
+- Only one kj3p driver at a time: an exclusive non-blocking flock on out/kj3p_state/driver.lock for the driver's life,
+  refused by name. It does not cover EnginePerf's other drivers (wu2_run.sh etc.): stated limit, EnginePerf never starts
+  kj3p while another of its drivers is queued or running (and the driver does not claim while any engineperf claim is held).
 - The driver refuses on any pin mismatch, a PIN_ME pin, a display that is :0 or exists, an engine already running, a left
   `zz_p1_puppet.script`, Caden's play wrapper running, a protected-title check that fails (cannot tell = NOT clear), or an
   out dir it cannot make NEW (made exclusively, before any queue or claim). Its traps are in place before the want. It
@@ -160,7 +164,8 @@ delimiter (pass 2): an error line, or a later traceback, inside or after such a 
   everything of THIS run itself (the runner's TERM trap does not stop the engine: t2_xray_kj3.sh:66 only exits, its cleanup
   CONTs and removes files): this run's launcher tb_run FIRST (KILL: its own TERM cleanup, tools/tb_run.sh:33, would run a
   prefix-wide `wineserver -k`), then this run's Wine processes, scanned again after 2 s until two scans in a row are empty,
-  then its Xvfb / openbox and watcher. Exit 4 wins over every other outcome, decided after the watchdog is reaped; not a run
+  then its Xvfb / openbox and watcher (TERM, <= 5 s wait, KILL, then a final check over all of them: anything of this run
+  still alive keeps the claim). user.ltx is put back from a run-local marker written before tb_run is killed. Exit 4 wins over every other outcome, decided after the watchdog is reaped; not a run
   of record. Only a process of this run is ever killed (DISPLAY or BENCH_DISPLAY in its environment is the run's display,
   or its command line has `-t2_run <this run id>`). The driver never runs `wineserver -k`.
 - After: stop on a crash, timeout, refusal or stop; no second boot without the supervisor; at most the one retry of section 5.
@@ -208,11 +213,11 @@ and swapped out by its EXIT trap (:37-38). So only the pinned configs/axr_option
 that wrapper's lock (run/.caden-play.lock) names a live process, and re-checks every pin after the claim.
 
 ## 12. Tests on these bytes
-`nice -n 19 bash wt-render-split/perf-harness/kj3/kj3p_selftest.sh` (2026-11-26 20:59:03-20:59:31, checker 4e4443ba…,
-run dir kj3/runs/kj3p-st-20261126-205903-3056122, 20 MB): `KJ3P SELFTEST: PASS (checker part rc 0; score-once states 7/7;
-driver functions offline 28/28)`; its checker part: `fixtures: 2 STUB-MADE runs; good PASS True; mutants failing exactly
-their checks 33/33; made NO VERDICT 4/4; missing-file REFUSED 8/8; real kj2 bytes ok`. Pass 2 added m1_lua_after (the real
-kj2 block, then a later traceback naming the bridge: FAIL 1) and the driver tests listed in the triage file, pass 2.
+`nice -n 19 bash wt-render-split/perf-harness/kj3/kj3p_selftest.sh` (2026-11-26 21:08:42-21:09:47, checker 707667f1…,
+run dir kj3/runs/kj3p-st-20261126-210842-3581378): `KJ3P SELFTEST: PASS (checker part rc 0; score-once states 7/7;
+driver functions offline 33/33)`; its checker part: `fixtures: 2 STUB-MADE runs; good PASS True; mutants failing exactly
+their checks 34/34; made NO VERDICT 4/4; missing-file REFUSED 8/8; real kj2 bytes ok`. Pass 2 added m1_lua_after, pass 3
+m1_lua_second (a second traceback inside the real kj2 block: FAIL 1); the driver tests of each pass are in the triage file.
 Checker fixtures: two STUB-MADE runs of the real kill6 reader (forced surge + psi; no force + two MADE `notstarted` lines),
 32 MADE mutants each failing exactly its listed check(s) (at least one per check 1 to 13; the review round added
 m2_extra, m2_early, m1_lua_noise, m6s_x, m9b, m10c), 4 MADE NO VERDICT fixtures (NV1, NV2+NV3, NV4, NV5), two unparsable
