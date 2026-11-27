@@ -1,0 +1,157 @@
+wu2 alife_warmup lever (PREREG-wu2-alife-warmup)
+scorer /home/caden/Projects/StalkerGameEngine/wt-render-split/perf-harness/wu2/wu2_score.py sha256 69cd81124cfb0606c0c033ffad718c87dcb89cd09aba104885785ea75a2fbed4
+order  /home/caden/Projects/StalkerGameEngine/wt-render-split/perf-harness/wu2/wu2_order.txt sha256 21e80fc1f29524c29f476c2af0545bd5fb72092ee0141664efb66015cd6f08ae
+root   /home/caden/Projects/StalkerGameEngine/out
+constants window 30 s from the end of loading (headline; 15 s reported only), slow 20.0/33.3 ms, H1 worst ratio 0.50, H2 n20 drop >= 7, H3 price <= 2.0 s, min ON 8, min OFF-IN-PLAY 3, stock hitch >= 150 ms, stock train >= 7, legacy wide 50, N/M >= 0.90, P >= 3, clock tolerance 15 ms, countdown race 1 frame
+
+LOAD wu2_prime prime: not scored (VERDICT: CONFOUNDED (other heavy process present))
+LOAD wu2_01_on ON VALID group=ON worst=35.9 n20=5 n33=2 span=6.16s worst_incl_save=35.9 save=#42 83 ms | 15s: worst=35.9 n20=5 n33=2 span=6.16s | loading=11.67 s in capture, engine clock 19.97 s
+    full pass 955 of 955, frame 34, precache_left 54, 800.1 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 11666.2 ms, 12 of them > 20 ms, worst 5672.1 ms
+    load time: in capture 11666.2 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19970 ms at capture 71 (from frame 142 T 20347 minus 377.0 ms; from the last countdown line 19970 ms; estimate: -5.9 / +5.1 ms = frame E 4.9 ms / frame 124 4.1 ms, + 1 ms)
+LOAD wu2_02_off OFF VALID group=OFF-IN-PLAY worst=311.7 n20=21 n33=4 span=20.32s worst_incl_save=311.7 save=#149 95 ms | 15s: worst=311.7 n20=8 n33=3 span=13.50s | loading=11.05 s in capture, engine clock 19.82 s
+    order: no wide pass; narrowed at frame 33 precache 56 (inside loading); wide passes logged 0; legacy P (max 0 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 11047.7 ms, 9 of them > 20 ms, worst 5911.4 ms
+    load time: in capture 11047.7 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19819 ms at capture 71 (from frame 106 T 19906 minus 87.3 ms; from the last countdown line 19819 ms; estimate: -6.8 / +5.1 ms = frame E 5.8 ms / frame 88 4.1 ms, + 1 ms)
+LOAD wu2_03_off OFF VOID [not_clean] group=OFF-IN-PLAY worst=291.8 n20=21 n33=6 span=20.30s worst_incl_save=291.8 save=#165 82 ms | 15s: worst=291.8 n20=8 n33=3 span=13.47s | loading=10.83 s in capture, engine clock 19.34 s
+    not_clean: 'VERDICT: CONFOUNDED (other heavy process present)' (no re-run, registered)
+    order: no wide pass; narrowed at frame 33 precache 56 (inside loading); wide passes logged 0; legacy P (max 0 alife_slow lines in one frame before intro_start)
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 10828.2 ms, 9 of them > 20 ms, worst 5835.6 ms
+    load time: in capture 10828.2 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19344 ms at capture 71 (from frame 94 T 19371 minus 27.4 ms; from the last countdown line 19344 ms; estimate: -6.1 / +5.0 ms = frame E 5.1 ms / frame 76 4.0 ms, + 1 ms)
+LOAD wu2_04_on ON VOID [not_clean] group=ON worst=43.1 n20=5 n33=1 span=0.72s worst_incl_save=77.7 save=#103 78 ms | 15s: worst=43.1 n20=5 n33=1 span=0.72s | loading=11.34 s in capture, engine clock 19.97 s
+    not_clean: 'VERDICT: CONFOUNDED (other heavy process present)' (no re-run, registered)
+    full pass 955 of 955, frame 32, precache_left 57, 659.8 ms
+    window from capture 71; before the window: 71 frames (13 loading 0..12, 58 precache 13..70), 11335.0 ms, 11 of them > 20 ms, worst 5842.1 ms
+    load time: in capture 11335.0 ms (capture 0..70, frames file; H3's measure); engine clock time_global 19965 ms at capture 71 (from frame 138 T 20352 minus 386.8 ms; from the last countdown line 19965 ms; estimate: -6.4 / +10.0 ms = frame E 5.4 ms / frame 120 9.0 ms, + 1 ms)
+LOAD wu2_05_on ON FAIL [missing]
+    missing: MISSING folder out/wu2_05_on
+LOAD wu2_06_off OFF FAIL [missing]
+    missing: MISSING folder out/wu2_06_off
+LOAD wu2_07_off OFF FAIL [missing]
+    missing: MISSING folder out/wu2_07_off
+LOAD wu2_08_on ON FAIL [missing]
+    missing: MISSING folder out/wu2_08_on
+LOAD wu2_09_on ON FAIL [missing]
+    missing: MISSING folder out/wu2_09_on
+LOAD wu2_10_off OFF FAIL [missing]
+    missing: MISSING folder out/wu2_10_off
+LOAD wu2_11_off OFF FAIL [missing]
+    missing: MISSING folder out/wu2_11_off
+LOAD wu2_12_on ON FAIL [missing]
+    missing: MISSING folder out/wu2_12_on
+LOAD wu2_13_on ON FAIL [missing]
+    missing: MISSING folder out/wu2_13_on
+LOAD wu2_14_off OFF FAIL [missing]
+    missing: MISSING folder out/wu2_14_off
+LOAD wu2_15_off OFF FAIL [missing]
+    missing: MISSING folder out/wu2_15_off
+LOAD wu2_16_on ON FAIL [missing]
+    missing: MISSING folder out/wu2_16_on
+LOAD wu2_17_on ON FAIL [missing]
+    missing: MISSING folder out/wu2_17_on
+LOAD wu2_18_off OFF FAIL [missing]
+    missing: MISSING folder out/wu2_18_off
+LOAD wu2_19_off OFF FAIL [missing]
+    missing: MISSING folder out/wu2_19_off
+LOAD wu2_20_on ON FAIL [missing]
+    missing: MISSING folder out/wu2_20_on
+LOAD wu2_21_on ON FAIL [missing]
+    missing: MISSING folder out/wu2_21_on
+LOAD wu2_22_off OFF FAIL [missing]
+    missing: MISSING folder out/wu2_22_off
+LOAD wu2_23_off OFF FAIL [missing]
+    missing: MISSING folder out/wu2_23_off
+LOAD wu2_24_on ON FAIL [missing]
+    missing: MISSING folder out/wu2_24_on
+LOAD wu2_25_on ON FAIL [missing]
+    missing: MISSING folder out/wu2_25_on
+LOAD wu2_26_off OFF FAIL [missing]
+    missing: MISSING folder out/wu2_26_off
+LOAD wu2_27_off OFF FAIL [missing]
+    missing: MISSING folder out/wu2_27_off
+LOAD wu2_28_on ON FAIL [missing]
+    missing: MISSING folder out/wu2_28_on
+LOAD wu2_29_on ON FAIL [missing]
+    missing: MISSING folder out/wu2_29_on
+LOAD wu2_30_off OFF FAIL [missing]
+    missing: MISSING folder out/wu2_30_off
+LOAD wu2_31_off OFF FAIL [missing]
+    missing: MISSING folder out/wu2_31_off
+LOAD wu2_32_on ON FAIL [missing]
+    missing: MISSING folder out/wu2_32_on
+
+GROUPS (valid loads; the two stock groups are never pooled): ON 1, OFF-IN-PLAY 1, OFF-IN-LOADING 0, OFF-OTHER 0 (reported only); void 2; failed 28
+  ON              worst_ms             median 35.89 min 35.89 max 35.89 n 1
+  ON              n20                  median 5.00 min 5.00 max 5.00 n 1
+  ON              n33                  median 2.00 min 2.00 max 2.00 n 1
+  ON              train_span_s         median 6.16 min 6.16 max 6.16 n 1
+  ON              worst_incl_save_ms   median 35.89 min 35.89 max 35.89 n 1
+  ON              worst15_ms           median 35.89 min 35.89 max 35.89 n 1
+  ON              n20_15               median 5.00 min 5.00 max 5.00 n 1
+  ON              n33_15               median 2.00 min 2.00 max 2.00 n 1
+  ON              loading_in_capture_s median 11.67 min 11.67 max 11.67 n 1
+  ON              engine_clock_load_s  median 19.97 min 19.97 max 19.97 n 1
+  ON              pass_ms              median 800.10 min 800.10 max 800.10 n 1
+  ON              held_frames          median 0.00 min 0.00 max 0.00 n 1
+  OFF-IN-PLAY     worst_ms             median 311.75 min 311.75 max 311.75 n 1
+  OFF-IN-PLAY     n20                  median 21.00 min 21.00 max 21.00 n 1
+  OFF-IN-PLAY     n33                  median 4.00 min 4.00 max 4.00 n 1
+  OFF-IN-PLAY     train_span_s         median 20.32 min 20.32 max 20.32 n 1
+  OFF-IN-PLAY     worst_incl_save_ms   median 311.75 min 311.75 max 311.75 n 1
+  OFF-IN-PLAY     worst15_ms           median 311.75 min 311.75 max 311.75 n 1
+  OFF-IN-PLAY     n20_15               median 8.00 min 8.00 max 8.00 n 1
+  OFF-IN-PLAY     n33_15               median 3.00 min 3.00 max 3.00 n 1
+  OFF-IN-PLAY     loading_in_capture_s median 11.05 min 11.05 max 11.05 n 1
+  OFF-IN-PLAY     engine_clock_load_s  median 19.82 min 19.82 max 19.82 n 1
+  OFF-IN-PLAY     pass_ms              n/a
+  OFF-IN-PLAY     held_frames          n/a
+  OFF-IN-LOADING  worst_ms             n/a
+  OFF-IN-LOADING  n20                  n/a
+  OFF-IN-LOADING  n33                  n/a
+  OFF-IN-LOADING  train_span_s         n/a
+  OFF-IN-LOADING  worst_incl_save_ms   n/a
+  OFF-IN-LOADING  worst15_ms           n/a
+  OFF-IN-LOADING  n20_15               n/a
+  OFF-IN-LOADING  n33_15               n/a
+  OFF-IN-LOADING  loading_in_capture_s n/a
+  OFF-IN-LOADING  engine_clock_load_s  n/a
+  OFF-IN-LOADING  pass_ms              n/a
+  OFF-IN-LOADING  held_frames          n/a
+
+LOAD TIME (H3's measure: in-capture loading time = sum of the frames file's ms of capture 0..E-1, QPC wall clock; the engine clock at E beside it)
+  loading takes 0.62 s longer with the lever (median in-capture loading time ON 11.67 s, OFF-IN-PLAY 11.05 s)
+  engine clock at E (estimate, reported only): median ON 19.97 s - median OFF-IN-PLAY 19.82 s = +0.15 s
+  difference of the two ON - OFF-IN-PLAY deltas (engine clock - in capture): -0.467 s; bound -0.011 / +0.012 s (the estimates' errors from the frame sizes, prereg 5.4) -> loadtime_measures_differ
+NOTE loadtime_measures_differ (reported only, not a verdict rule): the engine clock's ON - OFF-IN-PLAY delta is -0.467 s off the in-capture delta, outside -0.011 / +0.012 s: the engine time before the capture start differed between the groups, or the engine timer was paused / absorbed inside the loading frames (prereg 5.4, 6.1)
+
+FAIL wu2_05_on missing: MISSING folder out/wu2_05_on
+FAIL wu2_06_off missing: MISSING folder out/wu2_06_off
+FAIL wu2_07_off missing: MISSING folder out/wu2_07_off
+FAIL wu2_08_on missing: MISSING folder out/wu2_08_on
+FAIL wu2_09_on missing: MISSING folder out/wu2_09_on
+FAIL wu2_10_off missing: MISSING folder out/wu2_10_off
+FAIL wu2_11_off missing: MISSING folder out/wu2_11_off
+FAIL wu2_12_on missing: MISSING folder out/wu2_12_on
+FAIL wu2_13_on missing: MISSING folder out/wu2_13_on
+FAIL wu2_14_off missing: MISSING folder out/wu2_14_off
+FAIL wu2_15_off missing: MISSING folder out/wu2_15_off
+FAIL wu2_16_on missing: MISSING folder out/wu2_16_on
+FAIL wu2_17_on missing: MISSING folder out/wu2_17_on
+FAIL wu2_18_off missing: MISSING folder out/wu2_18_off
+FAIL wu2_19_off missing: MISSING folder out/wu2_19_off
+FAIL wu2_20_on missing: MISSING folder out/wu2_20_on
+FAIL wu2_21_on missing: MISSING folder out/wu2_21_on
+FAIL wu2_22_off missing: MISSING folder out/wu2_22_off
+FAIL wu2_23_off missing: MISSING folder out/wu2_23_off
+FAIL wu2_24_on missing: MISSING folder out/wu2_24_on
+FAIL wu2_25_on missing: MISSING folder out/wu2_25_on
+FAIL wu2_26_off missing: MISSING folder out/wu2_26_off
+FAIL wu2_27_off missing: MISSING folder out/wu2_27_off
+FAIL wu2_28_on missing: MISSING folder out/wu2_28_on
+FAIL wu2_29_on missing: MISSING folder out/wu2_29_on
+FAIL wu2_30_off missing: MISSING folder out/wu2_30_off
+FAIL wu2_31_off missing: MISSING folder out/wu2_31_off
+FAIL wu2_32_on missing: MISSING folder out/wu2_32_on
+FAIL series stopped_series: 3 non-clean load(s) (wu2_prime, wu2_03_off, wu2_04_on) >= MAX_CONFOUNDED 3: the driver stops the series at that load; a stopped series is FAIL (prereg 3.3), even with no folder missing
+
+WU2 RESULT: FAIL (28 load(s) failed a registered check, series stopped: missing, stopped_series)

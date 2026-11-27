@@ -1,0 +1,25 @@
+2026-11-27 09:16:38 slice granted, wu2, display :141, load 2.49 2.95 2.92
+2026-11-27 09:21:39 settle wait=301s load=1.99 heavy=[] ok before wu2_prime
+2026-11-27 09:21:41 load wu2_prime arm=prime exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 display=:141 load 1.99 2.64 2.78
+2026-11-27 09:23:51 load wu2_prime rc=0 VERDICT: CONFOUNDED (other heavy process present)
+2026-11-27 09:23:51 load wu2_prime PROBE wu2_prime ok
+2026-11-27 09:23:51 load wu2_prime not clean (1 of 3 allowed): the scorer voids it, no re-run
+2026-11-27 09:25:51 settle wait=120s load=1.41 heavy=[] ok before wu2_01_on
+2026-11-27 09:25:53 load wu2_01_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 display=:141 load 1.41 2.57 2.79
+2026-11-27 09:27:56 load wu2_01_on rc=0 VERDICT: clean
+2026-11-27 09:27:56 load wu2_01_on CHECK wu2_01_on ok
+2026-11-27 09:28:41 settle wait=45s load=1.88 heavy=[] ok before wu2_02_off
+2026-11-27 09:28:41 load wu2_02_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 display=:141 load 1.88 2.61 2.79
+2026-11-27 09:30:44 load wu2_02_off rc=0 VERDICT: clean
+2026-11-27 09:30:44 load wu2_02_off CHECK wu2_02_off ok
+2026-11-27 09:31:14 settle wait=30s load=1.72 heavy=[] ok before wu2_03_off
+2026-11-27 09:31:17 load wu2_03_off arm=off exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 display=:141 load 1.59 2.52 2.75
+2026-11-27 09:33:19 load wu2_03_off rc=0 VERDICT: CONFOUNDED (other heavy process present)
+2026-11-27 09:33:19 load wu2_03_off CHECK wu2_03_off ok
+2026-11-27 09:33:19 load wu2_03_off not clean (2 of 3 allowed): the scorer voids it, no re-run
+2026-11-27 09:34:49 settle wait=90s load=1.62 heavy=[] ok before wu2_04_on
+2026-11-27 09:34:51 load wu2_04_on arm=on exe=Warm18.exe save=cordon1 warm=0 frames=20000 slow=20 display=:141 load 1.49 2.33 2.66
+2026-11-27 09:36:59 load wu2_04_on rc=0 VERDICT: CONFOUNDED (other heavy process present)
+2026-11-27 09:36:59 load wu2_04_on CHECK wu2_04_on ok
+2026-11-27 09:36:59 load wu2_04_on not clean (3 of 3 allowed): the scorer voids it, no re-run
+2026-11-27 09:37:00 slice end: 5 done, 28 left, 3 confounded. 3 confounded loads: the box is not quiet
