@@ -13,6 +13,7 @@
 #include "PHDestroyable.h"
 #include "UIGameSP.h"
 #include "inventory.h"
+#include "WeaponAmmo.h" // GammaVR B3a
 #include "level.h"
 #include "game_cl_base.h"
 #include "xr_level_controller.h"
@@ -1099,6 +1100,32 @@ int vr_bpt_ruck_count(CActor* A, LPCSTR sect) // items of this section in the ba
 			if (it && !xr_strcmp(it->object().cNameSect().c_str(), sect))
 				++n;
 	return n;
+}
+// B3a (log only): is object id an ammo box; is it still the actor's; its rounds (-1 = no such object); and the rounds and
+// boxes of that section in the actor's whole inventory
+bool vr_bpt_ammo(CActor* A, int id, LPCSTR sect, int& owned, int& rounds, int& inv_rounds, int& boxes)
+{
+	owned = 0;
+	rounds = -1;
+	inv_rounds = 0;
+	boxes = 0;
+	if (!A || !A->m_inventory)
+		return false;
+	for (PIItem it : A->inventory().m_all)
+	{
+		CWeaponAmmo* am = it ? smart_cast<CWeaponAmmo*>(it) : nullptr;
+		if (!am || xr_strcmp(am->cNameSect().c_str(), sect))
+			continue;
+		++boxes;
+		inv_rounds += int(am->m_boxCurr);
+		if (int(am->ID()) == id)
+			owned = 1;
+	}
+	CObject* O = Level().Objects.net_Find(u16(id));
+	CWeaponAmmo* a = O ? smart_cast<CWeaponAmmo*>(O) : nullptr;
+	if (a)
+		rounds = int(a->m_boxCurr);
+	return a != nullptr;
 }
 int vr_bpt_pick(CActor* A, LPCSTR sect, bool& eatable, float& weight) // the one real item: GetAny; its id or -1
 {

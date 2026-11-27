@@ -4422,6 +4422,8 @@ struct vr_bph_state
 	u32 use_frame;
 	Fmatrix copy_xf;
 	int drop_id1;       // the last dropped item, followed to the end ([vr16d])
+	int ammo_id1;       // B3a: the last ammo box taken out of the bag (id + 1), its rounds followed in the log ([vr18])
+	string64 ammo_sect;
 	int drop_set;       // frames on which it was placed and stopped
 	Fmatrix drop_xf;
 	Fvector drop_bc;
@@ -4438,6 +4440,7 @@ struct vr_bph_state
 };
 int vr_bpt_ruck_count(CActor* A, LPCSTR sect);                                       // ActorInput.cpp (B2b)
 int vr_bpt_pick(CActor* A, LPCSTR sect, bool& eatable, float& weight);
+bool vr_bpt_ammo(CActor* A, int id, LPCSTR sect, int& owned, int& rounds, int& inv_rounds, int& boxes); // ActorInput.cpp (B3a)
 bool vr_bpt_drop(CActor* A, int id, const Fvector& pos);
 int vr_bpt_dropped(int id, const Fvector& bc, Fvector& centre, int mode, const Fmatrix& xf, const Fvector& lv, const Fvector& av, bool& was_set, Fmatrix& att);
 float vr_bpt_gravity();
@@ -4513,6 +4516,12 @@ static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
 		return false;
 	const bool held = s_vr_bp.state == 1 && B.placed && B.ready && !B.off && vr_bpo_on();
 	const bool geo = I.grip[gun].valid && I.grip[off].valid;
+	if (H.ammo_id1 > 0) // B3a (log only): the ammo box that was taken out, and every round of its kind the actor still carries
+	{
+		int owned = 0, rounds = -1, inv = 0, boxes = 0;
+		vr_bpt_ammo(A, H.ammo_id1 - 1, H.ammo_sect, owned, rounds, inv, boxes);
+		Msg("* [vr18] frame %u ammo id %d sect '%s' owned %d rounds %d inv_rounds %d boxes %d", I.frame, H.ammo_id1 - 1, H.ammo_sect, owned, rounds, inv, boxes);
+	}
 	if (H.drop_id1 > 0) // B2b: the dropped item starts at rest where it was let go, and is followed in the log
 	{
 		Fvector dc;
@@ -4623,6 +4632,13 @@ static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
 					H.use = 0;
 					Msg("* [vr16] frame %u out: model %d '%s' id %d (count %d, weight %.4f, %s) is the item in the hand%s", I.frame, carried, e.sect.c_str(), id, e.count, wt,
 						eat ? "consumable" : "not a consumable", H.copy ? "; the stack's model is back at its place" : "");
+					int ao = 0, ar = -1, ai = 0, ab = 0;
+					if (vr_bpt_ammo(A, id, e.sect.c_str(), ao, ar, ai, ab))
+					{
+						H.ammo_id1 = id + 1;
+						xr_strcpy(H.ammo_sect, e.sect.c_str());
+						Msg("* [vr18] frame %u out: ammo box id %d '%s' with %d rounds; the actor carries %d rounds of it in %d boxes", I.frame, id, H.ammo_sect, ar, ai, ab);
+					}
 				}
 			}
 			if (H.out_id1 > 0)
