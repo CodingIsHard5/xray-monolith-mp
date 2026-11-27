@@ -57,7 +57,7 @@ pins_ok() {   # every pinned file, relative to the project root (the cwd); 0 onl
   pin "$TRK1"                                  0a8bce3976ff0ef81fb0b5ded24c878088e83410f988ecf52d43fa148eb5a5e9 || b=1
   pin "$K/kj3p_check.py"                       7fa0ccf1d411f106b40a9951747729c770499edb0ad47f1cd1b1093a3c4d891b || b=1
   pin "$K/kj3p_score.sh"                       1b24dc7423c01f7af00dc75876fb5145f24a1be1a4485bc6e5ac43439c573024 || b=1
-  pin "$K/kj3p_selftest.sh"                    e9db7bd9332427d21bfcaa246a8c890158433b113941d9bcc06788b05df9045d || b=1
+  pin "$K/kj3p_selftest.sh"                    1f87bf69f68dc058e7af424eb793adfb1b971189fe89eaa28cd5941bde3aeb0a || b=1
   # the one-row track is exactly the header and the first data row of the pinned track (CR stripped on both)
   [ "$(head -2 "$TRK" 2>/dev/null | tr -d '\r')" = "$(tr -d '\r' < "$TRK1" 2>/dev/null)" ] || { echo "REFUSED: $TRK1 is not the first row of $TRK"; b=1; }
   # Caden's play wrapper (play/caden_simtick_play.sh) copies his own options over the pinned file while it runs
@@ -157,7 +157,9 @@ qr() { "$T/quiet-required.sh" "$@" >/dev/null 2>&1; }
 # Ownership read of the box flag. quiet-required.sh has no exit-code way to say who holds a slot or with which <what>
 # (triage, extra); its `check` TEXT (HELD: / SLOTn: <date> <time> <worker> <mins> <what>) is used for this test ONLY.
 flag_lines() { "$T/quiet-required.sh" check 2>/dev/null | sed -n 's/^\(HELD\|SLOT[0-9]*\): //p'; }
-w_holds() { flag_lines | awk -v w="$W" '$3 == w {f = 1} END {exit !f}'; }                     # any claim under our name
+# any claim under our name, EXCEPT the queue's own 5-minute handoff pre-claim (amendment 1, 2026-11-27: that one is
+# written in our name for us to claim over; quiet-required.sh matches the same text, *"handoff pre-claim"*, :534 :628)
+w_holds() { flag_lines | awk -v w="$W" '$3 == w && !index($0, "handoff pre-claim") {f = 1} END {exit !f}'; }
 mine_held() { flag_lines | awk -v w="$W" -v t="$TOKEN" '$3 == w && index($0, t) {f = 1} END {exit !f}'; }   # OUR claim
 # want / claim with TERM and INT held over the call: the signal is acted on right AFTER it, once the flags say what this
 # invocation now may hold. A claim can be committed although the call returns non-zero or is cut off (pass 2, #3), so

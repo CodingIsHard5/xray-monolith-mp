@@ -440,6 +440,11 @@ setq; echo refuse > "$DV/cmode"; echo "HELD: 2026-11-27 00:00:00 engineperf 60 E
 fx 'O="$DV/o_a3"; mkdir -p "$O"; held_call CLAIMED claim $W 30 "$WHAT"; finish'; [ "$(q)" = "$CL|" ]; dok "claim refused while ANOTHER engineperf claim is held: nothing released" $?
 setq; echo "HELD: 2026-11-27 00:00:00 engineperf 60 EXCLUSIVE: another engineperf job" > "$DV/held"
 fx 'O="$DV/o_a4"; mkdir -p "$O"; WAITMIN=0; trap finish EXIT; trap on_sig TERM INT; acquire; rc=$?; finish'; [ "$(q)" = "want engineperf EXCLUSIVE|withdraw engineperf|" ]; dok "an engineperf claim already held: no claim beside it (would renew it), queue left, nothing released" $?
+# amendment 1 (2026-11-27): replay of the 08:37 handoff. The releasing worker writes a 5-minute pre-claim in OUR name; the
+# driver must claim over it (renew it with its own text), not wait beside it until it lapses.
+setq; echo "HELD: 2026-11-27 08:37:00 engineperf 5 EXCLUSIVE handoff pre-claim (claim within 5 min)" > "$DV/held"
+fx 'O="$DV/o_a5"; mkdir -p "$O"; WAITMIN=0; trap finish EXIT; trap on_sig TERM INT; acquire; echo "rc $?" > "$O/rc"; finish'
+case "$(q)" in "want engineperf EXCLUSIVE|$CL|"*) grep -q '^rc 0$' "$DV/o_a5/rc" ;; *) false ;; esac; dok "handoff pre-claim in our name: claimed over it, not waited out (replay of 2026-11-27 08:37)" $?
 setq; echo 2 > "$DV/qsleep_want"
 fxb 'O="$DV/o_t1"; mkdir -p "$O"; trap finish EXIT; trap on_sig TERM INT; acquire; finish'; sleep 0.7; kill -TERM $FXP; wait $FXP; a=$?
 [ $a = 143 ] && [ "$(q)" = "want engineperf EXCLUSIVE|withdraw engineperf|" ]; dok "TERM during want: exit 143 ($a), leaves the queue, claims nothing, releases nothing" $?

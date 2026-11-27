@@ -200,9 +200,9 @@ is POST-HOC DESCRIPTIVE; a verdict that counts needs a new run under a re-regist
 ## 11. Pins (sha256; PIN_ME = EnginePerf fills at registration from the bytes it registers)
 | file | sha256 |
 |---|---|
-| wt-render-split/perf-harness/kj3/kj3p_run.sh (driver) | 1fc5632d0d50ca1f34dc0672bd3b312fac4f2ee95216698591381d33d7d43cb7 |
+| wt-render-split/perf-harness/kj3/kj3p_run.sh (driver) | 101c8dab1026db5357c2dcec39b1d25754a67205a7955b7b3c8566bf575159b6 (amendment 1; was 1fc5632d…) |
 | wt-render-split/perf-harness/kj3/kj3p_check.py (checker; also pinned inside the driver) | 7fa0ccf1d411f106b40a9951747729c770499edb0ad47f1cd1b1093a3c4d891b |
-| wt-render-split/perf-harness/kj3/kj3p_selftest.sh (pinned in the driver) | e9db7bd9332427d21bfcaa246a8c890158433b113941d9bcc06788b05df9045d |
+| wt-render-split/perf-harness/kj3/kj3p_selftest.sh (pinned in the driver) | 1f87bf69f68dc058e7af424eb793adfb1b971189fe89eaa28cd5941bde3aeb0a (amendment 1; was e9db7bd9…) |
 | wt-render-split/perf-harness/kj3/kj3p_score.sh (PIN_ME_SCORE in the driver; its CHK_SHA line must equal the checker's pin, the selftest checks it) | 1b24dc7423c01f7af00dc75876fb5145f24a1be1a4485bc6e5ac43439c573024 |
 | wt-render-split/perf-harness/kj3/kj3p_track_start.csv (pinned in the driver) | 0a8bce3976ff0ef81fb0b5ded24c878088e83410f988ecf52d43fa148eb5a5e9 |
 | wt-render-split/perf-harness/kj3/kill6h_stub.lua (the selftest's fake engine, unchanged) | f864764c06848c010324aa765a26a5d7943b530f4516ff5cd11c16ad55f6f4b5 |
@@ -249,3 +249,23 @@ at their edges.
 - Whether Wine hides DISPLAY in /proc environ (which the display-based ownership test needs) is not known; the engine is
   still found by its -t2_run id.
 - Pass 4's one finding (two empty scans required before the claim is released) was fixed by hand without a new mutant.
+
+## 14. Amendment 1 (2026-11-27): the driver's handoff fault, and the one retry
+**What happened.** First attempt, 2026-11-27: driver started 08:01 local and queued. At 08:37 the box was handed over; the
+queue tool writes a 5-minute pre-claim in the worker's own name for it to claim over. The driver's guard "never claim
+beside another engineperf claim" (review pass 2) took that pre-claim for a foreign claim and waited; the pre-claim lapsed
+at 08:42, another worker took the box, the queue place was lost. EnginePerf did not claim by hand and stopped the driver
+at 08:45 (clean: "slice end (exit 143; withdrew 1, claim tried 1, released 0)", out/kj3p/preflight.log). **No boot, no
+engine, no run folder; nothing was consumed.** The pre-boot selftest on the pinned bytes had passed
+(out/kj3p_state/preboot_selftest.txt); the offline tests had no handoff case.
+**Change.** kj3p_run.sh: `w_holds` ignores a claim whose text contains "handoff pre-claim" (the same text the queue tool
+matches). kj3p_selftest.sh: one new driver test that replays the handoff (the pre-claim line in our name -> the driver
+claims over it, rc 0); it FAILS on the unamended driver (33/34, shown before the fix) and passes on the amended one
+(34/34). The driver's pin of the selftest follows.
+**Unchanged, stated for the supervisor:** kj3p_check.py 7fa0ccf1d411f106b40a9951747729c770499edb0ad47f1cd1b1093a3c4d891b
+and kj3p_score.sh 1b24dc7423c01f7af00dc75876fb5145f24a1be1a4485bc6e5ac43439c573024, every check, bound, prediction and
+NO VERDICT rule, the runner, the reader and the env. No review pass on this change (the Overseer's ruling: none needed
+while checker and scorer pins are unchanged).
+**The retry (the one registered in section 7, on the Overseer's GO):** same command with out dir `out/kj3p-r1`; score once
+with `bash wt-render-split/perf-harness/kj3/kj3p_score.sh out/kj3p-r1/run out/kj3p-r1/kj3p_check.txt`. The pre-boot
+selftest on the amended pinned bytes is rerun and its line put in the run log first. It runs after the wu2 series.
