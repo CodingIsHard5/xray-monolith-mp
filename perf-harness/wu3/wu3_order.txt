@@ -1,0 +1,38 @@
+# wu3 alife_warmup lever (PREREG-wu3-alife-warmup-2026-11-27.md, DRAFT). ONE source for the driver and the scorer.
+# tag|exe|save|warm|frames|slow_ms|arm   arm: on = -alife_warmup, off = stock, prime = disk-cache priming load (not scored)
+# all-lowercase tags (the bench lowercases folder names). 1 prime + 32 scored loads, ABBA blocks: on off off on (x8).
+# Same exe, flags, order pattern and window as wu2. A re-run of slot <tag> is NOT listed here: it is <tag>_r1, at most
+# one per scored slot (driver wu3_run.sh, scorer wu3_score.py); the prime is never re-run.
+wu3_prime|Warm18.exe|cordon1|0|20000|20|prime
+wu3_01_on|Warm18.exe|cordon1|0|20000|20|on
+wu3_02_off|Warm18.exe|cordon1|0|20000|20|off
+wu3_03_off|Warm18.exe|cordon1|0|20000|20|off
+wu3_04_on|Warm18.exe|cordon1|0|20000|20|on
+wu3_05_on|Warm18.exe|cordon1|0|20000|20|on
+wu3_06_off|Warm18.exe|cordon1|0|20000|20|off
+wu3_07_off|Warm18.exe|cordon1|0|20000|20|off
+wu3_08_on|Warm18.exe|cordon1|0|20000|20|on
+wu3_09_on|Warm18.exe|cordon1|0|20000|20|on
+wu3_10_off|Warm18.exe|cordon1|0|20000|20|off
+wu3_11_off|Warm18.exe|cordon1|0|20000|20|off
+wu3_12_on|Warm18.exe|cordon1|0|20000|20|on
+wu3_13_on|Warm18.exe|cordon1|0|20000|20|on
+wu3_14_off|Warm18.exe|cordon1|0|20000|20|off
+wu3_15_off|Warm18.exe|cordon1|0|20000|20|off
+wu3_16_on|Warm18.exe|cordon1|0|20000|20|on
+wu3_17_on|Warm18.exe|cordon1|0|20000|20|on
+wu3_18_off|Warm18.exe|cordon1|0|20000|20|off
+wu3_19_off|Warm18.exe|cordon1|0|20000|20|off
+wu3_20_on|Warm18.exe|cordon1|0|20000|20|on
+wu3_21_on|Warm18.exe|cordon1|0|20000|20|on
+wu3_22_off|Warm18.exe|cordon1|0|20000|20|off
+wu3_23_off|Warm18.exe|cordon1|0|20000|20|off
+wu3_24_on|Warm18.exe|cordon1|0|20000|20|on
+wu3_25_on|Warm18.exe|cordon1|0|20000|20|on
+wu3_26_off|Warm18.exe|cordon1|0|20000|20|off
+wu3_27_off|Warm18.exe|cordon1|0|20000|20|off
+wu3_28_on|Warm18.exe|cordon1|0|20000|20|on
+wu3_29_on|Warm18.exe|cordon1|0|20000|20|on
+wu3_30_off|Warm18.exe|cordon1|0|20000|20|off
+wu3_31_off|Warm18.exe|cordon1|0|20000|20|off
+wu3_32_on|Warm18.exe|cordon1|0|20000|20|on
