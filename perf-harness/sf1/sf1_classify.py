@@ -2,21 +2,31 @@
 # sf1 slow-frame classifier (PREREG-sf1-slow-frame-classes-DRAFT.md). Stdlib only; run with python3 -I.
 #
 #   python3 -I sf1_classify.py root=<folder holding the run folders> order=<order file> out=<new output file>
+#   python3 -I sf1_classify.py probe=<probe run folder> order=<order file>   (driver: the PROBE GATE, before any scored run)
+#   python3 -I sf1_classify.py check=<scored run folder> order=<order file>  (driver: after every scored run and re-run)
 #
-# Order file: "tag|exe|save|warm|frames|slow_ms" per line, '#' = comment. save cordon1 -> scene cordon, bench1 -> rostok.
-# Each scene present must have exactly 3 slots. Tags must be all-lowercase. A slot whose conditions.txt VERDICT is not
-# "clean" is read from <tag>_rr (the driver's re-run, same rule as tools/s4c_series.sh); the substitution is named.
-# Run folder <root>/<tag>/: perf_frames_<tag>.csv, perf_sites_<tag>.csv, perf_slow_<tag>.csv, conditions.txt.
+# Order file: "tag|exe|save|warm|frames|slow_ms|arm" per line, '#' = comment. arm: probe (one per scene, all probe lines
+# before every scored line, never scored) or scored. save cordon1 -> scene cordon, bench1 -> rostok. Each scene must
+# have exactly 3 scored slots and exactly one probe.
+# Score mode also reads the driver's stop record <folder of order=>/stop.txt: missing, not exactly one physical line, or
+# a class other than done -> NO VERDICT [stop] for every scene. A scene whose own probe fails -> NO VERDICT [probe].
+# Tags must be all-lowercase and must not end in _r<digits> (that is the re-run folder name).
+# A scored slot whose conditions.txt VERDICT is not "clean" is read from <tag>_r1 (the driver's one re-run, the wu3 rule);
+# the substitution is named. <tag>_r1 next to a clean <tag> voids the slot (unexpected_rerun).
+# Run folder <root>/<tag>/: perf_frames_<tag>.csv, perf_sites_<tag>.csv, perf_slow_<tag>.csv, conditions.txt, xray.log.
 # A missing or empty file fails BY NAME and voids that slot; it is never read as 0.
 # The output is written to out= in this same call; an existing out file is refused (exit 2), never overwritten.
-# Exit: 0 = output written (whatever the verdict), 2 = refused (usage, order file, out exists).
+# Exit (score): 0 = output written (whatever the verdict), 2 = refused (usage, order file, out exists).
+# Exit (probe= / check=): 0 = go on, 1 = stop (every failed rule printed as "PROBE STOP <code>: ..." / "CHECK STOP ..."),
+#   2 = refused (usage, order file, folder is not the probe / a scored slot or its _r1).
 # Every rule and constant below is the registered one (prereg sections 4-6); nothing is read from the environment.
 import hashlib
 import math
 import os
+import re
 import sys
 
-# ---- registered constants (prereg section 5; derivations there) ----
+# ---- registered constants (prereg section 5 and 10; derivations there) ----
 THETA = 0.5             # a class explains a frame when its extra self time >= THETA * (frame ms - window p50)
 UNEXPLAINED_MAX = 0.5   # pooled share of unexplained slow frames above this -> scene NO VERDICT (zones too coarse)
 P99_SPREAD = 0.12       # each run's p99 within +-12 % of the scene's median-run p99, else NO VERDICT (not repeatable)
@@ -29,12 +39,21 @@ TRAIN_PASS_MS = 15.0    # a frame whose ALife/* self time sums to >= 15 ms is a 
 TRAIN_GAP_MS = 1000.0   # 3 such frames with gaps <= 1 s of wall time = the after-load train is in the window
 TRAIN_MIN = 3
 HITCH_MS = 100.0        # reported only
+ROW_MS_TOL = 0.0005     # a slow row's frame_ms equals the frames file's ms (both printed to 4 decimals; 0 seen on disk)
+# probe gate: median captured frame within the scene's plausible real-time range (prereg 6.1, one derivation per scene)
+PROBE_P50 = {"cordon1": (1.5, 8.0), "bench1": (2.0, 10.0)}
+STOP_RE = r"class=(done|fault) reason=.*|class=box( interrupted=[a-z0-9_]+)? reason=.*"   # stop record (prereg 6.4)
 RUNS_PER_SCENE = 3
 SCENES = {"cordon1": "cordon", "bench1": "rostok"}
+ARMS = ("probe", "scored")
 EXCLUDED = {"mt_FreezeThread", "Check timer"}   # freeze watchdog: a 500 ms Sleep loop, its "self" is sleep
 EXPLAINED = ["alife", "script", "render", "gpu_wait", "online_sim", "io_stream", "sound", "other_known"]
 UNEXPLAINED = ["gc", "main_unzoned_or_wait", "unknown", "no_data"]
 CLASSES = EXPLAINED + UNEXPLAINED
+# probe gate: the named sites the rules read, and every class of the map, must appear with calls in perf_sites
+REQUIRED_SITES = ("Process seqFrame", "bench: wait for GPU (no present)", "seqLuaGC")
+REQUIRED_CLASSES = ("alife", "gc", "gpu_wait", "script", "io_stream", "sound", "render", "online_sim")
+
 
 # ---- class map (prereg section 4.2): first matching rule wins; unmatched named zones are other_known ----
 def zone_class(name):
@@ -70,6 +89,10 @@ def zone_class(name):
 
 
 class Bad(Exception):
+    pass
+
+
+class Refused(Exception):
     pass
 
 
@@ -118,7 +141,7 @@ def read_frames(d, tag):
 def read_sites(d, tag):
     p = os.path.join(d, "perf_sites_%s.csv" % tag)
     L = lines_of(p)
-    if not L[0].startswith("#frames,") or not L[1].startswith("#total_ms,"):
+    if len(L) < 3 or not L[0].startswith("#frames,") or not L[1].startswith("#total_ms,"):
         raise Bad("malformed: %s header" % p)
     nfr = int(L[0].split(",")[1])
     if L[2] != "name,file,line,calls_main,incl_main_ms,self_main_ms,calls_other,incl_other_ms,self_other_ms":
@@ -157,6 +180,188 @@ def verdict_of(d):
         if l.startswith("VERDICT"):
             return l.strip()
     raise Bad("malformed: %s has no VERDICT line" % p)
+
+
+def heavy_of(d):
+    """Reported only (fleet desk rule): the bench's start / end heavy_others fields of conditions.txt."""
+    out = []
+    try:
+        for l in lines_of(os.path.join(d, "conditions.txt")):
+            m = re.match(r"^(start|end)\b.*?(heavy_others=\[[^\]]*\])", l)
+            if m:
+                out.append("%s %s" % (m.group(1), m.group(2)))
+    except Bad:
+        return "conditions unreadable"
+    return "; ".join(out) if out else "no heavy_others fields"
+
+
+def cmdline_reasons(log, tag, slot):
+    """The engine's own record of how it was started (xray.log 'command line'): exe, save, capture, real time."""
+    cl = [l for l in log if l.startswith("command line ")]
+    if not cl:
+        return ["cmdline: no 'command line' line in xray.log"]
+    toks = cl[0][len("command line "):].split()
+    bad = []
+    if not toks or not toks[0].lower().endswith("\\" + slot["exe"].lower()):
+        bad.append("cmdline: exe is %r, registered %s" % (toks[0] if toks else "", slot["exe"]))
+    def after(flag):
+        return toks[toks.index(flag) + 1] if flag in toks and toks.index(flag) + 1 < len(toks) else None
+    cap = "%d,%d,%s" % (slot["warm"], slot["frames"], tag)
+    if after("-perf_capture") != cap:
+        bad.append("cmdline: -perf_capture %r, registered %r" % (after("-perf_capture"), cap))
+    s = after("-perf_slow")
+    try:
+        sv = float(s)
+    except (TypeError, ValueError):
+        sv = None
+    if sv is None or abs(sv - slot["slow"]) > 0.0005:
+        bad.append("cmdline: -perf_slow %r, registered %.1f" % (s, slot["slow"]))
+    for f in ("-perf_noinput", "-perf_nopresent", "-perf_quit", "-nointro"):
+        if f not in toks:
+            bad.append("cmdline: %s missing" % f)
+    srv = "server(%s/single/alife/load)" % slot["save"]
+    if srv not in toks:
+        bad.append("cmdline: %s missing" % srv)
+    if "-perf_fixed_dt" in toks:
+        bad.append("cmdline: -perf_fixed_dt present (fixed game step, not real time)")
+    return bad
+
+
+def run_rules(d, tag, slot):
+    """The as-registered rules of one load (prereg 6 R0-R4, R8, R9). Returns (data or None, reasons)."""
+    if not os.path.isdir(d):
+        return None, ["missing: MISSING folder %s" % d]
+    reasons = []
+    try:
+        ms = read_frames(d, tag)
+        nfr, sites = read_sites(d, tag)
+        thr, rows = read_slow(d, tag)
+        lines_of(os.path.join(d, "conditions.txt"))
+        log = lines_of(os.path.join(d, "xray.log"))
+    except Bad as e:
+        return None, [str(e)]
+    N = len(ms)
+    if N != slot["frames"] or nfr != slot["frames"]:
+        reasons.append("framecount: frames file %d rows, sites header %d, registered %d" % (N, nfr, slot["frames"]))
+    if abs(thr - slot["slow"]) > 0.0005:
+        reasons.append("threshold_header: slow file threshold %.3f, registered %.3f" % (thr, slot["slow"]))
+    bad_idx = sorted(f for f in rows if f < 0 or f >= N)
+    if bad_idx:
+        reasons.append("malformed: slow rows for frame(s) outside the capture, e.g. %d" % bad_idx[0])
+    else:
+        off = [(f, r["fms"]) for f in sorted(rows) for r in rows[f]
+               if abs(r["fms"] - ms[f]) > ROW_MS_TOL or r["fms"] < thr * (1 - COVER_TOL)]
+        if off:
+            reasons.append("slow_rows: frame %d row frame_ms %.4f, frames file %.4f, threshold %.3f (%d rows off)"
+                           % (off[0][0], off[0][1], ms[off[0][0]], thr, len(off)))
+    seq = [s for s in sites.values() if s["name"] == "Process seqFrame"]
+    if not seq:
+        reasons.append("stock_loop: site 'Process seqFrame' missing from perf_sites")
+    elif seq[0]["cm"] != N:
+        reasons.append("stock_loop: 'Process seqFrame' main calls %d != frames %d" % (seq[0]["cm"], N))
+    st = sum(s["cm"] + s["co"] for s in sites.values() if s["name"] == "Sim tick")
+    if st:
+        reasons.append("stock_loop: site 'Sim tick' has %d calls (fixed tick on)" % st)
+    eco = sum(s["cm"] + s["co"] for s in sites.values() if s["name"] == "Eco Render")
+    if eco:
+        reasons.append("frame_limiter: site 'Eco Render' has %d calls (capped run)" % eco)
+    reasons += cmdline_reasons(log, tag, slot)
+    fat = [k for k, l in enumerate(log) if "FATAL" in l]
+    if fat:
+        reasons.append("fatal: xray.log line %d contains FATAL: %r" % (fat[0] + 1, log[fat[0]][:120]))
+    return dict(ms=ms, nfr=nfr, sites=sites, thr=thr, rows=rows, N=N), reasons
+
+
+def window_rules(D, R):
+    """Prereg 4.1 and R6 / R7: the analysis window, its p50 / p99, coverage and the after-load train."""
+    ms, rows, thr, N = D["ms"], D["rows"], D["thr"], D["N"]
+    cut = N
+    for i, v in enumerate(ms):
+        if v > thr * (1 + COVER_TOL) and i not in rows:
+            cut = i
+            break
+    R["cut"] = cut
+    if cut < N:
+        R["notes"].append("window cut at frame %d of %d (first frame above T without rows)" % (cut, N))
+    if cut < MIN_WINDOW * N:
+        R["reasons"].append("window_short: window %d frames < %.0f %% of %d" % (cut, MIN_WINDOW * 100, N))
+        return None
+    w = ms[:cut]
+    sw = sorted(w)
+    p50, p99 = pct(sw, 0.5), pct(sw, 0.99)
+    R.update(p50=p50, p99=p99, mean=sum(ms) / N, n_window=cut, max=max(w))
+    if p99 < thr * (1 + COVER_TOL):
+        R["reasons"].append("coverage_p99: threshold %.3f ms above window p99 %.3f ms (frames between have no zone rows)"
+                            % (thr, p99))
+    t = 0.0
+    cand = []
+    for i, v in enumerate(w):
+        if i in rows:
+            a = sum(r["self"] for r in rows[i] if r["name"].startswith("ALife/"))
+            if a >= TRAIN_PASS_MS:
+                cand.append((i, t))
+        t += v
+    run_len, worst = 1 if cand else 0, 1 if cand else 0
+    for k in range(1, len(cand)):
+        run_len = run_len + 1 if cand[k][1] - cand[k - 1][1] <= TRAIN_GAP_MS else 1
+        worst = max(worst, run_len)
+    if worst >= TRAIN_MIN:
+        R["reasons"].append("train: %d A-Life passes >= %.0f ms within <= %.0f ms gaps (first at frame %d)"
+                            % (worst, TRAIN_PASS_MS, TRAIN_GAP_MS, cand[0][0]))
+    R["hitches"] = sum(1 for v in w if v > HITCH_MS)
+    return w
+
+
+def probe_rules(d, tag, slot):
+    """The PROBE GATE (prereg 6.1): every as-registered rule, the window rules, and what the classifier relies on."""
+    R = dict(tag=tag, reasons=[], notes=[])
+    D, R["reasons"] = run_rules(d, tag, slot)
+    if D is None:
+        return R
+    if not D["rows"]:
+        R["reasons"].append("slow_rows: perf_slow has no rows (no frame above the threshold was dumped)")
+    have = {}
+    named = set()
+    for s in D["sites"].values():
+        if s["cm"] + s["co"] > 0:
+            named.add(s["name"])
+            c = zone_class(s["name"])
+            have[c] = have.get(c, 0) + 1
+    miss = [n for n in REQUIRED_SITES if n not in named] + ["class " + c for c in REQUIRED_CLASSES if not have.get(c)]
+    if miss:
+        R["reasons"].append("zones: not in perf_sites with calls: %s" % ", ".join(miss))
+    p50_all = pct(sorted(D["ms"]), 0.5)
+    R["p50_all"] = p50_all
+    lo, hi = PROBE_P50[slot["save"]]
+    if not (lo <= p50_all <= hi):
+        R["reasons"].append("frame_range: median frame %.3f ms outside the plausible real-time range [%.1f, %.1f] ms of %s"
+                            % (p50_all, lo, hi, slot["save"]))
+    window_rules(D, R)
+    return R
+
+
+def score_run(root, tag, slot):
+    """Returns dict with valid flag, reasons list, and the per-frame results."""
+    R = dict(tag=tag, reasons=[], notes=[], frames=[])
+    D, R["reasons"] = run_rules(os.path.join(root, tag), tag, slot)
+    if D is None:
+        return R
+    w = window_rules(D, R)
+    if w is None or R["reasons"]:
+        return R
+    rows, sites, nfr = D["rows"], D["sites"], D["nfr"]
+    p50, p99 = R["p50"], R["p99"]
+    t = 0.0
+    for i, v in enumerate(w):
+        if v > p99:
+            if i in rows:
+                c, sc, mainshare, top = classify_frame(v, p50, R["mean"], rows[i], sites, nfr)
+            else:
+                c, sc, mainshare, top = "no_data", 0.0, 0.0, []
+            R["frames"].append(dict(i=i, t=t, ms=v, E=v - p50, cls=c, score=sc, main=mainshare, top=top))
+        t += v
+    R["valid"] = True
+    return R
 
 
 def classify_frame(ms, p50, mean_frame, rows, sites, nfr):
@@ -198,127 +403,100 @@ def classify_frame(ms, p50, mean_frame, rows, sites, nfr):
     return "unknown", score[win], 0.0, []
 
 
-def score_run(root, tag, frames_reg, slow_reg):
-    """Returns dict with valid flag, reasons list, and the per-frame results."""
-    R = dict(tag=tag, reasons=[], notes=[], frames=[])
-    d = os.path.join(root, tag)
-    if not os.path.isdir(d):
-        R["reasons"].append("missing: MISSING folder %s" % d)
-        return R
+def read_order(path):
+    """The order file's slots, the probe first. Raises Refused with the reason."""
     try:
-        ms = read_frames(d, tag)
-        nfr, sites = read_sites(d, tag)
-        thr, rows = read_slow(d, tag)
+        olines = [l for l in lines_of(path) if not l.lstrip().startswith("#")]
     except Bad as e:
-        R["reasons"].append(str(e))
-        return R
-    N = len(ms)
-    if N != frames_reg or nfr != frames_reg:
-        R["reasons"].append("framecount: frames file %d rows, sites header %d, registered %d" % (N, nfr, frames_reg))
-    if abs(thr - slow_reg) > 0.0005:
-        R["reasons"].append("threshold_header: slow file threshold %.3f, registered %.3f" % (thr, slow_reg))
-    bad_idx = [f for f in rows if f < 0 or f >= N]
-    if bad_idx:
-        R["reasons"].append("malformed: slow rows for frame(s) outside the capture, e.g. %d" % bad_idx[0])
-    # stock frame loop, uncapped (outcome inside the capture, prereg 6 R3/R4)
-    seq = [s for s in sites.values() if s["name"] == "Process seqFrame"]
-    if not seq:
-        R["reasons"].append("stock_loop: site 'Process seqFrame' missing from perf_sites")
-    elif seq[0]["cm"] != N:
-        R["reasons"].append("stock_loop: 'Process seqFrame' main calls %d != frames %d" % (seq[0]["cm"], N))
-    st = sum(s["cm"] + s["co"] for s in sites.values() if s["name"] == "Sim tick")
-    if st:
-        R["reasons"].append("stock_loop: site 'Sim tick' has %d calls (fixed tick on)" % st)
-    eco = sum(s["cm"] + s["co"] for s in sites.values() if s["name"] == "Eco Render")
-    if eco:
-        R["reasons"].append("frame_limiter: site 'Eco Render' has %d calls (capped run)" % eco)
-    # analysis window: cut at the first frame clearly above T without zone rows (dump cap reached or a gap)
-    cut = N
-    for i, v in enumerate(ms):
-        if v > thr * (1 + COVER_TOL) and i not in rows:
-            cut = i
-            break
-    R["cut"] = cut
-    if cut < N:
-        R["notes"].append("window cut at frame %d of %d (first frame above T without rows)" % (cut, N))
-    if cut < MIN_WINDOW * N:
-        R["reasons"].append("window_short: window %d frames < %.0f %% of %d" % (cut, MIN_WINDOW * 100, N))
-        return R
-    w = ms[:cut]
-    sw = sorted(w)
-    p50, p99 = pct(sw, 0.5), pct(sw, 0.99)
-    R.update(p50=p50, p99=p99, mean=sum(ms) / N, n_window=cut, max=max(w))
-    if p99 < thr * (1 + COVER_TOL):
-        R["reasons"].append("coverage_p99: threshold %.3f ms above window p99 %.3f ms (frames between have no zone rows)"
-                            % (thr, p99))
-    # after-load train in the window (prereg 6 R6)
-    t = 0.0
-    cand = []
-    for i, v in enumerate(w):
-        if i in rows:
-            a = sum(r["self"] for r in rows[i] if r["name"].startswith("ALife/"))
-            if a >= TRAIN_PASS_MS:
-                cand.append((i, t))
-        t += v
-    run_len, worst = 1 if cand else 0, 1 if cand else 0
-    for k in range(1, len(cand)):
-        run_len = run_len + 1 if cand[k][1] - cand[k - 1][1] <= TRAIN_GAP_MS else 1
-        worst = max(worst, run_len)
-    if worst >= TRAIN_MIN:
-        R["reasons"].append("train: %d A-Life passes >= %.0f ms within <= %.0f ms gaps (first at frame %d)"
-                            % (worst, TRAIN_PASS_MS, TRAIN_GAP_MS, cand[0][0]))
-    R["hitches"] = sum(1 for v in w if v > HITCH_MS)
-    if R["reasons"]:
-        return R
-    t = 0.0
-    for i, v in enumerate(w):
-        if v > p99:
-            if i in rows:
-                c, sc, mainshare, top = classify_frame(v, p50, R["mean"], rows[i], sites, nfr)
-            else:
-                c, sc, mainshare, top = "no_data", 0.0, 0.0, []
-            R["frames"].append(dict(i=i, t=t, ms=v, E=v - p50, cls=c, score=sc, main=mainshare, top=top))
-        t += v
-    R["valid"] = True
-    return R
+        raise Refused("order file: %s" % e)
+    slots = []
+    for l in olines:
+        a = l.split("|")
+        if len(a) != 7:
+            raise Refused("order line %r is not tag|exe|save|warm|frames|slow_ms|arm" % l)
+        tag, exe, save, warm, frames, slow, arm = [x.strip() for x in a]
+        if tag != tag.lower():
+            raise Refused("tag %s is not lowercase" % tag)
+        if re.search(r"_r[0-9]+$", tag):
+            raise Refused("tag %s looks like a re-run folder name (<tag>_r<n>)" % tag)
+        if save not in SCENES:
+            raise Refused("save %s is not one of %s" % (save, sorted(SCENES)))
+        if arm not in ARMS:
+            raise Refused("arm %s of %s is not one of %s" % (arm, tag, "/".join(ARMS)))
+        try:
+            slots.append(dict(tag=tag, exe=exe, save=save, scene=SCENES[save], warm=int(warm), frames=int(frames),
+                              slow=float(slow), arm=arm))
+        except ValueError:
+            raise Refused("order line %r has a non-numeric warm / frames / slow_ms" % l)
+    if len({s["tag"] for s in slots}) != len(slots):
+        raise Refused("a tag is listed twice")
+    arms = [s["arm"] for s in slots]
+    first_scored = arms.index("scored") if "scored" in arms else len(arms)
+    if "probe" in arms[first_scored:]:
+        raise Refused("every probe line must come before the first scored line")
+    scored = [s for s in slots if s["arm"] == "scored"]
+    if not scored:
+        raise Refused("no scored slot")
+    for sc in sorted({s["scene"] for s in slots}):
+        if sum(1 for s in scored if s["scene"] == sc) != RUNS_PER_SCENE:
+            raise Refused("scene %s has not exactly %d slots" % (sc, RUNS_PER_SCENE))
+        if sum(1 for s in slots if s["arm"] == "probe" and s["scene"] == sc) != 1:
+            raise Refused("scene %s has not exactly one probe line" % sc)
+    return slots
+
+
+def one_load(folder, order, probe):
+    """probe= / check= for the driver: one load folder against its order line. 0 go on, 1 stop, 2 refused."""
+    try:
+        slots = read_order(order)
+    except Refused as e:
+        print("REFUSED: %s" % e)
+        return 2
+    tag = os.path.basename(os.path.normpath(folder))
+    base = tag[:-3] if tag.endswith("_r1") else tag
+    s = [x for x in slots if x["tag"] == base]
+    if not s or (s[0]["arm"] == "probe") != probe or (probe and base != tag):
+        print("REFUSED: %s is not %s in %s" % (tag, "the probe load" if probe else "a scored slot or its _r1", order))
+        return 2
+    word = "PROBE" if probe else "CHECK"
+    if probe:
+        R = probe_rules(folder, tag, s[0])
+        reasons = R["reasons"]
+    else:
+        D, reasons = run_rules(folder, tag, s[0])
+    if reasons:
+        for r in reasons:
+            print("%s STOP %s" % (word, r))
+        print("%s %s FAIL [%s]" % (word, tag, "] [".join(r.split(":")[0] for r in reasons)))
+        return 1
+    extra = ""
+    if probe:
+        extra = " (median frame %.3f ms, window p99 %.3f ms, window %d frames, slow threshold %.1f, %s)" % (
+            R["p50_all"], R["p99"], R["n_window"], s[0]["slow"], s[0]["save"])
+    print("%s %s ok%s" % (word, tag, extra))
+    return 0
 
 
 def main(argv):
     args = dict(a.split("=", 1) for a in argv if "=" in a)
+    for mode in ("probe", "check"):
+        if mode in args:
+            if set(args) != {mode, "order"} or len(argv) != 2:
+                break
+            return one_load(args[mode], args["order"], mode == "probe")
     if set(args) != {"root", "order", "out"} or len(argv) != 3:
-        print("usage: python3 -I sf1_classify.py root=<dir> order=<order file> out=<new file>")
+        print("usage: python3 -I sf1_classify.py root=<dir> order=<order file> out=<new file>   |   "
+              "probe=<probe folder> order=<order file>   |   check=<run folder> order=<order file>")
         return 2
     out = args["out"]
     if os.path.exists(out):
         print("REFUSED: %s exists, not overwriting" % out)
         return 2
     try:
-        olines = [l for l in lines_of(args["order"]) if not l.lstrip().startswith("#")]
-    except Bad as e:
-        print("REFUSED: order file: %s" % e)
+        slots = read_order(args["order"])
+    except Refused as e:
+        print("REFUSED: %s" % e)
         return 2
-    slots = []
-    for l in olines:
-        a = l.split("|")
-        if len(a) != 6:
-            print("REFUSED: order line %r is not tag|exe|save|warm|frames|slow_ms" % l)
-            return 2
-        tag, exe, save, warm, frames, slow = [x.strip() for x in a]
-        if tag != tag.lower():
-            print("REFUSED: tag %s is not lowercase" % tag)
-            return 2
-        if save not in SCENES:
-            print("REFUSED: save %s is not one of %s" % (save, sorted(SCENES)))
-            return 2
-        slots.append(dict(tag=tag, exe=exe, scene=SCENES[save], frames=int(frames), slow=float(slow)))
-    scenes = []
-    for s in slots:
-        if s["scene"] not in scenes:
-            scenes.append(s["scene"])
-    for sc in scenes:
-        if sum(1 for s in slots if s["scene"] == sc) != RUNS_PER_SCENE:
-            print("REFUSED: scene %s has not exactly %d slots" % (sc, RUNS_PER_SCENE))
-            return 2
     o = []
     P = o.append
     P("sf1 slow-frame classification (PREREG-sf1-slow-frame-classes)")
@@ -326,23 +504,62 @@ def main(argv):
     P("order  %s sha256 %s" % (os.path.abspath(args["order"]), sha(args["order"])))
     P("root   %s" % os.path.abspath(args["root"]))
     P("constants THETA=%.2f UNEXPLAINED_MAX=%.2f P99_SPREAD=%.2f SHARE_Z=%.1f DOMINANT=%.2f COVER_TOL=%.2f "
-      "MIN_WINDOW=%.2f TRAIN=%d x >=%.0f ms within %.0f ms" % (THETA, UNEXPLAINED_MAX, P99_SPREAD, SHARE_Z, DOMINANT,
-                                                             COVER_TOL, MIN_WINDOW, TRAIN_MIN, TRAIN_PASS_MS, TRAIN_GAP_MS))
+      "MIN_WINDOW=%.2f TRAIN=%d x >=%.0f ms within %.0f ms PROBE_P50=%s"
+      % (THETA, UNEXPLAINED_MAX, P99_SPREAD, SHARE_Z, DOMINANT, COVER_TOL, MIN_WINDOW, TRAIN_MIN, TRAIN_PASS_MS,
+         TRAIN_GAP_MS, sorted(PROBE_P50.items())))
+    # the driver's stop record (prereg 6.4): exactly one physical line, class done; else every scene NO VERDICT [stop]
+    sp = os.path.join(os.path.dirname(os.path.abspath(args["order"])), "stop.txt")
+    stop_bad = None
+    if not os.path.isfile(sp):
+        stop_bad = "missing: no stop record %s" % sp
+    else:
+        raw = open(sp, "rb").read().decode("ascii", "replace")
+        body = raw[:-1] if raw.endswith("\n") else None
+        if body is not None and body.endswith("\r"):
+            body = body[:-1]
+        if body is None or "\n" in body or "\r" in body:
+            stop_bad = "lines: %s is not exactly one physical line ended by LF (%d line ends, %d bytes)" % (
+                sp, raw.count("\n"), len(raw))
+        elif not re.fullmatch(STOP_RE, body):
+            stop_bad = "malformed: %r is not class=<done|box|fault>[ interrupted=<tag>] reason=<text>" % body
+        elif not body.startswith("class=done "):
+            stop_bad = "class: the series did not finish (%s)" % body
+        P("STOP RECORD %s: %s" % (sp, body if body is not None else repr(raw[:200])))
+    if stop_bad:
+        P("STOP RECORD NOT DONE [%s]: %s" % tuple(stop_bad.split(": ", 1)))
+    # each scene's probe load (never scored): the same gate the driver ran; failed or missing = NO VERDICT [probe]
+    # for THAT scene only (the driver stops the whole series on either; the scorer judges each scene on its own probe)
+    probe_ok = {}
+    for pr in [x for x in slots if x["arm"] == "probe"]:
+        PR = probe_rules(os.path.join(args["root"], pr["tag"]), pr["tag"], pr)
+        probe_ok[pr["scene"]] = (not PR["reasons"], pr["tag"])
+        if not PR["reasons"]:
+            P("PROBE %s ok (median frame %.3f ms, window p99 %.3f ms; %s)" % (pr["tag"], PR["p50_all"], PR["p99"],
+                                                                              heavy_of(os.path.join(args["root"], pr["tag"]))))
+        else:
+            P("PROBE %s STOP [%s]" % (pr["tag"], "] [".join(r.split(":")[0] for r in PR["reasons"])))
+            for r in PR["reasons"]:
+                P("    %s" % r)
+    scored = [s for s in slots if s["arm"] == "scored"]
+    scenes = []
+    for s in scored:
+        if s["scene"] not in scenes:
+            scenes.append(s["scene"])
     final = []
     for sc in scenes:
         P("")
         P("== scene %s ==" % sc)
         runs = []
-        for s in [x for x in slots if x["scene"] == sc]:
+        for s in [x for x in scored if x["scene"] == sc]:
             used = s["tag"]
             sub = ""
             d = os.path.join(args["root"], s["tag"])
+            rr = s["tag"] + "_r1"
             pre = []
             if os.path.isdir(d):
                 try:
                     v = verdict_of(d)
                     if v != "VERDICT: clean":
-                        rr = s["tag"] + "_rr"
                         if os.path.isdir(os.path.join(args["root"], rr)):
                             used = rr
                             sub = " (substituted: %s is %r)" % (s["tag"], v)
@@ -354,14 +571,18 @@ def main(argv):
                                 pre.append(str(e))
                         else:
                             pre.append("not_clean: %s is %r and there is no %s" % (s["tag"], v, rr))
+                    elif os.path.isdir(os.path.join(args["root"], rr)):
+                        pre.append("unexpected_rerun: %s is clean but %s exists (the driver re-runs only a not-clean "
+                                   "load)" % (s["tag"], rr))
                 except Bad as e:
                     pre.append(str(e))
-            R = score_run(args["root"], used, s["frames"], s["slow"])
+            R = score_run(args["root"], used, s)
             R["reasons"] = pre + R["reasons"]
             if R["reasons"]:
                 R["valid"] = False
             R["slot"] = s["tag"]
             runs.append(R)
+            hv = heavy_of(os.path.join(args["root"], used)) if os.path.isdir(os.path.join(args["root"], used)) else "-"
             if R.get("valid"):
                 P("RUN %s used=%s VALID%s window=%d p50=%.3f p99=%.3f max=%.1f slow=%d hitches>100ms=%d %s"
                   % (s["tag"], used, sub, R["n_window"], R["p50"], R["p99"], R["max"], len(R["frames"]),
@@ -371,7 +592,16 @@ def main(argv):
                                                   "] [".join(r.split(":")[0] for r in R["reasons"])))
                 for r in R["reasons"]:
                     P("    %s" % r)
+            P("    conditions %s: %s" % (used, hv))
         valid = [R for R in runs if R.get("valid")]
+        if stop_bad:
+            P("SCENE %s NO VERDICT [stop]: %s" % (sc, stop_bad))
+            final.append("%s=NO VERDICT (stop)" % sc)
+            continue
+        if not probe_ok[sc][0]:
+            P("SCENE %s NO VERDICT [probe]: the probe load %s did not pass the gate" % (sc, probe_ok[sc][1]))
+            final.append("%s=NO VERDICT (probe)" % sc)
+            continue
         if len(valid) != RUNS_PER_SCENE:
             P("SCENE %s NO VERDICT [runs]: %d of %d runs valid" % (sc, len(valid), RUNS_PER_SCENE))
             final.append("%s=NO VERDICT (runs %d/%d valid)" % (sc, len(valid), RUNS_PER_SCENE))
@@ -409,11 +639,11 @@ def main(argv):
                 continue
             for R in valid:
                 nr = len(R["frames"])
-                pr = sum(1 for f in R["frames"] if f["cls"] == c) / nr if nr else 0.0
+                pr_ = sum(1 for f in R["frames"] if f["cls"] == c) / nr if nr else 0.0
                 b = SHARE_Z * math.sqrt(share[c] * (1 - share[c]) / nr) + 1.0 / nr if nr else 1.0
-                ok = abs(pr - share[c]) <= b
+                ok = abs(pr_ - share[c]) <= b
                 rep_ok &= ok
-                P("  repeat %-20s %s share %.3f pooled %.3f bound %.3f %s" % (c, R["slot"], pr, share[c], b,
+                P("  repeat %-20s %s share %.3f pooled %.3f bound %.3f %s" % (c, R["slot"], pr_, share[c], b,
                                                                             "ok" if ok else "FAIL"))
         gaps = []
         for R in valid:

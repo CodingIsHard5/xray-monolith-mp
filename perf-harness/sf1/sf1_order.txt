@@ -1,8 +1,12 @@
 # sf1 slow-frame classes (PREREG-sf1-slow-frame-classes-DRAFT.md section 3). ONE source for the driver and the scorer.
-# tag|exe|save|warm|frames|slow_ms   -- all-lowercase tags (the bench lowercases folder names); scenes interleaved ABBAAB
-sf1_cor_1|Coarse14.exe|cordon1|11500|10000|6.0
-sf1_ros_1|Coarse14.exe|bench1|11500|10000|9.0
-sf1_ros_2|Coarse14.exe|bench1|11500|10000|9.0
-sf1_cor_2|Coarse14.exe|cordon1|11500|10000|6.0
-sf1_cor_3|Coarse14.exe|cordon1|11500|10000|6.0
-sf1_ros_3|Coarse14.exe|bench1|11500|10000|9.0
+# tag|exe|save|warm|frames|slow_ms|arm   -- all-lowercase tags (the bench lowercases folder names), no _r<n> tags.
+# arm probe: the PROBE GATE loads (first, one per scene, scored-run settings, never scored, never re-run).
+# Scored scenes interleaved ABBAAB.
+sf1_probe_cor|Coarse14.exe|cordon1|14000|10000|6.0|probe
+sf1_probe_ros|Coarse14.exe|bench1|14000|10000|8.0|probe
+sf1_cor_1|Coarse14.exe|cordon1|14000|10000|6.0|scored
+sf1_ros_1|Coarse14.exe|bench1|14000|10000|8.0|scored
+sf1_ros_2|Coarse14.exe|bench1|14000|10000|8.0|scored
+sf1_cor_2|Coarse14.exe|cordon1|14000|10000|6.0|scored
+sf1_cor_3|Coarse14.exe|cordon1|14000|10000|6.0|scored
+sf1_ros_3|Coarse14.exe|bench1|14000|10000|8.0|scored
