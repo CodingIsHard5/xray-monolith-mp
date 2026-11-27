@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NOT YET RUN (only `bash -n` checked); pins filled at registration. wu2 driver (PREREG-wu2-alife-warmup-DRAFT.md section 8).
+# NOT YET RUN (only `bash -n` checked); pins filled at registration 2026-11-26. wu2 driver (PREREG-wu2-alife-warmup-2026-11-26.md section 8).
 #   wt-render-split/perf-harness/wu2/wu2_run.sh [--preflight-only]
 # wu2 = wu1_run.sh with the wu2 names and paths (state out/wu2_state, tags wu2_*), the wu2 scorer's probe/check, and
 # PIN_ME pins for the wu2 files. Same exe, bench, flags, order, slice and stop rules. It claims the box itself through
@@ -33,7 +33,7 @@ WU=wt-render-split/perf-harness/wu2; ORDER=$WU/wu2_order.txt; ST=out/wu2_state
 EXE=Warm18.exe; EXE_SHA=15828a7a6cadd38e42cc376869f581166884c04f1eb236baf79054a74332ae9d; CFG=run/appdata/user.ltx
 FLAGS="-perf_noinput -perf_nopresent"          # + "-perf_slow <slow_ms>" per load, + "-alife_warmup" on ON loads
 NLOADS=33; NON=16; NOFF=16; MAX_CONFOUNDED=3     # MAX_CONFOUNDED: wu2_score.py has the same value (self-test checks)
-ORDER_SHA=PIN_ME_ORDER                          # the order file's registered sha256 (preflight AND the state-dir copy)
+ORDER_SHA=21e80fc1f29524c29f476c2af0545bd5fb72092ee0141664efb66015cd6f08ae                          # the order file's registered sha256 (preflight AND the state-dir copy)
 BENCH_TO=900                                    # BENCH_TIMEOUT passed to the bench
 END_RESERVE=120   # s after a bench timeout: the bench's own trap (wine + Xvfb), check_run, withdraw/release, notify (timeout 60)
 # ---- BEGIN driver functions (wu2_selftest.sh extracts this block and tests it offline; nothing here runs a load) ----
@@ -79,8 +79,8 @@ pin run/bin/$EXE                         $EXE_SHA || bad=1
 pin run/appdata/savedgames/cordon1.scop  6dea752bc652a45c748e1438e3bc8ffd2d8d89f24730177c792328aeb5d13f3e || bad=1
 pin run/appdata/savedgames/cordon1.scoc  a9f9a8a91b034de28a49be7f8029d823d057e46b4445f3f94d7255dbc77b0b6b || bad=1
 pin $ORDER                               $ORDER_SHA || bad=1
-pin $WU/wu2_score.py                     PIN_ME_SCORE || bad=1
-pin $WU/wu2_selftest.sh                  PIN_ME_SELFTEST || bad=1
+pin $WU/wu2_score.py                     69cd81124cfb0606c0c033ffad718c87dcb89cd09aba104885785ea75a2fbed4 || bad=1
+pin $WU/wu2_selftest.sh                  a2c23939fa8c560f895d842794847a2d31eb4ed5482c1398f4d19cc59e93d490 || bad=1
 DISP=${BENCH_DISPLAY:-:141}
 [ "$DISP" = ":141" ] || { echo "REFUSED: BENCH_DISPLAY '$DISP' is not :141 (this experiment's own display)"; bad=1; }
 disp_free() {   # refuses a display that exists or left a lock (tools/t3_kw1.sh)

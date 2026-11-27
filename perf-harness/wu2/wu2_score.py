@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # wu2 scorer: does the engine lever -alife_warmup remove the slow frames after a level load?
-# (PREREG-wu2-alife-warmup-DRAFT.md). Stdlib only; run with python3 -I. DRAFT, not registered.
+# (PREREG-wu2-alife-warmup-2026-11-26.md). Stdlib only; run with python3 -I. Registered 2026-11-26.
 # wu2 = wu1 (Revision 3) with the window start moved: with -perf_capture 0,N the capture starts BEFORE the level loads
 # (wu1 prereg 5.1 was wrong), so it holds the loading frames and the precache frames. This scorer finds the end of
 # loading inside the capture (prereg 5.1 / 5.4) and starts every window there. Everything else is wu1's.

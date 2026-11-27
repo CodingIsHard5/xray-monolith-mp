@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wu2 scorer self-test (PREREG-wu2-alife-warmup-DRAFT.md section 8). DRAFT.
+# wu2 scorer self-test (PREREG-wu2-alife-warmup-2026-11-26.md section 8). Registered 2026-11-26.
 #   nice -n 19 bash wu2_selftest.sh  -> builds wu2/selftest-runs/<stamp>/, runs every case and every mutant, prints one final line
 # Real fixtures: earlier run folders and logs under <project>/out, read IN PLACE (never copied whole, never written).
 #   out/wu1_prime (the one real Warm18 capture, with its loading frames) is probed in place; its mutants are folders in

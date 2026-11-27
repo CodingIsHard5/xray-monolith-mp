@@ -1,4 +1,4 @@
-# PREREG wu2 (DRAFT): does `-alife_warmup` remove the slow frames after a level load? (2026-11-26; not registered; nothing run)
+# PREREG wu2 (REGISTERED 2026-11-26): does `-alife_warmup` remove the slow frames after a level load? (no wu2 load run; one wu1 prime load seen, see below)
 
 ## What changed from wu1 and why (read first)
 **wu1 stopped at its probe because my desk read in wu1's section 5.1 was wrong.** wu1 5.1 said: with
@@ -395,7 +395,7 @@ longer carried: review pass 2 re-derived it for the in-capture measure, row abov
 
 ## 8. Scorer, self-test, driver
 `wu2_score.py` (stdlib, `python3 -I`), `wu2_selftest.sh`, `wu2_run.sh` (bash -n only), `wu2_order.txt`; hashes in
-NOTES.md; pinned into the driver at registration (PIN_ME until then: the driver refuses).
+NOTES.md; pinned into the driver at registration (section 13).
 Self-test 2026-11-26 (draft, after review pass 2): `WU2 SELFTEST PASS 259/259 (28 real cases, 144 made cases, 58 hook
 mutants caught, 18 constant mutants caught, 1 hook-coverage check, 1 MAX_CONFOUNDED agreement check, 1 fixture-bytes
 check, 2 find-error checks, 5 driver checks, 1 untouched check)`; command
@@ -468,9 +468,21 @@ under the expected spread).
 ## 12. What this cannot show (unchanged, wu1 12)
 
 ## 13. Registration
-DRAFT by an Opus sub-worker for EnginePerf, 2026-11-26. Not registered. Pins (sha256), filled at registration:
-wu2_order.txt PIN_ME; wu2_score.py PIN_ME; wu2_selftest.sh PIN_ME; wu2_run.sh PIN_ME; run/bin/Warm18.exe
+Registered by EnginePerf, 2026-11-26 (drafted by an Opus sub-worker; hashes, both suites and the probe output on
+out/wu1_prime checked by EnginePerf; three CodeRabbit passes, the third with no new findings, triage in
+coderabbit-triage-2026-11-26.md). Selftest at these pins: 259/259. The driver has had `bash -n` and offline function
+tests only. Pins (sha256):
+wu2_order.txt 21e80fc1f29524c29f476c2af0545bd5fb72092ee0141664efb66015cd6f08ae;
+wu2_score.py 69cd81124cfb0606c0c033ffad718c87dcb89cd09aba104885785ea75a2fbed4;
+wu2_selftest.sh a2c23939fa8c560f895d842794847a2d31eb4ed5482c1398f4d19cc59e93d490;
+wu2_run.sh 257f4ec7a52b43513cc58fcc67265377a8fdb76d951b19775120814fff0946cf; run/bin/Warm18.exe
 15828a7a6cadd38e42cc376869f581166884c04f1eb236baf79054a74332ae9d (unchanged); bench, save and tool pins in wu2_run.sh
 (copied from wu1, unchanged). Departures from the Overseer's wording, stated plainly: E is taken from the engine's
 call counters (sites file) and the clock lines + frames file are the cross-check, not the other way round (NOTES 3.1);
 the log alone cannot pin the loading-end line to one frame (5.1, 0).
+
+Also stated plainly at registration: (1) H3's measure changed from wu1 (engine-clock load time -> in-capture loading
+time), before any lever-on load existed; (2) the prime load's own numbers (out/wu1_prime) were seen before this
+registration; the only constant derived from them is the 15 ms clock tolerance; (3) the cross-clock comparison is
+report-only, so a uniform shift of the engine clock is not a stop; (4) the note loadtime_measures_differ is expected to
+fire on valid data and decides nothing; (5) held frames (the lever-on path) are tested on made data only.
