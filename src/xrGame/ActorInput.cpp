@@ -1207,6 +1207,47 @@ int vr_bpt_dropped(int id, const Fvector& bc, Fvector& centre, int mode, const F
 	att.transform_tiny(centre, bc);
 	return free_ ? 2 : 1;
 }
+// B3b: the free item whose box (grown by reach) holds p, among the objects the actor's own pick-up sees (feel_touch);
+// the nearest box centre wins. Its id or -1; its section, its matrix, whether it is a consumable.
+int vr_bpt_near(CActor* A, const Fvector& p, float reach, LPSTR sect, Fmatrix& xf, bool& eatable)
+{
+	int best = -1;
+	float bd = 1000.f;
+	if (!A)
+		return -1;
+	for (CObject* O : A->feel_touch)
+	{
+		CInventoryItem* it = smart_cast<CInventoryItem*>(O);
+		if (!it || O->H_Parent() || !O->getVisible() || O->getDestroy() || !O->Visual() || !it->CanTake())
+			continue;
+		const Fbox& bb = O->Visual()->getVisData().box;
+		Fmatrix ix;
+		ix.invert(O->XFORM());
+		Fvector q, c;
+		ix.transform_tiny(q, p);
+		if (q.x < bb.min.x - reach || q.x > bb.max.x + reach || q.y < bb.min.y - reach || q.y > bb.max.y + reach || q.z < bb.min.z - reach || q.z > bb.max.z + reach)
+			continue;
+		bb.getcenter(c);
+		O->XFORM().transform_tiny(c);
+		const float d = c.distance_to(p);
+		if (d < bd)
+		{
+			bd = d;
+			best = int(O->ID());
+			xr_strcpy(sect, 64, O->cNameSect().c_str());
+			xf.set(O->XFORM());
+			eatable = !!smart_cast<CEatableItem*>(it);
+		}
+	}
+	return best;
+}
+bool vr_bpt_take(CActor* A, int id) // the game's own pick-up (the call behind the flat game's pick-up key)
+{
+	if (!A || id < 0)
+		return false;
+	Game().SendPickUpEvent(A->ID(), u16(id));
+	return true;
+}
 int vr_bpt_use(CActor* A, int id) // the game's own use: -1 not ours any more, 0 no script gate, 1 gate false (FDDA took it), 2 gate true and Eat called
 {
 	PIItem it = vr_bpt_owned(A, id);

@@ -4437,7 +4437,14 @@ struct vr_bph_state
 	bool drop_vel;
 	Fvector drop_v, drop_w;
 	float drop_t, drop_g;
+	bool set_off;       // B3b: -vr_bp_set_off (TEST ONLY): no set-down and no hand pick-up (B3a exactly)
 };
+// B3b (Amendment 41 note 26): an item let go slowly just over a surface is set down on its base; a set-down or other
+// world item is picked up by the empty gun-side hand's grip through the game's own pick-up.
+static const float VR_SET_SURF = 0.10f;  // a surface this far below the item's lowest point, or nearer
+static const float VR_SET_SPEED = 0.3f;  // the hand slower than this (m/s, B2c's window)
+int vr_bpt_near(CActor* A, const Fvector& p, float reach, LPSTR sect, Fmatrix& xf, bool& eatable); // ActorInput.cpp (B3b)
+bool vr_bpt_take(CActor* A, int id);
 int vr_bpt_ruck_count(CActor* A, LPCSTR sect);                                       // ActorInput.cpp (B2b)
 int vr_bpt_pick(CActor* A, LPCSTR sect, bool& eatable, float& weight);
 bool vr_bpt_ammo(CActor* A, int id, LPCSTR sect, int& owned, int& rounds, int& inv_rounds, int& boxes); // ActorInput.cpp (B3a)
@@ -4482,6 +4489,9 @@ static void vr_bph_parse()
 		sscanf(q + 13, "%f", &H.reach);
 	H.out_off = !!strstr(Core.Params, "-vr_bp_out_off");
 	H.vel_off = !!strstr(Core.Params, "-vr_bp_vel_off");
+	H.set_off = !!strstr(Core.Params, "-vr_bp_set_off");
+	Msg("* [vr19] setting down on a surface and picking up by hand: %s; surface within %.2f m, hand slower than %.2f m/s", H.set_off ? "OFF (-vr_bp_set_off, TEST ONLY)" : "on",
+		VR_SET_SURF, VR_SET_SPEED);
 	Msg("* [vr17] a released item keeps the hand's velocity: %s", H.vel_off ? "OFF (-vr_bp_vel_off, TEST ONLY)" : "on");
 	Msg("* [vr14] hands in the bag: %s; reach %.3f m", H.off ? "OFF (-vr_bp_grab_off, TEST ONLY)" : "on", H.reach);
 	Msg("* [vr16] taking out of the bag: %s", H.off ? "off (hands in the bag are off)" : H.out_off ? "OFF (-vr_bp_out_off, TEST ONLY)" : "on");
@@ -4707,62 +4717,118 @@ static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
 				H.drop_xf.j.normalize();
 				H.drop_xf.k.normalize();
 				H.drop_bc = e.bc;
-				const bool ok = vr_bpt_drop(A, id, w.c);
+				// B2c: the velocity of the item's box centre in the hand, and the hand's spin, over the last 0.12 s
+				Fvector lv, av;
+				lv.set(0.f, 0.f, 0.f);
+				av.set(0.f, 0.f, 0.f);
+				int n = 0;
+				float T = 0.f;
+				bool capped = false;
+				if (!H.vel_off && H.vok[0])
+					for (int k = 1; k < 16; ++k)
+					{
+						if (H.vf[k] + u32(k) != I.frame || !H.vok[k])
+							break;
+						const float T2 = T + H.vdt[k - 1];
+						if (k > 1 && T2 > 0.12f)
+							break;
+						T = T2;
+						n = k;
+					}
+				if (n > 0 && T > 1e-4f)
+				{
+					lv.sub(H.vc[0], H.vc[n]);
+					lv.div(T);
+					Fmatrix ih, D;
+					ih.invert(H.vh[n]);
+					D.mul_43(H.vh[0], ih); // the hand's turn from then to now, in the world
+					Fvector vee;
+					vee.set(D.j.z - D.k.y, D.k.x - D.i.z, D.i.y - D.j.x);
+					const float sn = 0.5f * vee.magnitude();
+					const float cs = 0.5f * (D.i.x + D.j.y + D.k.z - 1.f);
+					if (sn > 1e-7f)
+						av.mul(vee, atan2f(sn, cs) / (2.f * sn * T));
+					if (lv.magnitude() > 10.f)
+					{
+						lv.mul(10.f / lv.magnitude());
+						capped = true;
+					}
+					if (av.magnitude() > 20.f)
+					{
+						av.mul(20.f / av.magnitude());
+						capped = true;
+					}
+				}
+				// B3b: set down? A static surface (normal y >= 0.9) straight below the box centre, no further than
+				// VR_SET_SURF below the box's lowest point, and a slow hand.
+				bool setd = false;
+				float surf = 0.f, gap = 0.f, yaw = 0.f;
+				Fvector dpos = w.c;
+				const float spd = lv.magnitude();
+				if (!H.set_off && spd < VR_SET_SPEED && g_pGameLevel && Level().bReady)
+				{
+					const Fmatrix& X = H.drop_xf;
+					const float hy = 0.5f * (_abs(X.i.y) * e.ext.x + _abs(X.j.y) * e.ext.y + _abs(X.k.y) * e.ext.z);
+					collide::rq_result R;
+					if (Level().ObjectSpace.RayPick(wc, Fvector().set(0.f, -1.f, 0.f), hy + VR_SET_SURF, collide::rqtStatic, R, nullptr) && R.element >= 0)
+					{
+						CDB::TRI* T = Level().ObjectSpace.GetStaticTris() + R.element;
+						Fvector* V = Level().ObjectSpace.GetStaticVerts();
+						Fvector e1, e2, nn;
+						e1.sub(V[T->verts[1]], V[T->verts[0]]);
+						e2.sub(V[T->verts[2]], V[T->verts[0]]);
+						nn.crossproduct(e1, e2);
+						nn.normalize_safe();
+						if (_abs(nn.y) >= 0.9f)
+						{
+							surf = wc.y - R.range;
+							gap = wc.y - hy - surf;
+							Fvector up, kk, ii, rc, tg;
+							up.set(0.f, 1.f, 0.f);
+							kk.set(X.k.x, 0.f, X.k.z);
+							if (kk.magnitude() < 0.5f) // its own long axis stands nearly upright: take the yaw from its side axis
+							{
+								ii.set(X.i.x, 0.f, X.i.z);
+								ii.normalize_safe();
+								kk.crossproduct(ii, up);
+							}
+							kk.normalize_safe();
+							ii.crossproduct(up, kk);
+							Fmatrix N;
+							N.identity();
+							N.i.set(ii);
+							N.j.set(up);
+							N.k.set(kk);
+							rc.set(0.f, 0.f, 0.f);
+							rc.mad(ii, e.bc.x);
+							rc.mad(up, e.bc.y);
+							rc.mad(kk, e.bc.z);
+							tg.set(wc.x, surf + 0.5f * e.ext.y, wc.z); // the box bottom on the surface
+							N.c.sub(tg, rc);
+							H.drop_xf = N;
+							dpos = N.c;
+							yaw = rad2deg(atan2f(kk.x, kk.z));
+							setd = true;
+						}
+					}
+				}
+				const bool ok = vr_bpt_drop(A, id, dpos);
 				Msg("* [vr16] frame %u drop: '%s' id %d let go outside the bag at %.4f %.4f %.4f (box centre): the game's drop %s", I.frame, e.sect.c_str(), id, wc.x, wc.y,
 					wc.z, ok ? "sent" : "NOT sent (the item is not ours)");
 				if (ok)
 				{
 					H.drop_id1 = id + 1;
 					H.drop_set = 0;
-					// B2c: the velocity of the item's box centre in the hand, and the hand's spin, over the last 0.12 s
-					Fvector lv, av;
-					lv.set(0.f, 0.f, 0.f);
-					av.set(0.f, 0.f, 0.f);
-					int n = 0;
-					float T = 0.f;
-					bool capped = false;
-					if (!H.vel_off && H.vok[0])
-						for (int k = 1; k < 16; ++k)
-						{
-							if (H.vf[k] + u32(k) != I.frame || !H.vok[k])
-								break;
-							const float T2 = T + H.vdt[k - 1];
-							if (k > 1 && T2 > 0.12f)
-								break;
-							T = T2;
-							n = k;
-						}
-					if (n > 0 && T > 1e-4f)
-					{
-						lv.sub(H.vc[0], H.vc[n]);
-						lv.div(T);
-						Fmatrix ih, D;
-						ih.invert(H.vh[n]);
-						D.mul_43(H.vh[0], ih); // the hand's turn from then to now, in the world
-						Fvector vee;
-						vee.set(D.j.z - D.k.y, D.k.x - D.i.z, D.i.y - D.j.x);
-						const float sn = 0.5f * vee.magnitude();
-						const float cs = 0.5f * (D.i.x + D.j.y + D.k.z - 1.f);
-						if (sn > 1e-7f)
-							av.mul(vee, atan2f(sn, cs) / (2.f * sn * T));
-						if (lv.magnitude() > 10.f)
-						{
-							lv.mul(10.f / lv.magnitude());
-							capped = true;
-						}
-						if (av.magnitude() > 20.f)
-						{
-							av.mul(20.f / av.magnitude());
-							capped = true;
-						}
-					}
-					H.drop_vel = !H.vel_off;
+					H.drop_vel = !H.vel_off && !setd;
 					H.drop_v = lv;
 					H.drop_w = av;
 					H.drop_t = 0.f;
 					H.drop_g = vr_bpt_gravity();
-					Msg("* [vr17] frame %u release: id %d frames %d time %.5f v %.4f %.4f %.4f w %.4f %.4f %.4f gravity %.3f %s", I.frame, id, n, T, lv.x, lv.y, lv.z, av.x,
-						av.y, av.z, H.drop_g, H.vel_off ? "off" : capped ? "capped" : "free");
+					if (setd)
+						Msg("* [vr19] frame %u set down: '%s' id %d surface y %.4f gap %.4f hand_speed %.4f yaw %.2f", I.frame, e.sect.c_str(), id, surf, gap, spd, yaw);
+					else
+						Msg("* [vr17] frame %u release: id %d frames %d time %.5f v %.4f %.4f %.4f w %.4f %.4f %.4f gravity %.3f %s", I.frame, id, n, T, lv.x, lv.y, lv.z, av.x,
+							av.y, av.z, H.drop_g, H.vel_off ? "off" : capped ? "capped" : "free");
 				}
 				H.carried1 = 0;
 				return false;
@@ -4810,7 +4876,48 @@ static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
 	if (!press)
 		return at_bag; // the holsters do not see a grip held at the bag
 	if (!at_bag)
-		return false;
+	{
+		// B3b: the empty hand's grip at a world item takes it through the game's own pick-up; it is then the item in the hand
+		if (H.set_off || H.out_off)
+			return false;
+		string64 ws = "";
+		Fmatrix wx;
+		bool weat = false;
+		const int wid = vr_bpt_near(A, hand.c, H.reach, ws, wx, weat);
+		if (wid < 0)
+			return false;
+		const u16 wslot = (A && A->m_inventory) ? A->inventory().GetActiveSlot() : NO_ACTIVE_SLOT;
+		if (wslot != NO_ACTIVE_SLOT)
+		{
+			Msg("* [vr19] frame %u pick up refused: a weapon is in the hand (slot %u); '%s' id %d stays", I.frame, u32(wslot), ws, wid);
+			return true;
+		}
+		int wi = -1;
+		for (int i = 0; i < int(B.list.size()); ++i)
+			if (B.list[i].vis && !xr_strcmp(B.list[i].sect.c_str(), ws))
+				wi = i;
+		if (wi < 0)
+		{
+			Msg("* [vr19] frame %u pick up: '%s' id %d has no model in the held bag's list; it stays (declared limit of B3b)", I.frame, ws, wid);
+			return true;
+		}
+		if (!vr_bpt_take(A, wid))
+			return false;
+		vr_bpi_entry& we = B.list[wi];
+		Fmatrix wih;
+		wx.i.mul(we.scale);
+		wx.j.mul(we.scale);
+		wx.k.mul(we.scale);
+		wih.invert(hand);
+		H.hand_local.mul_43(wih, wx);
+		H.carried1 = wi + 1;
+		vr_bph_out_clear(H);
+		H.out_id1 = wid + 1;
+		H.copy = we.count >= 1; // others of its kind are in the bag: their model stays there, the hand shows a copy
+		H.eatable = weat;
+		Msg("* [vr19] frame %u pick up: '%s' id %d", I.frame, ws, wid);
+		return true;
+	}
 	const u16 slot = (A && A->m_inventory) ? A->inventory().GetActiveSlot() : NO_ACTIVE_SLOT;
 	if (slot != NO_ACTIVE_SLOT)
 	{
