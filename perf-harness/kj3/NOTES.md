@@ -290,3 +290,86 @@ layout failures, one before the cost fix) were removed by literal path to keep t
        EP=$(engine); [ -n "$EP" ] || { why="no engine pid found (stall)"; break; }; log "STALL start (play clock): $(( $(utc) - play0 )) ms after the first play pose; seq $s track ${tt}s engine $EP"
        echo "utc_ms,event,seq,track_s" > "$O/stall.csv"; echo "$(utc),STOP,$s,$tt" >> "$O/stall.csv"
 ```
+
+# Stage 3: stale rows under the agreed rule (a)-(c), and two Stage 2 review fixes (2026-11-26, desk)
+
+## Limits first
+- Desk only, Lua 5.1 stub only. Nothing ran in the engine; no git command; no CodeRabbit.
+- Strict (a) ("stale only while the pose's line has ANOTHER section") would remove the alive-again kind, whose line has the
+  SAME section. I kept alive-again as a stale kind that behaves like the section kind (stale while named, dropped by (c)),
+  because without it a line the mod never dropped for a dead creature would be applied to the next same-section creature.
+  Itrzone should confirm this reading.
+- Unchanged limit: a same-section replacement under the same id cannot be told apart (ident_reuse_same_section still pins it).
+- A pending kill on a row dropped by (c) is never judged: no KCONF, no KNOCONF, no kdead_fail; its kdead_online stays
+  counted. A kill that was made and then forgotten this way shows only as `KDEAD,...,online` followed by `KSTALE,...,drop,...,pending`.
+- Two k lines for one id in one pose: not tested (processed in order, as before).
+
+## The three stale kinds now
+| kind | how found | stale line written | when the pose no longer names the id | a line with the object's own section |
+|---|---|---|---|---|
+| section (am138) | at the pose: line's section differs from the object's | while each newest pose carries such a line (st, reset per pose) | row dropped at that pose (c) | if the row's recorded creature (ks) differs: fresh row (b); if ks equals it (the pose's section was just wrong): the row goes on, pending kill judged again |
+| alive_again (am138) | at the pose: death confirmed > 10 s ago, id alive again, same section | while named (st) | row dropped at that pose (c); the next line is a new row | same section: stays stale (cannot be told apart from the old line) |
+| ident (kill6) | in the export, pending rows only: the object holding the id has another section than ks | only while the newest processed pose named the id (kx and nm); unnamed: no line at all | row dropped at the next pose without its line (c); kx is never cleared by a pose | fresh row (b) |
+Stale rows of every kind: no KCONF, no KNOCONF, no kdead_fail while stale (stage 1 fix 1, unchanged).
+Live rows (applied > 0 or a pending kill, not stale) are never dropped: a retired line keeps its plain `k,<id>,<applied>`
+line exactly as before, and a pending kill without a line still gets KNOCONF / KCONF (st3_live_kept).
+
+## Reader changes (harness/zz_p1_puppet_kill6.script 096380d8...)
+- k_line: every row named by a line of the pose gets `nm`; `ks` is recorded at every line taken (stale test passed), not
+  only at the kill call; (b) `if sec == cur and r.ks and r.ks ~= cur` replaces the row by `{ ap = 0 }` (applied, dd, ow, kb,
+  ke, kt, kn, kx, st all gone), clears kwho[id], logs `KSTALE,<now>,<seq>,<id>,fresh,<old ks>,<section>`, then the line is
+  processed as any first line (damage and kill applied normally).
+- k_pose: marks are reset and lines processed only for a pose with <= 64 lines; then (c) every row not named whose last
+  pose marked it stale (was) or with kx is removed, kwho[id] cleared, logged `KSTALE,<now>,<seq>,<id>,drop,<applied>,<pending|->`.
+  **Changed:** an over-64 pose now leaves every row and mark as it was (stage 2 cleared the st marks). Refused lines (form,
+  total, id, kind) do not name a row, so a stale row whose only line is refused is dropped.
+- Export: stale line `if r.st or (r.kx and r.nm)`; a kx row not named writes no line.
+- **KSTALE reasons added: `fresh` and `drop`. Neither is counted in kstale** (kstale still counts stale events: section,
+  alive_again, ident, once per episode). The kj2 checker files KSTALE lines under KOTHER (reported only).
+- ktab.txt: rows get **nm as a 10th field**; the loader takes 10, then 9 (stage 1/2 kill6), then 5 (kill5) fields. Stale rows
+  are carried with st, kx, nm, so the boot snapshot after the resume answers stale exactly as before the crossing, the
+  first pose processed after the resume re-marks them, and a pose that does not name them drops them. ktab also carries
+  `e,<em_done>` (below).
+- The r line: untouched (k_r is set at the end of k_pose for every processed pose, drops included; over64_r passes).
+- T2SUM keys: unchanged (19 + eerr). Snapshot format: unchanged.
+
+## Stage 2 review fixes
+1. **Not ready.** In the scripts (gamma_flat read-only; stock bind_stalker.script / _g.script from
+   plan-facts/stock_scripts/_unpacked, gamma_flat has no bind_stalker.script): `SurgeManager` / `PsiStormManager` start as
+   nil (SM:24, PSM:19) and are created by `get_*_manager()`. On a save load, `actor_binder:load` (bind_stalker.script:356-365,
+   USE_MARSHAL = `marshal ~= nil`, _g.script:46) calls `load_state` and then `bind_stalker_ext.actor_on_load` ->
+   `surge_manager.actor_on_load` (SM:1571) / `psi_storm_manager.actor_on_load`, which call `get_*_manager()` first: the
+   instances exist before the actor's first update. On a NEW game nothing creates them until `main_loop` (SM:51-63,
+   AddUniqueCall), which waits for `db.actor.afterFirstUpdate` (set in the actor's first update, bind_stalker.script:230),
+   while the bridge exports on its very first actor_on_update (warm-up included). So **yes, it can happen**: a new game,
+   and I found no call of actor_on_load in the non-marshal load path (bind_stalker.script:366-409). For the T2 runs (a
+   save loaded, marshal present) I infer it does not; not verified in the engine, nor what a level change does.
+   Rule built: while no good read has happened in this Lua state, a failure with `SurgeManager` or `PsiStormManager` nil
+   writes the same degraded lines, does not count eerr, logs no EERR, and logs `ENOTREADY,<now>` once; the first good read
+   logs `EREADY,<now>` (only if ENOTREADY was logged, so a normal run's meta is unchanged). Any other failure, and any
+   failure after the first good read, counts as before. Per Lua state (a new state after a crossing starts not ready again).
+   A module itself missing, or an instance with missing fields, still counts. Check em_notready; mutants m_em_nr_count,
+   m_em_nr_always.
+2. **Forced starts over a crossing.** k_save writes `e,<em_done>` into ktab.txt when the test mode is on; k_load reads it
+   only after the run id test; on_game_start sets em_done from it when the file is there, else counts the file's lines
+   (fresh process, or another run id). Check em_force_cross (same run: a `psi` appended during the level load is acted on
+   after it; another run id: skipped; fresh process: old lines skipped); mutants m_em_carry_none, m_em_carry_nosave,
+   m_em_carry_anyrun. Limit: if ktab.txt cannot be written at a crossing and an older ktab.txt of the same run is still
+   there, its older cursor is used (lines acted on twice) - the same exposure the kill table already had.
+
+## Tests
+New checks (each with its mutants, every catch an outcome failure): st3_a_named (m_kx_st_only, m_ident_never),
+st3_b_fresh (m_fresh_none, m_fresh_keep_ap, m_fresh_keep_kt), st3_same_back (m_fresh_any), st3_c_drop (m_drop_never_c,
+m_drop_over64), st3_live_kept (m_drop_live), st3_partner (m_drop_kwho, m_partner_perm; the partner's case end to end), em_notready,
+em_force_cross; also m_kx_unnamed on ident_no_pose, m_drop_never on ident_omitted_pose, m_cross_nm on cross_ident.
+**Stage 1 checks whose "permanent" expectation was changed:** pend_st_only (after the line is dropped: no line, no KNOCONF,
+drop line; was plain line + KNOCONF), ident_omitted_pose (dropped; the old line again is a new row `k,101,0.000,stale`),
+ident_no_pose (no line at all; was stale every snapshot), ident_reuse_alive_other (stale while named or while the kill pose
+is newest, none after), ident_sticky (now: never cleared, dropped, no KCONF when the id empties), cross_kx (stale while named
+after the resume, dropped after), cross_pending (ktab row has the nm field). Re-anchored: m_ks_none, m_ident_cleared,
+m_cross_nopend, m_cross_nopend_rel; m_ident_never moved from ident_omitted_pose to st3_a_named. The new st3/em checks run
+on the stage 2 reader fail except st3_same_back (which pins behaviour stage 2 already had).
+emission-line-examples.txt: regenerated, snapshot bodies byte-identical; only the header hash line changed.
+
+## Results (2026-11-26 19:03, desk)
+`cd wt-render-split/perf-harness && nice -n 19 bash kj3/kill6h_test.sh`: `== checks: 85 pass, 0 fail; mutants: 122 caught, 0 not caught or missing` / `RESULT: PASS` (77 + 8 checks, 104 + 18 mutants; run dir kj3/runs/r-20261126-190334-2450941). Two earlier runs of this stage (7 and 3 expected failures while the checks were rewritten) were removed by literal path.

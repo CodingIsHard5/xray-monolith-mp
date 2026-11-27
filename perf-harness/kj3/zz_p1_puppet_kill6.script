@@ -46,6 +46,16 @@
 --   Lua state, counted in the T2SUM key eerr, now the LAST key). Meta: ESTART EPHASE EEND. Test mode: if the bridge folder holds
 --   emtest.txt at game start, each new complete line `surge` / `psi` (at most one read per second) calls the manager's own start
 --   function once (EFORCE). Without that file at game start nothing of the test mode runs and no file is read.
+--   Stage 3 (stale rows, agreed with itrzone 2026-11-26; kj3/NOTES.md "Stage 3"; format version stays 4): (a) the stale
+--   answer is written only while the newest processed v4 pose carries a k line for the id that is stale (its section differs
+--   from the object's, or alive again > 10 s after a confirmed death), or carried the target's line before the identity
+--   check found another section under the id; (b) a line whose section equals the object's on a row whose recorded creature
+--   (ks, now recorded at every line taken) has another section starts a FRESH row (applied 0, pending kill and marks
+--   cleared; meta KSTALE,...,fresh, not counted); (c) a processed v4 pose that names no line for a stale row drops the row
+--   (meta KSTALE,...,drop,<applied>,<pending|->, not counted). Live rows are never dropped. An over-64 pose leaves rows and
+--   marks as they were. ktab.txt rows gain nm as a 10th field (a 9-field kill6 row or a kill5 row still loads). Not ready (stage 2 review): the
+--   managers nil before the first good read = degraded lines without eerr (meta ENOTREADY / EREADY). The forced-start
+--   cursor is carried over a crossing in ktab.txt (line e,<n>, same run id only).
 --   Track time t starts WAIT_MS after the first update (the actor holds the t=0 point meanwhile, t < 0), so GAMMA's
 --   auto_switch (1250 m for 10 s after load, then 450 m; configs\alife.ltx) has settled before the track starts.
 local cl = command_line and command_line() or ""
@@ -88,7 +98,9 @@ local seen = {}
 -- kill channel table: K[id] = { ap = applied, dd = time_global of the death applied or seen, ow = KOWED logged,
 -- st = stale in the last v4 pose, was = st before it, kb = last KBACK total, ke = offline kill error logged,
 -- kt = time_global of the online kill call (kill5: dd is set only when the snapshot reads it dead), kn = KNOCONF logged,
--- ks = section of the target at the kill call (kill6), kx = id held by another section since the call: stale for good (kill6) }
+-- ks = section of the row's creature (kill6: at the kill call; stage 3: at every line taken), kx = id held by another
+-- section since the call (kill6; stage 3: stale only while nm, and the row is dropped by the next pose without its line),
+-- nm = named by a line of the newest processed v4 pose (stage 3) }
 -- kcre[id]: exported as monster/stalker in a snapshot (the offline creature test: no engine call needed)
 local K, kcre, klog, kver_n, k_note = {}, {}, {}, nil, nil
 local k_r = nil   -- "<session>,<seq>" of the newest v4 pose whose k lines were processed (snapshot line r)
@@ -135,6 +147,9 @@ local function yaw(o) local d = o:direction(); return math.atan2(d.x, d.z) end
 local SURGE_PH = { 0, 30, 47, 50, 80, 108, 120, 156, 168, 200, 212, 220, 222 }
 local PSI_PH = { 0, 10, 12, 30, 78, 103 }
 local em_kind, em_ph, em_t, eerr, em_logged = "none", 0, 0, 0, false
+local em_ready, em_nr = false, false   -- review: a good read seen in this Lua state; ENOTREADY logged
+-- managers nil (not created yet: a new game creates them at the scripts' first 1 s update after the actor's first update)
+local function em_absent() return surge_manager.SurgeManager == nil or psi_storm_manager.PsiStormManager == nil end
 local function em_phase(tab, d) local p = 0; for i = 1, #tab do if d >= tab[i] then p = i end end; return p end
 local function em_ns(M, last, gt)   -- game seconds to the next scheduled start (SM:266 / PSM:132); -1 while that event runs
 	if M.started then return -1 end
@@ -179,16 +194,21 @@ local function em_snap(now, L)
 	local n0 = #L
 	local okf, tf = pcall(level.get_time_factor); if not okf or type(tf) ~= "number" then tf = nil end
 	local ok, err = pcall(em_body, L, tf, now)
+	if ok and not em_ready then em_ready = true; if em_nr then m(string.format("EREADY,%d", now)) end end
 	if not ok then
 		for i = #L, n0 + 1, -1 do L[i] = nil end
-		eerr = eerr + 1
-		if not em_logged then em_logged = true; m(string.format("EERR,%d,%s", now, (string.gsub(tostring(err), "[,\r\n]", ";")))) end
+		local nr = false; if not em_ready then local okn, a = pcall(em_absent); nr = okn and a end
+		if nr then if not em_nr then em_nr = true; m(string.format("ENOTREADY,%d", now)) end   -- not ready: not an error
+		else eerr = eerr + 1
+		if not em_logged then em_logged = true; m(string.format("EERR,%d,%s", now, (string.gsub(tostring(err), "[,\r\n]", ";")))) end end
 		L[#L + 1] = "e,none,0.00,0," .. (tf and tostring(tf) or "-1"); L[#L + 1] = "ns,-1,-1"
 	end
 end
 -- Stage 2 test mode (forced starts): em_test is set only at game start if emtest.txt exists then; em_done = complete lines
--- already in the file then (a level change does not repeat them)
+-- already in the file then (a level change does not repeat them). Review: after a crossing em_done is the carried
+-- cursor instead (lines appended during the level load are still acted on); a fresh process counts the file.
 local em_test, em_done, em_last = false, 0, -1e9
+local em_carry = nil   -- review: em_done of the Lua state before the crossing (ktab.txt line e, same run id), nil = none
 local function em_start(k)
 	if k == "surge" then surge_manager.start_surge(); return surge_manager.SurgeManager.started end   -- SM:1673-1675
 	psi_storm_manager.start_psi_storm(); return psi_storm_manager.PsiStormManager.started   -- PSM:713-715
@@ -248,7 +268,8 @@ local function export_b1(now, t, tm)
 			if r.kt and not r.dd and not stl then   -- kill5: an online kill call waiting for its effect (kill6: never on a stale row)
 				if dn then r.dd = now; m(string.format("KCONF,%d,%d,%d", now, id, now - r.kt))
 				elseif not r.kn and now - r.kt >= K_CONF_MS then r.kn = true; kc.kdead_fail = kc.kdead_fail + 1; m(string.format("KNOCONF,%d,%d,%d", now, id, now - r.kt)) end end
-			if stl then L[#L + 1] = string.format("k,%d,%.3f,stale", id, r.ap)
+			if r.st or (r.kx and r.nm) then L[#L + 1] = string.format("k,%d,%.3f,stale", id, r.ap)   -- stage 3 (a): only while named
+			elseif r.kx then   -- stage 3: identity gone, the newest pose names no line for it: no line; the next pose drops the row
 			elseif r.dd and now - r.dd <= K_HOLD and dn then L[#L + 1] = string.format("k,%d,%.3f,dead", id, r.ap)
 			elseif (r.ap > 0 or r.kt) and (not r.dd or now - r.dd <= K_HOLD) then L[#L + 1] = string.format("k,%d,%.3f", id, r.ap) end end end
 	L[#L + 1] = string.format("end,%d", seq)
@@ -424,14 +445,18 @@ local function k_line(a, now, n, line)
 			cur = se:section_name(); local ok, al = pcall(function() return se:alive() end); alive = not ok or al
 		end
 	end
-	local r = K[id] or { ap = 0 }; K[id] = r
+	local r = K[id] or { ap = 0 }; K[id] = r; r.nm = true   -- stage 3: named by this pose
 	if not o and not se then   -- released: confirmed dead
 		if r.kt and not r.dd then return end   -- kill5: a pending kill call: the snapshot confirms it (KCONF, dd) as for any other
 		if not r.dd then m(string.format("KDEAD,%d,%d,%d,released", now, n, id)) end; r.dd = now; return end
+	if sec == cur and r.ks and r.ks ~= cur then   -- stage 3 (b): the row was another creature's; this line is the new one's
+		m(string.format("KSTALE,%d,%d,%d,fresh,%s,%s", now, n, id, r.ks, cur))
+		r = { ap = 0, nm = true }; K[id] = r; kwho[id] = nil end
 	if sec ~= cur or (r.dd and alive and now - r.dd > K_HOLD) then   -- stale: another creature has this id now
 		r.st = true
 		if not r.was and not r.kx then kc.kstale = kc.kstale + 1; m(string.format("KSTALE,%d,%d,%d,%s,%s,%s", now, n, id, sec ~= cur and "section" or "alive_again", sec, tostring(cur))) end
 		return end
+	r.ks = cur   -- stage 3: the section of the row's creature, recorded at every line taken
 	if r.dd then if not alive then r.dd = now end; return end   -- dead here already: keep confirming
 	if r.kt then return end   -- kill5: kill call made, its effect is confirmed by the snapshot (no second call, no part hit)
 	if not alive then r.dd = now; m(string.format("KDEAD,%d,%d,%d,seen", now, n, id)); return end
@@ -452,7 +477,7 @@ local function k_line(a, now, n, line)
 			r.ap = tot; kc.khits = kc.khits + 1
 			m(string.format("KAPPLY,%d,%d,%d,%.3f,%.3f,%.4f,%.4f,%s", now, n, id, d, r.ap, hb, o.health, hok and "hit" or "hit_error"))
 		end
-		if dead == "1" then o:kill(a); r.kt = now; r.ks = cur; kc.kdead_online = kc.kdead_online + 1; m(string.format("KDEAD,%d,%d,%d,online", now, n, id)) end
+		if dead == "1" then o:kill(a); r.kt = now; kc.kdead_online = kc.kdead_online + 1; m(string.format("KDEAD,%d,%d,%d,online", now, n, id)) end
 	elseif dead == "1" then
 		-- the server object's own kill (sets health 0, leaves its group), as GAMMA's surge kills offline creatures;
 		-- NOT alife():kill_entity, which leaves health as it is. Confirmed only if the object now reads dead.
@@ -464,9 +489,14 @@ local function k_line(a, now, n, line)
 end
 local function k_pose(a, now, n, v4, lines, sess)
 	if not v4 then for _, l in ipairs(lines) do kref(now, n, string.match(l, "^k,([^,]*)") or "?", "v3") end; return end
-	for _, r in pairs(K) do r.was, r.st = r.st, false end
 	if #lines > K_MAX then kref(now, n, "-", "over64")   -- every k line refused; refused is processed, so r still advances
-	else for _, l in ipairs(lines) do k_line(a, now, n, l) end end
+	else   -- (stage 3: an over-64 pose leaves every row and mark as it was)
+		for _, r in pairs(K) do r.was, r.st, r.nm = r.st, false, nil end
+		for _, l in ipairs(lines) do k_line(a, now, n, l) end
+		for id, r in pairs(K) do if not r.nm and (r.was or r.kx) then   -- stage 3 (c): a stale row this pose does not name is dropped
+			K[id] = nil; kwho[id] = nil
+			m(string.format("KSTALE,%d,%d,%d,drop,%.3f,%s", now, n, id, r.ap, (r.kt and not r.dd) and "pending" or "-")) end end
+	end
 	k_r = string.format("%s,%d", tostring(sess or 0), n)
 end
 -- the table over a level change: written at the crossing request, read back at the resume when the run id matches
@@ -480,10 +510,11 @@ end
 local function k_save()
 	local f = io.open(DIR .. "ktab.txt", "wb"); if not f then return k_savefail() end
 	local ok = f:write("run,", t2_run, "\n") and true
-	for id, r in pairs(K) do ok = f:write(string.format("r,%d,%.9f,%s,%d,%d,%s,%d,%s,%d\n", id, r.ap, r.dd and string.format("%d", r.dd) or "-", r.ow and 1 or 0, r.st and 1 or 0,
-		r.kt and string.format("%d", r.kt) or "-", r.kn and 1 or 0, r.ks or "-", r.kx and 1 or 0)) and ok end
+	for id, r in pairs(K) do ok = f:write(string.format("r,%d,%.9f,%s,%d,%d,%s,%d,%s,%d,%d\n", id, r.ap, r.dd and string.format("%d", r.dd) or "-", r.ow and 1 or 0, r.st and 1 or 0,
+		r.kt and string.format("%d", r.kt) or "-", r.kn and 1 or 0, r.ks or "-", r.kx and 1 or 0, r.nm and 1 or 0)) and ok end   -- stage 3: nm appended
 	for id in pairs(kcre) do ok = f:write(string.format("c,%d\n", id)) and ok end
 	if k_r then ok = f:write("s,", k_r, "\n") and ok end
+	if em_test then ok = f:write(string.format("e,%d\n", em_done)) and ok end   -- review: the forced-start cursor
 	ok = f:write("end\n") and ok; ok = f:close() and ok
 	if not ok then return k_savefail() end
 	return true
@@ -504,11 +535,13 @@ local function k_load()
 	if run ~= t2_run then if rows > 0 then k_note = string.format("KTAB,skip,%s,%d", run, rows) end; return end
 	for id, ap, dd, ow, st, tl in string.gmatch(s, "\nr,(%d+),([%d%.]+),([%d%-]+),([01]),([01])([^\n]*)") do
 		local r = { ap = tonumber(ap), dd = tonumber(dd), ow = ow == "1" or nil, st = st == "1", was = st == "1" }
-		local kt, kn, ks, kx = string.match(tl, "^,([%d%-]+),([01]),([^,]*),([01])$")   -- kill6 fields; a kill5 row has none
-		if kt then r.kt = tonumber(kt); r.kn = kn == "1" or nil; r.ks = ks ~= "-" and ks or nil; r.kx = kx == "1" or nil end
+		local kt, kn, ks, kx, nm = string.match(tl, "^,([%d%-]+),([01]),([^,]*),([01]),([01])$")   -- stage 3 row (nm last)
+		if not kt then kt, kn, ks, kx = string.match(tl, "^,([%d%-]+),([01]),([^,]*),([01])$") end   -- kill6 fields; a kill5 row has none
+		if kt then r.kt = tonumber(kt); r.kn = kn == "1" or nil; r.ks = ks ~= "-" and ks or nil; r.kx = kx == "1" or nil; r.nm = nm == "1" or nil end
 		K[tonumber(id)] = r end
 	for id in string.gmatch(s, "\nc,(%d+)") do kcre[tonumber(id)] = true end
 	k_r = string.match(s, "\ns,(%d+,%d+)\n") or k_r
+	em_carry = tonumber(string.match(s, "\ne,(%d+)\n"))   -- review: only here, after the run id test
 	if rows > 0 then k_note = string.format("KTAB,read,%s,%d", run, rows) end
 end
 local function t2_pose(a, now, t)
@@ -859,7 +892,8 @@ function on_game_start()
 		elseif l == "god_off_norefill_norestore" then dmg_mode, dmg_raw, dmg_norestore = "god_off_norefill", l, true end end end   -- the mutation of section 49
 	if t2 then local f = io.open(DIR .. "emtest.txt", "rb")   -- Stage 2 test mode: only if the file is there at game start
 		if f then em_test = true; local s = f:read("*a") or ""; f:close()
-			for l in string.gmatch(s, "([^\n]*)\n") do if string.gsub(l, "%s", "") ~= "" then em_done = em_done + 1 end end end end
+			if em_carry then em_done = em_carry   -- review: a crossing carries the cursor; a fresh process counts the file
+			else for l in string.gmatch(s, "([^\n]*)\n") do if string.gsub(l, "%s", "") ~= "" then em_done = em_done + 1 end end end end end
 	meta = io.open(DIR .. "meta_" .. tag .. ".csv", t3_crossed and "a" or "w")
 	if not meta then printf("p1: CANNOT OPEN META FILE"); active = false; return end
 	if k_note then m(k_note) end

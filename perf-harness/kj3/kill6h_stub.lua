@@ -1,3 +1,7 @@
+-- kj3 Stage 3 (stale rows, 2026-11-26; kj3/NOTES.md "Stage 3"): 6 new checks st3_* plus seven kj3 checks rewritten for the
+-- agreed rules (a)-(c) (pend_st_only, ident_omitted_pose, ident_no_pose, ident_reuse_alive_other, ident_sticky, cross_kx; and
+-- cross_pending's ktab row, which gains the nm field); 13 new mutants; m_ks_none, m_ident_cleared, m_cross_nopend(_rel)
+-- re-anchored, m_ident_never now guards st3_a_named. Review of Stage 2: checks em_notready, em_force_cross with 5 mutants.
 -- kj3 Stage 2 (emission lines, 2026-11-26; kj3/NOTES.md "Stage 2"): fake surge / psi managers, game clock and time factor
 -- (section "kj3 Stage 2: fake ..."), 19 new checks em_* with 31 mutants m_em_*, mode `examples` (writes the fixtures of
 -- kj3/emission-line-examples.txt), and two kj3 checks updated for the new layout and T2SUM key: snapshot_lines and
@@ -106,20 +110,41 @@ local MUTANTS = {
 	-- kj3 (kill6, review fixes; kj3/NOTES.md). Each undoes one fix, or a part of one.
 	{ "m_fail_on_stale", "pend_stale_nofail", 'if r.kt and not r.dd and not stl then', 'if r.kt and not r.dd then' },          -- fix 1 and 2 guard gone (kill5)
 	{ "m_st_guard", "pend_st_only", 'if r.kt and not r.dd and not stl then', 'if r.kt and not r.dd and not r.kx then' },     -- fix 1 only
-	{ "m_ident_never", "ident_omitted_pose", 'if r.ks and cs and cs ~= r.ks then', 'if false then' },                        -- fix 2: no identity check
+	{ "m_ident_never", "st3_a_named", 'if r.ks and cs and cs ~= r.ks then', 'if false then' },                        -- fix 2: no identity check (stage 3: was ident_omitted_pose, which the pose's own mark now covers)
 	{ "m_ident_never_np", "ident_no_pose", 'if r.ks and cs and cs ~= r.ks then', 'if false then' },
-	{ "m_ks_none", "ident_no_pose", 'r.kt = now; r.ks = cur;', 'r.kt = now;' },                                              -- fix 2: identity not recorded
+	{ "m_ks_none", "ident_no_pose", '	r.ks = cur   -- stage 3: the section', '	-- (mutant) the section' },   -- stage 3: re-anchored (ks now recorded at every line taken)                                              -- fix 2: identity not recorded
 	{ "m_ident_never_alive", "ident_reuse_alive_other", 'if r.ks and cs and cs ~= r.ks then', 'if false then' },
-	{ "m_ident_cleared", "ident_sticky", 'for _, r in pairs(K) do r.was, r.st = r.st, false end', 'for _, r in pairs(K) do r.was, r.st, r.kx = r.st, false, nil end' },
+	{ "m_ident_cleared", "ident_sticky", 'for _, r in pairs(K) do r.was, r.st, r.nm = r.st, false, nil end', 'for _, r in pairs(K) do r.was, r.st, r.nm, r.kx = r.st, false, nil, nil end' },   -- stage 3: re-anchored
 	{ "m_ident_absent_stale", "ident_removed_dead", { { 'r.ks and cs and cs ~= r.ks', 'r.ks and cs ~= r.ks' }, { 'id, r.ks, cs))', 'id, r.ks, tostring(cs)))' } } },                  -- no object taken as a mismatch
 	{ "m_ident_any", "ident_reuse_same_section", 'r.ks and cs and cs ~= r.ks', 'r.ks and cs' },                             -- any object taken as a mismatch
-	{ "m_cross_nopend", "cross_pending", '"r,%d,%.9f,%s,%d,%d,%s,%d,%s,%d\\n"', '"r,%d,%.9f,%s,%d,%d\\n"' },                  -- fix 3: kill5's row
+	{ "m_cross_nopend", "cross_pending", '"r,%d,%.9f,%s,%d,%d,%s,%d,%s,%d,%d\\n"', '"r,%d,%.9f,%s,%d,%d\\n"' },   -- stage 3: re-anchored (nm field)                  -- fix 3: kill5's row
 	{ "m_cross_kt_late", "cross_pending", 'r.kt = tonumber(kt);', 'r.kt = time_global();' },                                -- fix 3: age restarted at the resume
-	{ "m_cross_nopend_rel", "cross_pending_released", '"r,%d,%.9f,%s,%d,%d,%s,%d,%s,%d\\n"', '"r,%d,%.9f,%s,%d,%d\\n"' },
+	{ "m_cross_nopend_rel", "cross_pending_released", '"r,%d,%.9f,%s,%d,%d,%s,%d,%s,%d,%d\\n"', '"r,%d,%.9f,%s,%d,%d\\n"' },
 	{ "m_cross_kn", "cross_kn_kept", 'r.kn = kn == "1" or nil;', '' },
 	{ "m_cross_ks", "cross_ident", 'r.ks = ks ~= "-" and ks or nil;', '' },
 	{ "m_cross_kx", "cross_kx", 'r.kx = kx == "1" or nil', 'r.kx = nil' },
 	{ "m_old_format", "ktab_old_format", '([01]),([01])([^\\n]*)")', '([01]),([01])(,[^\\n]+)")' },
+	-- kj3 Stage 3 (stale rows (a)-(c); kj3/NOTES.md "Stage 3"). Each undoes one rule, or a part of one.
+	{ "m_kx_st_only", "st3_a_named", 'if r.st or (r.kx and r.nm) then', 'if r.st then' },                                     -- (a): identity stale not written while named
+	{ "m_kx_unnamed", "ident_no_pose", 'if r.st or (r.kx and r.nm) then', 'if r.st or r.kx then' },                           -- (a): identity stale written although no line names it
+	{ "m_fresh_none", "st3_b_fresh", 'if sec == cur and r.ks and r.ks ~= cur then', 'if false then' },                       -- (b) gone
+	{ "m_fresh_keep_ap", "st3_b_fresh", 'r = { ap = 0, nm = true }', 'r = { ap = r.ap, nm = true }' },                      -- (b): applied not restarted
+	{ "m_fresh_keep_kt", "st3_b_fresh", 'r = { ap = 0, nm = true }', 'r = { ap = 0, nm = true, kt = r.kt }' },              -- (b): pending kill kept
+	{ "m_fresh_any", "st3_same_back", 'if sec == cur and r.ks and r.ks ~= cur then', 'if sec == cur and r.ks and r.was then' },   -- (b) on any row stale last pose
+	{ "m_drop_never", "ident_omitted_pose", 'if not r.nm and (r.was or r.kx) then', 'if false then' },                     -- (c) gone (stage 1)
+	{ "m_drop_never_c", "st3_c_drop", 'if not r.nm and (r.was or r.kx) then', 'if false then' },
+	{ "m_drop_over64", "st3_c_drop", { { 'if #lines > K_MAX then kref(now, n, "-", "over64")   -- every', 'if #lines > K_MAX then kref(now, n, "-", "over64"); lines = {} end; do   -- every' }, { '\telse   -- (stage 3: an over-64', '\t   -- (stage 3: an over-64' } } },   -- an over-64 pose drops like an empty one
+	{ "m_drop_live", "st3_live_kept", 'if not r.nm and (r.was or r.kx) then', 'if not r.nm then' },                        -- the edge: live rows dropped too
+	{ "m_drop_kwho", "st3_partner", 'K[id] = nil; kwho[id] = nil', 'K[id] = nil' },                                         -- KWHO not reopened for the next creature
+	{ "m_partner_perm", "st3_partner", 'if not r.nm and (r.was or r.kx) then', 'if false then' },                         -- the partner's case under no drop
+	{ "m_cross_nm", "cross_ident", 'r.nm = nm == "1" or nil end', 'end' },                                                   -- nm not carried over the crossing
+	-- kj3 review of Stage 2 (2026-11-26): not ready, and the forced-start cursor over a crossing
+	{ "m_em_nr_count", "em_notready", 'if nr then if not em_nr then', 'if nr then eerr = eerr + 1; if not em_nr then' },   -- not ready counted as an error
+	{ "m_em_nr_always", "em_notready", 'if not em_ready then local okn, a', 'if true then local okn, a' },                  -- nil after a good read not counted
+	{ "m_em_carry_none", "em_force_cross", 'if em_carry then em_done = em_carry', 'if false then em_done = em_carry' },
+	{ "m_em_carry_nosave", "em_force_cross", 'if em_test then ok = f:write(string.format("e,%d\\n", em_done)) and ok end', '' },
+	{ "m_em_carry_anyrun", "em_force_cross", { { '	em_carry = tonumber(string.match(s, "\\ne,(%d+)\\n"))   -- review: only here, after the run id test\n', '' },
+		{ 'if run ~= t2_run then', 'em_carry = tonumber(string.match(s, "\\ne,(%d+)\\n")); if run ~= t2_run then' } } },
 	-- kj3 Stage 2 (emission lines; kj3/NOTES.md "Stage 2")
 	{ "m_em_rk", "em_v4_every", 'if t2 then em_snap(now, L) end', 'if t2 and k_r then em_snap(now, L) end' },
 	{ "m_em_v3", "em_absent_v3", 'if t2 then em_snap(now, L) end', 'em_snap(now, L)' },
@@ -1078,50 +1103,61 @@ check("pend_stale_nofail", function()   -- fix 1, the review's case: pending kil
 	expect(count(meta(), "KSTALE,%d+,%d+,101,") == 1 and count(meta(), "KSTALE,%d+,%d+,101,section") == 1 and sum("kstale") == 1, "KSTALE: one line (section), kstale 1")
 end)
 
-check("pend_st_only", function()   -- fix 1, the pose's stale mark alone (identity unchanged): stale only while the pose marks it
+-- stage 3 helpers
+local function no_k(S, what)   -- no snapshot of S has a k line for id 101
+	expect(#S >= 3, what .. ": scenario: snapshots " .. #S)
+	for _, s in ipairs(S) do expect(kl(s, 101) == nil, what .. ": snapshot " .. sseq(s) .. ": k line " .. tostring(kl(s, 101)) .. ", expected none") end
+end
+local function nmeta(pat) return count(meta(), pat) end
+
+check("pend_st_only", function()   -- fix 1; stage 3 (c): the pose's stale mark alone (identity unchanged): stale only while the pose marks it, then dropped
 	kj3_pending()
 	all_k(rec(v4({ "k,101,dog_strong,0.250,1" }), 3000), "k,101,0.250,stale", "pose says another section")
 	expect(not string.find(meta(), "\nKNOCONF,", 1, true), "KNOCONF while the row was stale")
-	local S = rec(v4({}), 300)                                        -- the pose drops the line: the pending kill is judged again
-	expect(S[#S] and kl(S[#S], 101) == "k,101,0.250", "after the line was dropped: " .. tostring(S[#S] and kl(S[#S], 101)) .. ", expected the plain line")
-	finish()
-	expect(count(meta(), "\nKNOCONF,%d+,101,") == 1 and sum("kdead_fail") == 1 and not string.find(meta(), "\nKCONF,", 1, true), "after the stale mark ended: KNOCONF once, kdead_fail 1, no KCONF")
+	no_k(rec(v4({}), 1000), "after the line was dropped")               -- stage 3 (c); stage 1 expected the plain line and KNOCONF here
+	finish(); no_conf("dropped pending row")
+	expect(nmeta("\nKSTALE,%d+,%d+,101,drop,0%.250,pending\n") == 1 and sum("kstale") == 1, "KSTALE drop line once (pending), kstale 1")
 end)
 
-check("ident_omitted_pose", function()   -- fix 2, the review's case: stale mark from a pose, then poses omit the id
+check("ident_omitted_pose", function()   -- stage 3 (c), the review's case: stale mark from a pose, then poses omit the id: dropped; the old line again = a new row
 	kj3_pending()
 	add(101, "boar_strong", "m", { health = 0 })
-	run(v4({ "k,101,dog_weak,0.250,1" }), 100)                         -- the pose marks it stale (section)
-	all_k(rec(v4({}), 3000), "k,101,0.250,stale", "poses omit the id")
+	run(v4({ "k,101,dog_weak,0.250,1" }), 100)                         -- the pose marks it stale (section); the export sets kx too
+	expect(has_line(snap(), "k,101,0.250,stale"), "scenario: not stale while named: " .. tostring(kl(snap(), 101))); LAST_SQ = sseq(snap())
+	no_k(rec(v4({}), 1000), "poses omit the id")
+	all_k(rec(v4({ "k,101,dog_weak,0.250,1" }), 500), "k,101,0.000,stale", "the old line again")   -- a new row (applied 0), stale while named
 	finish(); no_conf("poses omit the id")
-	expect(sum("kstale") == 1, "kstale " .. tostring(sum("kstale")) .. ", expected 1 (one event)")
+	expect(nmeta("\nKSTALE,%d+,%d+,101,drop,0%.250,pending\n") == 1 and nmeta("\nKSTALE,%d+,%d+,101,section,") == 2 and sum("kstale") == 2,
+		"KSTALE: drop once, section twice (two rows), kstale 2 (got " .. tostring(sum("kstale")) .. ")")
 end)
 
-check("ident_no_pose", function()   -- fix 2: no pose names the id after the call; a dead replacement of another section
+check("ident_no_pose", function()   -- fix 2 + stage 3 (a): no pose names the id after the call, a dead replacement: no stale line, dropped at the next pose
 	kj3_pending()
 	add(101, "boar_strong", "m", { health = 0 })
-	all_k(rec(v4({}), 3000), "k,101,0.250,stale", "no pose names the id")
+	no_k(rec(v4({}), 3000), "no pose names the id")
 	finish(); no_conf("no pose names the id")
-	expect(count(meta(), "\nKSTALE,%d+,%d+,101,ident,dog_weak,boar_strong\n") == 1 and count(meta(), "\nKSTALE,") == 1 and sum("kstale") == 1,
-		"KSTALE ident line once, kstale 1: " .. tostring(string.match(meta(), "\n(KSTALE,[^\n]*)")))
+	expect(nmeta("\nKSTALE,%d+,%d+,101,ident,dog_weak,boar_strong\n") == 1 and nmeta("\nKSTALE,%d+,%d+,101,drop,0%.250,pending\n") == 1 and nmeta("\nKSTALE,") == 2 and sum("kstale") == 1,
+		"KSTALE ident once + drop once, kstale 1: " .. tostring(string.match(meta(), "\n(KSTALE,[^\n]*)")))
 end)
 
-check("ident_reuse_alive_other", function()   -- brief: id reused by a LIVING creature of another section while pending
+check("ident_reuse_alive_other", function()   -- brief + stage 3: a LIVING boar takes the id while the kill is pending
 	kj3_pending()
 	add(101, "boar_strong", "m")
-	all_k(rec(v4({ "k,101,dog_weak,0.250,1" }), 1500), "k,101,0.250,stale", "living replacement, named")
-	all_k(rec(v4({}), 1500), "k,101,0.250,stale", "living replacement, omitted")
+	all_k(rec(nil, 1000), "k,101,0.250,stale", "living replacement, the kill pose still the newest")   -- only the identity check sees it
+	all_k(rec(v4({ "k,101,dog_weak,0.250,1" }), 1000), "k,101,0.250,stale", "living replacement, named")
+	no_k(rec(v4({}), 1000), "living replacement, omitted")
 	expect(OBJ[101].health == 1 and #OBJ[101].hits == 0 and not OBJ[101].dtime, "the living replacement was hurt or killed")
 	finish(); no_conf("living replacement")
 end)
 
-check("ident_sticky", function()   -- fix 2: a mismatch stays stale when the replacement is gone too (poses omit the id)
+check("ident_sticky", function()   -- fix 2 + stage 3: a pose never clears the mismatch; the row is dropped and an emptied id does not confirm the kill
 	kj3_pending()
 	add(101, "boar_strong", "m")
-	all_k(rec(v4({}), 300), "k,101,0.250,stale", "replacement present")
+	no_k(rec(v4({}), 300), "replacement present")
 	OBJ[101].released = true
-	all_k(rec(v4({}), 1000), "k,101,0.250,stale", "replacement released")
+	no_k(rec(v4({}), 1000), "replacement released")
 	finish(); no_conf("replacement released")
+	expect(nmeta("\nKSTALE,%d+,%d+,101,ident,") == 1 and nmeta("\nKSTALE,%d+,%d+,101,drop,") == 1, "KSTALE ident / drop not once each")
 end)
 
 check("ident_removed_dead", function()   -- brief: the target removed (no object) while the kill is pending: confirmed dead, as kill5
@@ -1162,7 +1198,7 @@ local function kj3_after(ms) return rec(v4({ "k,101,dog_weak,0.250,1" }, { zone 
 
 check("cross_pending", function()   -- fix 3: pending kill over a crossing: no second kill, KNOCONF on the carried clock, later KCONF
 	local T = kj3_cross()
-	expect(string.find(readf(DIRS.a .. "/ktab.txt"), "\nr,101,0.250000000,-,0,0," .. tostring(T) .. ",0,dog_weak,0\n", 1, true), "ktab.txt row lacks the pending fields")
+	expect(string.find(readf(DIRS.a .. "/ktab.txt"), "\nr,101,0.250000000,-,0,0," .. tostring(T) .. ",0,dog_weak,0,1\n", 1, true), "ktab.txt row lacks the pending fields")   -- stage 3: nm appended (was ,0\n)
 	kj3_after(500)
 	expect(OBJ[101].kills == 1 and OBJ[101].sekill == 0 and OBJ[101].kill_err == 0, "a second kill after the crossing (kill " .. tostring(OBJ[101].kills) .. ", se:kill " .. OBJ[101].sekill .. ")")
 	OBJ[101].health = 0                                                -- the offline target now reads dead
@@ -1200,9 +1236,10 @@ check("cross_ident", function()   -- fix 3 + 2: the identity carried over: id re
 	expect(count(s, "\nKSTALE,%d+,%d+,101,ident,dog_weak,boar_strong\n") == 1, "KSTALE ident line not once")
 end)
 
-check("cross_kx", function()   -- fix 3 + 2: a stale identity carried over stays stale when the id is empty after the resume
-	kj3_cross(function() add(101, "boar_strong", "m"); rec(v4({}), 200); OBJ[101].released = true end)
+check("cross_kx", function()   -- fix 3 + 2, stage 3: a stale identity carried over: stale while named (the id now empty), dropped when not named
+	kj3_cross(function() add(101, "boar_strong", "m"); rec(nil, 200); OBJ[101].released = true end)
 	all_k(kj3_after(1000), "k,101,0.250,stale", "stale identity after the resume")
+	no_k(rec(v4({}, { zone = "l02_garbage" }), 1000), "after the resume, the line dropped")
 	finish(); no_conf("stale identity after the resume", 0)   -- the last T2SUM is the new Lua state's: its counters start at 0
 end)
 
@@ -1216,6 +1253,102 @@ check("ktab_old_format", function()   -- fix 3: a table file written by kill5 (f
 	finish(); local s = meta()
 	expect(string.find(s, "KTAB,read,1,2", 1, true) and string.find(s, "KAPPLY,%d+,%d+,101,0%.200,0%.500,"), "KTAB read / KAPPLY from 0.300")
 	expect(not string.find(s, "\nKDEAD,", 1, true), "a KDEAD for a loaded row")
+end)
+
+------------------------------------------------------------------------------------------------ kj3 Stage 3 checks (stale rows (a)-(c))
+check("st3_a_named", function()   -- (a): the identity stale is written exactly while the newest pose names the id with the old section
+	kj3_pending()
+	add(101, "boar_strong", "m", { health = 0 })                       -- after the kill pose: only the export's identity check sees it
+	all_k(rec(nil, 600), "k,101,0.250,stale", "the newest pose (the kill pose) names 101")
+	no_k(rec(v4({}), 600), "the line dropped")
+	finish(); no_conf("identity stale")
+	expect(nmeta("\nKSTALE,%d+,%d+,101,ident,") == 1 and sum("kstale") == 1, "KSTALE ident once, kstale 1")
+end)
+
+check("st3_b_fresh", function()   -- (b): the new creature's section on a row stale by identity starts a fresh row; then its kill works
+	kj3_pending()                                                      -- 101 dog_weak: 0.250 applied, kill pending (never in effect)
+	add(101, "boar_strong", "m")
+	all_k(rec(v4({ "k,101,dog_weak,0.250,1" }), 500), "k,101,0.250,stale", "old line")
+	local S = rec(v4({ "k,101,boar_strong,0.200,0" }), 3000)           -- the mod's new line for the boar, at once (no pose without a line between)
+	expect(near(OBJ[101].health, 0.8), "boar health " .. OBJ[101].health .. ", expected 0.8 (0.200 applied from 0)")
+	all_k(S, "k,101,0.200", "fresh row")
+	KILL_LAG = 0
+	S = rec(v4({ "k,101,boar_strong,0.500,1" }), 300)
+	expect(OBJ[101].kills == 1 and OBJ[101].health <= 0, "the boar not killed")
+	expect(S[#S] and kl(S[#S], 101) == "k,101,0.500,dead", "the boar's death: " .. tostring(S[#S] and kl(S[#S], 101)))
+	finish(); local s = meta()
+	expect(count(s, "\nKSTALE,%d+,%d+,101,fresh,dog_weak,boar_strong\n") == 1, "KSTALE fresh line not once")
+	expect(not string.find(s, "\nKNOCONF,", 1, true) and sum("kdead_fail") == 0, "the old pending kill judged after the fresh row (KNOCONF / kdead_fail)")
+	expect(count(s, "\nKCONF,%d+,101,") == 1 and sum("kdead_online") == 2 and sum("khits") == 3, "KCONF " .. count(s, "\nKCONF,%d+,101,") ..
+		", kdead_online " .. tostring(sum("kdead_online")) .. ", khits " .. tostring(sum("khits")) .. " (want 1, 2, 3)")
+end)
+
+check("st3_same_back", function()   -- (b) bound: the pose's section was wrong but the creature is the row's own (ks): no fresh row, the row goes on
+	kj3_pending()
+	all_k(rec(v4({ "k,101,dog_strong,0.250,1" }), 500), "k,101,0.250,stale", "wrong section")
+	all_k(rec(v4({ "k,101,dog_weak,0.250,1" }), 2500), "k,101,0.250", "the right section again")
+	finish(); local s = meta()
+	expect(OBJ[101].kills == 1 and #OBJ[101].hits == 1 and OBJ[101].kill_err == 0, "a second hit or kill call (hits " .. #OBJ[101].hits .. ", kill errors " .. OBJ[101].kill_err .. ")")
+	expect(count(s, "\nKNOCONF,%d+,101,") == 1 and sum("kdead_fail") == 1 and not string.find(s, "\nKSTALE,%d+,%d+,101,fresh,"), "KNOCONF once, kdead_fail 1, no fresh row")
+end)
+
+check("st3_c_drop", function()   -- (c): stale rows of both pose kinds are dropped at the first pose without their line; an over-64 pose drops nothing
+	add(101, "dog_weak", "m"); add(102, "stalker_bandit", "s"); boot()
+	run(v4({ "k,101,dog_weak,0.300,0", "k,102,stalker_bandit,0.300,1" }), 300)   -- 101 hit; 102 killed (in effect at once)
+	add(101, "boar_strong", "m")                                       -- 101: the id reused by another section
+	run(v4({}), 11000)                                                 -- 102's dead hold runs out
+	OBJ[102].health, OBJ[102].dtime, OBJ[102].hits = 1, nil, {}        -- 102 alive again (same section)
+	local both = { "k,101,dog_weak,0.300,0", "k,102,stalker_bandit,0.300,1" }
+	local S = rec(v4(both), 500)
+	expect(#S >= 3 and kl(S[#S], 101) == "k,101,0.300,stale" and kl(S[#S], 102) == "k,102,0.300,stale", "scenario: not both stale: " .. tostring(S[#S] and kl(S[#S], 101)) .. " / " .. tostring(S[#S] and kl(S[#S], 102)))
+	local L = { both[1], both[2] }; for i = 1, 63 do L[#L + 1] = string.format("k,%d,dog_weak,0.100,0", 3000 + i) end
+	S = rec(v4(L), 300)                                                -- 65 lines: refused whole; rows and marks as they were
+	expect(#S >= 2 and kl(S[#S], 101) == "k,101,0.300,stale" and kl(S[#S], 102) == "k,102,0.300,stale", "after an over-64 pose: " .. tostring(S[#S] and kl(S[#S], 101)) .. " / " .. tostring(S[#S] and kl(S[#S], 102)))
+	S = rec(v4({}), 1000)
+	no_k(S, "101 not named")
+	for _, s in ipairs(S) do expect(kl(s, 102) == nil, "102 not named: snapshot " .. sseq(s) .. ": " .. tostring(kl(s, 102))) end
+	run(v4({ "k,102,stalker_bandit,0.100,0" }), 300)                   -- a line after the drop is a new creature's: applied from 0
+	expect(near(OBJ[102].health, 0.9) and OBJ[101].health == 1 and #OBJ[101].hits == 0, "102 health " .. OBJ[102].health .. " (want 0.9), boar " .. OBJ[101].health)
+	finish(); local s = meta()
+	expect(count(s, "\nKSTALE,%d+,%d+,101,drop,0%.300,%-\n") == 1 and count(s, "\nKSTALE,%d+,%d+,102,drop,0%.300,%-\n") == 1, "KSTALE drop lines for 101 and 102")
+	expect(count(s, "\nKSTALE,%d+,%d+,101,section,") == 1 and count(s, "\nKSTALE,%d+,%d+,102,alive_again,") == 1 and sum("kstale") == 2, "KSTALE section / alive_again once each, kstale 2")
+end)
+
+check("st3_live_kept", function()   -- the agreed edge: live rows (applied > 0, alive, the line retired) stay as before; a pending row too
+	KILL_LAG = false
+	add(101, "dog_weak", "m"); add(103, "dog_weak", "m"); add(104, "dog_weak", "m"); boot()
+	run(v4({ "k,101,dog_weak,0.300,0", "k,103,dog_weak,0.200,1", "k,104,dog_strong,0.100,0" }), 300)   -- 101 live; 103 kill pending; 104 stale
+	LAST_SQ = sseq(snap())
+	local S = rec(v4({}), 3000)
+	expect(#S >= 3, "scenario: snapshots " .. #S)
+	for _, s in ipairs(S) do expect(kl(s, 101) == "k,101,0.300" and kl(s, 103) == "k,103,0.200" and kl(s, 104) == nil,
+		"snapshot " .. sseq(s) .. ": " .. tostring(kl(s, 101)) .. " / " .. tostring(kl(s, 103)) .. " / " .. tostring(kl(s, 104))) end
+	run(v4({ "k,101,dog_weak,0.500,0" }), 300)                         -- the mod restarts its total from the applied count
+	expect(near(OBJ[101].health, 0.5), "101 health " .. OBJ[101].health .. ", expected 0.5 (0.200 more)")
+	finish(); local s = meta()
+	expect(count(s, "\nKNOCONF,%d+,103,") == 1 and sum("kdead_fail") == 1, "103: KNOCONF once, kdead_fail 1")
+	expect(count(s, "\nKSTALE,%d+,%d+,%d+,drop,") == 1 and count(s, "\nKSTALE,%d+,%d+,104,drop,") == 1, "drop lines: only 104")
+end)
+
+check("st3_partner", function()   -- itrzone's case end to end: kill X (A); X becomes B; old line stale; line dropped; B's line hurts B; B's kill works
+	add(101, "dog_weak", "m"); boot()
+	run(v4({ "k,101,dog_weak,0.300,0" }), 300)
+	run(v4({ "k,101,dog_weak,0.300,1" }), 300)                         -- the kill, in effect at once: confirmed
+	expect(has_line(snap(), "k,101,0.300,dead"), "scenario: A not answered dead: " .. tostring(kl(snap(), 101))); LAST_SQ = sseq(snap())
+	add(101, "boar_strong", "m")                                       -- X's object is now section B
+	all_k(rec(v4({ "k,101,dog_weak,0.300,1" }), 1000), "k,101,0.300,stale", "the mod still sends A's line")
+	expect(OBJ[101].health == 1 and #OBJ[101].hits == 0, "B hurt by A's line")
+	no_k(rec(v4({}), 1000), "the mod dropped its line")
+	local S = rec(v4({ "k,101,boar_strong,0.250,0" }), 1000)
+	expect(near(OBJ[101].health, 0.75), "B health " .. OBJ[101].health .. ", expected 0.75")
+	all_k(S, "k,101,0.250", "B's line")
+	S = rec(v4({ "k,101,boar_strong,0.400,1" }), 300)
+	expect(OBJ[101].kills == 1 and OBJ[101].health <= 0 and S[#S] and kl(S[#S], 101) == "k,101,0.400,dead", "B not killed / not answered dead: " .. tostring(S[#S] and kl(S[#S], 101)))
+	finish(); local s = meta()
+	expect(count(s, "\nKDEAD,%d+,%d+,101,online") == 2 and count(s, "\nKCONF,%d+,101,") == 2 and sum("kdead_fail") == 0, "two kills, two confirmations, kdead_fail 0")
+	expect(count(s, "\nKWHO,%d+,101,0\n") == 2, "KWHO lines " .. count(s, "\nKWHO,%d+,101,0\n") .. " (want one per creature)")
+	expect(count(s, "\nKSTALE,%d+,%d+,101,section,dog_weak,boar_strong\n") == 1 and count(s, "\nKSTALE,%d+,%d+,101,drop,0%.300,%-\n") == 1 and sum("kstale") == 1,
+		"KSTALE section once, drop once, kstale 1")
 end)
 
 if MODE == "fixture" then   -- STUB-MADE fixtures for the kw1 checker: the real script in this fake world
@@ -1458,6 +1591,38 @@ check("em_backwards", function()   -- a restart (start_surge during an emission,
 	expect(count(s, "\nESTART,%d+,surge,") == 2, "ESTART count " .. count(s, "\nESTART,%d+,surge,"))
 	expect(string.find(s, "\nEEND,%d+,surge,[%d%.]+\nESTART,%d+,surge,0%.%d%d\nEPHASE,%d+,surge,1,0%.%d%d\n"), "restart not EEND, ESTART, EPHASE 1")
 	expect(not string.find(s, "\nEPHASE,%d+,surge,1[^\n]*\nEPHASE,%d+,surge,0,"), "phase 0 logged")
+end)
+check("em_notready", function()   -- review 1: managers nil before the first good read: degraded lines, not counted; after it, counted
+	surge_manager.SurgeManager = nil; psi_storm_manager.PsiStormManager = nil   -- a new game: the scripts create them later
+	local nd = 0
+	safe(function()
+		boot(); local S = erec(1000); degraded_ok(S, "not ready")
+		surge_manager.SurgeManager = SMF; S = erec(500); degraded_ok(S, "half ready (psi nil)")
+		psi_storm_manager.PsiStormManager = PMF; S = erec(500); expect(S[#S] and eline(S[#S].s) == "e,none,0.00,0,6", "not normal once ready")
+		surge_manager.SurgeManager = nil; S = erec(500); degraded_ok(S, "nil after the first good read"); nd = #S; surge_manager.SurgeManager = SMF
+	end)
+	finish(); local s = meta()
+	expect(nd > 0 and sum("eerr") == nd, "eerr " .. tostring(sum("eerr")) .. " want " .. nd .. " (only the snapshots after the first good read)")
+	expect(count(s, "\nENOTREADY,") == 1 and count(s, "\nEREADY,") == 1 and count(s, "\nEERR,") == 1, "ENOTREADY / EREADY / EERR not once each")
+	expect(string.find(s, "\nENOTREADY,%d+\n.-\nEREADY,%d+\n.-\nEERR,"), "order not ENOTREADY, EREADY, EERR")
+end)
+check("em_force_cross", function()   -- review 2: a line appended during the level load is acted on after it; another run id or a fresh process skips old lines
+	local function crossing()   -- l01 -> l02; `psi` is appended while the level loads
+		local cl = ChangeLevel; ChangeLevel = function(...) append("psi\n"); return cl(...) end
+		local r; for _ = 1, 20 do r = run(v4({}, { state = "cross", zone = "l02_garbage", c = "esc_to_gar" }), 50); if r then break end end
+		ChangeLevel = cl; expect(r == "changed", "scenario: no level change")
+	end
+	append(""); boot(); append("surge\n"); rec(nil, 1500)
+	expect(EMC.surge == 1, "scenario: surge not started before the crossing")
+	crossing(); rec(v4({}, { zone = "l02_garbage" }), 2000)
+	expect(EMC.psi == 1 and EMC.surge == 1, "same run: calls surge " .. EMC.surge .. " psi " .. EMC.psi .. " (want 1, 1)")
+	expect(string.find(readf(DIRS.a .. "/ktab.txt"), "\ne,1\n", 1, true), "ktab.txt lacks the cursor e,1")
+	finish(); expect(count(meta(), "\nEFORCE,%d+,psi,started\n") == 1, "EFORCE psi after the crossing not once")
+	new_world(DIRS.b, SCRIPT_UNDER_TEST, "1"); append(""); boot(); append("surge\n"); rec(nil, 1500)
+	RUN = "2"; crossing(); rec(v4({}, { zone = "l02_garbage" }), 2000)   -- the boot after the change sees another run id
+	expect(EMC.psi == 0 and EMC.surge == 1, "other run id: calls surge " .. EMC.surge .. " psi " .. EMC.psi .. " (want 1, 0)")
+	new_world(DIRS.c, SCRIPT_UNDER_TEST, "1"); append("surge\npsi\n"); boot(); rec(nil, 2000)
+	expect(EMC.surge == 0 and EMC.psi == 0, "a fresh process acted on lines already in the file")
 end)
 if MODE == "examples" then   -- lua5.1 kill6h_stub.lua examples <script> <dir>: the fixture text for kj3/emission-line-examples.txt
 	SCRIPT_UNDER_TEST = arg[2]; new_world(arg[3], arg[2]); F = {}

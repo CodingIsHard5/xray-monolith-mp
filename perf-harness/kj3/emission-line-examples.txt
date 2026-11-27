@@ -1,4 +1,4 @@
-# Stage 2 emission lines: fixtures. Real bytes written by harness/zz_p1_puppet_kill6.script (sha256 f378512ced7950ba...; regenerated with that version: same bytes) into snap.txt
+# Stage 2 emission lines: fixtures. Real bytes written by harness/zz_p1_puppet_kill6.script (sha256 096380d8a57d436d..., stage 3; the snapshot bodies are byte-identical to those of f378512ced7950ba...) into snap.txt
 # under the Lua 5.1 stub (kj3/kill6h_stub.lua, mode: lua5.1 kill6h_stub.lua examples <script> <dir>), 2026-11-26. NOT engine output.
 # Layout: a line '## <caption>' then the complete snapshot (LF line ends; snap.txt itself ends with 'end,<n>' + LF), then one blank line.
 # Fake world: actor at (1, 2.05, 3); one dog 101 with a v4 kill total 0.100 (so the r and k lines show the order r, e, w|v, ns, k).
