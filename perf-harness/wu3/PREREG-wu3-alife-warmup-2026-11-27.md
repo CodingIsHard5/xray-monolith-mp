@@ -1,7 +1,7 @@
-# PREREG wu3 (DRAFT, not registered): does `-alife_warmup` remove the slow frames after a level load? (wu2 re-registered with re-runs)
+# PREREG wu3 (REGISTERED 2026-11-27): does `-alife_warmup` remove the slow frames after a level load? (wu2 re-registered with re-runs)
 
-**Status: DRAFT, not registered.** Drafted 2026-11-27 by an Opus sub-worker for EnginePerf. No wu3 load has run. Pins in
-wu3_run.sh are `PIN_ME_*` (the driver refuses to start until they are set at registration).
+**Status: REGISTERED 2026-11-27 by EnginePerf. No wu3 load before the supervisor's GO.** Built by an Opus sub-worker to
+EnginePerf's brief; EnginePerf read the driver diff, ran the self-test itself and set the pins (section 10).
 
 **claim class: EXCLUSIVE (verdict depends on frame timing).**
 
@@ -218,7 +218,28 @@ I have SEEN four wu2 loads (2 per arm, section 8). These guesses are informed by
   loading 0.4-0.9 s longer with the lever; 0-3 re-runs used; OFF loads in-play: 10-16 of 16.
 - `loadtime_measures_differ` fires: 80 %.
 
-## 10. Registration
-Not registered. To register: EnginePerf checks this text and the self-test, sets the pins in wu3_run.sh (order,
-scorer, self-test), records the hashes here, and gets the supervisor's word. Files (draft): `wu3_run.sh`,
-`wu3_score.py`, `wu3_selftest.sh`, `wu3_order.txt` (sha256 7360330ff8837e280736d4a8be3472dd938b1a9b8d75bee00a7cb36ad198c60c).
+## 10. Registration (EnginePerf, 2026-11-27)
+Pins (sha256), recomputed from the committed bytes:
+| file | sha256 |
+|---|---|
+| wu3_order.txt | 7360330ff8837e280736d4a8be3472dd938b1a9b8d75bee00a7cb36ad198c60c |
+| wu3_score.py | b435a9ead5cdcf1d13af59f61ed4e5c20270dbd30de183464d3806ded94b8766 |
+| wu3_selftest.sh | 7bacc55d6490bf9ed46028a59a05685e361b5ab5d56327d2f05d2b8a5933915e |
+| wu3_run.sh | 89e8a8b3a8191280d74af75d07fa6ea53962b110ec51cd8d9351b2fa1ba7acf5 |
+Exe, save and tool pins inside wu3_run.sh are wu2's, unchanged.
+
+- Self-test on the pinned bytes, run by EnginePerf (10:43): `WU3 SELFTEST PASS 335/335 (33 real cases, 179 made cases,
+  75 hook mutants caught, 20 constant mutants caught, 1 hook-coverage check, 1 R_MAX agreement check, 1 fixture-bytes
+  check, 2 find-error checks, 22 driver checks, 1 untouched check)`.
+- Review: two CodeRabbit passes (10 findings: 7 fixed, 3 skipped with reasons; then 1 minor, skipped with a reason):
+  coderabbit-triage-2026-11-27.md. After pass 2 only the three pins and the driver's header line changed.
+- EnginePerf's own change to the sub-worker's draft: settle cap 300 -> 600 s (section 6), predictions (section 9).
+- Run command (from /home/caden/Projects/StalkerGameEngine, as a harness background task):
+  `bash wt-render-split/perf-harness/wu3/wu3_run.sh`. Score once with the command of section 4, after checking the
+  sha256 of both order copies by hand.
+- Game options file: run/gamedata/configs/axr_options.ltx carries a `version` line that each exe rewrites with its own
+  build stamp (found 2026-11-27: Stance14.exe writes 20261124, Warm18.exe 20261126). wu3 does not pin this file. If a
+  Stance14 boot ran before the series, the PRIME load rewrites the stamp; the prime is never scored. Stated, not tested.
+- The fleet rule against CPU-heavy desk tests during timed EXCLUSIVE slices (the supervisor's order of 2026-11-27) is
+  what keeps the box quiet; the re-run budget only covers the leftovers (section 5).
+- This text's own sha256 is sent to the supervisor with the GO request and is not written here.

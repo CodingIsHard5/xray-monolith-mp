@@ -13,3 +13,8 @@ Skipped on purpose:
 - Quoting state paths for spaces: the paths are fixed strings without spaces (out/wu3_state), and the self-test parent is ours.
 - State init failing after mkdir: the scorer already gives FAIL stop_record (no stop record), the same outcome class.
 - Scoring from the state copy of the order: EnginePerf checks the sha256 of BOTH the tree copy and the state copy against the registered hash by hand before the single scoring run (sentence added to PREREG section 4).
+
+Pass 2 (2026-11-27, on d9ddb4e9e; plan-facts/cr_wu3_pass2_2026-11-27.txt): 1 finding, minor.
+- STOP_RE allows only [a-z0-9_] in an interrupted= tag while the order rules allow any lowercase tag: SKIPPED. The
+  order file is hash-pinned and every registered tag is wu3_NN_on / wu3_NN_off / wu3_prime, so it cannot occur in this
+  registration. No byte of driver, scorer or self-test changed after pass 2 except the three pins set at registration.

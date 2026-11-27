@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# DRAFT, NOT YET RUN (only `bash -n` and the self-test's offline function tests); pins are PIN_ME_* until registration.
+# REGISTERED 2026-11-27 (PREREG-wu3-alife-warmup-2026-11-27.md). Not yet run for real: `bash -n` and the self-test's offline function tests only.
 # wu3 driver (PREREG-wu3-alife-warmup-2026-11-27.md, DRAFT).   wt-render-split/perf-harness/wu3/wu3_run.sh [--preflight-only]
 # wu3 = wu2_run.sh (registered 2026-11-26, sha 257f4ec7...) with the wu3 names and paths (state out/wu3_state, tags
 # wu3_*) and ONE change in how a not-clean load is handled. Same exe, bench, flags, order, window, slice, per-load checks.
@@ -25,7 +25,7 @@ WU=wt-render-split/perf-harness/wu3; ORDER=$WU/wu3_order.txt; ST=out/wu3_state; 
 EXE=Warm18.exe; EXE_SHA=15828a7a6cadd38e42cc376869f581166884c04f1eb236baf79054a74332ae9d; CFG=run/appdata/user.ltx
 FLAGS="-perf_noinput -perf_nopresent"          # + "-perf_slow <slow_ms>" per load, + "-alife_warmup" on ON loads
 NLOADS=33; NON=16; NOFF=16; R_MAX=8              # R_MAX: wu3_score.py has the same value (self-test checks)
-ORDER_SHA=PIN_ME_ORDER                           # the order file's sha256 (preflight AND the state-dir copy), set at registration
+ORDER_SHA=7360330ff8837e280736d4a8be3472dd938b1a9b8d75bee00a7cb36ad198c60c                           # the order file's sha256 (preflight AND the state-dir copy), set at registration
 BENCH_TO=900                                    # BENCH_TIMEOUT passed to the bench
 END_RESERVE=120   # s after a bench timeout: the bench's own trap (wine + Xvfb), check_run, withdraw/release, notify (timeout 60)
 # ---- BEGIN driver functions (wu3_selftest.sh extracts this block and tests it offline; nothing here runs a load) ----
@@ -141,8 +141,8 @@ pin run/bin/$EXE                         $EXE_SHA || bad=1
 pin run/appdata/savedgames/cordon1.scop  6dea752bc652a45c748e1438e3bc8ffd2d8d89f24730177c792328aeb5d13f3e || bad=1
 pin run/appdata/savedgames/cordon1.scoc  a9f9a8a91b034de28a49be7f8029d823d057e46b4445f3f94d7255dbc77b0b6b || bad=1
 pin $ORDER                               $ORDER_SHA || bad=1
-pin $WU/wu3_score.py                     PIN_ME_SCORE || bad=1
-pin $WU/wu3_selftest.sh                  PIN_ME_SELFTEST || bad=1
+pin $WU/wu3_score.py                     b435a9ead5cdcf1d13af59f61ed4e5c20270dbd30de183464d3806ded94b8766 || bad=1
+pin $WU/wu3_selftest.sh                  7bacc55d6490bf9ed46028a59a05685e361b5ab5d56327d2f05d2b8a5933915e || bad=1
 DISP=${BENCH_DISPLAY:-:141}
 [ "$DISP" = ":141" ] || { echo "REFUSED: BENCH_DISPLAY '$DISP' is not :141 (this experiment's own display)"; bad=1; }
 disp_free() {   # refuses a display that exists or left a lock (tools/t3_kw1.sh)
