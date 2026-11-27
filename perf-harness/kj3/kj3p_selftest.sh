@@ -14,8 +14,12 @@
 #    Each must FAIL with exactly its listed failing checks. NO VERDICT fixtures must give NO VERDICT with the listed rules.
 #  - REAL bytes: the kj2 X run folder (kill5, no e lines), read in place: as it is -> REFUSED naming emforce.csv; through a
 #    folder of symlinks plus a made emforce.csv -> FAIL naming the missing e lines (checks 2, 13).
-#  - missing / empty required files -> REFUSED naming the file; CRLF copy of good -> PASS; the checker writes nothing;
-#    the score-once redirection (set -C) refuses a second write.
+#  - missing / empty required files -> REFUSED naming the file; CRLF copy of good -> PASS; the checker writes nothing.
+#  - kj3/kj3p_score.sh in every state (bash, after the Python part): fresh, re-run, interrupted (report without .rc),
+#    .rc without report, checker hash mismatch, usage; its registered hash = the checker on disk.
+#  - kj3/kj3p_run.sh's functions, sourced with KJ3P_FUNCS_ONLY=1 against stub tools (no claim, no engine, no display):
+#    title check states, display check, exclusive out dir, pins, watchdog precedence, finish gives back only what was
+#    taken, TERM during want / claim, own-engine kill on harmless sleep processes, and the order of the main body.
 # Output dir: kj3/runs/kj3p-st-<time>-<pid>/ (nothing deleted). Exit 0 only if every expectation holds.
 # Last line: KJ3P SELFTEST: PASS|FAIL (...)
 set -u
@@ -191,10 +195,26 @@ def vort_last(t, n, k):   # remove vortex n's v lines from its last k snapshots
         t = t[:a] + re.sub(rf'^v,{n},[^\n]*\n', '', t[a:b], flags=re.M) + t[b:]
     return t
 first_v = int(re.search(r'^v,(\d+),', G[S], re.M).group(1))
+def vort_mid(t, n, val):   # set s of vortex n in its middle snapshot to val
+    recs = [(a, b) for a, b in snap_recs(t) if re.search(rf'^v,{n},', t[a:b], re.M)]
+    if len(recs) < 3: raise RuntimeError('vortex too short for a middle sample')
+    a, b = recs[len(recs) // 2]
+    return t[:a] + re.sub(rf'^(v,{n},[^,]+,[^,]+,[^,]+,)[-0-9.]+$', lambda m: m.group(1) + val, t[a:b], count=1, flags=re.M) + t[b:]
+NOISE = ("![axr_main callback_set] callback on_fddar_consumable_anim_start doesn't exist!\n~ " + '-' * 72 + "\n~ STACK TRACEBACK:\n\n"
+         "\t... axr_main.script (line: 267) in function 'callback_set'\n\t... zz_p1_puppet.script (line: 44) in function 'on_game_start'\n"
+         "~ " + '-' * 72 + "\n")
+GOOD_OUT = open(os.path.join(D, 'reports', 'good.txt')).read()
+D_SURGE = int(re.search(r"surge: runner appended .* EFORCE 'started' at X \d+, (-?\d+) ms after", GOOD_OUT).group(1))
 MUT = [   # name, file, transform, expected failing checks
     ('m1_rc', 't2_xray.log', lambda t: resub(t, r'rc=0$', 'rc=6', n=0), ['1']),
     ('m1_kpose', 'boot0/watch/poses_all.txt', lambda t: resub(t, r'^(end,1)$', r'k,0,actor,0.500,0\n\1'), ['1']),
     ('m1_lua', 'boot0/tb/xray.log', lambda t: t + '! [LUA] ...gameengine/run\\gamedata\\scripts\\zz_p1_puppet.script:812: attempt to index a nil value\n', ['1']),
+    ('m2_extra', M, lambda t: resub(t, r'^(SUMMARY,)', r'EFORCE,19000,unexpected,unknown\n\1'), ['2']),
+    ('m2_early', 'emforce.csv', lambda t: resub(t, r'^(\d+)(,[^,]+,surge,\d+)$', lambda m: f'{int(m.group(1)) + D_SURGE + 600}{m.group(2)}'), ['2']),
+    ('m1_lua_noise', 'boot0/tb/xray.log', lambda t: t + NOISE + '! [LUA] ...gameengine/run\\gamedata\\scripts\\zz_p1_puppet.script:812: attempt to index a nil value\n', ['1']),
+    ('m6s_x', M, lambda t: resub(t, r'^EEND,(\d+),surge,', lambda m: f'EEND,{int(m.group(1)) + 10000},surge,'), ['6s']),
+    ('m9b', S, lambda t: vort_mid(t, first_v, '99.00'), ['9']),
+    ('m10c', M, lambda t: resub(t, r'^SUMMARY,hits=\d+,cancelled=\d+,', 'SUMMARY,'), ['10']),
     ('m2_late', 'emforce.csv', lambda t: resub(t, r'^(\d+,[^,]+,surge,)\d+$', r'\g<1>73000'), ['2']),
     ('m2_error', M, lambda t: resub(t, r'^(EFORCE,\d+,surge,)started$', r"\1error:attempt to index global 'surge_manager' (a nil value)"), ['2']),
     ('m2_luaev', 'boot0/tb/xray.log', lambda t: t + '! [LUA] ...gameengine/run\\gamedata\\scripts\\surge_manager.script:1065: attempt to perform arithmetic on a nil value\n', ['2']),
@@ -222,10 +242,19 @@ MUT = [   # name, file, transform, expected failing checks
 NVM = [   # made NO VERDICT fixtures: name, file, transform, rules that must fire, failing checks allowed (all inside)
     ('nv1_pre', S, lambda t: edit_snap(t, lambda r: et(r)[0] == 'none' and re.search(r'^seq,\d+,\d+,1[0-9]\.', r, re.M),
                                        lambda r: one(r, '\ne,none,0.00,0,6\n', '\ne,psi,5.00,1,10\n')), ['NV1']),
-    ('nv4_overlap', M, lambda t: resub(t, r'^EEND,\d+,surge,', 'EEND,%d,surge,' % (int(re.search(r'^EFORCE,(\d+),psi,', G[M], re.M).group(1)) + 1000)), ['NV4']),
     ('nv5_novortex', S, lambda t: resub(t, r'^v,[^\n]*\n', '', n=0), ['NV5']),
 ]
 nmut = 0
+# NV4 (two files): the psi force moved to 1 s before the surge's EEND (X), its runner append moved by the same time, so
+# check 2's delay is unchanged; 3p then fails (ESTART long after EFORCE), inside NV4's untested set
+efp = int(re.search(r'^EFORCE,(\d+),psi,', G[M], re.M).group(1)); ees = int(re.search(r'^EEND,(\d+),surge,', G[M], re.M).group(1))
+dl = efp - (ees - 1000); R4 = os.path.join(D, 'nv4_overlap', 'run')
+for n in REQ:
+    os.makedirs(os.path.dirname(os.path.join(R4, n)), exist_ok=True)
+    if n not in (M, 'emforce.csv'): os.symlink(os.path.join(GOOD, n), os.path.join(R4, n))
+wfile(os.path.join(R4, M), resub(G[M], r'^EFORCE,\d+,psi,', f'EFORCE,{efp - dl},psi,'))
+wfile(os.path.join(R4, 'emforce.csv'), resub(G['emforce.csv'], r'^(\d+)(,[^,]+,psi,\d+)$', lambda m: f'{int(m.group(1)) - dl}{m.group(2)}'))
+expect('nv4_overlap', R4, 3, 'NO VERDICT', None, ['NV4'])
 for name, fn_, tr, want in MUT:
     R = work(fn_); wfile(os.path.join(R, fn_), tr(G[fn_]))
     out = expect(name, R, 1, 'FAIL', want, None)
@@ -236,6 +265,29 @@ for name, fn_, tr, fired in NVM:
 # unparsable: an EFORCE line with an extra field
 R = work(M); wfile(os.path.join(R, M), resub(G[M], r'^(EFORCE,\d+,surge,started)$', r'\1,x'))
 expect('unparsed_eforce', R, 1, 'FAIL', None, None, [r'^UNPARSED meta line \d+: EFORCE has 5 fields', r'^verdict: unparsable input'])
+# stray pose payload: the first #pose wrapper line removed, its payload kept
+PO = 'boot0/watch/poses_all.txt'
+R = work(PO); wfile(os.path.join(R, PO), resub(G[PO], r'^#pose,[^\n]*\n', ''))
+expect('unparsed_pstray', R, 1, 'FAIL', None, None, [r'^UNPARSED stray pose line: seq,', r'^verdict: unparsable input'])
+# PASS fixtures for the review fixes (each must still PASS):
+#  p2_stale: the P2 lines of the 300 ms before (and at) the surge EFORCE say a pose 400 ms older; the 10 s minimum map
+#            gives the SAME surge delay as good (the newest-P2 map would move it 400 ms early)
+efn = int(re.search(r'^EFORCE,(\d+),surge,', G[M], re.M).group(1))
+def stale(m):
+    f = m.group(0).split(','); now = int(f[3])
+    if efn - 300 <= now <= efn: f[2] = str(int(f[2]) - 400)
+    return ','.join(f)
+R = work(M); wfile(os.path.join(R, M), re.sub(r'^P2,[^\n]*$', stale, G[M], flags=re.M))
+expect('p2_stale', R, 0, 'PASS', [], [], [rf"surge: runner appended .* at X {efn}, {D_SURGE} ms after"])
+#  lua_noise_ok: a registration diagnostic whose FRAME names the bridge is still noise
+R = work('boot0/tb/xray.log'); wfile(os.path.join(R, 'boot0/tb/xray.log'), G['boot0/tb/xray.log'] + NOISE)
+expect('lua_noise_ok', R, 0, 'PASS', [], [])
+#  F5 on EEND: good reports both events; with EEND psi after the last snapshot, F5 psi is unavailable (6p fails: X span)
+if not re.search(r'^reported: F5 surge: online stalkers before \d+, after \(EEND \+ 2 s\)', GOOD_OUT, re.M): print('BAD  f5_good'); bad.append('f5_good')
+else: print('ok   f5_good: F5 surge reported against EEND + 2 s')
+last_tx = max(int(m.group(1)) for m in re.finditer(r'^seq,\d+,(\d+),', G[S], re.M))
+R = work(M); wfile(os.path.join(R, M), resub(G[M], r'^EEND,\d+,psi,', f'EEND,{last_tx + 60000},psi,'))
+expect('f5_unavail', R, 1, 'FAIL', ['6p'], None, [r'^reported: F5 psi: unavailable'])
 
 # ---------------------------------------------------------------------------------------------------- missing / empty
 nmiss = 0
@@ -272,21 +324,114 @@ if os.path.isdir(KJ2):
 else:
     print(f'BAD  real kj2 folder missing: {KJ2}'); bad.append('real')
 
-# ---------------------------------------------------------------------------------------------------- score once (set -C)
-rep = os.path.join(D, 'score_once_report.txt')
-c1 = subprocess.run(['bash', '-c', f'set -C; python3 -I "{CHK}" "{GOOD}" > "{rep}"; echo $? > "{rep}.rc"'], capture_output=True, text=True)
-first = open(rep).read()
-c2 = subprocess.run(['bash', '-c', f'set -C; python3 -I "{CHK}" "{GOOD}" > "{rep}"'], capture_output=True, text=True)
-okc = c1.returncode == 0 and open(rep + '.rc').read().strip() == '0' and first.rstrip().endswith('KJ3P: PASS') and c2.returncode != 0 and open(rep).read() == first
-print(f'{"ok  " if okc else "BAD "} score-once: first write rc {open(rep + ".rc").read().strip()}, second refused rc {c2.returncode} ({c2.stderr.strip()[:80]}), report unchanged {open(rep).read() == first}')
-if not okc: bad.append('score_once')
-
-print(f'KJ3P SELFTEST: {"PASS" if not bad else "FAIL"} (fixtures: 2 STUB-MADE runs; good PASS {"good" not in bad}; '
-      f'mutants failing exactly their checks {nmut}/{len(MUT)}; made NO VERDICT {sum(1 for n in NVM if n[0] not in bad) + ("nv23_refused" not in bad)}/{len(NVM) + 1}; '
+print(f'checker part: {"PASS" if not bad else "FAIL"} (fixtures: 2 STUB-MADE runs; good PASS {"good" not in bad}; '
+      f'mutants failing exactly their checks {nmut}/{len(MUT)}; made NO VERDICT {sum(1 for n in NVM if n[0] not in bad) + ("nv23_refused" not in bad) + ("nv4_overlap" not in bad)}/{len(NVM) + 2}; '
       f'missing-file REFUSED {nmiss}/{len(REQ)}; real kj2 bytes {"ok" if not {"real_kj2_inplace", "real_kj2_links", "real"} & set(bad) else "BAD"}'
       f'{"; bad: " + " ".join(bad) if bad else ""})')
 sys.exit(1 if bad else 0)
 PYEOF
-rc=$?
+pyrc=$?
+GOOD="$D/good/run"; sbad=""; dbad=""; ns=0; nd=0; nsb=0; ndb=0
+sok() { if [ "$2" = 0 ]; then echo "ok   score $1"; ns=$((ns + 1)); else echo "BAD  score $1"; sbad="$sbad|$1"; nsb=$((nsb + 1)); fi; }
+dok() { if [ "$2" = 0 ]; then echo "ok   driver $1"; nd=$((nd + 1)); else echo "BAD  driver $1"; dbad="$dbad|$1"; ndb=$((ndb + 1)); fi; }
+t() { "$@" >/dev/null 2>&1; echo $?; }   # exit code of a command, its output dropped
+# ---------------------------------------------------------------------------------------------------- kj3p_score.sh states
+SC="$HERE/kj3p_score.sh"; SD="$D/score"; mkdir -p "$SD/alt"
+reg=$(sed -n 's/^CHK_SHA=\([0-9a-f]\{64\}\)$/\1/p' "$SC"); cur=$(sha256sum "$HERE/kj3p_check.py" | cut -c1-64)
+[ -n "$reg" ] && [ "$reg" = "$cur" ]; sok "registered-hash-is-the-checker (${reg:0:8} = ${cur:0:8})" $?
+r=$(t bash "$SC"); [ "$r" = 2 ]; sok "usage-refused (rc $r)" $?
+r=$(t bash "$SC" "$GOOD" "$SD/rep1.txt")
+[ "$r" = 0 ] && [ "$(cat "$SD/rep1.txt.rc" 2>/dev/null)" = 0 ] && [ "$(tail -1 "$SD/rep1.txt")" = "KJ3P: PASS" ]; sok "fresh: report + rc 0 (rc $r)" $?
+h1=$(sha256sum "$SD/rep1.txt" "$SD/rep1.txt.rc")
+r=$(t bash "$SC" "$GOOD" "$SD/rep1.txt"); [ "$r" = 2 ] && [ "$(sha256sum "$SD/rep1.txt" "$SD/rep1.txt.rc")" = "$h1" ]; sok "re-run refused, report and rc unchanged (rc $r)" $?
+printf 'partial report of an interrupted score\n' > "$SD/rep2.txt"; h2=$(sha256sum < "$SD/rep2.txt")
+r=$(t bash "$SC" "$GOOD" "$SD/rep2.txt"); [ "$r" = 2 ] && [ ! -e "$SD/rep2.txt.rc" ] && [ "$(sha256sum < "$SD/rep2.txt")" = "$h2" ]; sok "interrupted (report, no rc): refused, no rc made, report unchanged (rc $r)" $?
+echo 0 > "$SD/rep3.txt.rc"
+r=$(t bash "$SC" "$GOOD" "$SD/rep3.txt"); [ "$r" = 2 ] && [ ! -e "$SD/rep3.txt" ] && [ "$(cat "$SD/rep3.txt.rc")" = 0 ]; sok "rc without report: refused, no report made (rc $r)" $?
+cp "$SC" "$SD/alt/kj3p_score.sh"; { cat "$HERE/kj3p_check.py"; echo "# changed"; } > "$SD/alt/kj3p_check.py"
+r=$(t bash "$SD/alt/kj3p_score.sh" "$GOOD" "$SD/rep4.txt"); [ "$r" = 2 ] && [ ! -e "$SD/rep4.txt" ] && [ ! -e "$SD/rep4.txt.rc" ]; sok "checker hash mismatch: refused, nothing made (rc $r)" $?
+# ---------------------------------------------------------------------------------------------------- kj3p_run.sh functions
+DV="$D/drv"; mkdir -p "$DV/tools" "$DV/bin" "$DV/x/.X11-unix" "$DV/notools"
+cat > "$DV/tools/protected-title-check.sh" <<EOS
+#!/bin/bash
+exit \$(cat "$DV/tcode" 2>/dev/null || echo 1)
+EOS
+cat > "$DV/tools/quiet-required.sh" <<EOS
+#!/bin/bash
+echo "\$*" >> "$DV/qr.log"; [ -e "$DV/qsleep_\$1" ] && sleep "\$(cat "$DV/qsleep_\$1")"
+exit \$(cat "$DV/qcode_\$1" 2>/dev/null || echo 0)
+EOS
+cat > "$DV/bin/pgrep" <<EOS
+#!/bin/bash
+[ "\$1" = -x ] && [ "\$2" = sober ] && exit \$(cat "$DV/pcode" 2>/dev/null || echo 1)
+exec /usr/bin/pgrep "\$@"
+EOS
+chmod +x "$DV/tools/protected-title-check.sh" "$DV/tools/quiet-required.sh" "$DV/bin/pgrep"
+# each test: a fresh subshell that sources the driver's functions only and sets the variables the main body would set
+fx() { ( KJ3P_FUNCS_ONLY=1; . "$HERE/kj3p_run.sh"; PATH="$DV/bin:$PATH"; T="$DV/tools"; W=engineperf; XROOT="$DV/x"; DISP=:4242
+         P="$DV"; K="$HERE"; SHM="$DV/shm"; WAITMIN=1; WHAT="EXCLUSIVE: test"; PW=""; XP=""; WD=""; rc=0; WANTED=0; CLAIMED=0
+         LAUNCHED=0; SIGPEND=0; RID=""; O="$DV/o"; KJ3P_NO_WINESERVER=1; KJ3P_POLL_S=1; mkdir -p "$O"; eval "$1" ) >> "$DV/fx.log" 2>&1; }
+setq() { local v; for v in want claim withdraw release; do echo 0 > "$DV/qsleep_$v"; echo 0 > "$DV/qcode_$v"; done; : > "$DV/qr.log"; }   # stub state reset (no file removed)
+fxb() { ( KJ3P_FUNCS_ONLY=1; . "$HERE/kj3p_run.sh"; PATH="$DV/bin:$PATH"; T="$DV/tools"; W=engineperf; XROOT="$DV/x"; DISP=:4242
+          P="$DV"; K="$HERE"; SHM="$DV/shm"; WAITMIN=1; WHAT="EXCLUSIVE: test"; PW=""; XP=""; WD=""; rc=0; WANTED=0; CLAIMED=0
+          LAUNCHED=0; SIGPEND=0; RID=""; O="$DV/o"; KJ3P_NO_WINESERVER=1; KJ3P_POLL_S=1; eval "$1" ) >> "$DV/fx.log" 2>&1 & FXP=$!; }   # in the background, FXP = the subshell that holds the traps
+ts() { echo "$1" > "$DV/tcode"; echo "$2" > "$DV/pcode"; fx 'title_state'; echo $?; }
+[ "$(ts 0 1)" = 0 ] && [ "$(ts 1 1)" = 1 ] && [ "$(ts 1 0)" = 0 ] && [ "$(ts 2 1)" = 2 ] && [ "$(ts 1 3)" = 2 ]; dok "title_state: playing 0, clear 1, helper rc 2 -> 2, pgrep error -> 2" $?
+fx 'T="$DV/notools"; title_state'; [ $? = 2 ]; dok "title_state: helper missing -> 2 (not clear)" $?
+fx 'DISP=:0; disp_free'; a=$?; fx 'DISP=:x1; disp_free'; b=$?; fx 'disp_free'; c=$?; : > "$DV/x/.X11-unix/X4244"; fx 'DISP=:4244; disp_free'; d=$?
+: > "$DV/x/.X4245-lock"; fx 'DISP=:4245; disp_free'; e=$?
+[ $a = 1 ] && [ $b = 1 ] && [ $c = 0 ] && [ $d = 1 ] && [ $e = 1 ]; dok "disp_free: :0 / not :<n> / socket / lock refused, free ok ($a$b$c$d$e)" $?
+mkdir -p "$DV/ro"; chmod 555 "$DV/ro"
+fx 'O="$DV/new1"; make_out'; a=$?; fx 'O="$DV/new1"; make_out'; b=$?; fx 'O="$DV/ro/sub"; make_out'; c=$?; fx 'O="$DV/nop/sub"; make_out'; d=$?
+chmod 755 "$DV/ro"
+[ $a = 0 ] && [ -d "$DV/new1" ] && [ $b = 1 ] && [ $c = 1 ] && [ $d = 1 ] && [ ! -e "$DV/ro/sub" ]; dok "make_out: new ok; exists / parent not writable / parent missing refused ($a$b$c$d)" $?
+echo pinned > "$DV/pinf"; ps=$(sha256sum "$DV/pinf" | cut -c1-64)
+fx "pin '$DV/pinf' $ps"; a=$?; fx "pin '$DV/pinf' ${ps/a/b}0"; b=$?; fx "pin '$DV/nofile' $ps"; c=$?; fx "pin '$DV/pinf' PIN_ME_X"; d=$?
+[ $a = 0 ] && [ $b = 1 ] && [ $c = 1 ] && [ $d = 1 ]; dok "pin: match ok; other hash / missing / PIN_ME refused ($a$b$c$d)" $?
+fx 'O="$DV/o_fr"; mkdir -p "$O"; [ "$(final_rc 3)" = 3 ] && [ "$(final_rc 0)" = 0 ] && echo stop > "$O/.title_stop" && [ "$(final_rc 3)" = 4 ] && [ "$(final_rc 0)" = 4 ]'
+dok "final_rc: the watchdog marker wins (3 -> 4, 0 -> 4), else unchanged" $?
+setq; fx 'finish'; a=$?; [ ! -s "$DV/qr.log" ] && [ $a = 0 ]; dok "finish with nothing taken: no withdraw, no release" $?
+setq; fx 'WANTED=1; rc=2; finish'; a=$?; [ "$(cat "$DV/qr.log")" = "withdraw engineperf" ] && [ $a = 2 ]; dok "finish after a want only: withdraw only" $?
+setq; fx 'CLAIMED=1; finish'; [ "$(cat "$DV/qr.log")" = "release engineperf" ]; dok "finish after a claim: release only" $?
+echo 1 > "$DV/tcode"; echo 1 > "$DV/pcode"
+setq; fx 'trap finish EXIT; trap on_sig TERM INT; acquire; echo "acq $?" >> "$O/acq"; finish'
+[ "$(tr '\n' '|' < "$DV/qr.log")" = "want engineperf EXCLUSIVE|claim engineperf 30 EXCLUSIVE: test|withdraw engineperf|release engineperf|" ]; dok "acquire: want, claim, withdraw; finish releases" $?
+setq; echo 2 > "$DV/qsleep_want"
+fxb 'trap finish EXIT; trap on_sig TERM INT; acquire; finish'; sleep 0.7; kill -TERM $FXP; wait $FXP; a=$?
+[ $a = 143 ] && [ "$(tr '\n' '|' < "$DV/qr.log")" = "want engineperf EXCLUSIVE|withdraw engineperf|" ]; dok "TERM during want: exit 143 ($a), leaves the queue, claims nothing, releases nothing" $?
+setq; echo 2 > "$DV/qsleep_claim"
+fxb 'trap finish EXIT; trap on_sig TERM INT; acquire; finish'; sleep 0.7; kill -TERM $FXP; wait $FXP; a=$?
+[ "$(tr '\n' '|' < "$DV/qr.log")" = "want engineperf EXCLUSIVE|claim engineperf 30 EXCLUSIVE: test|withdraw engineperf|release engineperf|" ]; dok "TERM during a claim that succeeds: the claim is released" $?
+setq; echo 1 > "$DV/qcode_claim"; echo 2 > "$DV/qsleep_claim"
+fxb 'trap finish EXIT; trap on_sig TERM INT; acquire; finish'; sleep 0.7; kill -TERM $FXP; wait $FXP; a=$?
+[ "$(tr '\n' '|' < "$DV/qr.log")" = "want engineperf EXCLUSIVE|claim engineperf 30 EXCLUSIVE: test|withdraw engineperf|" ]; dok "TERM during a claim that fails: no release" $?
+setq; echo 2 > "$DV/tcode"
+fx 'trap finish EXIT; trap on_sig TERM INT; acquire; a=$?; [ $a = 2 ] && rc=2; finish'
+[ "$(tr '\n' '|' < "$DV/qr.log")" = "want engineperf EXCLUSIVE|withdraw engineperf|" ]; dok "title check failing while queued: refused, no claim, queue left" $?
+echo 1 > "$DV/tcode"
+# own-engine kill on three harmless shells: one on our display, one with -t2_run <our run id>, one neither
+mkdir -p "$DV/o/run"; echo "2026-11-27 00:00:00.000Z boot 0: run_id 777 engine_s 465 load 0 0 0" > "$DV/o/run/t2_xray.log"
+alive=$( { env DISPLAY=:4242 bash -c 'sleep 20; :' >/dev/null & p1=$!; env DISPLAY=:4243 bash -c 'sleep 20; :' x -t2_run 777 >/dev/null & p2=$!
+  env DISPLAY=:4243 bash -c 'sleep 20; :' x -t2_run 7770 >/dev/null & p3=$!
+  sleep 0.3; fx "cand_pids() { echo $p1 $p2 $p3; }; kill_own"; sleep 0.3
+  for q in $p1 $p2 $p3; do kill -0 $q 2>/dev/null && printf 1 || printf 0; done; kill $p3; wait $p1 $p2 $p3; } 2>/dev/null )   # job notices dropped
+a=${alive:0:1}; b=${alive:1:1}; c=${alive:2:1}
+[ $a = 0 ] && [ $b = 0 ] && [ $c = 1 ]; dok "kill_own: kills our display's and our run id's process, leaves the other (alive $a$b$c)" $?
+# watchdog: playing / check failed -> marker, runner TERMed, stop; clear -> go on
+for code in 0 2; do echo $code > "$DV/tcode"; sleep 20 & xp=$!
+  mkdir -p "$DV/o_w$code"; fx "O=\"\$DV/o_w$code\"; cand_pids() { :; }; XP=$xp; watch_once"; a=$?; sleep 0.2; k=0; kill -0 $xp 2>/dev/null && k=1; kill $xp 2>/dev/null; wait $xp 2>/dev/null
+  [ $a = 1 ] && [ -e "$DV/o_w$code/.title_stop" ] && [ $k = 0 ]; dok "watch_once title rc $code: stop marker, runner TERMed" $?; done
+echo 1 > "$DV/tcode"; mkdir -p "$DV/o_wc"; fx 'O="$DV/o_wc"; cand_pids() { :; }; watch_once'; a=$?; [ $a = 0 ] && [ ! -e "$DV/o_wc/.title_stop" ]; dok "watch_once clear: goes on, no marker" $?
+# source guard and the order of the main body (static: line numbers in the file)
+r=$(t env KJ3P_FUNCS_ONLY=1 bash "$HERE/kj3p_run.sh" "$DV/should_not_exist"); [ "$r" = 2 ] && [ ! -e "$DV/should_not_exist" ]; dok "KJ3P_FUNCS_ONLY=1 run as a program: refused, nothing made" $?
+ln_() { grep -n -F -- "$1" "$HERE/kj3p_run.sh" | grep -v '^[0-9]*: *#' | tail -1 | cut -d: -f1; }
+L1=$(ln_ 'make_out || exit 2'); L2=$(ln_ 'trap finish EXIT; trap on_sig TERM INT'); L3=$(ln_ 'acquire || {'); L4=$(ln_ 'pins_ok >> "$O/preflight.log"')
+L5=$(ln_ 'SESS1=$(utc); LAUNCHED=1'); L6=$(ln_ 'python3 -I tools/t2_kill_pose.py'); L7=$(ln_ 'tools/t2_xray_kj3.sh "$O/run"')
+[ -n "$L1" ] && [ -n "$L7" ] && [ "$L1" -lt "$L2" ] && [ "$L2" -lt "$L3" ] && [ "$L3" -lt "$L4" ] && [ "$L4" -lt "$L5" ] && [ "$L5" -lt "$L6" ] && [ "$L6" -lt "$L7" ]
+dok "main body order: out dir ($L1) < traps ($L2) < claim ($L3) < pins again ($L4) < launch ($L5-$L7)" $?
+nk=$(grep -c -- 'kill -KILL' "$HERE/kj3p_run.sh"); grep -q -- 'kill -KILL \$mine' "$HERE/kj3p_run.sh" && [ "$nk" = 2 ]; dok "kill -KILL only on this run's engine (kill_own) and the writer ($nk lines)" $?
+echo "driver offline tests: $nd passed${dbad:+, BAD:$dbad}; score states: $ns passed${sbad:+, BAD:$sbad}"
+fin=PASS; [ "$pyrc" = 0 ] && [ -z "$sbad" ] && [ -z "$dbad" ] || fin=FAIL
 echo "end $(date '+%F %T')"
-exit $rc
+echo "KJ3P SELFTEST: $fin (checker part rc $pyrc; score-once states $ns/$((ns + nsb)); driver functions offline $nd/$((nd + ndb)))"
+[ "$fin" = PASS ]

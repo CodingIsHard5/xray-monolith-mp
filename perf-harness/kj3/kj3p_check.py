@@ -16,9 +16,12 @@ Checks 1, 2, 4n, 10, 11, 12, 13 are in no untested set: always judged.
 
 CLOCKS. X = time_global() ms of the engine (snapshot header field 3, field 2 of the E* meta lines, P2 field 4).
 W = Linux realtime ms (the watcher's #snap/#pose stamps, emforce.csv utc_ms, the runner's play0 = header utc of the first
-play pose it read). The one cross-clock place (check 2's EFORCE delay) maps X to W through the newest P2 line at or before
-the event: W ~ P2 pose utc + (T - P2 now); the pose was written before the script read it, so the estimate is EARLY by
-the pose's age at the read (<= 50 ms writer period + one frame + file read), never late.
+play pose it read). The one cross-clock place (check 2's EFORCE delay) maps X to W through the P2 lines of the 10 s of X
+before the event: W(T) = T - min(P2 now - P2 pose utc). X is the engine's TimerGlobal (wall based, device.cpp:808), so every
+P2 gives now - utc = C + a (C the clock offset, a >= 0 the pose's age when the script read it); the smallest of ~200 values
+in 10 s is C + the freshest age. The estimate is EARLY by that freshest age plus the X-vs-W drift over <= 10 s (kj2's real
+P2 lines: local age p50 12 ms, max 45 ms in normal play; drift <= 25 ms per 10 s), never later than the drift. The newest
+single P2 (the earlier rule) is early by THAT pose's age, which kj2 shows up to 283 ms after a freeze (review 2026-11-26).
 """
 import math, os, re, sys
 
@@ -27,7 +30,8 @@ import math, os, re, sys
 SURGE_PLAY_S, PSI_PLAY_S, END_PLAY_S = 70, 310, 440   # the partner's plan (T2_SURGE_PLAY, T2_PSI_PLAY; run end)
 RUNNER_LATE_MS = 2500        # runner loop = sleep 1 + body (kj2 measured 757 ms late on its 105 s trigger)
 EF_EARLY_MS, EF_LATE_MS = 250, 2500   # EFORCE after the runner's append: true delay 0..1000 ms + frame (one read per s);
-                                      # estimate early by <= pose age (~50-90 ms)
+                                      # estimate early by <= the freshest pose age in 10 s + drift (<= ~70 ms, see CLOCKS)
+P2_WIN_MS = 10000            # the window of P2 lines the X -> W map takes its minimum over
 START_MS = 1000              # ESTART after EFORCE (X): start() sets started in the call; next snapshot <= 100 ms + frame
 START_T = 1.0                # t at ESTART: inited_time = now at the call
 TF_EVENT, TF_NONE = 10.0, 6.0  # SM:33,245 PSM:26,117 set 10; alife.ltx:7 time_factor 6, restored SM:388 / main_loop
@@ -186,13 +190,29 @@ def phases_ok(tab, t, ph):
     return ph in (phase_of(tab, t - 0.005), phase_of(tab, t + 0.005))
 
 
+_FRAME = re.compile(r'^\s*\.\.\. .*\(line: \d+\) in function')
+
+
+def noise_frames(xlog):
+    """indexes of the traceback FRAME lines of axr_main's callback-registration diagnostics (out/wu1_prime/xray.log:5845):
+    '![axr_main callback_set] callback <x> doesn't exist!' or '... to nil function!', then '~ ----', '~ STACK TRACEBACK:', a
+    blank line, '\t... <f>.script (line: N) in function ...' frames, '~ ----'. A block ends at the first other line; only its
+    frame lines are excused, never an error line ('...script:812: attempt ...') inside or after it."""
+    out, blk = set(), False
+    for i, l in enumerate(xlog):
+        if l.startswith('![axr_main callback_set]') and ("doesn't exist" in l or 'nil function' in l): blk = True; continue
+        if blk and _FRAME.match(l): out.add(i); continue
+        if blk and (l.startswith('~ ') or l.strip() == ''): continue
+        blk = False
+    return out
+
+
 def script_errs(xlog, name):
     # engine log forms (real logs under out/): '<path>\<name>.script:16: attempt ...', '<name>.script(325) : fn',
-    # '... <name>.script (line: 267) in function'. Callback-registration noise (a 'doesn't exist' / 'nil function' line
-    # within the 8 lines before) is not counted, as the kj2 checker does.
-    pat = re.compile(re.escape(name) + r'\.script(\(\d| \(line|:\d)')
-    return [xlog[i] for i in range(len(xlog)) if pat.search(xlog[i]) and
-            not any("doesn't exist" in xlog[j] or 'nil function' in xlog[j] for j in range(max(0, i - 8), i))]
+    # '... <name>.script (line: 267) in function'. Only the frame lines of a callback-registration diagnostic are not
+    # counted (noise_frames); the kj2 checker's 8-line rule could hide a real error next to one (review 2026-11-26).
+    pat = re.compile(re.escape(name) + r'\.script(\(\d| \(line|:\d)'); nz = noise_frames(xlog)
+    return [xlog[i] for i in range(len(xlog)) if pat.search(xlog[i]) and i not in nz]
 
 
 def full(run_dir):
@@ -233,6 +253,7 @@ def full(run_dir):
     for r in precs:
         try: poses.append(parse_pose(r))
         except (ValueError, IndexError) as e: unparsed.append(f'{r["mark"]}: {e}')
+    unparsed += [f'stray pose line: {s[:60]}' for s in pstray[:3]]
     if not snaps: unparsed.append('no kept snapshot')
     play0 = None
     for l in rlog:
@@ -269,15 +290,15 @@ def full(run_dir):
 
     # ---- 2 F1: forced starts through emtest.txt ----------------------------------------------------------------------
     p2 = other['P2']
-    def w_of(T):   # X -> W through the newest P2 at or before T
-        best = None
-        for now, pu in p2:
-            if now <= T and (best is None or now > best[0]): best = (now, pu)
-        return None if best is None else best[1] + (T - best[0])
+    def w_of(T):   # X -> W: T - min(now - pose utc) over the P2 lines with T - P2_WIN_MS <= now <= T (CLOCKS, header)
+        offs = [now - pu for now, pu in p2 if T - P2_WIN_MS <= now <= T]
+        return None if not offs else T - min(offs)
     def c2():
         nums, ok = [], True
         kinds = [r['kind'] for r in ef_rows]
         if kinds != ['surge', 'psi']: ok = False; nums.append(f'emforce rows {kinds} (want [surge, psi])')
+        allef = [(e['what'], e['res']) for e in ev['EFORCE']]   # every EFORCE record, before any grouping
+        if [w for w, _ in allef] != ['surge', 'psi']: ok = False; nums.append(f'EFORCE records {allef} (want surge then psi, one each)')
         lua_e = [l for x in EV_SCRIPTS for l in script_errs(xlog, x)]
         if lua_e: ok = False
         nums.append(f'Lua errors naming {"/".join(EV_SCRIPTS)} {len(lua_e)} {lua_e[:1]}')
@@ -342,9 +363,14 @@ def full(run_dir):
             if len(en[k]) != 1 or not st[k]: return False, f'EEND {k} lines {len(en[k])} (want 1)'
             e = en[k][0]; after = [s['seq'] for s in snaps if s['tx'] > e['now'] and s['e'] and s['e'][0]['kind'] == k]
             last = esn[k][-1]['e'][0]['t'] if esn[k] else None
-            ok = lo <= e['t'] <= hi and not after and e['now'] > st[k][0]['now']
-            return ok, (f'EEND t {e["t"]:.2f} (want {lo}..{hi}), last {k} snapshot t {last}, {(e["now"] - st[k][0]["now"]) / 1000:.1f} s '
-                        f'after ESTART, {k} snapshots after EEND {len(after)}')
+            # EEND's X time against the event's own clock: t - X/1000 of its snapshots (check 5 bounds their spread); the
+            # t that clock gives at EEND's X must be EEND's t within CLOCK_SPAN (independent of ESTART: check 3's)
+            offs = [s['e'][0]['t'] - s['tx'] / 1000 for s in esn[k]]
+            dev = None if not offs else e['t'] - (e['now'] / 1000 + (max(offs) + min(offs)) / 2)
+            ok = (lo <= e['t'] <= hi and not after and e['now'] > st[k][0]['now'] and dev is not None and abs(dev) <= CLOCK_SPAN)
+            return ok, (f'EEND t {e["t"]:.2f} (want {lo}..{hi}), last {k} snapshot t {last}, {(e["now"] - st[k][0]["now"]) / 1000:.1f} X s '
+                        f'after ESTART; EEND t minus the snapshot clock at its X {dev if dev is None else round(dev, 3)} s (want '
+                        f'|.| <= {CLOCK_SPAN}), {k} snapshots after EEND {len(after)}')
         return f
     add('6s', 'F2 the surge ends as the desk table says (222 s)', c6('surge'))
     add('6p', 'F2 the psi storm ends as the desk table says (103 s)', c6('psi'))
@@ -408,11 +434,13 @@ def full(run_dir):
             V = vort[n]; s0, x, y, z, sf = V[0]; sl = V[-1][4]; t0 = s0['e'][0]['t']
             stt = sf + t0 - 20; S = round(stt); starts.append(S)
             a = s0['a']; dy = None if a is None else y - (a[1] + 20); r = None if a is None else ((x - a[0]) ** 2 + (z - a[2]) ** 2) ** 0.5
+            mid = [round(sv, 2) for (sn, _x, _y, _z, sv) in V if abs(sv + sn['e'][0]['t'] - 20 - S) > V_INT]   # every sample
             o = (abs(stt - S) <= V_INT and V_START[0] <= S <= V_START[1] and V_S_FIRST[0] <= sf <= V_S_FIRST[1]
-                 and V_S_LAST[0] <= sl <= V_S_LAST[1] and dy is not None and abs(dy) <= V_DY and r <= V_R)
+                 and V_S_LAST[0] <= sl <= V_S_LAST[1] and dy is not None and abs(dy) <= V_DY and r <= V_R and not mid)
             if not o: bad.append(n)
             vrep.append(f'vortex {n}: start {S} ({stt:.2f}), first s {sf:.2f} at t {t0:.2f}, last s {sl:.2f}, y - actor y - 20 '
-                        f'{dy if dy is None else round(dy, 3)}, distance {r if r is None else round(r, 1)} m, x {x:.3f} z {z:.3f}, {len(V)} lines')
+                        f'{dy if dy is None else round(dy, 3)}, distance {r if r is None else round(r, 1)} m, x {x:.3f} z {z:.3f}, {len(V)} lines, '
+                        f'samples off the start by > {V_INT}: {mid[:3]}')
         gaps = [b - a for a, b in zip(starts, starts[1:])]
         if any(not (V_GAP[0] <= g <= V_GAP[1]) for g in gaps): ok = False
         ok = ok and not bad
@@ -427,7 +455,8 @@ def full(run_dir):
         vit = other['VITALS'][-1] if other['VITALS'] else None; sm = other['SUMMARY'][-1] if other['SUMMARY'] else None
         V = kv(vit) if vit else {}; Sm = kv(sm) if sm else {}
         okv = V.get('min_health') == '1.000' and V.get('max_radiation') == '0.0000' and V.get('max_bleeding') == '0.0000' and V.get('unread') == '0'
-        oks = Sm.get('min_health') == '1.000' and Sm.get('refills') == '0' and Sm.get('hits') == Sm.get('cancelled')
+        hc = [Sm.get('hits'), Sm.get('cancelled')]; cnt = all(v is not None and v.isdigit() for v in hc)   # both, counts
+        oks = Sm.get('min_health') == '1.000' and Sm.get('refills') == '0' and cnt and int(hc[0]) == int(hc[1])
         ok = hs == ['1.0000'] and noa == 0 and okv and oks
         return ok, (f'actor health values in {len(snaps)} snapshots {hs[:4]}, snapshots without a line {noa}; VITALS {vit}; '
                     f'SUMMARY hits {Sm.get("hits")} cancelled {Sm.get("cancelled")} refills {Sm.get("refills")} min_health {Sm.get("min_health")}')
@@ -525,7 +554,7 @@ def full(run_dir):
         dx = max(abs(a[0] - ap[0][0]) + abs(a[2] - ap[0][2]) for a in ap)
         out.append(f'reported: F3 pose points {pts[:2]}{" ..." if len(pts) > 2 else ""} ({len(pts)} distinct); actor x,z drift after the first 20 s '
                    f'{dx:.3f} m (|dx|+|dz|, max); first actor position {ap[0]}')
-    out += f5(snaps, other, esn)
+    out += f5(snaps, other, esn, st, en)
     out += f6(other, esn, snaps)
     out.append(f'reported: inputs {len(snaps)} snapshots, {len(poses)} poses, {len(meta_lines)} meta lines, {len(ef_rows)} emforce rows')
 
@@ -552,22 +581,24 @@ def _tf_is(s, want):
     except ValueError: return False
 
 
-def f5(snaps, other, esn):
-    """F5: counts only. Stalkers = o lines of kind s, alive 1, section without 'zombied'."""
+def f5(snaps, other, esn, st, en):
+    """F5: counts only. Stalkers = o lines of kind s, alive 1, section without 'zombied'. Before = the last snapshot before
+    ESTART (X); after = the first snapshot at or after EEND + 2 s (X). No EEND, or no snapshot on either side: unavailable."""
     out = []
     def stalkers(s): return {i for i, o in s['o'].items() if o['kind'] == 's' and o['alive'] == '1' and 'zombied' not in o['sec']}
     for k in ('surge', 'psi'):
-        S = esn[k]
-        if not S: out.append(f'reported: F5 {k}: no event'); continue
-        before = [s for s in snaps if s['tx'] < S[0]['tx']]; aft = [s for s in snaps if s['tx'] >= S[-1]['tx'] + 2000]
-        b = stalkers(before[-1]) if before else set(); a_all = set(aft[0]['o']) if aft else set()
-        a_alive = stalkers(aft[0]) if aft else set()
+        if not esn[k] or len(st[k]) != 1: out.append(f'reported: F5 {k}: no event'); continue
+        x0 = st[k][0]['now']; x1 = en[k][0]['now'] + 2000 if len(en[k]) == 1 else None
+        before = [s for s in snaps if s['tx'] < x0]; aft = [] if x1 is None else [s for s in snaps if s['tx'] >= x1]
+        if not before or not aft:
+            out.append(f'reported: F5 {k}: unavailable (EEND lines {len(en[k])}, snapshots before ESTART {len(before)}, '
+                       f'at or after EEND + 2 s {len(aft)})'); continue
+        b = stalkers(before[-1]); a_all = set(aft[0]['o']); a_alive = stalkers(aft[0])
         gone = b - a_all; dead = (b & a_all) - a_alive
-        x0, x1 = S[0]['tx'], S[-1]['tx'] + 2000
         offs = [l.split(',') for l in other['OFF']]; ons = [l.split(',') for l in other['ON']]
         off_s = sum(1 for f in offs if len(f) >= 4 and f[2].lstrip('-').isdigit() and x0 <= int(f[2]) <= x1 and f[3] in b)
         newz = [f[3] + ':' + f[4] for f in ons if len(f) >= 5 and f[2].lstrip('-').isdigit() and x0 <= int(f[2]) <= x1 and 'zombied' in f[4]]
-        out.append(f'reported: F5 {k}: online stalkers before {len(b)}, after (2 s past the end) not listed {len(gone)}, listed but not alive '
+        out.append(f'reported: F5 {k}: online stalkers before {len(b)}, after (EEND + 2 s) not listed {len(gone)}, listed but not alive '
                    f'{len(dead)}; OFF lines for them in the event {off_s}; new zombied ids ON in the event {len(newz)} {newz[:4]}')
     return out
 

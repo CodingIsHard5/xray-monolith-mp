@@ -84,22 +84,23 @@ scripts never run in an emission; a FAIL that shows a desk line wrong is a usefu
 | id | outcome judged | bound |
 |---|---|---|
 | 1 | runner rc 0, no restart row, one boot, no FATAL, no bridge Lua error (three log forms), every snapshot on l01_escape with one run id, no kept pose with a k line, last kept snapshot at play >= 440 | exact; 440 s |
-| 2 | F1: emforce rows exactly [surge, psi]; one EFORCE per kind; result `started` or `notstarted` (an `error:…` or `unknown` FAILS); runner append at play 70 / 310 s + <= 2.5 s; EFORCE 250 ms early to 2.5 s late after the append (X mapped to W by the newest P2 line); no Lua error naming surge_manager / psi_storm_manager | see 6 |
+| 2 | F1: emforce rows exactly [surge, psi]; one EFORCE per kind; result `started` or `notstarted` (an `error:…` or `unknown` FAILS); runner append at play 70 / 310 s + <= 2.5 s; the EFORCE records are exactly [surge, psi] before any grouping (an extra or unknown record FAILS); EFORCE 250 ms early to 2.5 s late after the append (X mapped to W as T - min(P2 now - P2 pose utc) over the P2 lines of the 10 s before T); no Lua error naming surge_manager / psi_storm_manager | see 6 |
 | 3s / 3p | one ESTART per kind, 0..1000 ms after its EFORCE (X), t 0..1.0 | 1000 ms; 1.0 |
 | 4s / 4p / 4n | F2: float(tf) == 10 in every surge / psi snapshot, == 6 in every none snapshot (at least one each); the printed forms are reported | exact |
 | 5s / 5p | F2: max - min of (t - X/1000) over the event's snapshots | <= 0.5 s |
-| 6s / 6p | F2: one EEND, its t in [220.5, 223.0] / [101.5, 104.0], no event snapshot after it | see 6 |
+| 6s / 6p | F2: one EEND, its t in [220.5, 223.0] / [101.5, 104.0], no event snapshot after it; EEND's t minus the event's snapshot clock at EEND's X (X/1000 + the mid of the snapshots' t - X/1000) within 0.5 s | see 6 |
 | 7s / 7p | F2: EPHASE phases exactly 1..12 (13 optional) / 1..5 (6 optional), in order, each with t in (X-1, X-1+1.0] (+-0.005 print rounding); every e line's phase = the table's phase of its t | 1.0 s |
 | 8 | F2: w lines only in surge snapshots, n in {1,2}; per wave: first t in (X-1, X+1.0] (X = 120 / 168), first z - actor z in [244, 250.5], least-squares speed in [-16.5, -13.5] m/s | see 6 |
-| 9 | F2: v lines only in psi snapshots, ascending n; per vortex: start = s + t - 20 within 0.02 of an integer in [33, 77]; gaps between starts in [3, 16]; first s in [19.0, 21]; last s in [-1.0, 1.5]; y = actor y + 20 +- 0.05; distance <= 150.5 m | see 6 |
-| 10 | F3: actor health 1.0000 in every snapshot; VITALS min_health=1.000, max_radiation=0.0000, max_bleeding=0.0000, unread=0; SUMMARY min_health=1.000, refills=0, hits = cancelled | exact |
+| 9 | F2: v lines only in psi snapshots, ascending n; per vortex: start = s + t - 20 within 0.02 of an integer in [33, 77], and EVERY sample's s + t - 20 within 0.02 of that start; gaps between starts in [3, 16]; first s in [19.0, 21]; last s in [-1.0, 1.5]; y = actor y + 20 +- 0.05; distance <= 150.5 m | see 6 |
+| 10 | F3: actor health 1.0000 in every snapshot; VITALS min_health=1.000, max_radiation=0.0000, max_bleeding=0.0000, unread=0; SUMMARY min_health=1.000, refills=0, hits and cancelled both present as counts and equal (0 = 0 is valid) | exact |
 | 11 | F4: last T2SUM has the registered 20 keys in order (eerr last); eerr, torn, lost, epochs, every k* counter, ktabfail = 0; paused false; no EERR line; no snapshot in the degraded form (e none + ns,-1,-1) | exact |
 | 12 | F4: no ENOTREADY and no EREADY line | exact |
 | 13 | every snapshot has the form `a o* r? e (w\|v)* ns` with w only in a surge and v only in a psi storm, no k line | exact |
 Always judged (in no NO VERDICT set): 1, 2, 4n, 10, 11, 12, 13. Reported: F1 ANSWER line (managers readable, each forced start
 started / REFUSED BY THE GAME / CALL FAILED), tf forms, ESTART/EEND lines, wave z where it passes the actor and its last line,
 each vortex, ns at the first snapshot, hits by draftsman/type, pose points and actor drift, F5 counts (online stalkers before
-each event, not listed / not alive 2 s after it, their OFF lines, new zombied ids), F6 SUMMARY + per-minute export means from
+each event's ESTART (X), not listed / not alive in the first snapshot at or after EEND + 2 s (X), their OFF lines, new zombied
+ids; "unavailable" with no EEND or no snapshot on either side), F6 SUMMARY + per-minute export means from
 the TICK lines marked by the event they overlap, against kj2's 795.8 / 1558.1 / 15920.6 us.
 
 ## 5. NO VERDICT rules (decided before; each names what it leaves untested)
@@ -112,7 +113,8 @@ the TICK lines marked by the event they overlap, against kj2's 795.8 / 1558.1 / 
 | NV5 | the psi storm started but no v line at all: PSM:361's `==` can end the chain before the first vortex; the run cannot tell that from a reader fault | 9 |
 A NO VERDICT never hides a failure it does not explain: a failing check outside the union of the fired rules' sets makes
 the run a FAIL, named. Missing / unreadable / empty required input: REFUSED (exit 2), by name. Unparsable input (a malformed
-E* line, a snapshot that breaks the line grammar, emforce rows): FAIL, never excused. One retry after a NO VERDICT, crash or
+E* line, a snapshot that breaks the line grammar, emforce rows, snapshot or pose payload outside its watcher record): FAIL,
+never excused. One retry after a NO VERDICT, crash or
 stop, with a new out dir, only on the supervisor's GO; registered here before the first boot: same command, `out/kj3p-r1`.
 
 ## 6. Margin table (each bound derived for THIS run; expected = what the scripts and the stub say)
@@ -121,18 +123,19 @@ stop, with a new out dir, only on the supervisor's GO; registered here before th
 | 1 play end | >= 440 s | the partner's plan | ~449 s (465 engine s - 15 s warm-up - <= 1.2 s writer start and runner read) | 9 s slack vs ~1.2 s jitter: 7x | - |
 | 2 runner append | plan + 0..2.5 s | runner loop = `sleep 1` + body | <= 1.3 s (kj2: 757 ms late at 105 s) | 3.3x | - |
 | 2 EFORCE delay, late | <= 2.5 s | the reader reads emtest.txt once per 1000 ms of X time + one frame | <= ~1.05 s (stub 0.95 s) | 2.4x | - |
-| 2 EFORCE delay, early | >= -250 ms | the P2 mapping is early by the pose's age at the read (<= 50 ms writer period + a frame + read) | -50..-90 ms | 2.8x | - |
+| 2 EFORCE delay, early | >= -250 ms | X = TimerGlobal (wall based, device.cpp:808), so each P2 gives now - utc = C + a, a >= 0 the pose's age at the read; the 10 s minimum is C + the freshest age: early by that age + the X-vs-W drift over 10 s (kj2 real P2: local age p50 12 ms, max 45 ms in normal play; drift <= 25 ms / 10 s). The newest single P2 (draft 1) was early by its own age: kj2 shows 283 ms after a freeze (review #6) | 0..-70 ms | 3.6x | - |
 | 3 ESTART after EFORCE | 0..1000 ms | `start(true)` sets started and inited_time in the call (SM:205-246); the next snapshot <= 100 ms + a frame | 0 (same frame in the stub) to ~130 ms | 7.5x | - |
 | 3 t at ESTART | 0..1.0 | as above | 0.00..0.13 | 7.5x | - |
 | 4 tf | exact | set and restored in the same Lua call as `started` (SM:245 / SM:388, PSM:117 / 244); the snapshot is built in the bridge's own callback | 10 / 6 | exact | - |
 | 5 t - X spread | <= 0.5 s | game time = factor x time_global (alife_time_manager_inline.h:25); t = game s / factor; quantum 0.1 s if diffSec is whole game seconds, + 0.01 print | <= 0.11 | 4.5x | - |
 | 6 surge EEND t | 220.5..223.0 | end_surge at the 1 s update with ceil(t) >= 222: last t seen in (220.9, 222] | 221.0..222.0 (stub 221.90) | low 0.4 s / 0.1 s spacing: 4x; high 1.0 s / a frame: >30x | - |
 | 6 psi EEND t | 101.5..104.0 | as above with 103 | 102.0..103.0 (stub 102.90) | as above | - |
+| 6 EEND X vs t | <= 0.5 s | EEND is written in the update that ends the event, with the same t clock as the snapshots (check 5's spread bound) | <= 0.11 | 4.5x | - |
 | 7 phase t | (X-1, X-1+1.0] | phase = ceil(t) >= X, first snapshot after t crosses X-1 | X-1 + 0..0.13 (stub +0.10) | 7.5x above; the lower edge is the rule itself (+-0.005 for the print) | lower edge by construction |
 | 8 first w t | (X-1, X+1.0] | start_wave at the update with ceil(t) >= X: t in (X-1, X], first snapshot after it | (X-1, X+0.13] (stub X+0.00) | 7x above; lower edge by construction | lower edge by construction |
 | 8 first z - actor z | 244..250.5 | inited_pos.z = actor z + 250 (SM:496); <= 1 step of 3 m (2 game s = 0.2 s) before the first snapshot | 247..250 (stub 250.0) | 3 m below / one step: **2.0x** | at 2x |
 | 8 speed | -16.5..-13.5 m/s | 3 m per 2 game s at factor 10 (SM:688, 1065) = -15 | -15.0 +- 0.2 (3 m steps over ~33 s) | 7x | - |
-| 9 integer start | 0.02 | two %.2f roundings | <= 0.01 | **2.0x** | at 2x |
+| 9 integer start, every sample | 0.02 | two %.2f roundings | <= 0.01 | **2.0x** | at 2x |
 | 9 start range / gaps | 33..77 / 3..16 | PSM:357-365; PVF 3..6 or stock 8..16 (which one applies is reported) | 33..77 / 3..6 | rule | copied from the scripts |
 | 9 first s | 19.0..21 | created at the update with ceil(t) = start, t in (start-1, start]; s = start + 20 - t | 19.87..21 | 6.7x low; 21 is the rule | upper edge by construction |
 | 9 last s | -1.0..1.5 | strike at the first update with ceil(t) - start >= 20 (s < 1), 1 s updates; last sighting <= one snapshot before | -0.04..1.13 (stub 0.10) | low 25x; high 0.37 s over a 0.13 s spacing: 2.8x | - |
@@ -140,16 +143,24 @@ stop, with a new out dir, only on the supervisor's GO; registered here before th
 | 10, 11, 12, 13 | exact | the standing rule (the actor takes no damage) / the format | as stated | exact | - |
 Flagged: two bounds at exactly 2x (8 first z, 9 integer start); four edges set by the scripts' own rules rather than by a
 margin (7 and 8 lower edges, 9 first-s upper edge, 9 distance). Copied, not derived for this run: kj2's runner flags (env
-row of section 2), the Lua-log noise filter of the kj2 checker (a "doesn't exist" / "nil function" line within 8 lines
-before), and the 3..16 gap range taken from the two script settings. No bound is copied from another arm's table.
+row of section 2) and the 3..16 gap range taken from the two script settings. The Lua-log noise filter is no longer kj2's
+8-line rule (review #10): only the traceback FRAME lines of an `![axr_main callback_set] ... doesn't exist` / `... nil
+function` block (out/wu1_prime/xray.log:5845 shape) are excused; an error line inside or after such a block counts. No bound is copied from another arm's table.
 
 ## 7. Stop rules
 - The driver refuses on any pin mismatch, a PIN_ME pin, a display that is :0 or exists, an engine already running, a left
-  `zz_p1_puppet.script`, or an existing out dir. It waits (<= 240 min) while a protected title or Sober runs; claims only by exit 0.
+  `zz_p1_puppet.script`, Caden's play wrapper running, a protected-title check that fails (cannot tell = NOT clear), or an
+  out dir it cannot make NEW (made exclusively, before any queue or claim). Its traps are in place before the want. It
+  waits (<= 240 min) while a protected title or Sober runs; claims only by exit 0. After the claim it checks every pin, the
+  display, the engine and the title again before either child starts.
 - During the run: T2_MAXRESTART=0 (a crash, 120 s without a first snapshot, 30 s without a new seq, or the over-run limit
   ends the run, no restart); tb_run's wall limit 900 s from launch; the watchdog stops the run within 10 s if a protected title
-  or Sober starts (exit 4, not a run of record).
+  or Sober starts or the title check fails: it kills the engine of THIS run itself (the runner's TERM trap does not stop
+  the engine: t2_xray_kj3.sh:66 only exits, its cleanup CONTs and removes files), then TERMs the runner; exit 4 wins over
+  every other outcome, not a run of record. Only a process of this run is killed (its DISPLAY is the run's display, or its
+  command line has `-t2_run <this run id>`); `wineserver -k` only when no other engine is left.
 - After: stop on a crash, timeout, refusal or stop; no second boot without the supervisor; at most the one retry of section 5.
+  The driver gives back only what this invocation took (withdraw if it queued, release if it claimed).
 
 ## 8. Duration (against a 30 min claim)
 Boot to level ~29 s (kj2) + 465 engine s + quit and Wine teardown ~10 s = ~8.5 min. Claim 30 min; the worst case the runner
@@ -164,8 +175,12 @@ attribution of a removed stalker to the emission (no callback names it; F5 count
 save; story characters; whether the wave and vortex fields are right for a moving actor (the actor stands).
 
 ## 10. Score once
-`cd /home/caden/Projects/StalkerGameEngine && bash -c 'set -C; python3 -I wt-render-split/perf-harness/kj3/kj3p_check.py out/kj3p/run > out/kj3p/kj3p_check.txt; echo $? > out/kj3p/kj3p_check.rc'`
-`set -C` refuses to overwrite an existing report (tested in the selftest). The checker itself writes nothing. No re-score
+`cd /home/caden/Projects/StalkerGameEngine && bash wt-render-split/perf-harness/kj3/kj3p_score.sh out/kj3p/run out/kj3p/kj3p_check.txt`
+kj3p_score.sh (pinned, section 11): (1) the checker beside it must hash to its registered CHK_SHA, else REFUSED with no
+file made; (2) an existing report, or a .rc with no report, is REFUSED with nothing written; the report is opened
+no-clobber (`set -C`) BEFORE the checker runs; (3) the checker's exit code goes to `kj3p_check.txt.rc` only after it ran.
+All of these states are tested in the selftest. The checker itself writes nothing. Known gap: the hash is taken a few ms
+before python opens the file (a change inside that window is not caught). No re-score
 after a checker fix: the registered checker's output stands, or the run is NO VERDICT if it gives none; a fixed checker's read
 is POST-HOC DESCRIPTIVE; a verdict that counts needs a new run under a re-registered checker (the Overseer's rule since kw1).
 
@@ -175,19 +190,37 @@ is POST-HOC DESCRIPTIVE; a verdict that counts needs a new run under a re-regist
 | wt-render-split/perf-harness/kj3/kj3p_run.sh (driver) | PIN_ME |
 | wt-render-split/perf-harness/kj3/kj3p_check.py (checker; also pinned inside the driver as PIN_ME_CHECKER) | PIN_ME |
 | wt-render-split/perf-harness/kj3/kj3p_selftest.sh (PIN_ME_SELFTEST in the driver) | PIN_ME |
+| wt-render-split/perf-harness/kj3/kj3p_score.sh (PIN_ME_SCORE in the driver; its CHK_SHA line must equal the checker's pin, the selftest checks it) | PIN_ME |
 | wt-render-split/perf-harness/kj3/kj3p_track_start.csv (PIN_ME_TRACK_START in the driver) | PIN_ME |
 | wt-render-split/perf-harness/kj3/kill6h_stub.lua (the selftest's fake engine, unchanged) | PIN_ME (2026-11-26 20:17: f864764c06848c010324aa765a26a5d7943b530f4516ff5cd11c16ad55f6f4b5) |
 | tools/t2_xray_kj3.sh, harness/zz_p1_puppet_kill6.script, tools/t2_kill_pose.py, tools/t1_watch_keep.py, tools/lib_engine_pids.sh, tools/tb_run.sh, tools/run_noguard.sh, harness/zz_eperf_dump.script, out/user.ltx.orig, run/bin/Stance14.exe, run/appdata/savedgames/cordon1.scop, ITRZone out/p1/cordon_full_track.csv, run/gamedata/scripts/surge_manager.script, psi_storm_manager.script, pulse_vortex_consistency_fix.script, run/gamedata/configs/axr_options.ltx | PIN_ME each; the values measured 2026-11-26 20:05 are written into the driver's pin lines (245c7dac…, 7d7c173d…, 9f3075cd…, 9df9c8e4…, cb183b7b…, 1b8d103f…, 92729abc…, 2b79a817…, 3efd38ee…, b4ce9c77…, 6dea752b…, 213ff8f1…, aad00a89…, 5e83cea9…, e795db4d…, 27d54b9f…); all but the last five equal kj2's pins |
-Not pinned and read by the game: `appdata/axr_options_play.ltx` (the desk read says the same ten event values; which of the
-two the engine reads is INFERRED).
+`appdata/axr_options_play.ltx` is read by no game script (review #17): axr_main.script:15 opens `ini_file_ex("axr_options.ltx")`,
+whose path is `$game_config$` (_g.script:1598) = `gamedata\configs\` (fsgame.ltx:23); ui_options.get (ui_options.script:1217)
+reads only that object. The play file is Caden's own option copy, swapped in by play/caden_simtick_play.sh:47 while he plays
+and swapped out by its EXIT trap (:37-38). So only the pinned configs/axr_options.ltx matters; the driver refuses while
+that wrapper's lock (run/.caden-play.lock) names a live process, and re-checks every pin after the claim.
 
 ## 12. Tests on these bytes
-`nice -n 19 bash wt-render-split/perf-harness/kj3/kj3p_selftest.sh` (2026-11-26 20:18:21-20:18:28, checker 5c97e95d…,
-run dir kj3/runs/kj3p-st-20261126-201821-1862432, 19 MB): `KJ3P SELFTEST: PASS (fixtures: 2 STUB-MADE runs; good PASS True;
-mutants failing exactly their checks 26/26; made NO VERDICT 4/4; missing-file REFUSED 8/8; real kj2 bytes ok)`. Fixtures: two STUB-MADE runs of the real kill6 reader (forced surge +
-psi; no force + two MADE `notstarted` lines), 26 MADE mutants each failing exactly its listed check(s) (at least one per check
-1 to 13), 4 MADE NO VERDICT fixtures (NV1, NV2+NV3, NV4, NV5), one unparsable input, 8 missing-file and 3 empty-file folders
-(REFUSED by name), a CRLF copy of the good run (PASS), the real kj2 X folder read in place (REFUSED: emforce.csv missing) and
-through symlinks with a made emforce.csv (FAIL: no EFORCE, no e line; checks 2 and 13 named), "the checker writes nothing",
-and the set -C score-once refusal. Not tested: the driver (`bash -n` only, never run); the runner's new lines (`bash -n` only,
-kj3 Stage 2); any e/w/v/ns/E* byte the engine wrote; bounds exactly at their edges.
+`nice -n 19 bash wt-render-split/perf-harness/kj3/kj3p_selftest.sh` (2026-11-26 20:40:18-20:40:34, checker b29400ec…,
+run dir kj3/runs/kj3p-st-20261126-204018-2425251, 20 MB): `KJ3P SELFTEST: PASS (checker part rc 0; score-once states 7/7;
+driver functions offline 21/21)`; its checker part: `fixtures: 2 STUB-MADE runs; good PASS True; mutants failing exactly
+their checks 32/32; made NO VERDICT 4/4; missing-file REFUSED 8/8; real kj2 bytes ok`.
+Checker fixtures: two STUB-MADE runs of the real kill6 reader (forced surge + psi; no force + two MADE `notstarted` lines),
+32 MADE mutants each failing exactly its listed check(s) (at least one per check 1 to 13; the review round added
+m2_extra, m2_early, m1_lua_noise, m6s_x, m9b, m10c), 4 MADE NO VERDICT fixtures (NV1, NV2+NV3, NV4, NV5), two unparsable
+inputs (an EFORCE with 5 fields; a pose payload without its `#pose` line), PASS fixtures p2_stale (stale P2 lines next to
+the EFORCE leave the delay unchanged), lua_noise_ok (a registration block naming the bridge) and the F5 lines (good:
+against EEND + 2 s; f5_unavail: "unavailable"), 8 missing-file and 3 empty-file folders (REFUSED by name), a CRLF copy of
+the good run (PASS), the real kj2 X folder read in place (REFUSED: emforce.csv missing) and through symlinks with a made
+emforce.csv (FAIL: checks 2 and 13 named), and "the checker writes nothing".
+kj3p_score.sh: registered hash = the checker; usage; fresh (report + rc 0); re-run refused with both unchanged; report
+without rc refused, no rc made; rc without report refused, no report made; checker hash mismatch refused, nothing made.
+kj3p_run.sh, offline (sourced with KJ3P_FUNCS_ONLY=1, stub quiet-required.sh / protected-title-check.sh / pgrep, no
+claim, no engine, no display): title_state (playing / clear / helper error / helper missing / pgrep error), disp_free,
+make_out (new / exists / parent not writable / parent missing), pin, final_rc (the marker wins), finish (gives back only
+what was taken), acquire (want, claim, withdraw, release), TERM during want / during a claim that succeeds / fails, a
+failing title check while queued, kill_own on three harmless shells (ours by display, ours by run id, not ours), watch_once
+(playing / check failed / clear), the FUNCS_ONLY guard, the order of the main body, and kill -KILL only in kill_own.
+Not tested: the driver's main body end to end (needs the box), kill_own on a real Wine engine and `wineserver -k`,
+kill_watcher, the runner's new lines (`bash -n` only, kj3 Stage 2); any e/w/v/ns/E* byte the engine wrote; bounds exactly
+at their edges.
