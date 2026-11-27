@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""kj3p: X-ONLY emission preflight checker (kj3/PREREG-kj3p-emission-preflight-DRAFT.md). Stdlib only, run with python3 -I.
+"""kj3p: X-ONLY emission preflight checker (kj3/PREREG-kj3p-emission-preflight-2026-11-26.md). Stdlib only, run with python3 -I.
   kj3p_check.py <run dir>
 <run dir> = the folder the runner tools/t2_xray_kj3.sh was given (kj3p_run.sh passes <out>/run). Required, by name:
   t2_xray.log  restarts.csv  emforce.csv  boot0/meta_t2.csv  boot0/hits_t2.csv (may be empty: no hit)

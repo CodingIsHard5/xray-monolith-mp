@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# kj3p: X-ONLY emission preflight driver (kj3/PREREG-kj3p-emission-preflight-DRAFT.md). Made from tools/t3_kw1.sh (cecc098f).
+# kj3p: X-ONLY emission preflight driver (kj3/PREREG-kj3p-emission-preflight-2026-11-26.md). Made from tools/t3_kw1.sh (cecc098f).
 #   kj3p_run.sh <out dir> [--preflight-only]          (<out dir> relative to the project root, or absolute)
 # ONE X-Ray-only boot, Cordon bench save, its own WANT slice, no ITR2. Runner tools/t2_xray_kj3.sh (installs
 # harness/zz_p1_puppet_kill6.script; T2_SURGE_PLAY / T2_PSI_PLAY append `surge` / `psi` to emtest.txt). Pose feed: the
@@ -54,10 +54,10 @@ pins_ok() {   # every pinned file, relative to the project root (the cwd); 0 onl
   # gamedata\configs\ (_g.script:1598, fsgame.ltx:23); appdata/axr_options_play.ltx is read by no script (triage #17)
   pin run/gamedata/configs/axr_options.ltx     27d54b9f59404d224258649598ca604ebfc174dd066be4a96ff392323244fb29 || b=1
   pin "$TRK"                                   213ff8f125723f011b6cae3972c5e9afa574bf0418a36c0fb34fbde652734cd1 || b=1
-  pin "$TRK1"                                  PIN_ME_TRACK_START || b=1
-  pin "$K/kj3p_check.py"                       PIN_ME_CHECKER || b=1
-  pin "$K/kj3p_score.sh"                       PIN_ME_SCORE || b=1
-  pin "$K/kj3p_selftest.sh"                    PIN_ME_SELFTEST || b=1
+  pin "$TRK1"                                  0a8bce3976ff0ef81fb0b5ded24c878088e83410f988ecf52d43fa148eb5a5e9 || b=1
+  pin "$K/kj3p_check.py"                       7fa0ccf1d411f106b40a9951747729c770499edb0ad47f1cd1b1093a3c4d891b || b=1
+  pin "$K/kj3p_score.sh"                       1b24dc7423c01f7af00dc75876fb5145f24a1be1a4485bc6e5ac43439c573024 || b=1
+  pin "$K/kj3p_selftest.sh"                    e9db7bd9332427d21bfcaa246a8c890158433b113941d9bcc06788b05df9045d || b=1
   # the one-row track is exactly the header and the first data row of the pinned track (CR stripped on both)
   [ "$(head -2 "$TRK" 2>/dev/null | tr -d '\r')" = "$(tr -d '\r' < "$TRK1" 2>/dev/null)" ] || { echo "REFUSED: $TRK1 is not the first row of $TRK"; b=1; }
   # Caden's play wrapper (play/caden_simtick_play.sh) copies his own options over the pinned file while it runs
@@ -121,7 +121,8 @@ stop_run() {   # 0 = no process of this run is left. LAUNCHER FIRST (tb_run of t
   x=$(rest_pids); [ -n "$x" ] && { log "Xvfb / openbox / watcher of this run pid $x: still alive after 5 s, KILL"; kill -KILL $x 2>/dev/null; sleep 0.5; }
   restore_ltx
   left="$(own_of launch_pids | tr '\n' ' ')$(own_of wine_pids | tr '\n' ' ')$(rest_pids)"
-  [ -z "${left// /}" ] && return 0
+  [ -z "${left// /}" ] && [ "$clean" -ge 2 ] && return 0   # pass 4: two empty scans in a row AND nothing left
+  [ -z "${left// /}" ] && { log "scan budget used up without two empty scans in a row: claim kept"; return 1; }
   log "LEFT ALIVE (launcher / Wine / Xvfb / openbox / watcher of this run): $left"; return 1
 }
 watch_pids() {   # the runner's watcher (t1_watch_keep.py) writing OUR run dir: it outlives a runner that was TERMed

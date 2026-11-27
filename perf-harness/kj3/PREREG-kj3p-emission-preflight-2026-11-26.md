@@ -1,7 +1,8 @@
-# kj3p: X-ONLY emission preflight (DRAFT, 2026-11-26). Not registered. No boot before the supervisor's GO.
+# kj3p: X-ONLY emission preflight (REGISTERED 2026-11-26). No boot before the supervisor's GO.
 
-Drafted by an Opus sub-worker at the desk (no engine, no Wine, no display, no claim, no git). EnginePerf reads, fills the
-`P = ?` lines and the PIN_ME pins, and registers. Everything below about the engine is from the scripts and earlier runs;
+Drafted by an Opus sub-worker at the desk (no engine, no Wine, no display, no claim, no git). EnginePerf read it, filled the
+P values and the pins, reran the selftest after every fix round, and registered it. CodeRabbit: four passes (19, 5, 5, 1
+findings; the last one minor and fixed by EnginePerf; no pass after that fix), triage in kj3p-coderabbit-triage-2026-11-26.md. Everything below about the engine is from the scripts and earlier runs;
 nothing of it has been seen in an emission yet.
 
 ## 0. Limits first
@@ -199,13 +200,13 @@ is POST-HOC DESCRIPTIVE; a verdict that counts needs a new run under a re-regist
 ## 11. Pins (sha256; PIN_ME = EnginePerf fills at registration from the bytes it registers)
 | file | sha256 |
 |---|---|
-| wt-render-split/perf-harness/kj3/kj3p_run.sh (driver) | PIN_ME |
-| wt-render-split/perf-harness/kj3/kj3p_check.py (checker; also pinned inside the driver as PIN_ME_CHECKER) | PIN_ME |
-| wt-render-split/perf-harness/kj3/kj3p_selftest.sh (PIN_ME_SELFTEST in the driver) | PIN_ME |
-| wt-render-split/perf-harness/kj3/kj3p_score.sh (PIN_ME_SCORE in the driver; its CHK_SHA line must equal the checker's pin, the selftest checks it) | PIN_ME |
-| wt-render-split/perf-harness/kj3/kj3p_track_start.csv (PIN_ME_TRACK_START in the driver) | PIN_ME |
-| wt-render-split/perf-harness/kj3/kill6h_stub.lua (the selftest's fake engine, unchanged) | PIN_ME (2026-11-26 20:17: f864764c06848c010324aa765a26a5d7943b530f4516ff5cd11c16ad55f6f4b5) |
-| tools/t2_xray_kj3.sh, harness/zz_p1_puppet_kill6.script, tools/t2_kill_pose.py, tools/t1_watch_keep.py, tools/lib_engine_pids.sh, tools/tb_run.sh, tools/run_noguard.sh, harness/zz_eperf_dump.script, out/user.ltx.orig, run/bin/Stance14.exe, run/appdata/savedgames/cordon1.scop, ITRZone out/p1/cordon_full_track.csv, run/gamedata/scripts/surge_manager.script, psi_storm_manager.script, pulse_vortex_consistency_fix.script, run/gamedata/configs/axr_options.ltx | PIN_ME each; the values measured 2026-11-26 20:05 are written into the driver's pin lines (245c7dac…, 7d7c173d…, 9f3075cd…, 9df9c8e4…, cb183b7b…, 1b8d103f…, 92729abc…, 2b79a817…, 3efd38ee…, b4ce9c77…, 6dea752b…, 213ff8f1…, aad00a89…, 5e83cea9…, e795db4d…, 27d54b9f…); all but the last five equal kj2's pins |
+| wt-render-split/perf-harness/kj3/kj3p_run.sh (driver) | 1fc5632d0d50ca1f34dc0672bd3b312fac4f2ee95216698591381d33d7d43cb7 |
+| wt-render-split/perf-harness/kj3/kj3p_check.py (checker; also pinned inside the driver) | 7fa0ccf1d411f106b40a9951747729c770499edb0ad47f1cd1b1093a3c4d891b |
+| wt-render-split/perf-harness/kj3/kj3p_selftest.sh (pinned in the driver) | e9db7bd9332427d21bfcaa246a8c890158433b113941d9bcc06788b05df9045d |
+| wt-render-split/perf-harness/kj3/kj3p_score.sh (PIN_ME_SCORE in the driver; its CHK_SHA line must equal the checker's pin, the selftest checks it) | 1b24dc7423c01f7af00dc75876fb5145f24a1be1a4485bc6e5ac43439c573024 |
+| wt-render-split/perf-harness/kj3/kj3p_track_start.csv (pinned in the driver) | 0a8bce3976ff0ef81fb0b5ded24c878088e83410f988ecf52d43fa148eb5a5e9 |
+| wt-render-split/perf-harness/kj3/kill6h_stub.lua (the selftest's fake engine, unchanged) | f864764c06848c010324aa765a26a5d7943b530f4516ff5cd11c16ad55f6f4b5 |
+| tools/t2_xray_kj3.sh, harness/zz_p1_puppet_kill6.script, tools/t2_kill_pose.py, tools/t1_watch_keep.py, tools/lib_engine_pids.sh, tools/tb_run.sh, tools/run_noguard.sh, harness/zz_eperf_dump.script, out/user.ltx.orig, run/bin/Stance14.exe, run/appdata/savedgames/cordon1.scop, ITRZone out/p1/cordon_full_track.csv, run/gamedata/scripts/surge_manager.script, psi_storm_manager.script, pulse_vortex_consistency_fix.script, run/gamedata/configs/axr_options.ltx | pinned in the driver's pin lines (the driver refuses on any mismatch); values measured 2026-11-26 20:05 (245c7dac…, 7d7c173d…, 9f3075cd…, 9df9c8e4…, cb183b7b…, 1b8d103f…, 92729abc…, 2b79a817…, 3efd38ee…, b4ce9c77…, 6dea752b…, 213ff8f1…, aad00a89…, 5e83cea9…, e795db4d…, 27d54b9f…); all but the last five equal kj2's pins |
 `appdata/axr_options_play.ltx` is read by no game script (review #17): axr_main.script:15 opens `ini_file_ex("axr_options.ltx")`,
 whose path is `$game_config$` (_g.script:1598) = `gamedata\configs\` (fsgame.ltx:23); ui_options.get (ui_options.script:1217)
 reads only that object. The play file is Caden's own option copy, swapped in by play/caden_simtick_play.sh:47 while he plays
@@ -237,3 +238,14 @@ failing title check while queued, stop_run on three fake engines (ours by displa
 Not tested: the driver's main body end to end (needs the box), stop_run on a real Wine engine / tb_run / Xvfb (tested
 on fake processes only), kill_watcher, the user.ltx put-back after a KILLed tb_run, the runner's new lines (`bash -n` only, kj3 Stage 2); any e/w/v/ns/E* byte the engine wrote; bounds exactly
 at their edges.
+
+## 13. Stated at registration (EnginePerf)
+- Selftest at these pins: PASS (checker part 34 mutants, score-once 7/7, driver functions offline 33/33).
+- The driver's main body, its cleanup on real Wine / tb_run / Xvfb processes and the real queue tool's claim and release
+  paths have never run. A fault there on the box is a stop, reported as such.
+- tools/t2_xray_kj3.sh line 56 tests "an EXCLUSIVE claim is held" by the queue tool's text (no exit-code query exists);
+  it fails closed.
+- The driver lock covers kj3p drivers only: EnginePerf never starts kj3p while another of its drivers is queued or running.
+- Whether Wine hides DISPLAY in /proc environ (which the display-based ownership test needs) is not known; the engine is
+  still found by its -t2_run id.
+- Pass 4's one finding (two empty scans required before the claim is released) was fixed by hand without a new mutant.

@@ -96,3 +96,8 @@ Selftest: `KJ3P SELFTEST: PASS (checker part rc 0; score-once states 7/7; driver
 - Wine's behaviour on wineserver TERM.
 - The real quiet-required.sh.
 - The lock against EnginePerf's other drivers (a stated limit, not enforced).
+
+## Pass 4 (2026-11-26, base f42675823; first attempt refused by the review limit, rerun after the reset)
+| # | where | finding | decision |
+|---|---|---|---|
+| 1 | kj3p_run.sh:124 | success possible without two empty scans in a row when the scan budget runs out | FIXED by EnginePerf: return 0 needs clean >= 2 AND nothing left; otherwise the claim is kept. No new mutant; selftest rerun PASS. No review pass after this fix. |
