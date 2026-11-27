@@ -578,6 +578,9 @@ def score_load(root, s):
             errs.append(str(e))
     if errs:
         (R["fatal"] if on("missing_fail") else R["void"]).extend(errs)
+        # wu3 fix F: a VERDICT that was read stays in the not-clean counts when another file fails (still a FAIL)
+        if on("verdict_kept") and "verdict" in got and got["verdict"] != "VERDICT: clean" and on("not_clean"):
+            R["void"].append("not_clean: %r (wu3: a not-clean scored load is re-run once as <tag>_r1)" % got["verdict"])
         return R
     verdict, ms, g = got["verdict"], got["ms"], got["g"]
     nfr, calls = got["sites"]
@@ -744,21 +747,40 @@ def score_safe(root, s):
                     notes=[], group=None, why="", lt=None)
 
 
+STOP_RE = re.compile(r"^class=(\S+)(?: interrupted=([a-z0-9_]+))? reason=(.*\S.*)$")
+
+
 def read_stop(path):
-    """wu3: the driver's stop record, exactly one line 'class=<done|box|fault> reason=<text>' (CR stripped).
-    Returns (class, reason, None) or (None, None, why it is unusable)."""
+    """wu3: the driver's stop record: exactly ONE physical line, ended by LF or CRLF:
+    'class=<done|box|fault> [interrupted=<tag> ]reason=<text>'. interrupted= (fix B) is written only with class=box,
+    when the stop came while a bench was live; it names that load's tag.
+    Returns (class, reason, interrupted or None, None) or (None, None, None, why it is unusable)."""
+    if not os.path.exists(path):
+        return None, None, None, "missing: MISSING %s" % path
     try:
-        L = lines_of(path)
-    except Bad as e:
-        return None, None, str(e)
+        with open(path, "rb") as f:
+            raw = f.read().decode("ascii", "replace")
     except OSError as e:
-        return None, None, "UNREADABLE %s (%s)" % (path, type(e).__name__)
-    if len(L) != 1:
-        return None, None, "%s holds %d lines, the driver writes exactly one" % (path, len(L))
-    m = re.match(r"^class=(\S+) reason=(.*\S.*)$", L[0])
-    if not m or m.group(1) not in STOP_CLASSES:
-        return None, None, "UNPARSABLE %s %r (not 'class=<%s> reason=<text>')" % (path, L[0], "|".join(STOP_CLASSES))
-    return m.group(1), m.group(2).strip(), None
+        return None, None, None, "UNREADABLE %s (%s)" % (path, type(e).__name__)
+    if raw == "":
+        return None, None, None, "empty: EMPTY %s" % path
+    # fix E: physical lines are counted; one line and its LF / CRLF end, nothing else (a blank line is a second line)
+    body = raw[:-1] if raw.endswith("\n") else None
+    if body is not None and body.endswith("\r"):
+        body = body[:-1]
+    if on("stop_lines"):
+        if body is None:
+            return None, None, None, "%s has no line end (the driver writes one line ended by LF)" % path
+        n = body.count("\n") + 1
+        if "\n" in body or "\r" in body:
+            return None, None, None, "%s holds %d physical lines, the driver writes exactly one" % (path, n)
+    else:
+        body = [l for l in raw.replace("\r", "").split("\n") if l][0] if raw.strip() else ""
+    m = STOP_RE.match(body)
+    if not m or m.group(1) not in STOP_CLASSES or (m.group(2) and m.group(1) != "box"):
+        return None, None, None, "UNPARSABLE %s %r (not 'class=<%s> [interrupted=<tag> ]reason=<text>', interrupted= only " \
+                                 "with class=box)" % (path, body, "|".join(STOP_CLASSES))
+    return m.group(1), m.group(3).strip(), m.group(2), None
 
 
 def read_order(path):
@@ -894,8 +916,9 @@ def main(argv):
       "legacy wide %d, N/M >= %.2f, P >= %d, clock tolerance %.0f ms, countdown race %d frame, re-runs <= %d, void-arm note > %d"
       % (WINDOW_MS / 1000, WINDOW2_MS / 1000, SLOW1_MS, SLOW2_MS, WORST_RATIO, N20_DROP, PRICE_MAX_S, MIN_ON, MIN_OFFP,
          STOCK_HITCH_MIN, STOCK_TRAIN_MIN, LEGACY_WIDE, N_M_MIN, P_MIN, CLOCK_TOL_MS, RACE_FRAMES, R_MAX, VOID_ARM_DIFF))
-    stop_cls, stop_reason, stop_err = read_stop(args["stop"])
-    P("STOP RECORD %s" % (("class=%s reason=%s" % (stop_cls, stop_reason)) if stop_cls else ("unusable: %s" % stop_err)))
+    stop_cls, stop_reason, stop_int, stop_err = read_stop(args["stop"])
+    P("STOP RECORD %s" % (("class=%s%s reason=%s" % (stop_cls, (" interrupted=%s" % stop_int) if stop_int else "", stop_reason))
+                          if stop_cls else ("unusable: %s" % stop_err)))
     P("")
     fails = []      # (load tag or "series", reason)
     try:
@@ -903,6 +926,25 @@ def main(argv):
     except OSError as e:
         present = set()
         fails.append(("series", "missing: cannot list the root %s (%s)" % (root, type(e).__name__)))
+
+    # ---- fix B: a box stop while a bench was live names that load (interrupted=<tag>); its folder, whatever it holds,
+    # is treated as not run. It must be the last folder in run order (prime, then each slot T, T_r1), else FAIL ----
+    run_order = [s["tag"] for s in slots if s["arm"] == "prime"]
+    for s in slots:
+        if s["arm"] != "prime":
+            run_order += [s["tag"], s["tag"] + "_r1"]
+    if stop_cls == "box" and stop_int:
+        ro = [t for t in run_order if t in present]
+        if stop_int not in run_order:
+            if on("interrupted_last"):
+                fails.append(("series", "stop_contradiction: interrupted tag %s is not a load of this order" % stop_int))
+        elif stop_int in present and ro[-1] != stop_int and on("interrupted_last"):
+            fails.append(("series", "stop_contradiction: interrupted tag %s is not the last folder in run order (the last is "
+                                    "%s): the driver only stops a bench that is running" % (stop_int, ro[-1])))
+        elif on("interrupted_not_run"):
+            present.discard(stop_int)
+            P("INTERRUPTED %s: the bench was live at the box stop; its folder (%s) is treated as not run"
+              % (stop_int, "present" if stop_int in ro else "absent"))
 
     def reruns_of(tag):
         return sorted(n for n in present if RERUN_RE.match(n) and RERUN_RE.match(n).group(1) == tag)
@@ -939,7 +981,10 @@ def main(argv):
     for s in slots:
         if s["arm"] != "prime":
             continue
-        prime_present = prime_present or os.path.isdir(os.path.join(root, s["tag"]))
+        prime_present = prime_present or s["tag"] in present
+        if s["tag"] not in present:
+            P("LOAD %s prime: not run (no folder%s)" % (s["tag"], ", interrupted" if s["tag"] == stop_int else ""))
+            continue
         try:
             pv = read_verdict(os.path.join(root, s["tag"]))
         except Bad as e:
@@ -966,11 +1011,12 @@ def main(argv):
         has_r1 = r1 in present
         if has_r1:
             nrr.append(r1)
-        st = dict(slot=s, status=None, first=None, rerun=None, scored=None)
+        st = dict(slot=s, status=None, first=None, rerun=None, scored=None, failed=False)
         S.append(st)
-        if not os.path.isdir(os.path.join(root, T)):
+        if T not in present:
             st["status"] = "missing"
-            P("LOAD %s %s NOT RUN (no folder %s)" % (T, s["arm"].upper(), os.path.join(root, T)))
+            P("LOAD %s %s NOT RUN (%s)" % (T, s["arm"].upper(), ("interrupted by the box stop: folder %s ignored" if T == stop_int
+                                                             else "no folder %s") % os.path.join(root, T)))
             if has_r1 and on("stop_contradiction"):
                 fails.append((r1, "stop_contradiction: re-run %s present but its slot's first load %s is missing" % (r1, T)))
             continue
@@ -979,6 +1025,7 @@ def main(argv):
         # a FAIL of the first attempt is never dropped, also when a re-run is scored in its place (prereg wu3 3.5)
         if not (has_r1 and not_clean(R0) and not on("first_fatal_kept")):
             fails += [(T, r) for r in R0["fatal"]]
+        st["failed"] = bool(R0["fatal"])
         if not not_clean(R0):
             st["status"], st["scored"] = "scored", R0
             report(R0)
@@ -988,6 +1035,12 @@ def main(argv):
         elif has_r1 and on("rerun_scored"):
             R1 = score_safe(root, dict(s, tag=r1))
             st["status"], st["rerun"], st["scored"] = "rerun", R1, R1
+            st["failed"] = st["failed"] or bool(R1["fatal"])
+            # fix A: the driver re-runs only a first load that passed check= (no FAIL, no stop-VOID)
+            r0stop = list(R0["fatal"]) + [v for v in R0["void"] if v.split(":")[0] in STOP_VOIDS]
+            if r0stop and on("rerun_after_check"):
+                fails.append((r1, "stop_contradiction: re-run %s exists but the first load %s failed its check (%s): the "
+                                  "driver never re-runs after a failed check" % (r1, T, ", ".join(sorted(set(v.split(":")[0] for v in r0stop))))))
             report(R0, ["first attempt not clean: re-run %s is scored in its place" % r1])
             report(R1, ["re-run of slot %s, scored in its place (every per-load rule)%s" % (
                 T, "; not clean again: the slot is VOID" if not_clean(R1) else "")])
@@ -1037,11 +1090,13 @@ def main(argv):
         A = [st for st in S if st["slot"]["arm"] == a]
         att = [R for st in A for R in (st["first"], st["rerun"]) if R is not None]
         nc = sum(1 for R in att if not_clean(R))
-        sc = [st["scored"] for st in A if st["scored"] is not None]
-        arm_n[a] = dict(slots=len(A), att=len(att), nc=nc, valid=sum(1 for R in sc if not R["fatal"] and not R["void"]),
-                        void=sum(1 for R in sc if R["void"] and not R["fatal"]),
-                        void_nc=sum(1 for R in sc if not_clean(R) and not R["fatal"]),
-                        failed=sum(1 for R in sc if R["fatal"]), notrun=sum(1 for st in A if st["status"] == "missing"))
+        # fix D: a slot is failed when EITHER attempt failed; only a slot with no failed attempt counts as valid or void
+        fl = lambda st: (st["failed"] if on("slot_failed_either") else bool(st["scored"]["fatal"]))
+        sc = [st["scored"] for st in A if st["scored"] is not None and not fl(st)]
+        arm_n[a] = dict(slots=len(A), att=len(att), nc=nc, valid=sum(1 for R in sc if not R["void"]),
+                        void=sum(1 for R in sc if R["void"]), void_nc=sum(1 for R in sc if not_clean(R)),
+                        failed=sum(1 for st in A if st["scored"] is not None and fl(st)),
+                        notrun=sum(1 for st in A if st["status"] == "missing"))
         n = arm_n[a]
         P("SLOTS %-3s %d slots: %d valid, %d void (%d of them not clean on every attempt), %d failed, %d not run; "
           "attempts run %d, not clean %d (%s)" % (a.upper(), n["slots"], n["valid"], n["void"], n["void_nc"], n["failed"],
@@ -1052,8 +1107,11 @@ def main(argv):
         P("NOTE void_arms_differ (reported only, not a verdict rule): void slots ON %d, OFF %d differ by more than %d: the "
           "valid loads of the two arms may not be alike" % (arm_n["on"]["void"], arm_n["off"]["void"], VOID_ARM_DIFF))
     loads = [st["scored"] for st in S if st["scored"] is not None]
+    for st in S:   # fix D: the metrics use the chosen capture only when neither attempt failed
+        if st["scored"] is not None and st["failed"] and on("slot_failed_either"):
+            st["scored"]["slot_failed"] = True
     # ---------------- verdict (prereg wu2 7, wu3 3.5) ----------------
-    valid = [R for R in loads if not R["fatal"] and not R["void"]]
+    valid = [R for R in loads if not R["fatal"] and not R["void"] and not R.get("slot_failed")]
     for R in valid:   # wu2: a valid load always has a load time (E and the clock fit are stop-VOID conditions, 5.4)
         if R["lt"] is None:
             R["fatal"].append("scorer_error: valid load without a load time")
@@ -1067,8 +1125,8 @@ def main(argv):
     P("")
     P("GROUPS (valid loads; the two stock groups are never pooled): ON %d, OFF-IN-PLAY %d, OFF-IN-LOADING %d, "
       "OFF-OTHER %d (reported only); void %d; failed %d"
-      % (len(on_v), len(offP), len(offL), len(offO), sum(1 for R in loads if R["void"] and not R["fatal"]),
-         sum(1 for R in loads if R["fatal"])))
+      % (len(on_v), len(offP), len(offL), len(offO), sum(1 for R in loads if R["void"] and not R["fatal"] and not R.get("slot_failed")),
+         sum(1 for R in loads if R["fatal"] or R.get("slot_failed"))))
 
     def stats(G, key):
         v = [key(R) for R in G]

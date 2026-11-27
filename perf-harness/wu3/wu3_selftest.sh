@@ -37,6 +37,7 @@ for t in wu2_prime wu2_01_on wu2_02_off wu2_03_off wu2_04_on; do
   done
 done
 PARENT="${1:-$HERE/selftest-runs}"
+case "$PARENT" in /*) ;; *) PARENT="$PWD/$PARENT" ;; esac      # fix G: a relative parent is made absolute here
 ST="$PARENT/$(date +%Y%m%d-%H%M%S)-$$"
 [ -e "$ST" ] && { echo "WU3 SELFTEST FAIL: $ST exists"; exit 2; }
 mkdir -p "$ST/cases" "$ST/pool" "$ST/rpool" "$ST/roots" "$ST/mutants" "$ST/rpm"
@@ -474,6 +475,15 @@ make("v_ncl_b", "on", pool=RPOOL, verdict=CONFV); make("v_ncl_b_r1", "on", pool=
 make("g_on_01_r1", "on", pool=RPOOL)                      # a re-run of a CLEAN first load (g_on_01)
 make("p_prime_ok_r1", "offL", pool=RPOOL)                 # a re-run of the prime
 make("v_orphan_r1", "on", pool=RPOOL)                     # a re-run whose slot's first load is missing
+make("v_ncfc", "on", pool=RPOOL, verdict=CONFV, drop_last=True); make("v_ncfc_r1", "on", pool=RPOOL)   # fix A: 1st fails check=
+make("v_mxc", "on", verdict=CONFV, skip=("xray",))       # fix F: not clean, xray.log missing (FAIL; VERDICT still counted)
+# fix B: what tools/s2_bench.sh leaves when TERM comes mid-load (its EXIT trap cleans up; lines 70-77 never run): the
+# folder with conditions.txt (start line + the engine pid line, no end, no VERDICT) and wine_stderr.log; no xray.log, no csv
+os.makedirs(os.path.join(RPOOL, "v_part"))
+with open(os.path.join(RPOOL, "v_part", "conditions.txt"), "x") as f:
+    f.write("start 2026-11-27 10:00:00 kind=EXCLUSIVE timing loadavg=0.30 0.40 0.50 heavy_others=[]\nengine pid 1 cpus_allowed=0-15 cgroup=x\n")
+with open(os.path.join(RPOOL, "v_part", "wine_stderr.log"), "x") as f:
+    f.write("wine: starting\n")
 ROOTS = os.path.join(ST, "roots")
 def mkroot(name, tags):
     """<ST>/roots/<name>/: one symlink per load folder (RPOOL first, then POOL, then a real-fixture folder in RR)."""
@@ -589,7 +599,7 @@ OFF_GOOD = [GP[0], GP[1], GL[0], GP[2], GP[3], GL[1], GP[4], GP[5], GL[2], GP[6]
 def sub(lst, old, new):
     l = list(lst); l[l.index(old)] = new; return l
 def case(name, want, pats, on_tags=GON, off_tags=OFF_GOOD, lines=None, root=None, pre_out=False, parse=None, targets=(),
-         one=None, prime="p_prime_ok", stop="class=done reason=list finished", reruns=None, nopats=()):
+         one=None, prime="p_prime_ok", stop="class=done reason=list finished", reruns=None, nopats=(), stop_raw=None):
     """one = ("probe" | "check", tag): the driver's one-load modes on <root>/<tag> with this case's order file (lines).
     wu3: stop = the stop record's text (written as <case>/stop.txt; None = no file); reruns = extra folders (re-runs) for
     a root of symlinks built for this case (every order tag + these); nopats = patterns that must NOT appear."""
@@ -603,7 +613,10 @@ def case(name, want, pats, on_tags=GON, off_tags=OFF_GOOD, lines=None, root=None
             f.write("# selftest case %s\n" % name + "\n".join(L) + "\n")
     if reruns is not None:
         root = mkroot(name, [l.split("|")[0] for l in L] + list(reruns))
-    if stop is not None and parse is None:
+    if stop_raw is not None and parse is None:
+        with open(os.path.join(cd, "stop.txt"), "wb") as f:
+            f.write(stop_raw)
+    elif stop is not None and parse is None:
         with open(os.path.join(cd, "stop.txt"), "w") as f:
             f.write(stop + "\n")
     CASES.append(dict(name=name, want=want, pats=pats, root=root or POOL, order=os.path.join(cd, "wu3_order.txt"),
@@ -872,7 +885,9 @@ case("s_budget_9", 1, [r"^FAIL series rerun_budget: 9 re-run folders \(.*\) > R_
      on_tags=NC[:9] + GON[:7], reruns=[t + "_r1" for t in NC[:9]])
 # a failing ON-lever check on either attempt is FAIL and is never dropped
 case("s_first_fatal", 1, [r"^LOAD v_ncl_a ON FAIL \[lever_count\] \[not_clean\]", r"^FAIL v_ncl_a lever_count: 0 ", r"^LOAD v_ncl_a_r1 ON VALID",
-                          r"^WU3 RESULT: FAIL \(1 load\(s\) failed a registered check: lever_count\)$"],
+                          r"^SLOTS ON +16 slots: 15 valid, 0 void .*, 1 failed, 0 not run", r"^GROUPS .*: ON 15, .*; failed 1$",
+                          r"^FAIL v_ncl_a_r1 stop_contradiction: re-run v_ncl_a_r1 exists but the first load v_ncl_a failed its check \(lever_count\)",
+                          r"^WU3 RESULT: FAIL \(2 load\(s\) failed a registered check: lever_count, stop_contradiction\)$"],
      on_tags=sub(GON, GON[0], "v_ncl_a"), reruns=["v_ncl_a_r1"])
 case("s_rerun_fatal", 1, [r"^LOAD v_ncl_b ON VOID \[not_clean\]", r"^LOAD v_ncl_b_r1 ON FAIL \[lever_count\]", r"^FAIL v_ncl_b_r1 lever_count: 0 ",
                           r"^WU3 RESULT: FAIL \(1 load\(s\) failed a registered check: lever_count\)$"],
@@ -919,7 +934,7 @@ case("s_stop_missing", 1, [r"^STOP RECORD unusable: missing: MISSING .*/s_stop_m
                            r"^WU3 RESULT: FAIL .*stop_record"], stop=None)
 case("s_stop_bad", 1, [r"^FAIL series stop_record: no usable stop record \(UNPARSABLE .*'class=maybe reason=x'", r"^WU3 RESULT: FAIL .*stop_record"],
      stop="class=maybe reason=x")
-case("s_stop_two", 1, [r"^FAIL series stop_record: .*holds 2 lines, the driver writes exactly one", r"^WU3 RESULT: FAIL .*stop_record"],
+case("s_stop_two", 1, [r"^FAIL series stop_record: .*holds 2 physical lines, the driver writes exactly one", r"^WU3 RESULT: FAIL .*stop_record"],
      stop="class=done reason=list finished\nclass=box reason=cancelled")
 case("s_stop_crlf", 0, [r"^STOP RECORD class=done reason=list finished$", r"^WU3 RESULT: PASS$"], stop="class=done reason=list finished\r")
 # the prime: not clean is fine (never re-run, not counted); an unreadable conditions.txt is reported, the report written
@@ -954,6 +969,34 @@ case("real_rerun_done_gap", 1, [r"^FAIL series stop_contradiction: slot wu2_03_o
                                 r"^WU3 RESULT: FAIL .*stop_contradiction"], lines=RLINES, reruns=[])
 case("real_check_r1", 0, [r"^CHECK info wu2_03_off_r1 group=OFF-IN-PLAY ", r"^CHECK wu2_03_off_r1 ok$"], lines=RLINES, root=RR, one=("check", "wu2_03_off_r1"))
 case("real_check_not_clean", 0, [r"^CHECK note wu2_03_off not_clean: 'VERDICT: CONFOUNDED", r"^CHECK wu2_03_off ok$"], lines=RLINES, root=RR, one=("check", "wu2_03_off"))
+
+
+# ---------------- wu3 fix round 1 (A-F) ----------------
+# A: a re-run after a first load that failed check= (here VOID framecount, a stop-VOID) is a contradiction
+case("s_rerun_after_check", 1, [r"^FAIL v_ncfc_r1 stop_contradiction: re-run v_ncfc_r1 exists but the first load v_ncfc failed its check \(framecount\)",
+                                r"^WU3 RESULT: FAIL .*stop_contradiction"], on_tags=sub(GON, GON[0], "v_ncfc"), reruns=["v_ncfc_r1"])
+# B: a box stop during a live bench names the load; its (partial) folder is then not run; without the field it is a FAIL
+PART_ON = GON[:14] + ["v_part", ABS_ON[0]]
+case("s_box_interrupted", 3, [r"^STOP RECORD class=box interrupted=v_part reason=cancelled during v_part$",
+                              r"^INTERRUPTED v_part: the bench was live at the box stop; its folder \(present\) is treated as not run$",
+                              r"^LOAD v_part ON NOT RUN", r"slots not run 4\]$", r"^WU3 RESULT: NO VERDICT \(box_not_quiet\)$"],
+     on_tags=PART_ON, off_tags=OFF_GOOD[:14] + ABS_OFF[:2], reruns=[], stop="class=box interrupted=v_part reason=cancelled during v_part")
+case("s_box_partial_nofield", 1, [r"^LOAD v_part ON FAIL \[unparsable\] \[missing\]", r"^FAIL v_part unparsable: UNPARSABLE .*/v_part/conditions\.txt has no VERDICT line",
+                                  r"^FAIL v_part missing: MISSING .*/v_part/xray\.log", r"^WU3 RESULT: FAIL \(1 load\(s\) failed a registered check: missing, unparsable\)$"],
+     on_tags=PART_ON, off_tags=OFF_GOOD[:14] + ABS_OFF[:2], reruns=[], stop="class=box reason=cancelled")
+case("s_box_interrupted_notlast", 1, [r"^FAIL series stop_contradiction: interrupted tag g_on_05 is not the last folder in run order \(the last is g_on_14\)",
+                                      r"^WU3 RESULT: FAIL .*stop_contradiction"],
+     on_tags=GON[:14] + ABS_ON[:2], off_tags=OFF_GOOD[:14] + ABS_OFF[:2], stop="class=box interrupted=g_on_05 reason=cancelled during g_on_05")
+case("s_stop_interrupted_done", 1, [r"^FAIL series stop_record: no usable stop record \(UNPARSABLE .*interrupted= only with class=box",
+                                    r"^WU3 RESULT: FAIL .*stop_record"], stop="class=done interrupted=g_on_16 reason=list finished")
+# E: physical lines: an extra blank line, or no line end, is not the driver's one line
+case("s_stop_blank", 1, [r"^FAIL series stop_record: .*holds 2 physical lines", r"^WU3 RESULT: FAIL .*stop_record"],
+     stop="class=done reason=list finished\n")
+case("s_stop_noeol", 1, [r"^FAIL series stop_record: .*has no line end", r"^WU3 RESULT: FAIL .*stop_record"],
+     stop_raw=b"class=done reason=list finished")
+# F: a VERDICT that was read stays in the not-clean counts when another file of the load fails
+case("f_verdict_kept", 1, [r"^LOAD v_mxc ON FAIL \[missing\] \[not_clean\]", r"^SLOTS ON +16 slots: .*attempts run 16, not clean 1 \(6 %\)$",
+                           r"^WU3 RESULT: FAIL"], on_tags=sub(GON, GON[2], "v_mxc"))
 
 # ---------------- runner ----------------
 def run(scorer, c, outdir):
@@ -1035,6 +1078,10 @@ MUT = {"missing_fail": ["f_miss_xray"], "cr_strip": ["good_crlf"], "not_clean": 
        "stop_contradiction": ["s_done_unresolved", "s_box_gap", "s_box_stopvoid", "s_r1_without_t", "s_prime_missing", "real_rerun_done_gap"],
        "stop_record": ["s_stop_missing", "s_stop_bad", "s_stop_two"], "fault_stop": ["s_fault"],
        "box_nv": ["s_box_nv", "s_box_budget", "real_rerun_box"], "void_arms_note": ["v_void_5"],
+       # wu3 fix round 1
+       "rerun_after_check": ["s_rerun_after_check"], "interrupted_not_run": ["s_box_interrupted"],
+       "interrupted_last": ["s_box_interrupted_notlast"], "slot_failed_either": ["s_first_fatal"],
+       "stop_lines": ["s_stop_blank", "s_stop_noeol"], "verdict_kept": ["f_verdict_kept"],
        "window_from_e": ["loading_outside_window", "real_prime_probe"], "stock_loop_l": ["good", "real_prime_probe"],
        # review pass 2 (2026-11-26)
        "h3_capture": ["h_price_capture", "h_price_engine_only"], "lt_differ": ["h_price_engine_only", "h_price_capture"],
@@ -1235,6 +1282,7 @@ drv_tests() {   # <function file> <work dir> <R_MAX>: prints one line per failed
     claim_renew() { rec claim "$1"; [ "${CLAIM_AT:-}" != "$1" ]; }
     slice_ok() { rec slice "$2"; return 0; }
     bench() { rec bench "$1"; mkdir "$OUT/$1" || return 9
+      [ "${CANCEL_AT:-}" = "$1" ] && { cancel; stop_write; exit 143; }     # TERM while this bench is live (fix B)
       if [ "$(field v "$1")" = conf ]; then printf 'start x\r\nVERDICT: CONFOUNDED (other heavy process present)\r\n'
       else printf 'start x\r\nVERDICT: clean\r\n'; fi > "$OUT/$1/conditions.txt"
       return "$(field rc "$1")"; }
@@ -1247,9 +1295,9 @@ drv_tests() {   # <function file> <work dir> <R_MAX>: prints one line per failed
       while [ $# -ge 4 ]; do echo "$1 $2 $3 $4" >> "$ST/table"; shift 4; done
       cp -- "$HERE/wu3_order.txt" "$ST/wu3_order.txt"; ORDER="$ST/wu3_order.txt"
       stop=""; sc=""; rc=0; nnc=0; nrr=0; PROBED=0
-      series_loop; stop_write
+      ( series_loop; stop_write )
       B=$(grep '^bench ' "$ST/calls" | cut -d' ' -f2 | tr '\n' ' '); S=$(cat "$ST/stop.txt" 2>/dev/null)
-      CAP_AT=""; CFG_AT=""; CLAIM_AT=""; }
+      CAP_AT=""; CFG_AT=""; CLAIM_AT=""; CANCEL_AT=""; }
     nb() { echo "$B" | wc -w; }
     DONE="class=done reason=list finished"
     scen rerun wu3_01_on conf 0 0
@@ -1284,8 +1332,18 @@ drv_tests() {   # <function file> <work dir> <R_MAX>: prints one line per failed
     [ "$B" = "wu3_prime wu3_01_on " ] && [ "$S" = "class=box reason=claim renewal refused before wu3_02_off" ] || { echo "claim: a refused renewal is not a box stop (stop '$S')"; f=$((f+1)); }
     scen probe wu3_prime clean 0 1
     [ "$B" = "wu3_prime " ] && [ "${S%% on the prime*}" = "class=fault reason=PROBE FAILED" ] || { echo "probe: a failed probe is not a fault stop before any scored load (bench: $B; stop '$S')"; f=$((f+1)); }
-    sc=""; stop=""; halt box cancelled; stop_write
-    [ "$(cat "$ST/stop.txt")" = "class=box reason=cancelled" ] || { echo "cancel: stop record '$(cat "$ST/stop.txt")'"; f=$((f+1)); }
+    sc=""; stop=""; LIVE=""; INTR=""; rc=0; cancel; stop_write
+    [ "$(cat "$ST/stop.txt" 2>/dev/null)" = "class=box reason=cancelled" ] && [ "$rc" = 143 ] || { echo "cancel: stop record '$(cat "$ST/stop.txt" 2>/dev/null)' rc $rc"; f=$((f+1)); }
+    # fix B: a cancel while the bench of wu3_02_off is live: the record names it in the fixed form
+    CANCEL_AT=wu3_02_off; scen cancel_live
+    [ "$B" = "wu3_prime wu3_01_on wu3_02_off " ] && [ "$S" = "class=box interrupted=wu3_02_off reason=cancelled during wu3_02_off" ] || \
+      { echo "cancel_live: stop record '$S' (want class=box interrupted=wu3_02_off reason=cancelled during wu3_02_off)"; f=$((f+1)); }
+    # fix C: the stop record cannot be written (stop.txt is a folder): rc 1 (or the rc it had), SNOTE set; else untouched
+    mkdir -p "$D/norec/stop.txt"; ST="$D/norec"; sc=box; stop=x; INTR=""; SNOTE=""; rc=0
+    record_stop; r=$?
+    [ "$r" != 0 ] && [ "$rc" = 1 ] && [ "$SNOTE" = "stop record NOT written ($D/norec/stop.txt)" ] || { echo "record_stop: write failure gave return $r rc $rc note '$SNOTE'"; f=$((f+1)); }
+    rc=143; SNOTE=""; record_stop; [ "$rc" = 143 ] || { echo "record_stop: rc 143 changed to $rc"; f=$((f+1)); }
+    mkdir -p "$D/rec"; ST="$D/rec"; rc=0; SNOTE=""; record_stop && [ "$rc" = 0 ] && [ -z "$SNOTE" ] && [ -s "$ST/stop.txt" ] || { echo "record_stop: a good write gave rc $rc note '$SNOTE'"; f=$((f+1)); }
     exit $f )
 }
 ndrv=0
@@ -1316,6 +1374,9 @@ claim_as_fault|s/halt box "claim renewal/halt fault "claim renewal/
 no_cr_strip|s/ | tr -d '\\r'//
 no_recheck|/slice_ok \$SL_END \$((BENCH_TO + END_RESERVE))/d
 no_stop_write|s|> "\$ST/stop.txt"|> /dev/null|
+no_live|/# LIVE-BENCH set$/d
+no_interrupted_field|s/"\${INTR:+ interrupted=\$INTR}"/""/
+no_rc_on_stop_fail|/\[ "\$rc" = 0 \] \&\& rc=1/d
 MUTEOF
 # the driver's R_MAX moved off its registered value: the offline series tests must catch both sides
 for v in 7 9; do
@@ -1328,10 +1389,11 @@ done
 if awk '/^order_copy "\$ORDER" "\$ORDER_SHA" "\$ST"/{c=NR} /^ORDER=\$ST\/wu3_order.txt$/{if (c && NR<=c+2) ok=1} END{exit !ok}' "$DRV" && \
    [ "$(grep -c 'pending "\$ORDER"' "$DRV")" = 3 ] && ! grep -q '\bpending |' "$DRV" && grep -q 'order=\$ORDER 2>&1' "$DRV" && \
    awk '/^trap finish EXIT/{t=NR} /^CANCEL=0$/{c=NR} END{exit !(t && c && t < c)}' "$DRV" && \
-   awk '/^finish\(\) \{/{f=NR} f && NR>f && /stop_write/{s=NR} f && NR>f && /quiet-required.sh" withdraw/{w=NR} END{exit !(s && w && s < w)}' "$DRV" && \
+   awk '/^finish\(\) \{/{f=NR} f && NR>f && /record_stop/ && !s{s=NR} f && NR>f && /quiet-required.sh" withdraw/ && !w{w=NR} END{exit !(s && w && s < w)}' "$DRV" && \
+   [ "$(grep -c '\${SNOTE:+ \$SNOTE}' "$DRV")" = 2 ] && grep -q "^trap finish EXIT; trap 'cancel; finish' TERM INT$" "$DRV" && \
    [ "$(tail -2 "$DRV" | tr '\n' ' ')" = "series_loop finish " ] && grep -q 'for f in \$OUT/\$t \$OUT/\${t}_r1; do' "$DRV" && \
    grep -q 'tools/s2_bench.sh "\$2" "\$1" "\$4" "\$5" \$FLAGS -perf_slow "\$6" \$LEVER' "$DRV"; then
-  pass=$((pass+1)); ndrv=$((ndrv+1)); echo "ok   driver body: order copy used, trap before the queue, stop record first in finish, series_loop + finish, _r1 preflight, bench call" | tee -a "$LOG"
+  pass=$((pass+1)); ndrv=$((ndrv+1)); echo "ok   driver body: order copy used, trap before the queue (cancel; finish), stop record first in finish, SNOTE in log + notify, series_loop + finish, _r1 preflight, bench call" | tee -a "$LOG"
 else fail=$((fail+1)); echo "FAIL driver body: one of the static checks (order copy, trap, stop record in finish, series_loop + finish, _r1 preflight, bench call) failed" | tee -a "$LOG"; fi
 touched=0
 for t in cp1 cp2 cp3 cp4 uc1 lc1 lc2 lc3 cpl1 r1a_cor_1 wu1_prime wu2_prime wu2_01_on wu2_02_off wu2_03_off wu2_04_on; do

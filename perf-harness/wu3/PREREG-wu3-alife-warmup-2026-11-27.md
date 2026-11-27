@@ -57,16 +57,28 @@ NO VERDICT, not FAIL. A series with no re-run at all needs 110 min at the measur
 When a not-clean scored load needs a re-run and 8 re-runs are already done, the driver stops (class box).
 
 ## 3. New: the stop record
-On every exit after the state folder exists, the driver writes `out/wu3_state/stop.txt`, one line:
-`class=<done|box|fault> reason=<text>`.
+On every exit after the state folder exists, the driver writes `out/wu3_state/stop.txt`, exactly one line ended by LF:
+`class=<done|box|fault> reason=<text>`, or, for a box stop while a bench was live (fix round 1, B):
+`class=box interrupted=<tag> reason=<text>` (the tag is the load whose bench was running; `interrupted=` appears only
+with class=box, always before `reason=`).
+- **What a TERM does to a live bench** (read from tools/s2_bench.sh, pinned 072af8ed, not edited): the folder
+  out/<tag> is made at once (line 14) and conditions.txt gets its start line (line 29); the engine's stderr and the DXVK
+  logs are written into the folder while it runs (lines 54-56). The only trap is `trap cleanup EXIT` (line 38;
+  cleanup lines 32-37: `wineserver -k`, kill the window manager and Xvfb). Bash runs that EXIT trap on TERM (checked
+  with a 3-line script: the trap ran, exit 143, the code after the loop did not). So lines 70-77 never run: no end line,
+  no VERDICT line, no xray.log copy (line 76), and the perf_*.csv files stay in run/appdata/logs (line 77). A TERM
+  leaves a **partial out/<tag>**. The driver's finish() also sends TERM to the bench and waits for it.
 - **done**: the list finished.
 - **box** (the box was not quiet or not ours): settle cap (10 min; wu2 had 5 min; now a box reason), re-run budget used,
   slice time used, slice too short for the next load, protected title, Roblox, Caden's launcher, claim renewal
-  refused, cancelled (TERM/INT).
+  refused, cancelled (TERM/INT; with `interrupted=<tag>` when a bench was live).
 - **fault** (something did not run as registered): crash / timeout / no capture (bench rc != 0), a failed per-load
   check, failed probe (wu2's "probe failed: nothing scored, nothing consumed" text and handling kept), state write
   failure, exe changed, settings not stock, display not free, an existing out folder, order copy refused.
 - Before the state folder exists (preflight refusals) nothing is written: the folder must be new, so it is not made.
+- If the record cannot be written (fix round 1, C), the driver still reaps the bench, withdraws and releases, but exits
+  non-zero (rc 1 unless it was already non-zero) and puts "stop record NOT written" into its series.log line and the
+  notify text. The scorer then gives FAIL `stop_record`.
 
 ## 4. New scorer rules (replace wu2 7.1 `stopped_series`)
 Score command (one more argument):
@@ -77,12 +89,23 @@ Per scored slot T:
 - out/T not clean and out/T_r1 exists: T_r1 is scored in T's place with every per-load rule. T_r1 not clean too: the
   slot is VOID [not_clean].
 - out/T not clean and no out/T_r1: the slot is VOID.
-- A FAIL on either attempt (any ON lever check L1-L5, any wu2 FAIL) is FAIL and is never dropped.
+- A FAIL on either attempt (any ON lever check L1-L5, any wu2 FAIL) is FAIL and is never dropped. Such a slot counts as
+  **failed** in the summary, and its loads are left out of the group metrics (fix round 1, D).
+- The driver re-runs only a first load that passed check=. out/T_r1 next to a T that fails check= (a FAIL or a wu2
+  stop-VOID) is **FAIL `stop_contradiction`** (fix round 1, A).
+- A load whose conditions.txt holds a VERDICT but whose other file fails to parse keeps that VERDICT in the not-clean
+  counts (still FAIL; fix round 1, F).
 - A re-run of the prime, any `T_r2` or higher: **FAIL `unexpected_rerun` / `second_rerun`**. More `_r1` folders than
   R_MAX: **FAIL `rerun_budget`**. A `T_r1` without T: **FAIL `stop_contradiction`**.
 
 The stop record against the folders:
-- stop.txt missing, empty, unreadable, not one line or not `class=<done|box|fault> reason=<text>`: **FAIL `stop_record`**.
+- stop.txt missing, empty, unreadable, without a line end, more than one physical line (an extra blank line counts),
+  or not in the form above (`interrupted=` with a class other than box included): **FAIL `stop_record`**. Exactly one
+  line ended by LF or CRLF is accepted (fix round 1, E).
+- class=box with `interrupted=<tag>` (fix round 1, B): the folder out/<tag>, whatever it holds, is treated as **not
+  run**. The tag must be a load of the order (prime, T or T_r1) and, if its folder exists, the last folder in run order
+  (prime, then each slot T, T_r1), else **FAIL `stop_contradiction`**. Without the field a partial folder stays FAIL
+  `missing` / `unparsable` as before.
 - class=fault: **FAIL `fault_stop`**, plus FAIL `missing` for every slot not run (as wu2).
 - class=done but a slot not run or a not-clean slot without a re-run: **FAIL `stop_contradiction`** (plus `missing`).
 - Any class: a slot not run or not resolved, followed by later slots with folders: **FAIL `stop_contradiction`** (the
@@ -96,6 +119,9 @@ The stop record against the folders:
 - Always reported: per arm the slots valid / void / failed / not run, attempts and not-clean attempts, re-runs used.
   **NOTE `void_arms_differ`** (reported only) if the ON and OFF void-slot counts differ by more than 4.
 - Precedence: FAIL > NO VERDICT box_not_quiet > the wu2 rules.
+- **Scoring input check (by hand):** before the single scoring run EnginePerf checks the sha256 of BOTH the tree copy
+  `wt-render-split/perf-harness/wu3/wu3_order.txt` and the state copy `out/wu3_state/wu3_order.txt` against the
+  registered order hash.
 - `probe=` and `check=` work for T and for T_r1 (T_r1 is checked with its slot's line under its own tag). T_r2 and a
   prime re-run are refused (exit 2). An order tag ending in `_r<number>` is refused (driver and scorer).
 
@@ -134,7 +160,7 @@ VOID_ARM_DIFF = 4 (scorer; constant mutants 3 / 5). **Removed:** MAX_CONFOUNDED 
 ## 7. Self-test
 `cd wt-render-split/perf-harness/wu3 && nice -n 19 bash wu3_selftest.sh [<parent folder>]` (default parent
 `wu3/selftest-runs`). Draft run 2026-11-27:
-`WU3 SELFTEST PASS 318/318 (33 real cases, 171 made cases, 69 hook mutants caught, 20 constant mutants caught, 1 hook-coverage check, 1 R_MAX agreement check, 1 fixture-bytes check, 2 find-error checks, 19 driver checks, 1 untouched check)` (run folder under /tmp, deleted after; 19 driver checks = 1 offline test set + 15 driver mutants + R_MAX 7 / 9 + 1 static body check)
+`WU3 SELFTEST PASS 335/335 (33 real cases, 179 made cases, 75 hook mutants caught, 20 constant mutants caught, 1 hook-coverage check, 1 R_MAX agreement check, 1 fixture-bytes check, 2 find-error checks, 22 driver checks, 1 untouched check)` (fix round 1, run with a relative parent folder; run folder under /tmp, deleted after; 22 driver checks = 1 offline test set + 18 driver mutants + R_MAX 7 / 9 + 1 static body check)
 
 What it adds to wu2's self-test (all wu2 checks are ported; by design wu2's stopped_series cases and v_not_clean are
 replaced, since their rule is gone):
@@ -155,7 +181,17 @@ replaced, since their rule is gone):
   not clean twice = no third attempt, the series goes on; 8 re-runs = done (41 loads), the 9th = box (18 loads);
   settle cap before a load and before a re-run = box; settings = fault; claim renewal = box; failed probe = fault;
   cancel = box; claim renewal then slice recheck right before every bench; the real verdict_of on real conditions.txt;
-  the bench stub writes CRLF. Driver mutants (15) and R_MAX 7 / 9 must each be caught.
+  the bench stub writes CRLF. Driver mutants and R_MAX 7 / 9 must each be caught.
+- Fix round 1 (2026-11-27), each with a check and a mutant caught by name: A re-run after a first load that failed
+  check= (FAIL stop_contradiction); B a cancel during a live bench writes `class=box interrupted=wu3_02_off reason=
+  cancelled during wu3_02_off` (driver mutants: LIVE not set, field not written), a partial folder like the one the
+  bench leaves on TERM + interrupted = NO VERDICT, the same folder without the field = FAIL missing, an interrupted tag
+  that is not the last folder = FAIL, interrupted= with class=done = FAIL stop_record; C a stop record that cannot be
+  written gives rc 1 (rc 143 kept) and the "stop record NOT written" note (driver mutant: rc not set; static check:
+  the note is in the log line and the notify); D the slot with a failed first attempt counts as failed and leaves the
+  ON group (15 valid); E an extra blank line or no line end = FAIL stop_record; F a not-clean load with a missing
+  xray.log keeps its VERDICT in the not-clean counts; G a relative parent folder is made absolute (checked by running
+  the suite with a relative parent).
 
 ## 8. Weaknesses (plain)
 - **Whether one busy core really disturbs a load is not measured.** The not-clean mark fires when any other process

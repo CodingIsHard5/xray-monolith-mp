@@ -65,8 +65,15 @@ slice_ok() {   # <slice end, epoch s> <seconds needed>: 0 if at least that many 
   [ $(( $1 - $(date +%s) )) -ge "$2" ]; }
 halt() {   # <class box|fault> <reason>: the series stops here (rc 1)
   sc=$1; stop=$2; rc=1; }
-stop_write() {   # the stop record, one line; written on every exit once the state folder exists
-  printf 'class=%s reason=%s\n' "${sc:-fault}" "$(printf '%s' "${stop:-list finished}" | tr '\n\r' '  ')" > "$ST/stop.txt"; }
+stop_write() {   # the stop record, ONE line ended by LF; written on every exit once the state folder exists. Fix B: a box
+  # stop while a bench was live adds interrupted=<tag> (fixed form: class=box interrupted=<tag> reason=<text>)
+  printf 'class=%s%s reason=%s\n' "${sc:-fault}" "${INTR:+ interrupted=$INTR}" "$(printf '%s' "${stop:-list finished}" | tr '\n\r' '  ')" > "$ST/stop.txt"; }
+cancel() {   # TERM / INT: a box stop; when a bench is live (LIVE = its tag) the record names it
+  halt box "cancelled${LIVE:+ during $LIVE}"; rc=143; INTR=$LIVE; }
+record_stop() {   # fix C: the stop record or, if it cannot be written, rc != 0 and SNOTE for the log line and the notify
+  stop_write 2>/dev/null && return 0
+  [ "$rc" = 0 ] && rc=1
+  SNOTE="stop record NOT written ($ST/stop.txt)"; return 1; }
 verdict_of() {   # <tag>: the bench's VERDICT line of out/<tag> (CR stripped: engine-side files may be CRLF)
   grep -a '^VERDICT' "$OUT/$1/conditions.txt" 2>/dev/null | head -1 | tr -d '\r'; }
 gates() {   # <tag> <arm>: every pre-load gate, in wu2's order; 1 = stop (halt set the class and reason)
@@ -96,7 +103,9 @@ series_loop() {   # every slot of the order copy in order; one re-run <slot>_r1 
     while :; do      # a = 0: the slot's load; a = 1: its one re-run
       gates "$t" "$arm" || return 0
       log "load $t arm=$arm exe=$exe save=$save warm=$warm frames=$frames slow=$slow attempt=$((a+1)) display=$DISP load $(cut -d' ' -f1-3 /proc/loadavg)"
+      LIVE=$t                                                                           # LIVE-BENCH set
       bench "$t" "$exe" "$save" "$warm" "$frames" "$slow" "$arm"; brc=$?
+      LIVE=""
       v=$(verdict_of "$t")
       log "load $t rc=$brc $v"
       # ran (whatever happened): this tag is never run again. A failed append stops the series by name
@@ -166,7 +175,7 @@ mkdir "$ST" 2>/dev/null && : > "$ST/done.txt" 2>/dev/null && : >> "$ST/series.lo
   echo "REFUSED: cannot create the state folder $ST (or its done.txt / series.log)"; exit 2; }
 # wu2 review pass 1 (finding 3): from here on only the hash-checked state-dir copy of the order is read
 order_copy "$ORDER" "$ORDER_SHA" "$ST" >> $ST/series.log 2>&1 || {
-  sc=fault; stop="order copy in $ST refused (see $ST/series.log)"; stop_write; echo "REFUSED: $stop"; exit 2; }
+  sc=fault; stop="order copy in $ST refused (see $ST/series.log)"; INTR=""; stop_write; echo "REFUSED: $stop"; exit 2; }
 ORDER=$ST/wu3_order.txt
 WHAT="EXCLUSIVE: headless wu3 alife_warmup loads (one engine at a time)"
 log() { echo "$(date '+%F %T') $*" | tee -a $ST/series.log; }
@@ -194,21 +203,21 @@ check_run() {   # <tag> <arm>: the scorer's own per-load rules (one source; exit
   [ "$2" = prime ] && mode=probe
   python3 -I $WU/wu3_score.py $mode=$OUT/$tag order=$ORDER 2>&1; }
 
-stop=""; sc=""; BP=""; rc=0; nnc=0; nrr=0; CLAIMED=0; PROBED=0; SL_END=0
+stop=""; sc=""; BP=""; LIVE=""; INTR=""; SNOTE=""; rc=0; nnc=0; nrr=0; CLAIMED=0; PROBED=0; SL_END=0
 # ONE way out, also when cancelled (installed BEFORE the first queue operation): the stop record first, then the bench
 # stopped and reaped, the WANT entry withdrawn, the slice released ONLY if this invocation acquired the claim
 finish() { trap - EXIT TERM INT
   [ -n "$sc" ] || halt fault "driver exited without a recorded stop (rc $rc)"
-  stop_write || echo "cannot write $ST/stop.txt" >&2
+  record_stop || echo "$SNOTE" >&2     # fix C: on failure rc != 0 and SNOTE goes into the log line and the notify; go on
   [ -n "$BP" ] && kill -0 $BP 2>/dev/null && { kill -TERM $BP 2>/dev/null; wait $BP 2>/dev/null; }
   "$T/quiet-required.sh" withdraw $W >/dev/null 2>&1
   if [ "$CLAIMED" = 1 ]; then
     "$T/quiet-required.sh" release $W >/dev/null 2>&1 || log "release exit code $? (claim may already have expired)"
   fi
-  log "slice end: $(grep -c . $ST/done.txt) loads done, $(pending "$ORDER" | wc -l) slots left, $nrr of $R_MAX re-runs, $nnc not clean. $(cat $ST/stop.txt 2>/dev/null)"
-  timeout 60 "$T/notify-overseer.sh" engineperf - <<<"EnginePerf wu3 alife_warmup series: slice ended $(date +%T), $(grep -c . $ST/done.txt) loads done, $(pending "$ORDER" | wc -l) slots left, $nrr of $R_MAX re-runs, $nnc not clean. $(cat $ST/stop.txt 2>/dev/null). $([ "$PROBED" = 1 ] && echo "Not scored yet (score once by hand)." || echo "NOT scored: no passed prime probe (failed or not reached), no scored load ran, nothing is consumed; another attempt needs the supervisor's word.")" >/dev/null 2>&1
+  log "slice end: $(grep -c . $ST/done.txt) loads done, $(pending "$ORDER" | wc -l) slots left, $nrr of $R_MAX re-runs, $nnc not clean. $(cat $ST/stop.txt 2>/dev/null)${SNOTE:+ $SNOTE}"
+  timeout 60 "$T/notify-overseer.sh" engineperf - <<<"EnginePerf wu3 alife_warmup series: slice ended $(date +%T), $(grep -c . $ST/done.txt) loads done, $(pending "$ORDER" | wc -l) slots left, $nrr of $R_MAX re-runs, $nnc not clean. $(cat $ST/stop.txt 2>/dev/null)${SNOTE:+ $SNOTE}. $([ "$PROBED" = 1 ] && echo "Not scored yet (score once by hand)." || echo "NOT scored: no passed prime probe (failed or not reached), no scored load ran, nothing is consumed; another attempt needs the supervisor's word.")" >/dev/null 2>&1
   exit $rc; }
-trap finish EXIT; trap 'halt box cancelled; rc=143; finish' TERM INT
+trap finish EXIT; trap 'cancel; finish' TERM INT
 # WANT queue and slice, decided by EXIT CODE only (wu2, unchanged). A TERM/INT during the claim call is deferred until
 # CLAIMED records its outcome, then handled as a cancel
 CANCEL=0
@@ -217,8 +226,8 @@ while :; do
   trap 'CANCEL=1' TERM INT
   if ! title_running && ! roblox_running && ! caden_lock && \
      "$T/quiet-required.sh" claim $W 30 "$WHAT" >/dev/null 2>&1; then got=1; CLAIMED=1; fi
-  trap 'halt box cancelled; rc=143; finish' TERM INT
-  [ "$CANCEL" = 1 ] && { halt box cancelled; rc=143; finish; }
+  trap 'cancel; finish' TERM INT
+  [ "$CANCEL" = 1 ] && { cancel; finish; }
   [ "$got" = 1 ] && break
   "$T/quiet-required.sh" want $W EXCLUSIVE >/dev/null 2>&1
   sleep 60
