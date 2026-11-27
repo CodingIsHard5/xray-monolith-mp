@@ -10,6 +10,8 @@
 #   with -perf_capture 0,N (prereg 5.1): 13 loading frames first (their ms copied from wu1_prime), then 58 precache
 #   frames, then play; the clock lines' frame numbers and times follow those frames (dwFrame = capture index + 18).
 # Mutants: copies of the scorer with ONE check switched off (its on("<name>") hook returns False); each must be caught.
+# Review pass 2: H3 on the in-capture loading time (h_price_capture / h_price_engine_only / loadtime_agree), an unreadable
+#   prime conditions.txt (s_prime_unreadable*, skipped as root), and v_g_back's own bytes checked before the cases run.
 # The stamp folder must be new. Output also saved as <stamp>/selftest_output.txt. The self-test deletes nothing.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -89,7 +91,9 @@ def frames_for(kind, o):
         while Eh + i in zone and i < len(play) - 1:
             i += 1
         play[i] = v; zone[Eh + i] = z
-    ms = [round(v, 4) for v in (LOAD_MS + pre_ms + play)]
+    lm = list(LOAD_MS)
+    lm[1] += o.get("load_extra", 0.0)       # review pass 2: a longer loading frame (net_start2): in-capture time + extra, engine clock at E kept
+    ms = [round(v, 4) for v in (lm + pre_ms + play)]
     for i, z in list(ZONE_FIX.items()) + [(Eh - 2, INTRO_ZONE)]:
         if ms[i] > 20.0:
             zone[i] = z
@@ -423,7 +427,19 @@ STRAY = [make("v_stray_%d" % i, "on", extra=((6000.0, 400.0),)) or "v_stray_%d" 
 LHITCH = [make("v_lhitch_%d" % i, "offL", extra=((6000.0, 200.0),)) or "v_lhitch_%d" % i for i in range(5)]
 LTRAIN = [make("v_ltrain_%d" % i, "offL", extra=tuple((3000.0 + 500.0 * k, 25.0) for k in range(11))) or "v_ltrain_%d" % i for i in range(5)]
 LTRAIN10 = [make("v_ltrain10_%d" % i, "offL", extra=tuple((3000.0 + 500.0 * k, 25.0) for k in range(10))) or "v_ltrain10_%d" % i for i in range(5)]
-PRICE = [make("v_price_%d" % i, "on", t_end=36700 + i * 11) or "v_price_%d" % i for i in range(9)]
+PRICE = [make("v_price_%d" % i, "on", t_end=36700 + i * 11) or "v_price_%d" % i for i in range(9)]   # engine clock +3 s, in capture the same
+# review pass 2 (H3 on the in-capture loading time): in capture +3 s, engine clock at E as the good ON loads; and ON loads
+# whose engine clock at E is the OFF-IN-PLAY median (33010 ms): the two measures agree
+PRICEC = [make("v_pricec_%d" % i, "on", load_extra=3000.0, t_end=33600 + (i * 37) % 300) or "v_pricec_%d" % i for i in range(9)]
+LTSAME = [make("v_ltsame_%02d" % i, "on", t_end=33010) or "v_ltsame_%02d" % i for i in range(16)]
+# review pass 2: a prime whose conditions.txt exists but cannot be read (own file, not a shared pool blob; skipped as root)
+ROOT = os.geteuid() == 0
+make("p_prime_unread", "offL")
+UNREAD = os.path.join(POOL, "p_prime_unread", "conditions.txt")
+os.unlink(UNREAD)
+with open(UNREAD, "xb") as f:
+    f.write(b"VERDICT: clean\n")
+os.chmod(UNREAD, 0)
 REALSRC = {"r_cp2": ("offL", REAL + "/cp2/xray.log"), "r_cp1": ("offP", REAL + "/cp1/xray.log"),
            "r_cp4": ("offL", REAL + "/cp4/xray.log"), "r_uc1": ("offP", REAL + "/uc1/xray.log")}
 for t, (k, src) in REALSRC.items():
@@ -547,8 +563,8 @@ case("real_prime_probe", 0, [
     r"^PROBE loading_end wu1_prime located: first play frame E=71 by the engine's counters, 71 by the countdown lines \(frame 31 precache 58 -> 71, frame 33 precache 56 -> 71, frame 34 precache 54 -> 70, frame 40 precache 49 -> 71\); 10940\.6 ms after capture start; engine time at E 19876 ms$",
     r"\(log line 8492\) is printed in the End\(\) of the last precache frame: capture 70 \(engine counters\) / 70 \(countdown lines\); log order puts it after the clock line of capture 22 and before that of capture 84; intro marker .* at capture 69 \(expected E-2 = 69\)$",
     r"^PROBE window wu1_prime 30 s from capture 71: worst 339\.8 ms, n20 20, n33 6, .*before the window: 71 frames \(13 loading 0\.\.12, 58 precache 13\.\.70\), 10940\.6 ms, 10 of them > 20 ms, worst 5761\.1 ms$",
-    r"^PROBE info wu1_prime group=OFF-IN-PLAY save=#155 80 ms load=19\.88 s",
-    r"load=19\.88 s \(time_global 19876 ms at capture 71 \(from frame 102 T 19948 minus 71\.6 ms; from the last countdown line 19876 ms; estimate: -\d+\.\d / \+\d+\.\d ms = frame E \d+\.\d ms / frame 84 \d+\.\d ms, \+ 1 ms\)\)$",
+    r"^PROBE info wu1_prime group=OFF-IN-PLAY save=#155 80 ms loading=10\.94 s in capture \(capture 0\.\.70, frames file: H3's measure\) engine=19\.88 s",
+    r"engine=19\.88 s \(time_global 19876 ms at capture 71 \(from frame 102 T 19948 minus 71\.6 ms; from the last countdown line 19876 ms; estimate: -\d+\.\d / \+\d+\.\d ms = frame E \d+\.\d ms / frame 84 \d+\.\d ms, \+ 1 ms\)\)$",
     r"^PROBE wu1_prime ok$"],
      lines=RPO, root=REAL, one=("probe", "wu1_prime"))
 for nm, want, pats in (
@@ -621,8 +637,8 @@ case("v_g_back_msg", 0, [r"clock_order: log line \d+ time_global \d+ after log l
 case("v_tc_back2_msg", 0, [r"clock_order: log line \d+ Time continual (\d+) after log line \d+ Time continual \d+: Time continual goes back"], on_tags=sub(GON, GON[3], V["tc_back2"]))
 case("race_ok", 0, [r"LOAD v_race ON VALID group=ON", r"^WU2 RESULT: PASS$"], on_tags=sub(GON, GON[3], V["race"]))
 case("clk_14_ok", 0, [r"LOAD v_clk_14 ON VALID group=ON", r"^WU2 RESULT: PASS$"], on_tags=sub(GON, GON[3], V["clk_14"]))
-case("noplay_loadtime", 0, [r"LOAD v_noplay ON VALID group=ON .*\| load=33\.00 s$",
-                            r"load time: time_global 33000 ms at capture 71 \(from frame \d+ T \d+ plus \d+\.\d ms; estimate: -\d+\.\d / \+\d+\.\d ms = frame E \d+\.\d ms / frame \d+ \d+\.\d ms, \+ 1 ms\)$", r"^WU2 RESULT: PASS$"],
+case("noplay_loadtime", 0, [r"LOAD v_noplay ON VALID group=ON .*\| loading=\d+\.\d\d s in capture, engine clock 33\.00 s$",
+                            r"load time: in capture \d+\.\d ms \(capture 0\.\.\d+, frames file; H3's measure\); engine clock time_global 33000 ms at capture 71 \(from frame \d+ T \d+ plus \d+\.\d ms; estimate: -\d+\.\d / \+\d+\.\d ms = frame E \d+\.\d ms / frame \d+ \d+\.\d ms, \+ 1 ms\)$", r"^WU2 RESULT: PASS$"],
      on_tags=sub(GON, GON[3], V["noplay"]))
 for nm, slot, pat in (("on_noflag", "on", r"-alife_warmup absent on an ON load"), ("off_flag", "offp", r"-alife_warmup present on an OFF load"),
                       ("fixed_dt", "on", r"-perf_fixed_dt present"), ("warm600", "offl", r"-perf_capture is not 0,%d,v_warm600" % FR),
@@ -638,14 +654,14 @@ for lv, code in (("none", "lever_count"), ("two", "lever_count"), ("after_intro"
 # a cap hit holds 300 frames: the made fixture does not hold them, so its countdown also disagrees (VOID loading_end beside the FAIL)
 case("l_cap", 1, [r"LOAD v_lever_cap ON FAIL \[lever_cap\]", r"^WU2 RESULT: FAIL \(1 load"], on_tags=sub(GON, GON[6], V["lever_cap"]))
 # a hold of K = 12 frames ADDS 12 precache frames (device.cpp:166-168, 771-773): E = 71 + 12 = 83; the no-hold control 71
-case("l_held_ok", 0, [r"LOAD v_lever_held ON VALID .*\| load=33\.00 s$", r"precache held 12 frames \(cap 300\)",
+case("l_held_ok", 0, [r"LOAD v_lever_held ON VALID .*\| loading=\d+\.\d\d s in capture, engine clock 33\.00 s$", r"precache held 12 frames \(cap 300\)",
                       r"window from capture 83; before the window: 83 frames \(13 loading 0\.\.12, 70 precache 13\.\.82\)",
-                      r"load time: time_global 33000 ms at capture 83 \(from frame 106 T \d+ minus \d+\.\d ms",
+                      r"load time: in capture \d+\.\d ms \(capture 0\.\.\d+, frames file; H3's measure\); engine clock time_global 33000 ms at capture 83 \(from frame 106 T \d+ minus \d+\.\d ms",
                       r"^WU2 RESULT: PASS$"],
      on_tags=sub(GON, GON[6], V["lever_held"]))
-case("l_held0_ok", 0, [r"LOAD v_lever_held0 ON VALID .*\| load=33\.00 s$",
+case("l_held0_ok", 0, [r"LOAD v_lever_held0 ON VALID .*\| loading=\d+\.\d\d s in capture, engine clock 33\.00 s$",
                        r"window from capture 71; before the window: 71 frames \(13 loading 0\.\.12, 58 precache 13\.\.70\)",
-                       r"load time: time_global 33000 ms at capture 71 \(from frame 94 T \d+ minus \d+\.\d ms",
+                       r"load time: in capture \d+\.\d ms \(capture 0\.\.\d+, frames file; H3's measure\); engine clock time_global 33000 ms at capture 71 \(from frame 94 T \d+ minus \d+\.\d ms",
                        r"^WU2 RESULT: PASS$"],
      on_tags=sub(GON, GON[6], V["lever_held0"]))
 for nm, pat in (("reset_late", r"pass lines end before the narrowing"), ("legacy_disagree", r"pass lines say in-loading, alife_slow lines say P"),
@@ -685,7 +701,24 @@ case("win_in", 1, [r"H1 .*\(FAIL\), and .*\(ok\) -> FAIL", r"^WU2 RESULT: FAIL \
 case("win_out", 0, [r"LOAD v_winout_0 ON VALID group=ON worst=5\.\d n20=0 ", r"^WU2 RESULT: PASS$"], on_tags=WIN_OUT + GON[:7])
 case("good_15s_reported", 0, [r"LOAD g_offp_01 OFF VALID group=OFF-IN-PLAY worst=320\.0 n20=17 n33=10 .*\| 15s: worst=320\.0 n20=3 n33=3 ",
                               r"OFF-IN-PLAY +n20_15 +median 3\.00", r"^WU2 RESULT: PASS$"])
-case("h_price", 1, [r"H3 .* -> FAIL", r"SAME AS GOOD ORDER .* -> DIFFERENT", r"^WU2 RESULT: FAIL \(H3\)$"], on_tags=PRICE + GON[:7])
+# review pass 2: H3 follows the in-capture loading time, not the engine clock at E (each case: the two measures disagree)
+case("h_price_engine_only", 0, [r"^  loading takes the same time \(\+0\.00 s\) with the lever \(median in-capture loading time ON 10\.88 s, OFF-IN-PLAY 10\.88 s\)$",
+                                 r"^  engine clock at E \(estimate, reported only\): median ON 36\.71 s - median OFF-IN-PLAY 33\.01 s = \+3\.70 s$",
+                                 r"-> loadtime_measures_differ$", r"^NOTE loadtime_measures_differ \(reported only, not a verdict rule\)",
+                                 r"^H3 load-time price \(in-capture loading time\): median ON 10\.88 s - median OFF-IN-PLAY 10\.88 s = \+0\.00 s <= 2\.0 s -> ok$",
+                                 r"SAME AS GOOD ORDER .* -> SAME", r"^WU2 RESULT: PASS$"], on_tags=PRICE + GON[:7])
+case("h_price_capture", 1, [r"^  loading takes 3\.00 s longer with the lever \(median in-capture loading time ON 13\.88 s, OFF-IN-PLAY 10\.88 s\)$",
+                             r"^NOTE loadtime_measures_differ \(reported only, not a verdict rule\)",
+                             r"^H3 load-time price \(in-capture loading time\): median ON 13\.88 s - median OFF-IN-PLAY 10\.88 s = \+3\.00 s <= 2\.0 s -> FAIL$",
+                             r"SAME AS GOOD ORDER .* -> DIFFERENT", r"^WU2 RESULT: FAIL \(H3\)$"], on_tags=PRICEC + GON[:7])
+case("loadtime_agree", 0, [r"^  loading takes the same time \(\+0\.00 s\) with the lever", r"^  engine clock at E \(estimate, reported only\): median ON 33\.01 s - median OFF-IN-PLAY 33\.01 s = [+-]0\.00 s$",
+                            r"^  difference of the two .*: [+-]0\.00\d s; bound -0\.0\d\d / \+0\.0\d\d s .* -> agree$", r"^WU2 RESULT: PASS$"], on_tags=LTSAME)
+if not ROOT:   # review pass 2: the prime's conditions.txt exists but cannot be read: not clean (as the driver), report written
+    case("s_prime_unreadable_ok", 0, [r"^LOAD p_prime_unread prime: not scored \(unreadable \(PermissionError: ", r"^WU2 RESULT: PASS$"],
+         prime="p_prime_unread")
+    case("s_prime_unreadable", 1, [r"^FAIL series stopped_series: 3 non-clean load\(s\) \(p_prime_unread, v_conf_0, v_conf_1\)",
+                                    r"^WU2 RESULT: FAIL \(0 load\(s\) failed a registered check, series stopped"],
+         on_tags=sub(sub(GON, GON[0], CONF[0]), GON[15], CONF[1]), prime="p_prime_unread")
 G = order_lines(GON, OFF_GOOD)
 case("f_verdictx", 1, [r"LOAD v_verdictx ON FAIL \[unparsable\]", r"VERDICT line\(s\) \['VERDICTX: clean'\] are not one",
                        r"^WU2 RESULT: FAIL"], on_tags=sub(GON, GON[8], V["verdictx"]))
@@ -712,7 +745,7 @@ case("slow_8386_ok", 0, [r"LOAD v_slow_8386 ON VALID group=ON", r"^WU2 RESULT: P
 # the probe on the PRIME load (exit 0 = go on, 1 = stop the series before any scored load, 2 = refused)
 def one_order(tag, arm):
     return ["%s|Warm18.exe|cordon1|0|%d|20|%s" % (tag, FR, arm), "g_on_01|Warm18.exe|cordon1|0|%d|20|on" % FR]
-case("probe_ok", 0, [r"^PROBE info p_prime_ok group=OFF-IN-LOADING save=#\d+ 900 ms load=\d",
+case("probe_ok", 0, [r"^PROBE info p_prime_ok group=OFF-IN-LOADING save=#\d+ 900 ms loading=10\.88 s in capture \(capture 0\.\.70, frames file: H3's measure\) engine=\d",
                      r"^PROBE loading_end p_prime_ok located: first play frame E=71 by the engine's counters, 71 by the countdown lines",
                      r"^PROBE handled p_prime_ok .*: capture 70 \(engine counters\) / 70 \(countdown lines\)", r"^PROBE p_prime_ok ok$"],
      lines=one_order("p_prime_ok", "prime"), one=("probe", "p_prime_ok"))
@@ -785,6 +818,15 @@ def run(scorer, c, outdir):
     return why
 
 npass = nfail = nreal = nmade = 0
+# review pass 2: v_g_back must hold the swap in its own bytes (the case cannot pass on a fixture that sorted it away)
+GB = open(os.path.join(POOL, V["g_back"], "xray.log"), "rb").read().decode("ascii").replace("\r", "").split("\n")
+gh = GB.index("* [x-ray]: Handled Necessary Textures Destruction")
+gp = [(i, l) for i, l in enumerate(GB) if i > gh and l.startswith("* alife_pass ")][:2]
+gv = [tuple(int(x) for x in re.match(r"^\* alife_pass frame (\d+) time_global (\d+) ", l).groups()) for _, l in gp]
+if len(gv) == 2 and gv[0][0] > gv[1][0] and gv[0][1] > gv[1][1]:
+    npass += 1; print("ok   fixture v_g_back bytes: line %d %r before line %d %r" % (gp[0][0] + 1, gp[0][1], gp[1][0] + 1, gp[1][1]))
+else:
+    nfail += 1; print("FAIL fixture v_g_back bytes: the first two play pass lines are not in reversed order: %r" % gp)
 for c in CASES:
     why = run(SC, c, c["dir"])
     if c["name"].startswith("real_"): nreal += 1
@@ -804,7 +846,7 @@ MUT = {"missing_fail": ["f_miss_xray"], "cr_strip": ["good_crlf"], "not_clean": 
        "l_in_loading": ["c_wide_in_play"], "nv_few_on": ["nv_few_on"], "nv_few_inplay": ["nv_few_inplay"],
        "nv_no_hitch": ["nv_no_hitch"], "nv_no_train": ["nv_no_train"], "nv_alike": ["nv_alike_worst", "nv_alike_train"],
        "h1_median": ["h_worst"], "h1_max": ["h_stray_two"],
-       "h2": ["h_train"], "h3": ["h_price"], "refuse_out": ["r_out_exists"], "lowercase": ["r_uppercase"], "dup_tag": ["r_dup"],
+       "h2": ["h_train"], "h3": ["h_price_capture"], "refuse_out": ["r_out_exists"], "lowercase": ["r_uppercase"], "dup_tag": ["r_dup"],
        "finite": ["f_inf_frame", "f_inf_site", "f_nan_thr"], "verdict_form": ["f_verdictx", "f_verdict2"],
        "log_num": ["f_full_ms", "f_slow_ms"], "held_k": ["l_held_ok", "check_held"], "capture_order": ["v_cap_order", "v_cap_late", "check_cap_order"],
        "measure_lines": ["f_no_opu", "f_no_pass", "f_opu_renamed", "probe_no_opu"], "probe_save": ["probe_no_save"],
@@ -819,7 +861,10 @@ MUT = {"missing_fail": ["f_miss_xray"], "cr_strip": ["good_crlf"], "not_clean": 
        # review pass 1 (2026-11-26)
        "probe_window": ["probe_short"], "measure_flags": ["a_no_nopresent", "a_no_noinput", "check_no_nopresent"],
        "series_stopped": ["s_stopped_last", "s_stopped_prime"],
-       "window_from_e": ["loading_outside_window", "real_prime_probe"], "stock_loop_l": ["good", "real_prime_probe"]}
+       "window_from_e": ["loading_outside_window", "real_prime_probe"], "stock_loop_l": ["good", "real_prime_probe"],
+       # review pass 2 (2026-11-26)
+       "h3_capture": ["h_price_capture", "h_price_engine_only"], "lt_differ": ["h_price_engine_only", "h_price_capture"],
+       "prime_oserror": ["s_prime_unreadable_ok", "s_prime_unreadable"]}
 src = open(SC).read()
 hook = 'def on(name):\n    """Self-test mutation hook: every check below is guarded by on("<name>"). Always True in this file."""\n    return True\n'
 byname = {c["name"]: c for c in CASES}
@@ -851,6 +896,8 @@ else:
     for m, targets in sorted(MUT.items()):
         if m not in used:
             continue
+        if ROOT and m == "prime_oserror":
+            print("skip mutant prime_oserror (root reads an unreadable file)"); continue
         md = os.path.join(ST, "mutants", m); os.makedirs(md)
         ms = os.path.join(md, "wu2_score.py")
         with open(ms, "w") as f:
@@ -1015,5 +1062,5 @@ done
 if [ "$touched" != 0 ]; then fail=$((fail+1)); echo "FAIL real fixture folders changed during the self-test ($touched paths)" | tee -a "$LOG"
 else pass=$((pass+1)); echo "ok   real fixture folders unchanged" | tee -a "$LOG"; fi
 tot=$((pass+fail))
-if [ "$fail" = 0 ]; then echo "WU2 SELFTEST PASS $pass/$tot ($nreal real cases, $nmade made cases, $nmut hook mutants caught, $ncm constant mutants caught, 1 hook-coverage check, 1 MAX_CONFOUNDED agreement check, $nfind find-error checks, $ndrv driver checks, 1 untouched check) in $ST" | tee -a "$LOG"; exit 0
+if [ "$fail" = 0 ]; then echo "WU2 SELFTEST PASS $pass/$tot ($nreal real cases, $nmade made cases, $nmut hook mutants caught, $ncm constant mutants caught, 1 hook-coverage check, 1 MAX_CONFOUNDED agreement check, 1 fixture-bytes check, $nfind find-error checks, $ndrv driver checks, 1 untouched check) in $ST" | tee -a "$LOG"; exit 0
 else echo "WU2 SELFTEST FAIL $fail of $tot in $ST" | tee -a "$LOG"; exit 1; fi

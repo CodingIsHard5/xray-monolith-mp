@@ -4,6 +4,8 @@
 # wu2 = wu1 (Revision 3) with the window start moved: with -perf_capture 0,N the capture starts BEFORE the level loads
 # (wu1 prereg 5.1 was wrong), so it holds the loading frames and the precache frames. This scorer finds the end of
 # loading inside the capture (prereg 5.1 / 5.4) and starts every window there. Everything else is wu1's.
+# Review pass 2: H3 is on the IN-CAPTURE loading time (frames file, capture 0..E-1: QPC wall time, never paused); the
+# engine clock at E is reported beside it with the report-only note loadtime_measures_differ (prereg 5.4).
 #
 #   python3 -I wu2_score.py root=<folder holding the load folders> order=<wu2_order.txt> out=<new report file>
 #   python3 -I wu2_score.py parse=<xray.log>        (log parser only, prints what it found; used by the self-test)
@@ -47,11 +49,11 @@ WORST_RATIO = 0.5         # H1: median ON worst <= 0.5 x median OFF-IN-PLAY wors
 WORST_STRAY = 1           #     ... and at most 1 ON load with worst >= median OFF-IN-PLAY worst
 N20_DROP = 7              # H2: median OFF-IN-PLAY frames > 20 ms - median ON frames > 20 ms >= 7 (30 s)
 ALIKE_MIN_OFFL = 2        # stock's two orders must differ in the window (checked when >= 2 OFF-IN-LOADING loads)
-PRICE_MAX_S = 2.0         # H3: median ON load time - median OFF-IN-PLAY load time <= 2.0 s
+PRICE_MAX_S = 2.0         # H3: median ON - median OFF-IN-PLAY IN-CAPTURE loading time (capture 0..E-1, frames file) <= 2.0 s
 SAME_WORST_X = 1.25       # secondary (reported only): ON "same as stock's good order" if median ON worst
 SAME_WORST_ADD = 10.0     #   <= 1.25 x median OFF-IN-LOADING worst + 10 ms,
 SAME_N20_ADD = 2          #   median ON n20 <= median OFF-IN-LOADING n20 + 2,
-SAME_PRICE_S = 1.0        #   and |median ON load - median OFF-IN-LOADING load| <= 1.0 s
+SAME_PRICE_S = 1.0        #   and |median ON - median OFF-IN-LOADING in-capture loading time| <= 1.0 s
 SAME_MIN_OFFL = 2
 SLOW_CAP_ROWS = 600 * 14 - 14   # profiler_agg.cpp:42-43, 190: a slow frame is kept only while rows + 14 <= 8400
 # ---- wu2: the end of loading inside the capture (prereg 5.1, 5.4, 6) ----
@@ -674,6 +676,7 @@ def score_load(root, s):
         R["void"].append("window_short: capture covers %.1f s after the end of loading < %.0f s"
                          % (sum(ms[E:]) / 1000.0, WINDOW_MS / 1000.0))
     R["lt"], R["lt_why"] = Y["lt"], Y["lt_why"]
+    R["lc"] = Y["pre"][E] / 1000.0   # H3's measure (prereg 5.4): in-capture loading time, frames file (QPC wall clock)
     pre_slow = sum(1 for v in ms[:E] if v > SLOW1_MS)
     R["before"] = "before the window: %d frames (%d loading 0..%d, %d precache %d..%d), %.1f ms, %d of them > 20 ms, worst %.1f ms" % (
         E, Y["L"], Y["L"] - 1, Y["Pc"], Y["L"], E - 1, Y["pre"][E], pre_slow, max(ms[:E]))
@@ -802,8 +805,8 @@ def one_load(folder, order, probe):
         w = R["w1"]
         print("%s window %s 30 s from capture %d: worst %.1f ms, n20 %d, n33 %d, span %.2f s (save excluded: %s); %s"
               % (word, tag, w["first"], w["worst"], w["n20"], w["n33"], w["span"], R["save"], R["before"]))
-        print("%s info %s group=%s save=%s load=%s s (%s)" % (word, tag, R["group"], R["save"], fmt(R["lt"], "%.2f"),
-                                                         R["lt_why"]))
+        print("%s info %s group=%s save=%s loading=%.2f s in capture (capture 0..%d, frames file: H3's measure) engine=%s s (%s)"
+              % (word, tag, R["group"], R["save"], R["lc"], R["layout"]["E"] - 1, fmt(R["lt"], "%.2f"), R["lt_why"]))
     print("%s %s %s" % (word, tag, "FAIL" if stop else "ok"))
     return 1 if stop else 0
 
@@ -864,6 +867,10 @@ def main(argv):
                 pv = read_verdict(os.path.join(args["root"], s["tag"]))
             except Bad as e:
                 pv = "unreadable (%s)" % e
+            except OSError as e:   # review pass 2: exists but cannot be read (permissions, I/O): not clean, report kept
+                if not on("prime_oserror"):
+                    raise
+                pv = "unreadable (%s: %s)" % (type(e).__name__, e)
             if pv != "VERDICT: clean":
                 nonclean.append(s["tag"])
             P("LOAD %s prime: not scored (%s)" % (s["tag"], pv))
@@ -876,12 +883,12 @@ def main(argv):
         if "w1" in R:
             w, w2 = R["w1"], R["w2"]
             head += (" group=%s worst=%.1f n20=%d n33=%d span=%.2fs worst_incl_save=%.1f save=%s | 15s: worst=%s n20=%s "
-                     "n33=%s span=%s | load=%s s" % (R["group"], w["worst"], w["n20"], w["n33"], w["span"], w["worst_all"],
+                     "n33=%s span=%s | loading=%.2f s in capture, engine clock %s s" % (R["group"], w["worst"], w["n20"], w["n33"], w["span"], w["worst_all"],
                                                     R["save"], fmt(w2["worst"]) if w2["covered"] else "n/a",
                                                     w2["n20"] if w2["covered"] else "n/a",
                                                     w2["n33"] if w2["covered"] else "n/a",
                                                     ("%.2fs" % w2["span"]) if w2["covered"] else "n/a",
-                                                    fmt(R["lt"], "%.2f")))
+                                                    R["lc"], fmt(R["lt"], "%.2f")))
         P(head)
         for r in R["fatal"] + R["void"]:
             P("    %s" % r)
@@ -891,7 +898,8 @@ def main(argv):
             for n in R["notes"]:
                 P("    %s" % n)
             P("    window from capture %d; %s" % (R["w1"]["first"], R["before"]))
-            P("    load time: %s" % (R["lt_why"]))
+            P("    load time: in capture %.1f ms (capture 0..%d, frames file; H3's measure); engine clock %s" % (
+                R["lc"] * 1000.0, R["layout"]["E"] - 1, R["lt_why"]))
     # ---------------- verdict (prereg 7) ----------------
     fails = [(R["tag"], r) for R in loads for r in R["fatal"]]
     # (a scored load whose conditions.txt cannot be read is a FAIL by itself, so only its not_clean VOID is counted here)
@@ -932,12 +940,42 @@ def main(argv):
                      ("worst15_ms", lambda R: R["w2"]["worst"] if R["w2"]["covered"] else None),
                      ("n20_15", lambda R: R["w2"]["n20"] if R["w2"]["covered"] else None),
                      ("n33_15", lambda R: R["w2"]["n33"] if R["w2"]["covered"] else None),
-                     ("load_s", lambda R: R["lt"]), ("loading_in_capture_s", lambda R: R["layout"]["pre"][R["layout"]["E"]] / 1000.0),
+                     ("loading_in_capture_s", lambda R: R["lc"]), ("engine_clock_load_s", lambda R: R["lt"]),
                      ("pass_ms", lambda R: R.get("pass_ms")), ("held_frames", lambda R: R.get("held"))):
             M[(name, k)], txt = stats(G, f)
             if txt != "n/a" or name != "OFF-OTHER":
                 P("  %-15s %-20s %s" % (name, k, txt))
     final, code = "", 0
+    # ---- load time (prereg 5.4): H3's measure is the in-capture loading time; the engine clock at E is reported beside it ----
+    LKEY = "loading_in_capture_s" if on("h3_capture") else "engine_clock_load_s"
+    LNAME = "in-capture loading time" if LKEY == "loading_in_capture_s" else "engine clock at E"
+    if on_v and offP:
+        dc = M[("ON", "loading_in_capture_s")] - M[("OFF-IN-PLAY", "loading_in_capture_s")]
+        de = M[("ON", "engine_clock_load_s")] - M[("OFF-IN-PLAY", "engine_clock_load_s")]
+        # Bound on de - dc (prereg 5.4): per load, engine clock at E - in-capture time = G + e, G = engine time at the capture
+        # start (minus any timer pause / absorb inside 0..E-1), e = the estimate's error in [-(ms[E] + 1), +(ms[c] + 1)] ms.
+        # With G the same in every load, a median being monotone in each value gives de - dc in
+        # [-(max ON lo + max OFF up), +(max ON up + max OFF lo)]. G varies from load to load: not covered (prereg 6.1).
+        lo = lambda G: max(R["layout"]["lt_bound"][0] for R in G)
+        up = lambda G: max(R["layout"]["lt_bound"][1] for R in G)
+        bl, bu = -(lo(on_v) + up(offP)) / 1000.0, (up(on_v) + lo(offP)) / 1000.0
+        dd = de - dc
+        differ = on("lt_differ") and not bl <= dd <= bu
+        P("")
+        P("LOAD TIME (H3's measure: in-capture loading time = sum of the frames file's ms of capture 0..E-1, QPC wall clock; "
+          "the engine clock at E beside it)")
+        P("  loading takes %s with the lever (median in-capture loading time ON %.2f s, OFF-IN-PLAY %.2f s)"
+          % (("%.2f s %s" % (abs(dc), "longer" if dc > 0 else "shorter")) if abs(dc) >= 0.005 else "the same time (+0.00 s)",
+             M[("ON", "loading_in_capture_s")], M[("OFF-IN-PLAY", "loading_in_capture_s")]))
+        P("  engine clock at E (estimate, reported only): median ON %.2f s - median OFF-IN-PLAY %.2f s = %+.2f s"
+          % (M[("ON", "engine_clock_load_s")], M[("OFF-IN-PLAY", "engine_clock_load_s")], de))
+        P("  difference of the two ON - OFF-IN-PLAY deltas (engine clock - in capture): %+.3f s; bound %+.3f / %+.3f s (the "
+          "estimates' errors from the frame sizes, prereg 5.4) -> %s" % (dd, bl, bu, "loadtime_measures_differ" if differ else "agree"))
+        if differ:
+            P("NOTE loadtime_measures_differ (reported only, not a verdict rule): the engine clock's ON - OFF-IN-PLAY delta is "
+              "%+.3f s off the in-capture delta, outside %+.3f / %+.3f s: the engine time before the capture start differed "
+              "between the groups, or the engine timer was paused / absorbed inside the loading frames (prereg 5.4, 6.1)"
+              % (dd, bl, bu))
     if fails:
         P("")
         for t, r in fails:
@@ -977,7 +1015,7 @@ def main(argv):
             h1 = h1a and h1b
             no, np_ = M[("ON", "n20")], M[("OFF-IN-PLAY", "n20")]
             h2 = np_ - no >= N20_DROP
-            price = M[("ON", "load_s")] - M[("OFF-IN-PLAY", "load_s")]
+            price = M[("ON", LKEY)] - M[("OFF-IN-PLAY", LKEY)]
             h3 = price <= PRICE_MAX_S
             h2 = h2 or not on("h2")
             h3 = h3 or not on("h3")
@@ -986,18 +1024,18 @@ def main(argv):
                                                        stray, WORST_STRAY, "ok" if h1b else "FAIL", "ok" if h1 else "FAIL"))
             P("H2 frames > 20 ms (%.0f s): median OFF-IN-PLAY %.1f - median ON %.1f = %.1f >= %d -> %s"
               % (WINDOW_MS / 1000, np_, no, np_ - no, N20_DROP, "ok" if h2 else "FAIL"))
-            P("H3 load-time price: median ON %.2f s - median OFF-IN-PLAY %.2f s = %+.2f s <= %.1f s -> %s"
-              % (M[("ON", "load_s")], M[("OFF-IN-PLAY", "load_s")], price, PRICE_MAX_S, "ok" if h3 else "FAIL"))
+            P("H3 load-time price (%s): median ON %.2f s - median OFF-IN-PLAY %.2f s = %+.2f s <= %.1f s -> %s"
+              % (LNAME, M[("ON", LKEY)], M[("OFF-IN-PLAY", LKEY)], price, PRICE_MAX_S, "ok" if h3 else "FAIL"))
             if h1 and h2 and h3:
                 final, code = "PASS", 0
             else:
                 final, code = "FAIL (%s)" % ", ".join(n for n, h in (("H1", h1), ("H2", h2), ("H3", h3)) if not h), 1
-        if len(offL) >= SAME_MIN_OFFL and on_v and M[("ON", "load_s")] is not None and M[("OFF-IN-LOADING", "load_s")] is not None:
+        if len(offL) >= SAME_MIN_OFFL and on_v and M[("ON", LKEY)] is not None and M[("OFF-IN-LOADING", LKEY)] is not None:
             a = M[("ON", "worst_ms")] <= SAME_WORST_X * M[("OFF-IN-LOADING", "worst_ms")] + SAME_WORST_ADD
             b = M[("ON", "n20")] <= M[("OFF-IN-LOADING", "n20")] + SAME_N20_ADD
-            c = abs(M[("ON", "load_s")] - M[("OFF-IN-LOADING", "load_s")]) <= SAME_PRICE_S
-            P("SAME AS GOOD ORDER (reported only): worst %s, n20 %s, load %+.2f s %s -> %s"
-              % ("ok" if a else "worse", "ok" if b else "worse", M[("ON", "load_s")] - M[("OFF-IN-LOADING", "load_s")],
+            c = abs(M[("ON", LKEY)] - M[("OFF-IN-LOADING", LKEY)]) <= SAME_PRICE_S
+            P("SAME AS GOOD ORDER (reported only): worst %s, n20 %s, load (%s) %+.2f s %s -> %s"
+              % ("ok" if a else "worse", "ok" if b else "worse", LNAME, M[("ON", LKEY)] - M[("OFF-IN-LOADING", LKEY)],
                  "ok" if c else "differs", "SAME" if a and b and c else "DIFFERENT"))
         else:
             P("SAME AS GOOD ORDER (reported only): NO VERDICT (%d valid OFF-IN-LOADING loads, need %d, or load time missing)"

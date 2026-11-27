@@ -89,8 +89,8 @@ only erases). So frames 0-12 are the loading frames.
 - The old 5.4 method (F0 = F + P, then subtract from the first play line) is replaced: the capture now gives the frames
   between any clock line and E directly, and E comes from the counters. The capture also gives the in-capture loading
   duration directly: 10.94 s from capture start (net_start1) to E; it misses device init -> level creation (about 8.9 s
-  of engine clock before the capture: 15175 - 6239.8 at capture 13). H3 stays on the engine-clock load time (as wu1);
-  the in-capture duration is reported (decision 3.4).
+  of engine clock before the capture: 15175 - 6239.8 at capture 13). Review pass 2: H3 is now on the in-capture
+  duration; the engine-clock load time is reported beside it (section 8).
 - MEASURED wu1 probe "13708 ms not between 19486 and 19948": wu1's rule took the frames after F0 from capture index 0,
   which are loading frames; same cause as the stop.
 
@@ -124,7 +124,7 @@ only erases). So frames 0-12 are the loading frames.
 3. **All new checks are stop-VOIDs** (like wu1's capture_lines / stock_loop / framecount): loading_frames, clock_fit,
    loading_end, clock_order, frames_slow. In the probe they make PROBE FAIL by name. No clock line at all stays the
    wu1 FAIL no_measure_lines. Never a fallback.
-4. **H3 unchanged**: load time = engine clock at E. Reported beside it: loading_in_capture_s.
+4. ~~H3 unchanged: load time = engine clock at E~~ (superseded by review pass 2: H3 on loading_in_capture_s, section 8).
 5. **NO VERDICT `loadtime` withdrawn**: under wu2 every load that is not VOID has a load time (E and the clock fit are
    stop-VOID conditions), so the rule could never fire; a valid load without one would be FAIL scorer_error. (The
    rule's hook and constants LOADTIME_MIN_* are gone.)
@@ -238,3 +238,75 @@ Source: wt-simtick perf/alife-warmup d77d70b5c (working tree clean). Data: out/w
   wu2_run.sh cecfa44d200489207015338d9bbf5c853a8cb2f73356cb60ca6ee73eb0dc77f7 (bash -n ok, never run);
   wu2_order.txt 21e80fc1f29524c29f476c2af0545bd5fb72092ee0141664efb66015cd6f08ae (unchanged).
 - Still not pinned (PIN_ME_* in wu2_run.sh: ORDER_SHA, score, selftest; prereg 13).
+
+## 8. Review pass 2 (CodeRabbit 2026-11-26, plan-facts/cr_wu2_kj3_pass2_2026-11-26.txt; triage section "pass 2")
+Desk only. Source: wt-simtick (perf/alife-warmup d77d70b5c tree as checked out). Data read in place: out/wu1_prime and
+the earlier cordon1 logs named below. Each finding was checked against the code first.
+### 8.1 Prime conditions.txt that exists but cannot be read (finding wu2_score.py:865) - CONFIRMED, FIXED
+- read_verdict -> lines_of opens the file; a mode-000 file raises PermissionError (an OSError, not Bad), which the prime
+  loop did not catch: the scorer exited with a traceback before writing the report. Now `except OSError` (hook
+  prime_oserror) gives `unreadable (<type>: <text>)`, counted as not clean like a missing one. Scored loads were already
+  safe (score_safe: scorer_error FAIL).
+- Tests: s_prime_unreadable_ok (prime mode 000, nothing else non-clean: PASS, report written), s_prime_unreadable (with 2
+  CONFOUNDED loads: FAIL stopped_series naming p_prime_unread). The fixture file is its own file (unlinked from the pool
+  blob, created with "xb", chmod 0), never a shared hard link. Both skipped as root (root reads mode 000), as the driver
+  tests. Mutant prime_oserror (re-raise) caught by both: exit 1 with no report instead of the result.
+### 8.2 Does v_g_back really hold the swap? (finding wu2_selftest.sh:206) - REFUTED by the bytes
+- `log_events` sorts the play lines by k BEFORE the swap (`play.sort(...)`, then `play[0], play[1] = play[1], play[0]`),
+  and `make` writes them in list order (`head + cs + ... + made + play + ...`): nothing sorts after the swap.
+- The generated file (selftest-runs/20261126-194722-289594/pool/v_g_back/xray.log), lines 68 and 69, right after the
+  loading-end line 67:
+  `* alife_pass frame 177 time_global 33453 precache 0 n 20 of 2400 limit 20`
+  `* alife_pass frame 89 time_global 33000 precache 0 n 20 of 2400 limit 20`
+  The scorer's VOID names exactly that pair ("log line 69 time_global 33000 after log line 68 time_global 33453").
+- Added: a counted self-test check on the fixture bytes themselves (before the cases run): the first two play
+  alife_pass lines after the loading-end line must have frame and time_global both decreasing; prints both lines.
+### 8.3 H3 and a timer paused during loading (finding wu2_score.py:499) - CONFIRMED as a gap; H3 moved (the Overseer's decision)
+- The concern holds: time_global is TimerGlobal, a CTimer_paused (device.h:124) registered with g_pauseMngr
+  (FTimer.h:194); Device::Pause -> g_pauseMngr().Pause (device.cpp:1155) -> each timer's Pause adds the paused span to
+  qwPauseAccum (FTimer.cpp:37-45; FTimer.h:173-187), elapsed = QPC - start - accum (FTimer.h:46); the freeze absorb
+  also adds to it (device.cpp:1105, FTimer.h:41; default off). The loading frames run no FrameMove (device.cpp:695-704),
+  so no clock line exists in capture 0..12: a pause there shifts every later time_global by the same amount, which the
+  clock fit (differences only) cannot see.
+- The frames file is not affected (checked BEFORE building, as ordered): the only PROF_FRAME is device.cpp:675 (top of
+  on_idle, after the b_is_Ready return at 669-673); PROF_FRAME = ::xrprof::frame() (profiler.h:123); frame() pushes
+  `__rdtsc() - g_tsc_last` (profiler_agg.cpp:185-187) and sets g_tsc_last (217); start sets the QPC and TSC bases
+  (99-100); dump() converts with ms_per_tick = QPC ms of the whole capture / TSC ticks (116-121) and writes ms = ticks x
+  ms_per_tick (153). No CTimer, no pause manager, no time factor on that path.
+- H3 now: median ON - median OFF-IN-PLAY of loading_in_capture_s = sum ms[0..E-1] <= 2.0 s. The engine clock at E stays
+  in every LOAD line, the probe/check info line and the stats (engine_clock_load_s). Report block "LOAD TIME" with the
+  player line "loading takes X s longer / shorter with the lever", the engine-clock delta, the difference of the two
+  deltas, its bound and the named note loadtime_measures_differ (prereg 5.4, 6, 6.1).
+- **The note's bound (derivation in prereg 5.4):** per load engine - in capture = G + e, e in [-(ms[E]+1), +(ms[c]+1)];
+  with G equal in every load, medians are monotone, so (de - dc) in [-(max ON lo + max OFF up), +(max ON up + max OFF
+  lo)]: about +-11.4 ms on wu1_prime's frame sizes, +-12 ms on made loads. **UNDER 2x, far below 1x:** G (engine time
+  at the capture start) varies per load. Proxy, MEASURED: the mcm_log stamp printed during the loading events (xray.log
+  line 5212-5217; dwTimeContinual is written only in FrameMove, device.cpp:1051, so it is the last FrameMove before the
+  loading events): cord1-3 7567/7604/7604, cp1-4 7934/7695/7650/7504, cpl1 8360, uc1 8019, lc1-3 8007/8136/8047,
+  wu1_prime 7749 ms: range 856 ms over 13 cordon1 loads. In wu1_prime G = 19876 - 10940.6 = 8935 ms, 1186 ms more than its
+  stamp (time between that FrameMove and the capture start, not seen). So the note will very likely fire on a valid
+  series (the made "good" series prints it: +0.736 s, from the fixtures' t_end spread). It is a pointer, decides nothing.
+- 2.0 s re-derived (prereg 6): the moved pass (0.5-0.75 s) and any held frames lie inside capture 13..E-1, so the whole
+  price is in the in-capture time; margin 2.5x on wu1 P9's -0.3..+0.8 s (GUESS, carried). The old 6.1 row (load-time
+  estimate >= 300x against 2.0 s) is withdrawn; wu1's carried "H3 price 2.5x" row replaced by a re-derived one.
+- Tests: h_price_capture (9 ON loads with the net_start2 loading frame +3000 ms, engine clock at E as the good ON loads:
+  H3 +3.00 s FAIL, "loading takes 3.00 s longer", SAME DIFFERENT, note printed), h_price_engine_only (wu1's PRICE loads:
+  engine clock +3.70 s, in capture +0.00 s: H3 ok, note printed, SAME), loadtime_agree (16 ON loads at the OFF-IN-PLAY
+  median engine clock 33010 ms: delta difference +0.000 s, "agree"); probe/check info line patterns (real_prime_probe:
+  loading=10.94 s in capture, engine=19.88 s). Mutants: h3_capture (H3 and SAME on the engine clock) caught by
+  h_price_capture and h_price_engine_only; lt_differ (note never printed) caught by both; h3 now targets h_price_capture.
+### 8.4 Decisions the brief did not specify
+1. SAME AS GOOD ORDER's load term also moved to the in-capture time (same reason; reported only).
+2. The note line says "agree" inside the bound; outside it a separate "NOTE loadtime_measures_differ" line.
+3. Stats key renamed load_s -> engine_clock_load_s; loading_in_capture_s kept as H3's key.
+4. No constant for the note's bound (it is computed per series from the frame sizes).
+### 8.5 Self-test run and hashes (review pass 2)
+- Run 2026-11-26 19:47:22-19:48:20 (`date`), folder selftest-runs/20261126-194722-289594 (40 MB):
+  `WU2 SELFTEST PASS 259/259 (28 real cases, 144 made cases, 58 hook mutants caught, 18 constant mutants caught,
+  1 hook-coverage check, 1 MAX_CONFOUNDED agreement check, 1 fixture-bytes check, 2 find-error checks, 5 driver checks,
+  1 untouched check)`. My two earlier runs of this round (19:41:53, 4 pattern fails; 19:43:18, before the summary-line
+  label) were removed by their literal paths.
+- sha256: wu2_score.py b5d14b1256f5aab5aa139db59771d1e97a9c23aa90f31400ec309d82bd985c41;
+  wu2_selftest.sh fda4065ce184598e12e570a0f2f1459f8bbf25c9e2c1ac1cab5901b54b2e0ddb;
+  wu2_run.sh cecfa44d200489207015338d9bbf5c853a8cb2f73356cb60ca6ee73eb0dc77f7 (unchanged);
+  wu2_order.txt 21e80fc1f29524c29f476c2af0545bd5fb72092ee0141664efb66015cd6f08ae (unchanged). Still PIN_ME.

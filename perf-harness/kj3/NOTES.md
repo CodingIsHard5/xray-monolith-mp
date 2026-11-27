@@ -373,3 +373,49 @@ emission-line-examples.txt: regenerated, snapshot bodies byte-identical; only th
 
 ## Results (2026-11-26 19:03, desk)
 `cd wt-render-split/perf-harness && nice -n 19 bash kj3/kill6h_test.sh`: `== checks: 85 pass, 0 fail; mutants: 122 caught, 0 not caught or missing` / `RESULT: PASS` (77 + 8 checks, 104 + 18 mutants; run dir kj3/runs/r-20261126-190334-2450941). Two earlier runs of this stage (7 and 3 expected failures while the checks were rewritten) were removed by literal path.
+
+# Review pass 2 (CodeRabbit 2026-11-26, plan-facts/cr_wu2_kj3_pass2_2026-11-26.txt), desk
+
+## Limits first
+- Lua 5.1 stub only; nothing ran in the engine; no git, no CodeRabbit. Same limits as Stage 2/3 otherwise.
+- The legacy (nine-field) ktab row can only come from a stage 1/2 kill6 reader writing ktab.txt and this reader loading it
+  in the same run (same run id = same process). Neither stage ran in the engine; the fix is for completeness.
+
+## Fix 1 (finding :200): not ready only for the failure that IS a nil manager
+- Found: em_snap suppressed eerr whenever `em_absent()` was true before the first good read, whatever em_body had failed
+  on. em_body checks the time factor FIRST (`time factor unreadable`), so a factor <= 0 or unreadable while a manager was
+  still nil counted nothing and logged no EERR (only ENOTREADY). Confirmed.
+- Now: `local nr = not em_ready and (err == "SurgeManager nil" or err == "PsiStormManager nil")`, the two errors em_body
+  raises itself (level 0, exact strings) for a nil instance. em_absent is removed. Every other failure counts as before:
+  a bad factor, a missing module (`surge_manager` nil raises a Lua index error, not these strings), missing fields, a
+  throwing accessor, and any failure after the first good read.
+- Check em_notready_tf: both managers nil (a new game), boot, 200 ms not ready (degraded, not counted), then factor 0 for
+  1 s (degraded and counted: eerr = those snapshots; EERR `time factor unreadable` once), then factor good with the
+  managers still nil (not ready again, not counted); ENOTREADY once, no EREADY. Mutant m_em_nr_anyerr (pass 1's rule:
+  "any failure while a manager is nil") caught: eerr 0 want 10. m_em_nr_always re-anchored on the new line (same
+  mutation: nil after a good read not counted), still caught by em_notready.
+
+## Fix 2 (finding :539): a nine-field row with kx answers stale until the first processed pose
+- Found: k_load's nine-field branch reads kt, kn, ks, kx but no nm, so `r.nm` is nil and the export's (a) rule
+  (`r.st or (r.kx and r.nm)`) writes no line for that row until a pose names it; a stage 1/2 reader wrote `stale` for a
+  kx row in every snapshot. Confirmed.
+- Chosen (smallest, inside the (a)-(c) rule): in the nine-field branch `nm = kx`, so a legacy identity-stale row counts as
+  named until the first processed pose. k_pose then resets nm for every row (as for any row) and (c) drops it if that
+  pose does not name it; a pose that names it keeps it stale. Ten-field rows keep their own nm; kill5 rows are untouched.
+- Check ktab_legacy_kx: a hand-written ktab.txt with `r,101,0.250000000,-,0,0,9000,0,dog_weak,1` (same run id, the id now
+  a boar): `k,101,0.250,stale` in every snapshot before any pose; the first processed pose without 101: no k line, one
+  `KSTALE,...,101,drop,` line; KTAB read 1,1; no KCONF, no KNOCONF, kdead_fail 0. Mutant m_legacy_nm (the assignment
+  removed) caught: k line nil in the boot snapshots.
+
+## Files
+- harness/zz_p1_puppet_kill6.script = kj3/zz_p1_puppet_kill6.script (cp, cmp equal), sha256
+  7d7c173dae815a0d7673acffb9d911413a18708f9beb7914afc1dc4685d4c8e9 (was 096380d8...). Header paragraph updated.
+- kj3/kill6h_stub.lua f864764c06848c010324aa765a26a5d7943b530f4516ff5cd11c16ad55f6f4b5: 2 checks, 2 mutants, 1 re-anchor.
+- kj3/emission-line-examples.txt 0fab2ee26bda681c658da6aeb6ae0d0566aacace6420da7946eb4e6af380b28c: regenerated with
+  mode `examples`; snapshot bodies byte-identical (diff of everything from the first `## ` line: none); only the header
+  hash line changed.
+- T2SUM keys, snapshot format, meta lines: unchanged.
+
+## Results (2026-11-26 19:37:59, desk)
+`cd wt-render-split/perf-harness && nice -n 19 bash kj3/kill6h_test.sh`: `== checks: 87 pass, 0 fail; mutants: 124 caught,
+0 not caught or missing` / `RESULT: PASS` (85 + 2 checks, 122 + 2 mutants; run dir kj3/runs/r-20261126-193759-4021895).

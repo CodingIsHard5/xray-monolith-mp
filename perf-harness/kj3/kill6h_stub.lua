@@ -1,3 +1,6 @@
+-- kj3 review pass 2 (2026-11-26): checks em_notready_tf (a bad time factor while the managers are nil counts eerr) and
+-- ktab_legacy_kx (a 9-field row with kx answers stale until the first processed pose); mutants m_em_nr_anyerr, m_legacy_nm;
+-- m_em_nr_always re-anchored on the new not-ready line (same mutation).
 -- kj3 Stage 3 (stale rows, 2026-11-26; kj3/NOTES.md "Stage 3"): 6 new checks st3_* plus seven kj3 checks rewritten for the
 -- agreed rules (a)-(c) (pend_st_only, ident_omitted_pose, ident_no_pose, ident_reuse_alive_other, ident_sticky, cross_kx; and
 -- cross_pending's ktab row, which gains the nm field); 13 new mutants; m_ks_none, m_ident_cleared, m_cross_nopend(_rel)
@@ -140,7 +143,10 @@ local MUTANTS = {
 	{ "m_cross_nm", "cross_ident", 'r.nm = nm == "1" or nil end', 'end' },                                                   -- nm not carried over the crossing
 	-- kj3 review of Stage 2 (2026-11-26): not ready, and the forced-start cursor over a crossing
 	{ "m_em_nr_count", "em_notready", 'if nr then if not em_nr then', 'if nr then eerr = eerr + 1; if not em_nr then' },   -- not ready counted as an error
-	{ "m_em_nr_always", "em_notready", 'if not em_ready then local okn, a', 'if true then local okn, a' },                  -- nil after a good read not counted
+	{ "m_em_nr_always", "em_notready", 'local nr = not em_ready and (', 'local nr = (' },                                  -- nil after a good read not counted (pass 2: re-anchored)
+	-- kj3 review pass 2 (2026-11-26)
+	{ "m_em_nr_anyerr", "em_notready_tf", '(err == "SurgeManager nil" or err == "PsiStormManager nil")', '(surge_manager.SurgeManager == nil or psi_storm_manager.PsiStormManager == nil)' },   -- pass 1's rule: any failure while a manager is nil
+	{ "m_legacy_nm", "ktab_legacy_kx", '; nm = kx end   -- kill6 stage 1/2 row', ' end   -- kill6 stage 1/2 row' },                -- a 9-field row with kx loads unnamed
 	{ "m_em_carry_none", "em_force_cross", 'if em_carry then em_done = em_carry', 'if false then em_done = em_carry' },
 	{ "m_em_carry_nosave", "em_force_cross", 'if em_test then ok = f:write(string.format("e,%d\\n", em_done)) and ok end', '' },
 	{ "m_em_carry_anyrun", "em_force_cross", { { '	em_carry = tonumber(string.match(s, "\\ne,(%d+)\\n"))   -- review: only here, after the run id test\n', '' },
@@ -1243,6 +1249,16 @@ check("cross_kx", function()   -- fix 3 + 2, stage 3: a stale identity carried o
 	finish(); no_conf("stale identity after the resume", 0)   -- the last T2SUM is the new Lua state's: its counters start at 0
 end)
 
+check("ktab_legacy_kx", function()   -- review pass 2: a 9-field (stage 1/2) row with kx: stale from the boot snapshot until the first processed pose, then dropped
+	local f = real_open(SHM .. "/ktab.txt", "wb"); f:write("run,1\nr,101,0.250000000,-,0,0,9000,0,dog_weak,1\nc,101\ns,", SESS, ",7\nend\n"); f:close()
+	f = real_open(SHM .. "/cross.txt", "wb"); f:write("l01_escape,l02_garbage,1795000000350\nx,keep,", SESS, ",7\n"); f:close()
+	LEVEL = "l02_garbage"; add(101, "boar_strong", "m"); boot()
+	all_k(rec(nil, 600), "k,101,0.250,stale", "legacy identity-stale row, no pose processed yet")
+	SEQ = 7; no_k(rec(v4({}, { zone = "l02_garbage" }), 600), "the first processed pose does not name 101")
+	finish(); local s = meta()
+	expect(string.find(s, "KTAB,read,1,1", 1, true) and nmeta("\nKSTALE,%d+,%d+,101,drop,") == 1, "KTAB read / one drop line")
+	no_conf("legacy identity-stale row", 0)
+end)
 check("ktab_old_format", function()   -- fix 3: a table file written by kill5 (five fields a row) still loads
 	local f = real_open(SHM .. "/ktab.txt", "wb"); f:write("run,1\nr,101,0.300000000,-,0,0\nr,102,0.200000000,9000,0,0\nc,101\nc,102\ns,", SESS, ",7\nend\n"); f:close()
 	f = real_open(SHM .. "/cross.txt", "wb"); f:write("l01_escape,l02_garbage,1795000000350\nx,keep,", SESS, ",7\n"); f:close()
@@ -1605,6 +1621,18 @@ check("em_notready", function()   -- review 1: managers nil before the first goo
 	expect(nd > 0 and sum("eerr") == nd, "eerr " .. tostring(sum("eerr")) .. " want " .. nd .. " (only the snapshots after the first good read)")
 	expect(count(s, "\nENOTREADY,") == 1 and count(s, "\nEREADY,") == 1 and count(s, "\nEERR,") == 1, "ENOTREADY / EREADY / EERR not once each")
 	expect(string.find(s, "\nENOTREADY,%d+\n.-\nEREADY,%d+\n.-\nEERR,"), "order not ENOTREADY, EREADY, EERR")
+end)
+check("em_notready_tf", function()   -- review pass 2: not ready only when the failure IS a nil manager; a bad factor at the same moment counts
+	surge_manager.SurgeManager = nil; psi_storm_manager.PsiStormManager = nil   -- a new game: the scripts create them later
+	local nd = 0
+	safe(function()
+		boot(); degraded_ok(erec(200), "managers nil (not ready)"); TF = 0; local S = erec(1000); degraded_ok(S, "factor 0, managers nil"); nd = #S
+		TF = 6; S = erec(500); degraded_ok(S, "factor good, managers nil (not ready)")
+	end)
+	finish(); local s = meta()
+	expect(nd > 0 and sum("eerr") == nd, "eerr " .. tostring(sum("eerr")) .. " want " .. nd .. " (the factor-0 snapshots only)")
+	expect(count(s, "\nEERR,%d+,time factor unreadable\n") == 1, "EERR for the factor not logged once")
+	expect(count(s, "\nENOTREADY,") == 1 and count(s, "\nEREADY,") == 0, "ENOTREADY not once (or EREADY logged)")
 end)
 check("em_force_cross", function()   -- review 2: a line appended during the level load is acted on after it; another run id or a fresh process skips old lines
 	local function crossing()   -- l01 -> l02; `psi` is appended while the level loads
