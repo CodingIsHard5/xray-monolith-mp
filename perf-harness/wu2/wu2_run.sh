@@ -19,8 +19,11 @@
 # lever log checks, measurement lines; wu2: loading frames, clock fit, end of loading, clock order, frames/slow match), a refused claim renewal, the third CONFOUNDED load (tools/s2_bench.sh returns
 # rc 0 for a completed CONFOUNDED capture: RC is set only by the capture loop, lines 57-64, the VERDICT is written
 # after, 72-74, so such a load reaches the counter), display not free, settings not stock, settle cap, < 15 min left,
-# protected title, Roblox, Caden's launcher, a failed write of the state folder. NO RETRY: a load is never run twice; a
-# stopped series is not resumed without a new GO.
+# less than BENCH_TO + END_RESERVE (900 + 120 s) left right before a load starts (rechecked after the display wait and
+# the claim renewal), protected title, Roblox, Caden's launcher, a failed write of the state folder. NO RETRY: a load
+# is never run twice; a stopped series is not resumed without a new GO.
+# The order file: hash-checked in the preflight, then copied into the state folder, the COPY hash-checked again, and
+# only the copy is read for dispatch and the per-load checks (review pass 1, finding 3).
 # Not scored here. Score ONCE afterwards, output written in the same call:
 #   python3 -I wt-render-split/perf-harness/wu2/wu2_score.py root=out order=wt-render-split/perf-harness/wu2/wu2_order.txt out=out/wu2_state/wu2_score.txt
 set -u
@@ -29,7 +32,11 @@ T="$HOME/.claude/overseer/tools"; W=engineperf
 WU=wt-render-split/perf-harness/wu2; ORDER=$WU/wu2_order.txt; ST=out/wu2_state
 EXE=Warm18.exe; EXE_SHA=15828a7a6cadd38e42cc376869f581166884c04f1eb236baf79054a74332ae9d; CFG=run/appdata/user.ltx
 FLAGS="-perf_noinput -perf_nopresent"          # + "-perf_slow <slow_ms>" per load, + "-alife_warmup" on ON loads
-NLOADS=33; NON=16; NOFF=16; MAX_CONFOUNDED=3
+NLOADS=33; NON=16; NOFF=16; MAX_CONFOUNDED=3     # MAX_CONFOUNDED: wu2_score.py has the same value (self-test checks)
+ORDER_SHA=PIN_ME_ORDER                          # the order file's registered sha256 (preflight AND the state-dir copy)
+BENCH_TO=900                                    # BENCH_TIMEOUT passed to the bench
+END_RESERVE=120   # s after a bench timeout: the bench's own trap (wine + Xvfb), check_run, withdraw/release, notify (timeout 60)
+# ---- BEGIN driver functions (wu2_selftest.sh extracts this block and tests it offline; nothing here runs a load) ----
 pin() {   # <file> <sha256>   (tools/t3_kw1.sh)
   local f=$1 want=$2 got
   [ -e "$f" ] || { echo "REFUSED: $f is missing"; return 1; }
@@ -37,6 +44,33 @@ pin() {   # <file> <sha256>   (tools/t3_kw1.sh)
   got=$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)
   [ "$got" = "$want" ] || { echo "REFUSED: $f is not ${want:0:8} (it is ${got:0:8})"; return 1; }
 }
+order_ok() {   # <order file>: the registered shape (33 loads, 1 prime first + 16 on + 16 off, fields, lowercase, no dup)
+  local o=$1 lines t f=0
+  lines=$(grep -v '^#' "$o" 2>/dev/null | grep .)
+  [ "$(echo "$lines" | grep -c .)" = $NLOADS ] || { echo "REFUSED: $o does not list $NLOADS loads"; f=1; }
+  [ "$(echo "$lines" | grep -c '|on$')" = $NON ] && [ "$(echo "$lines" | grep -c '|off$')" = $NOFF ] && \
+    [ "$(echo "$lines" | grep -c '|prime$')" = 1 ] || { echo "REFUSED: $o is not 1 prime + $NON on + $NOFF off"; f=1; }
+  [ "$(echo "$lines" | head -1 | cut -d'|' -f7)" = prime ] || { echo "REFUSED: the first load of $o is not the prime load"; f=1; }
+  echo "$lines" | awk -F'|' -v e=$EXE 'NF!=7 || $2!=e || $3!="cordon1" || $4!="0" || $5!="20000" || $6!="20" || $7!~/^(on|off|prime)$/ {print "REFUSED: order line " $0 " is not <tag>|" e "|cordon1|0|20000|20|on/off/prime"; f=1} END{exit f}' || f=1
+  for t in $(echo "$lines" | cut -d'|' -f1); do
+    [ "$t" = "${t,,}" ] || { echo "REFUSED: tag $t is not lowercase"; f=1; }
+  done
+  [ "$(echo "$lines" | cut -d'|' -f1 | sort | uniq -d | grep -c .)" = 0 ] || { echo "REFUSED: a tag is listed twice"; f=1; }
+  return $f
+}
+order_copy() {   # <order file> <sha256> <state dir>: copy into the state dir, then the COPY must have the registered hash
+  local src=$1 want=$2 dst=$3/wu2_order.txt
+  [ -e "$dst" ] && { echo "REFUSED: $dst exists"; return 1; }
+  cp -- "$src" "$dst" 2>/dev/null || { echo "REFUSED: cannot copy $src to $dst"; return 1; }
+  chmod a-w "$dst" 2>/dev/null
+  pin "$dst" "$want" || { echo "REFUSED: the state-dir copy of the order file failed its hash check"; return 1; }
+  order_ok "$dst" || return 1
+}
+pending() {   # <order file>: the tags not yet in $ST/done.txt, in order
+  grep -v '^#' "$1" | grep . | while IFS='|' read -r tag rest; do grep -qx "$tag" $ST/done.txt || echo "$tag|$rest"; done; }
+slice_ok() {   # <slice end, epoch s> <seconds needed>: 0 if at least that many seconds are left now
+  [ $(( $1 - $(date +%s) )) -ge "$2" ]; }
+# ---- END driver functions ----
 bad=0
 pin tools/s2_bench.sh                    072af8edb67eab095ea4408f3950a428709757b3ce1abdfe25efc25a3fb150b5 || bad=1
 pin tools/lib_engine_pids.sh             cb183b7b894eab3edb200e2c03a3a96f2e935cd2d1e1f402f48be7aad238ed6e || bad=1
@@ -44,7 +78,7 @@ pin tools/run_noguard.sh                 92729abc420784053cee4b1b1832f5d112f7497
 pin run/bin/$EXE                         $EXE_SHA || bad=1
 pin run/appdata/savedgames/cordon1.scop  6dea752bc652a45c748e1438e3bc8ffd2d8d89f24730177c792328aeb5d13f3e || bad=1
 pin run/appdata/savedgames/cordon1.scoc  a9f9a8a91b034de28a49be7f8029d823d057e46b4445f3f94d7255dbc77b0b6b || bad=1
-pin $ORDER                               PIN_ME_ORDER || bad=1
+pin $ORDER                               $ORDER_SHA || bad=1
 pin $WU/wu2_score.py                     PIN_ME_SCORE || bad=1
 pin $WU/wu2_selftest.sh                  PIN_ME_SELFTEST || bad=1
 DISP=${BENCH_DISPLAY:-:141}
@@ -67,26 +101,22 @@ cfg_ok() {
 }
 cfg_ok || bad=1
 [ -e "$ST" ] && { echo "REFUSED: $ST exists (state folder must be new)"; bad=1; }
-lines=$(grep -v '^#' "$ORDER" 2>/dev/null | grep .)
-[ "$(echo "$lines" | grep -c .)" = $NLOADS ] || { echo "REFUSED: $ORDER does not list $NLOADS loads"; bad=1; }
-[ "$(echo "$lines" | grep -c '|on$')" = $NON ] && [ "$(echo "$lines" | grep -c '|off$')" = $NOFF ] && \
-  [ "$(echo "$lines" | grep -c '|prime$')" = 1 ] || { echo "REFUSED: $ORDER is not 1 prime + $NON on + $NOFF off"; bad=1; }
-[ "$(echo "$lines" | head -1 | cut -d'|' -f7)" = prime ] || { echo "REFUSED: the first load of $ORDER is not the prime load"; bad=1; }
-echo "$lines" | awk -F'|' -v e=$EXE 'NF!=7 || $2!=e || $3!="cordon1" || $4!="0" || $5!="20000" || $6!="20" || $7!~/^(on|off|prime)$/ {print "REFUSED: order line " $0 " is not <tag>|" e "|cordon1|0|20000|20|on/off/prime"; f=1} END{exit f}' || bad=1
-for t in $(echo "$lines" | cut -d'|' -f1); do
-  [ "$t" = "${t,,}" ] || { echo "REFUSED: tag $t is not lowercase"; bad=1; }
+order_ok "$ORDER" || bad=1
+for t in $(grep -v '^#' "$ORDER" 2>/dev/null | grep . | cut -d'|' -f1); do
   [ -e out/$t ] && { echo "REFUSED: out/$t exists"; bad=1; }
 done
-[ "$(echo "$lines" | cut -d'|' -f1 | sort | uniq -d | grep -c .)" = 0 ] || { echo "REFUSED: a tag is listed twice"; bad=1; }
 [ "$bad" = 0 ] || exit 2
 [ "${1:-}" = "--preflight-only" ] && { echo "preflight ok"; exit 0; }
 
 # Revision 3 (D5): the state folder must be created (new) and writable BEFORE the queue is joined
 mkdir "$ST" 2>/dev/null && : > "$ST/done.txt" 2>/dev/null && : >> "$ST/series.log" 2>/dev/null || {
   echo "REFUSED: cannot create the state folder $ST (or its done.txt / series.log)"; exit 2; }
+# review pass 1 (finding 3): the order that passed the hash preflight is copied into the state folder, the COPY's hash
+# is checked, and from here on only the copy is read (dispatch, per-load checks): edits to $ORDER no longer reach the run
+order_copy "$ORDER" "$ORDER_SHA" "$ST" >> $ST/series.log 2>&1 || { echo "REFUSED: order copy in $ST (see $ST/series.log)"; exit 2; }
+ORDER=$ST/wu2_order.txt
 WHAT="EXCLUSIVE: headless wu2 alife_warmup loads (one engine at a time)"
 log() { echo "$(date '+%F %T') $*" | tee -a $ST/series.log; }
-pending() { grep -v '^#' "$ORDER" | grep . | while IFS='|' read -r tag rest; do grep -qx "$tag" $ST/done.txt || echo "$tag|$rest"; done; }
 heavy_ps() { ps -eo pcpu,pid,comm,args --sort=-pcpu | awk 'NR>1 && $1>=100 && $3!~/wineserver|Xvfb/ && $3!="ps" {print $1"%:"$3}' | head -5 | tr '\n' ' '; }
 caden_lock() { [ -e run/.caden-play.lock ] && kill -0 "$(cat run/.caden-play.lock 2>/dev/null)" 2>/dev/null; }
 settle() { local t0 l1 hv; t0=$(date +%s)      # tools/s4c_series.sh: 1-min load < 2 and no other >= 100 % process, 15 s checks, 5 min cap
@@ -109,8 +139,8 @@ finish() { trap - EXIT TERM INT
   if [ "$CLAIMED" = 1 ]; then
     "$T/quiet-required.sh" release $W >/dev/null 2>&1 || log "release exit code $? (claim may already have expired)"
   fi
-  log "slice end: $(grep -c . $ST/done.txt) done, $(pending | wc -l) left, $nconf confounded. ${stop:-list finished}"
-  timeout 60 "$T/notify-overseer.sh" engineperf - <<<"EnginePerf wu2 alife_warmup series: slice ended $(date +%T), $(grep -c . $ST/done.txt) loads done, $(pending | wc -l) left, $nconf confounded. ${stop:-list finished}. $([ "$PROBED" = 1 ] && echo "Not scored yet (score once by hand)." || echo "NOT scored: no passed prime probe (failed or not reached), no scored load ran, nothing is consumed; another attempt needs the supervisor's word.")" >/dev/null 2>&1
+  log "slice end: $(grep -c . $ST/done.txt) done, $(pending "$ORDER" | wc -l) left, $nconf confounded. ${stop:-list finished}"
+  timeout 60 "$T/notify-overseer.sh" engineperf - <<<"EnginePerf wu2 alife_warmup series: slice ended $(date +%T), $(grep -c . $ST/done.txt) loads done, $(pending "$ORDER" | wc -l) left, $nconf confounded. ${stop:-list finished}. $([ "$PROBED" = 1 ] && echo "Not scored yet (score once by hand)." || echo "NOT scored: no passed prime probe (failed or not reached), no scored load ran, nothing is consumed; another attempt needs the supervisor's word.")" >/dev/null 2>&1
   exit $rc; }
 trap finish EXIT; trap 'stop="cancelled"; rc=143; finish' TERM INT
 # WANT queue and slice. Every decision on the EXIT CODE of quiet-required.sh (its header: "THE EXIT CODE IS THE API.
@@ -136,10 +166,10 @@ log "slice granted, wu2, display $DISP, load $(cut -d' ' -f1-3 /proc/loadavg)"
 # the wait for the slice can be long: the display must still be free now
 disp_free >> $ST/series.log 2>&1 || { stop="display $DISP not free at the slice grant"; rc=2; finish; }
 while :; do
-  line=$(pending | head -1); [ -n "$line" ] || break
+  line=$(pending "$ORDER" | head -1); [ -n "$line" ] || break
   IFS='|' read -r tag exe save warm frames slow arm <<<"$line"
   sr=$(settle); log "$sr before $tag"; case "$sr" in *cap) stop="not quiet before $tag"; rc=1; break;; esac
-  [ $(( SL_END - $(date +%s) )) -lt 900 ] && { stop="slice time used"; rc=1; break; }
+  slice_ok $SL_END 900 || { stop="slice time used"; rc=1; break; }
   "$T/protected-title-check.sh" >/dev/null 2>&1 && { stop="protected title running"; rc=1; break; }
   pgrep -x sober >/dev/null && { stop="Roblox running"; rc=1; break; }
   caden_lock && { stop="Caden's launcher running"; rc=1; break; }
@@ -151,11 +181,14 @@ while :; do
   pin run/bin/$EXE $EXE_SHA >> $ST/series.log 2>&1 || { stop="exe changed"; rc=1; break; }
   # same-text renewal for this load (tools/s4c_series.sh), decided by exit code
   "$T/quiet-required.sh" claim $W 30 "$WHAT" >/dev/null 2>&1 || { stop="claim renewal refused before $tag (exit $?)"; rc=1; break; }
+  # review pass 1 (finding 9): the settle, display wait and renewal above take time: the slice must still hold a full
+  # bench timeout plus the cleanup after it NOW, else the load is not started
+  slice_ok $SL_END $((BENCH_TO + END_RESERVE)) || { stop="slice too short for $tag ($(( SL_END - $(date +%s) )) s left < $BENCH_TO + $END_RESERVE s)"; rc=1; break; }
   # Revision 3 (D1): no scored load before the prime probe passed
   [ "$arm" = prime ] || [ "$PROBED" = 1 ] || { stop="scored load $tag reached without a passed prime probe"; rc=1; break; }
   LEVER=""; [ "$arm" = on ] && LEVER="-alife_warmup"
   log "load $tag arm=$arm exe=$exe save=$save warm=$warm frames=$frames slow=$slow display=$DISP load $(cut -d' ' -f1-3 /proc/loadavg)"
-  BENCH_DISPLAY=$DISP BENCH_NOCLAIM=1 BENCH_EXCLUSIVE=1 BENCH_SAVE=$save BENCH_LOWEND=0 BENCH_FIXED=0 BENCH_TIMEOUT=900 \
+  BENCH_DISPLAY=$DISP BENCH_NOCLAIM=1 BENCH_EXCLUSIVE=1 BENCH_SAVE=$save BENCH_LOWEND=0 BENCH_FIXED=0 BENCH_TIMEOUT=$BENCH_TO \
     tools/s2_bench.sh "$exe" "$tag" "$warm" "$frames" $FLAGS -perf_slow "$slow" $LEVER > $ST/run_$tag.log 2>&1 & BP=$!
   wait $BP; brc=$?; BP=""
   v=$(grep -a '^VERDICT' out/${tag,,}/conditions.txt 2>/dev/null)

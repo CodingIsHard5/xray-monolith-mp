@@ -20,8 +20,9 @@ whole). No engine run, no box claim.
    the 15 ms tolerance; self-test real_prime_play_line_moved: 4.96 ms, probe ok). It does not move the window (E comes
    from the counters) and moves the load time by at most that line's share. A countdown line moved one frame forward
    IS caught (its countdown says E+1). A renumbering of EVERY device frame by the same amount is invisible and
-   harmless (real_prime_f_plus_1_all: D=19, same E). A uniform shift of every time_global is caught only because
-   the mcm_log "Time continual is:" stamps exist (real_prime_t_plus_1000); a build without that script would not catch it.
+   harmless (real_prime_f_plus_1_all: D=19, same E). A uniform shift of every time_global against the mcm_log
+   "Time continual is:" stamps is, since review pass 1, only REPORTED (clock_cross note; real_prime_t_plus_1000 now
+   passes with the note): see 7.3.
 5. **"Precache frame" count = 58, not 60.** PreCache(60) is set in net_start_client6 (Level_network_start_client.cpp:273);
    the counters say 58 FrameMove frames had the countdown > 0. The 2 missing are most likely the End() of LoadDraw in
    the 2 loading frames after it (x_ray.cpp:1590-1601: LoadDraw calls Device.End() while g_appLoaded is false); I did
@@ -132,8 +133,8 @@ only erases). So frames 0-12 are the loading frames.
 7. capture_lines now: started < Handled < finished (log order). wu1's "Handled < started" is the wrong rule.
 8. clock_order: (a) no clock line of capture > E-1 logged before line HANDLED, none of capture < E-2 logged after it
    (E-2: the A-Life thread may print a frame's line after that frame's End(); one more frame allowed for its read race);
-   (b) time_global and "Time continual is:" values never go back in log order by more than 1 ms (dwTimeContinual is
-   read before dwTimeGlobal in FrameMove from a timer started after it, device.cpp:1051, Device_Initialize.cpp:40-41).
+   (b) since review pass 1: each clock kind ALONE never goes back by more than CLOCK_BACK_MS = 1 ms in log order (stop);
+   the cross-kind comparison is the reported-only clock_cross (7.3).
 9. Self-test disk: pool files are stored once per content and hard-linked (identical frames files across made loads);
    the self-test folder is 32 MB. One earlier iteration folder of mine (50 MB, failed run) was removed by its literal
    path; the passing reference run is kept.
@@ -154,11 +155,86 @@ only erases). So frames 0-12 are the loading frames.
 - Real, in place: out/wu1_prime (probe passes; 12 mutants as one changed file + symlinks), parser on out/cp1, cp2, cp3,
   cp4, uc1, lc1-3, cpl1, wu1_prime; folders cp1, cp2, uc1, r1a_cor_1 as loads; cp1, cp2, cp4, uc1 spliced.
 - Self-test: `cd wt-render-split/perf-harness/wu2 && nice -n 19 bash wu2_selftest.sh`
-  -> `WU2 SELFTEST PASS 218/218 (26 real cases, 124 made cases, 51 hook mutants caught, 14 constant mutants caught,
-  1 hook-coverage check, 1 find-error check, 1 untouched check)`; folder: see section 6. wu2 mutants must be caught by
-  EVERY listed target (wu1 stopped at the first case that differed).
+  -> result line in section 6. wu2 mutants must be caught by EVERY listed target (wu1 stopped at the first case that
+  differed).
 
 ## 6. Self-test reference run and hashes
-- Run 2026-11-26 18:42:39-18:43:26 (`date`), folder selftest-runs/20261126-184239-1446505 (32 MB), result line as in 5.
-- sha256 at that run: wu2_score.py 5a6203cbe70bab82632d05af755ad32459e7449f515a98008adfaaaf3f5f4c6f; wu2_selftest.sh 5587851ae4a62c281c0b761ca8b24944e36cb7c3016c5c9eee616290154cca71; wu2_order.txt 21e80fc1f29524c29f476c2af0545bd5fb72092ee0141664efb66015cd6f08ae; wu2_run.sh 0428792391367c877828679263949467e3047d636b5a82a60392421c16f8b99f (bash -n ok, never run).
-- Not pinned anywhere yet (PIN_ME in wu2_run.sh and prereg 13).
+- See 7.6 (review pass 1). The pre-fix reference run 20261126-184239-1446505 (218/218) is superseded; kept (not mine).
+
+## 7. Review pass 1 (CodeRabbit 2026-11-26, triage table in coderabbit-triage-2026-11-26.md), facts and decisions
+Source: wt-simtick perf/alife-warmup d77d70b5c (working tree clean). Data: out/wu1_prime in place. Desk only.
+### 7.1 Held frames extend the precache block (finding 5) - CODE
+- End(): `if (!(dwPrecacheFrame == 3 && alife_warmup_hold_frame())) dwPrecacheFrame--;` (device.cpp:165-169);
+  alife_warmup_hold_frame() returns true (no count-down) while g_alife_warmup_hold == 1 and fewer than 300 frames are
+  held, counting s_alife_warmup_held (device.cpp:131-139); the release frame prints "precache held K frames" and
+  counts 3 -> 2 (device.cpp:147-152); a new PreCache() zeroes the count (device.cpp:223).
+- So the countdown is still 3 at the next FrameMove: 'Precache frame' (device.cpp:771-773, `if (dwPrecacheFrame)`) is
+  called in every held frame, dwFrame++ runs in each (device.cpp:1048), and 'Start xrSASH Benchmark' (device.cpp:707-710,
+  countdown 0) does not. Precache block = 58 + K frames, **E = L + 58 + K** (71 + 12 = 83 in the fixture), as the
+  scorer already computed (E = L + 'Precache frame' calls). Only the fixture was wrong (it fitted the hold inside 58).
+- Fixture now: capture 13..67 countdown 58..4, 68 = 3, 69..68+K = 3 (held), 69+K = 2, 70+K = 1, E = 71+K;
+  'Precache frame' = 58 + K, 'Start xrSASH Benchmark' = N - 71 - K. Self-test l_held_ok (E=83, 70 precache frames,
+  load time at capture 83 from device frame 106), l_held0_ok (same path, K = 0: E=71), check_held / check_held0.
+### 7.2 Load time: an estimate, with a code bound (finding 2)
+- time_global of a clock line in capture frame c is read at device.cpp:1112, o_c after that frame's PROF_FRAME
+  (device.cpp:675), FrameMove being called at device.cpp:744 in the same on_idle; the frames file measures PROF_FRAME to
+  PROF_FRAME in TSC ticks scaled to QPC time over the whole capture (profiler_agg.cpp:119-121), TimerGlobal is QPC
+  (FTimer.h). So 0 <= o_c <= ms[c]; estimate - true value at E = o_c - o_E in [-ms[E], +ms[c]], + 1 ms of integer
+  time_global, if no timer pause lies between c and E. There is no tighter engine bound on o_E: between PROF_FRAME and
+  the read run perf_autocapture, the seqParallelBeforRender callbacks (any number, device.cpp:719-735), and FrameMove's
+  head; nothing logs when. The clock fit says nothing about o_E (CodeRabbit's point, correct); it places the lines and
+  says the offsets at the clock-line frames agree within the residual.
+- MEASURED-PRIME: bound -5.9 / +5.5 ms (frame E 4.9 ms, frame 84 4.5 ms). The scorer prints the bound per load.
+### 7.3 clock_order (finding 8) - CODE; the CodeRabbit question refuted, the cross-clock rule made report-only
+- Where each value is sampled: dwTimeContinual = TimerMM - app_inactive_time (device.cpp:1051) and dwTimeGlobal =
+  TimerGlobal (device.cpp:1112), both only in FrameMove. alife_pass: copies Device.dwFrame / dwTimeGlobal /
+  dwPrecacheFrame at the START of CALifeUpdateManager::update and Msg()s them AFTER the pass, wide or full
+  (alife_update_manager.cpp:173-193). alife_opu: live read at the Msg (alife_simulator_script.cpp:506-509). The stamp:
+  mcm_log.script:203-205 printf -> _g.script:765 time_continual() -> device():time_continual() -> Device.dwTimeContinual
+  (script_render_device_script.cpp:45-48): a live read of the frame's sample.
+- When each line is logged: the A-Life update runs from seqParallel inside the GameThread task (EngineThreading.cpp:
+  161-166; pushed by shedule_Update, alife_update_manager.cpp:205-213), started at device.cpp:865 and joined at
+  device.cpp:918, before the on_idle ends; the next FrameMove (the only writer) is in a later on_idle. So a pass line,
+  however long its pass (612 ms full pass, a wide stock pass, any held frame), is logged before any value of a later
+  frame exists. Same for every other print. Hence each kind is non-decreasing in log order (TimerGlobal frozen, never
+  back, while paused; dwTimeContinual drops only at an app re-activation, device.cpp:1248). The per-kind rule cannot
+  stop valid data; kept as a stop.
+- Across kinds the same-frame gap is TimerMM - TimerGlobal: started together (Device_Initialize.cpp:40-41), one QPC
+  clock, so < 1 ms, UNLESS TimerGlobal was paused (Device::Pause -> g_pauseMngr, device.cpp:1153-1155; callers include
+  UIGameTutorial.cpp:192-194 for UI sequences with a pause flag and GamePersistent.cpp:959 on focus loss), the app was
+  deactivated (device.cpp:1248, 1266), or time_factor changed (TimerGlobal only, device.h:363-367;
+  console_commands.cpp:2049, 2160, which GAMMA scripts can run). The "game_loaded" sequence (intro_start,
+  GamePersistent.cpp:563-575) is a CUISequencer; whether its xml sets the pause flag I could not read (not unpacked).
+  So the source does not settle that a normal load has a 0 ms gap: the cross rule is now REPORTED only (clock_cross).
+  MEASURED-PRIME: gap 0 in 3 same-frame pairs (7045/7046 frame 31, 8130/8132 frame 33, 8527/8553 frame 1413).
+  Protection lost: a uniform shift of every time_global against the stamps is no longer a stop (it moves that load's
+  load time, H3); it is printed per load.
+### 7.4 Driver (findings 3, 9)
+- Finding 3: order_copy (copy into the new state folder, chmod a-w, pin the COPY with the same ORDER_SHA, order_ok on
+  the copy); ORDER is then the copy for pending and check_run. Tested offline: the function block between the
+  BEGIN/END markers of wu2_run.sh is extracted and run on a copy of wu2_order.txt in the self-test folder (copy ok,
+  hash, read-only, dispatch unchanged after the original is edited, original changed before the copy -> refused by
+  name, PIN_ME refused, existing copy refused, wrong shape refused); 3 mutants caught; a static check of the body.
+- Finding 9: slice_ok $SL_END $((BENCH_TO + END_RESERVE)) right after the claim renewal, before the bench (900 + 120 s).
+- `bash -n wu2_run.sh` ok; the driver itself never run.
+### 7.5 Decisions the brief did not specify (to confirm)
+1. Stopped series name: FAIL `stopped_series` (prereg 3.3 says a stopped series is FAIL; the code could PASS: code
+   fixed). The prime's VERDICT counts toward the 3, as in the driver (its loop counts the prime); a missing or
+   unreadable prime conditions.txt counts as not clean (the driver's empty VERDICT does). The made series cases now
+   use a real clean prime fixture (p_prime_ok) instead of a missing wu2_prime folder; nv_few_on uses 9 window_short
+   loads instead of 9 CONFOUNDED (9 would now be a stopped series).
+2. clock_order split: per-kind stop (CLOCK_BACK_MS = 1 named), cross-kind report-only `clock_cross`.
+3. END_RESERVE = 120 s (GUESS except the 60 s notify timeout); usable slice 165 -> 163 min in 3.3 / 6.1.
+4. The load-time bound is printed in every report's "load time:" line and the probe/check info line.
+5. measure_flags: both flags are part of arm_mismatch (FAIL), as the brief's name says.
+6. The find-error test uses a missing -newer file (works as root) and an unreadable subfolder (skipped as root).
+### 7.6 Self-test run and hashes (review pass 1)
+- Run 2026-11-26 19:23:39-19:24:35 (`date`), folder selftest-runs/20261126-192339-3368140 (36 MB):
+  `WU2 SELFTEST PASS 251/251 (28 real cases, 140 made cases, 55 hook mutants caught, 18 constant mutants caught,
+  1 hook-coverage check, 1 MAX_CONFOUNDED agreement check, 2 find-error checks, 5 driver checks, 1 untouched check)`.
+  My earlier passing run of this round (20261126-191952-3185680, before a citation fix) removed by its literal path.
+- sha256 at that run: wu2_score.py d86c928fee7678997634a8681bf95c42785bf0dd2344c54bab6468e70ff84143;
+  wu2_selftest.sh cbb6a4601f311943f4a20716eee69c0851567b5ff01f35547026bf9af82f370d;
+  wu2_run.sh cecfa44d200489207015338d9bbf5c853a8cb2f73356cb60ca6ee73eb0dc77f7 (bash -n ok, never run);
+  wu2_order.txt 21e80fc1f29524c29f476c2af0545bd5fb72092ee0141664efb66015cd6f08ae (unchanged).
+- Still not pinned (PIN_ME_* in wu2_run.sh: ORDER_SHA, score, selftest; prereg 13).

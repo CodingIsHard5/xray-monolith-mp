@@ -43,20 +43,30 @@ OLD = 7                        # the wu1 fixtures' frame numbers F_old (frame 64
 PRE_HEAD = [1234.3661, 2494.7303, 22.0252, 28.6732, 488.9313]   # wu1_prime capture 13-17
 ZONE_FIX = {1: "CALifeSimulator::CALifeSimulator", 10: "CLevel::net_start_client6", 12: "CLevel::net_start6",
             13: "CLevel::cl_Process_Spawn", 14: "CScriptBinder::shedule_Update", 15: "CScriptBinder::shedule_Update",
-            16: "CScriptBinder::shedule_Update", 17: "CLevel::cl_Process_Spawn", E - 2: "CGamePersistent OnFrame"}
+            16: "CScriptBinder::shedule_Update", 17: "CLevel::cl_Process_Spawn"}
+INTRO_ZONE = "CGamePersistent OnFrame"   # at capture E-2 (E = the made load's own first play frame)
+
+def hold_k(kind, o):
+    """Held frames of a made load. Engine (wt-simtick d77d70b5c, device.cpp:166-168): End() does not count the precache
+    countdown down while it is 3 and the lever's pass is pending, so every held frame is one more FrameMove frame with the
+    countdown > 0 ('Precache frame', device.cpp:771-773; dwFrame++ device.cpp:1048): the precache block is 58 + K frames
+    and the first play frame is E = 71 + K."""
+    return o.get("hold", 12) if (kind == "on" and o.get("lever") == "held") else 0
 
 # ---------------- made loads ----------------
 def frames_for(kind, o):
     base = o.get("base", 5.0)
+    K = hold_k(kind, o)
+    Eh = E + K
     jit = (lambda i: 0.0) if o.get("flat") else (lambda i: 0.3 * ((i * 7919) % 7) / 6.0)
     if o.get("flat"):
         pre_ms = [base] * PC
     elif kind == "on" and o.get("lever") == "held":
-        pre_ms = [200.0] * PC      # long precache frames: the 10 s pass-log window closes before the full pass
+        pre_ms = [200.0] * (PC + K)   # long precache frames: the 10 s pass-log window closes before the full pass
     else:
         pre_ms = PRE_HEAD + [base + 1.0 + jit(i) for i in range(PC - len(PRE_HEAD))]
         pre_ms[E - 2 - NL] = 52.0  # intro frame (lua GC after intro_start, 52 ms in wu1_prime)
-    play = [base + jit(i) for i in range(FR - E)]
+    play = [base + jit(i) for i in range(FR - Eh)]
     ev = []                                            # (time ms after the end of loading, frame ms, zone)
     if o.get("save", True):
         ev.append((2000.0, o.get("save_ms", 900.0), "CALifeStorageManager::save" if o.get("save_row", True) else "Device: other work"))
@@ -76,11 +86,11 @@ def frames_for(kind, o):
         c, i = 0.0, 0
         while i < len(play) - 1 and c < t:
             c += play[i]; i += 1
-        while E + i in zone and i < len(play) - 1:
+        while Eh + i in zone and i < len(play) - 1:
             i += 1
-        play[i] = v; zone[E + i] = z
+        play[i] = v; zone[Eh + i] = z
     ms = [round(v, 4) for v in (LOAD_MS + pre_ms + play)]
-    for i, z in ZONE_FIX.items():
+    for i, z in list(ZONE_FIX.items()) + [(Eh - 2, INTRO_ZONE)]:
         if ms[i] > 20.0:
             zone[i] = z
     if o.get("no_frame1"):
@@ -106,19 +116,28 @@ def log_events(tag, kind, o, ms, zone):
     Pc = lambda F: 64 - F
     L, lv = [], o.get("lever", "good")
     if kind == "on" and lv == "held":
-        # the engine's order (device.cpp:131-170): the countdown is held at 3 for K = 12 frames (old 49..60 read
-        # precache 3) until the pass is claimed at old frame 61, whose End() prints the held line and counts 3 -> 2;
-        # old frame 64 is the first with precache 0. Precache frames 200 ms apart, so the 10 s pass-log window (from
-        # the pass at old frame 6) has closed before the full pass: its alife_pass line is not printed, and the last
-        # line with precache > 0 is the actor-reinit alife_opu at old frame 50, inside the hold (precache 3)
-        Ph = lambda F: 64 - F if F > 61 else max(3, 52 - F)
-        L = [(6, 0, pline(Fn(6), T(6), Ph(6), 3, 2400, 3)), (17, 0, pline(Fn(17), T(17), Ph(17), 3, 2400, 3)),
-             (28, 0, oline(Fn(28), T(28), Ph(28), 20)), (42, 0, pline(Fn(42), T(42), Ph(42), 3, 2400, 3)),
-             (50, 0, oline(Fn(50), T(50), Ph(50), LIMIT_WIDE))]
-        L += [(61, 1, sline(Fn(61), 14200 + j, "zat_b106_smart_terrain" if j == 0 else "stalker_sim_squad_novice%d" % (19000 + j), 300.0 if j == 0 else 2.1)) for j in range(130)]
-        L.append((61, 2, "* [alife_warmup] full pass: 2400 of 2400 objects, frame %d, precache_left 3, 612.3 ms" % Fn(61)))
-        L.append((61, 3, "* [alife_warmup] precache held 12 frames"))
-        return L, [oline(Fn(64) + 5, int(round(te + pre[E + 5] - pre[E])), 0, 20)]
+        # the engine's order (device.cpp:131-170), in CAPTURE indices c: the countdown runs 58 .. 4 at capture 13 .. 67
+        # and is 3 at capture 68 (E-3); while the pass is pending End() holds it at 3 (device.cpp:166-168), so capture
+        # 69 .. 68+K also read 3 (K held frames, each one more 'Precache frame' call); the pass is claimed in capture
+        # 68+K, whose End() prints the held line (only if K > 0) and counts 3 -> 2; capture 69+K reads 2, 70+K reads 1,
+        # and Eh = 71+K is the first play frame (countdown 0). Precache frames are 200 ms apart, so the 10 s pass-log
+        # window (from the pass at capture 13) has closed before the full pass: its alife_pass line is not printed,
+        # and the last line with precache > 0 is the actor-reinit alife_opu in the claim frame (precache 3).
+        # Log-order keys stay in the wu1 numbering (capture - 7), so intro_start / textures-handled sort at Eh-2-7 / Eh-1-7.
+        K = hold_k(kind, o)
+        Eh = E + K
+        Pcap = lambda c: (E - c) if c <= E - 3 else (3 if c <= E - 3 + K else Eh - c)
+        Tc = lambda c: int(round(te - (pre[Eh] - pre[c])))
+        Fc = lambda c: c + DOFF
+        cc = E - 3 + K                     # the claim frame
+        L = [(13 - OLD, 0, pline(Fc(13), Tc(13), Pcap(13), 3, 2400, 3)), (24 - OLD, 0, pline(Fc(24), Tc(24), Pcap(24), 3, 2400, 3)),
+             (35 - OLD, 0, oline(Fc(35), Tc(35), Pcap(35), 20)), (49 - OLD, 0, pline(Fc(49), Tc(49), Pcap(49), 3, 2400, 3)),
+             (cc - OLD, 0, oline(Fc(cc), Tc(cc), Pcap(cc), LIMIT_WIDE))]
+        L += [(cc - OLD, 1, sline(Fc(cc), 14200 + j, "zat_b106_smart_terrain" if j == 0 else "stalker_sim_squad_novice%d" % (19000 + j), 300.0 if j == 0 else 2.1)) for j in range(130)]
+        L.append((cc - OLD, 2, "* [alife_warmup] full pass: 2400 of 2400 objects, frame %d, precache_left %d, 612.3 ms" % (Fc(cc), Pcap(cc))))
+        if K:
+            L.append((cc - OLD, 3, "* [alife_warmup] precache held %d frames" % K))
+        return L, [oline(Fc(Eh + 5), int(round(te + pre[Eh + 5] - pre[Eh])), 0, 20)]
     L.append((6, 0, pline(Fn(6), T(6), Pc(6) - o.get("race", 0), 3, 2400, 3)))
     L.append((17, 0, pline(Fn(17), T(17, o.get("t_jit", 0)), Pc(17), 3, 2400, 3)))
     L.append((28, 0, oline(Fn(28), T(28), Pc(28), LIMIT_WIDE)))
@@ -170,6 +189,8 @@ def log_events(tag, kind, o, ms, zone):
             play.append((k, pline(Fn(64) + k, int(round(te + cum(k))) + o.get("t_shift", 0), 0, n, 2400, lim)))
             if k == 88:
                 play.append((k, "Time continual is:%d" % int(round(te + cum(k)))))
+                if o.get("tc_dup") is not None:    # one more stamp, tc_dup ms below the previous stamp
+                    play.append((k, "Time continual is:%d" % (int(round(te + cum(k))) - o["tc_dup"])))
             k += 88
     if o.get("reset_late"):
         play.append((2500, oline(Fn(64) + 2500, int(round(te + cum(2500))) + o.get("t_shift", 0), 0, 20)))
@@ -180,6 +201,9 @@ def log_events(tag, kind, o, ms, zone):
         if z == "ALife/scheduled/update":
             play.append((i - E, sline(Fn(64) + i - E, 14200, "zat_b106_smart_terrain", ms[i] - 5.0)))
     play.sort(key=lambda x: x[0])
+    if o.get("swap_play"):                     # the first two play pass lines logged in the wrong order
+        assert play[0][1].startswith("* alife_pass ") and play[1][1].startswith("* alife_pass "), tag
+        play[0], play[1] = play[1], play[0]
     drop = o.get("drop_lines", ())
     keep = lambda t: not any(t.startswith(d) for d in drop)
     ren = lambda t: t.replace("* alife_opu ", "* alife_opu2 ") if o.get("rename_opu") else t
@@ -191,6 +215,7 @@ def cmdline(tag, arm, o):
          "-perf_quit", "-perf_noinput", "-perf_nopresent", "-perf_slow", "20"]
     if o.get("fixed_dt"): t.insert(8, "-perf_fixed_dt")
     if o.get("save_name"): t[4] = "server(%s/single/alife/load)" % o["save_name"]
+    t = [x for x in t if x not in o.get("drop_flags", ())]
     t += list(o.get("more_flags", ()))
     if (arm == "on") != bool(o.get("flip_flag")): t.append("-alife_warmup")
     return " ".join(t)
@@ -243,8 +268,9 @@ def make(tag, kind, real=None, **o):
               "CLevel::net_start_client4", "CLevel::net_start_client5"):
         sl.append(site(n, 100, 1))
     sl.append(site("CLevel::net_start_client6", 240, c6, 260.2267, 197.4940))
-    sl.append(site("Precache frame", 773, PC, 0.0091, 0.0091))
-    sl.append(site("Start xrSASH Benchmark", 709, FR - E, 0.1685, 0.1685))
+    K = hold_k(kind, o)                       # held frames are precache frames (device.cpp:166-168, 771-773)
+    sl.append(site("Precache frame", 773, PC + K, 0.0091, 0.0091))
+    sl.append(site("Start xrSASH Benchmark", 709, FR - E - K, 0.1685, 0.1685))
     if o.get("save", True):
         sl.append("CALifeStorageManager::save,z:\\src\\xrgame\\alife_storage_manager.cpp,48,2,800.0000,700.0000,0,0.0000,0.0000")
     if o.get("site_text"): sl.append("CDetailManager::cache_Update,z:\\src\\x.cpp,1,10,1.0000,%s,0,0.0000,0.0000" % o["site_text"])
@@ -274,8 +300,8 @@ def make(tag, kind, real=None, **o):
     ev, play = log_events(tag, kind, o, ms, zone)
     cap_s = "* [xrprof] capture '%s' started: %d frames" % (tag, FR)
     cap_f = "* [xrprof] capture '%s' finished: %d frames, %.1f ms total, %.3f ms/frame avg" % (tag, FR, tot, tot / FR)
-    ev.append((62, 50, "intro_start game_loaded"))
-    ev.append((o.get("handled_at", 63), 50, "* [x-ray]: Handled Necessary Textures Destruction"))
+    ev.append((62 + K, 50, "intro_start game_loaded"))
+    ev.append((o.get("handled_at", 63 + K), 50, "* [x-ray]: Handled Necessary Textures Destruction"))
     made = [t for _, _, t in sorted(ev, key=lambda x: (x[0], x[1]))]
     if real is None:
         head = ["* Detected CPU: AMD Ryzen 7 9800X3D 8-Core Processor", "Init FileSystem 5.5 sec",
@@ -354,6 +380,10 @@ var("on_noflag", "on", flip_flag=True); var("off_flag", "offP", flip_flag=True);
 var("warm600", "offL", warm=600); var("off_warm", "offP", off_warm=True)
 for lv in ("none", "two", "after_intro", "p2", "cap", "partial", "held"):
     var("lever_" + lv, "on", lever=lv)
+var("lever_held0", "on", lever="held", hold=0)            # the same path with no held frame: control, E = 71
+var("no_nopresent", "on", drop_flags=("-perf_nopresent",)); var("no_noinput", "offP", drop_flags=("-perf_noinput",))
+var("g_back", "offP", swap_play=True)                     # two play pass lines logged in the wrong order: time_global goes back
+var("tc_back1", "on", tc_dup=1); var("tc_back2", "on", tc_dup=2)   # a stamp 1 / 2 ms below the previous stamp
 # wu2: the end of loading inside the capture (prereg 5.1, 5.4); each must be caught by name
 var("no_frame1", "on", no_frame1=True)                    # no CALifeSimulator slow row in capture frame 1
 var("no_loading_site", "offL", no_loading_site=True)      # sites file without 'Loading...'
@@ -373,10 +403,13 @@ NOPLAY1 = var("noplay", "on", no_play_lines=True)         # no clock line in pla
 for nm, kind, o in (("ok", "offL", {}), ("no_opu", "offP", dict(drop_lines=("* alife_opu ",))),
                     ("no_pass", "offL", dict(drop_lines=("* alife_pass ",))), ("no_save", "offP", dict(save=False)),
                     ("no_cap", "offL", dict(no_cap_lines=True)), ("lever", "offP", dict(flip_flag=True)),
-                    ("bad_row", "offL", dict(bad_frame_row=True)), ("move", "offP", dict(f_shift={17: -10}))):
+                    ("bad_row", "offL", dict(bad_frame_row=True)), ("move", "offP", dict(f_shift={17: -10})),
+                    ("short", "offP", dict(base=3.0)),
+                    ("conf", "offL", dict(verdict="VERDICT: CONFOUNDED (other heavy process present)"))):
     make("p_prime_" + nm, kind, **o)      # probe fixtures: the PRIME load (an OFF load, never scored)
 var("reset_late", "offP", reset_late=True); var("legacy_disagree", "offL", wide_slows=10); var("wide_in_play", "offP", wide_in_play=True)
-CONF = [make("v_conf_%d" % i, "on", verdict="VERDICT: CONFOUNDED (other heavy process present)") or "v_conf_%d" % i for i in range(9)]
+CONF = [make("v_conf_%d" % i, "on", verdict="VERDICT: CONFOUNDED (other heavy process present)") or "v_conf_%d" % i for i in range(3)]
+WSHORT = [make("v_wshort_%d" % i, "on", base=3.0) or "v_wshort_%d" % i for i in range(9)]   # VOID window_short, not a stop
 QUIET = [make("v_quiet_%d" % i, "offP", hitch=False) or "v_quiet_%d" % i for i in range(3)]
 NOTRAIN = [make("v_notrain_%d" % i, "offP", train=False) or "v_notrain_%d" % i for i in range(3)]
 WORSE = [make("v_worse_%d" % i, "on", extra=((6000.0, 200.0),)) or "v_worse_%d" % i for i in range(9)]
@@ -466,12 +499,15 @@ RPM["frames_no_loading"] = rpm("frames_no_loading", "frames", frames_rows(lambda
 RPM["sites_no_loading"] = rpm("sites_no_loading", "sites", lambda x: b"".join(l for l in x.splitlines(True) if not l.startswith(b"Loading...,")))
 RPM["f_plus_1_all"] = rpm("f_plus_1_all", "log", log_lines(f_plus))
 RPM["play_line_moved"] = rpm("play_line_moved", "log", sub1(b"* alife_pass frame 1015 ", b"* alife_pass frame 1016 "))
+RPM["pass_swap"] = rpm("pass_swap", "log", log_lines(move_line(b"* alife_pass frame 420 ", b"* alife_pass frame 322 ")))
+RPM["tcont_back"] = rpm("tcont_back", "log", sub1(b"Time continual is:20415", b"Time continual is:18000"))
 
 # ---------------- cases ----------------
 CASES = []
-def order_lines(on_tags, off_tags, frames=FR):
+def order_lines(on_tags, off_tags, frames=FR, prime="p_prime_ok"):
+    """The prime is a real pool load (clean) since the scorer counts its VERDICT as the driver does (MAX_CONFOUNDED)."""
     on_tags, off_tags = list(on_tags), list(off_tags)
-    out = ["wu2_prime|Warm18.exe|cordon1|0|%d|20|prime" % frames]
+    out = ["%s|Warm18.exe|cordon1|0|%d|20|prime" % (prime, frames)]
     for a in ["on", "off", "off", "on"] * 8:
         t = (on_tags if a == "on" else off_tags).pop(0)
         out.append("%s|Warm18.exe|cordon1|0|%d|20|%s" % (t, frames, a))
@@ -480,13 +516,13 @@ OFF_GOOD = [GP[0], GP[1], GL[0], GP[2], GP[3], GL[1], GP[4], GP[5], GL[2], GP[6]
 def sub(lst, old, new):
     l = list(lst); l[l.index(old)] = new; return l
 def case(name, want, pats, on_tags=GON, off_tags=OFF_GOOD, lines=None, root=None, pre_out=False, parse=None, targets=(),
-         one=None):
+         one=None, prime="p_prime_ok"):
     """one = ("probe" | "check", tag): the driver's one-load modes on <root>/<tag> with this case's order file (lines)."""
     cd = os.path.join(ST, "cases", name); os.makedirs(cd)
     if one is not None:
         parse = ["%s=%s" % (one[0], os.path.join(root or POOL, one[1])), "order=" + os.path.join(cd, "wu2_order.txt")]
     if parse is None or one is not None:
-        L = lines if lines is not None else order_lines(on_tags, off_tags)
+        L = lines if lines is not None else order_lines(on_tags, off_tags, prime=prime)
         with open(os.path.join(cd, "wu2_order.txt"), "w") as f:
             f.write("# selftest case %s\n" % name + "\n".join(L) + "\n")
     CASES.append(dict(name=name, want=want, pats=pats, root=root or POOL, order=os.path.join(cd, "wu2_order.txt"),
@@ -511,7 +547,9 @@ case("real_prime_probe", 0, [
     r"^PROBE loading_end wu1_prime located: first play frame E=71 by the engine's counters, 71 by the countdown lines \(frame 31 precache 58 -> 71, frame 33 precache 56 -> 71, frame 34 precache 54 -> 70, frame 40 precache 49 -> 71\); 10940\.6 ms after capture start; engine time at E 19876 ms$",
     r"\(log line 8492\) is printed in the End\(\) of the last precache frame: capture 70 \(engine counters\) / 70 \(countdown lines\); log order puts it after the clock line of capture 22 and before that of capture 84; intro marker .* at capture 69 \(expected E-2 = 69\)$",
     r"^PROBE window wu1_prime 30 s from capture 71: worst 339\.8 ms, n20 20, n33 6, .*before the window: 71 frames \(13 loading 0\.\.12, 58 precache 13\.\.70\), 10940\.6 ms, 10 of them > 20 ms, worst 5761\.1 ms$",
-    r"^PROBE info wu1_prime group=OFF-IN-PLAY save=#155 80 ms load=19\.88 s", r"^PROBE wu1_prime ok$"],
+    r"^PROBE info wu1_prime group=OFF-IN-PLAY save=#155 80 ms load=19\.88 s",
+    r"load=19\.88 s \(time_global 19876 ms at capture 71 \(from frame 102 T 19948 minus 71\.6 ms; from the last countdown line 19876 ms; estimate: -\d+\.\d / \+\d+\.\d ms = frame E \d+\.\d ms / frame 84 \d+\.\d ms, \+ 1 ms\)\)$",
+    r"^PROBE wu1_prime ok$"],
      lines=RPO, root=REAL, one=("probe", "wu1_prime"))
 for nm, want, pats in (
         ("opu31_to_32", 1, [r"^PROBE STOP wu1_prime clock_fit: no device-frame offset .* best D=\d+ leaves \d+\.\d ms > 15 ms"]),
@@ -521,7 +559,11 @@ for nm, want, pats in (
                              r"^PROBE STOP wu1_prime clock_fit: ambiguous: D=18 \(0\.8 ms\) and D=19 \(7\.1 ms\)"]),
         ("countdown_zeroed", 1, [r"^PROBE STOP wu1_prime loading_end: no clock line during the precache countdown"]),
         ("no_clock", 1, [r"^PROBE STOP wu1_prime no_measure_lines: 0 alife_pass and 0 alife_opu", r"^PROBE STOP wu1_prime clock_fit: 0 clock line"]),
-        ("t_plus_1000", 1, [r"^PROBE STOP wu1_prime clock_order: log line 7046 Time continual 15175 after log line 7045 at 16175"]),
+        # every time_global + 1000 against the stamps: REPORTED only since review pass 1 (finding 8; stated limit)
+        ("t_plus_1000", 0, [r"^PROBE note wu1_prime clock_cross \(reported only\): log line 7046 Time continual 15175 after log line 7045 time_global 16175: 1000 ms back",
+                            r"^PROBE wu1_prime ok$"]),
+        ("pass_swap", 1, [r"^PROBE STOP wu1_prime clock_order: log line 8512 time_global 21312 after log line 8511 time_global 21765: time_global goes back"]),
+        ("tcont_back", 1, [r"^PROBE STOP wu1_prime clock_order: log line 8497 Time continual 18000 after log line 8130 Time continual 18905: Time continual goes back"]),
         ("pass102_early", 1, [r"^PROBE STOP wu1_prime clock_order: a clock line of capture frame 84 is logged before the loading-end line \(printed in frame 70\)"]),
         ("handled_early", 1, [r"^PROBE STOP wu1_prime clock_order: a clock line of capture frame 22 is logged after the loading-end line"]),
         ("frames_shift", 1, [r"^PROBE STOP wu1_prime frames_slow: \d+ perf_slow row\(s\) disagree with perf_frames \(first: frame 1 frame_ms 5761\.1038"]),
@@ -564,7 +606,7 @@ for nm, slot, code in (("not_clean", "on", "not_clean"), ("framecount", "offp", 
                        # wu2 layout checks
                        ("no_frame1", "on", "loading_frames"), ("no_loading_site", "offl", "stock_loop"), ("c6_three", "on", "loading_frames"),
                        ("move_pre_fit", "offp", "clock_fit"), ("move_pre_end", "on", "loading_end"), ("move_pre_back", "offl", "loading_end"),
-                       ("race2", "on", "loading_end"), ("clk_16", "on", "clock_fit"), ("t_shift", "offp", "clock_order"),
+                       ("race2", "on", "loading_end"), ("clk_16", "on", "clock_fit"), ("g_back", "offp", "clock_order"), ("tc_back2", "on", "clock_order"),
                        ("handled_early", "offl", "clock_order"), ("frames_shift", "on", "frames_slow"), ("drop_loading", "offp", "framecount"),
                        ("flat", "on", "clock_fit"), ("cap_late", "offp", "capture_lines")):
     ot = sub(GON, GON[3], V[nm]) if slot == "on" else GON
@@ -572,13 +614,20 @@ for nm, slot, code in (("not_clean", "on", "not_clean"), ("framecount", "offp", 
     case("v_" + nm, 0, [r"LOAD %s \S+ VOID \[%s\]" % (V[nm], code), r"^WU2 RESULT: PASS$"], on_tags=ot, off_tags=ft)
 case("v_flat_msg", 0, [r"clock_fit: ambiguous: D=-?\d+ \(0\.0 ms\) and D=-?\d+ \(0\.0 ms\) both fit"], on_tags=sub(GON, GON[3], V["flat"]))
 case("v_no_loading_site_msg", 0, [r"loading_frames: 'Loading\.\.\.' 0 calls != 'LoadDraw' 13"], off_tags=sub(OFF_GOOD, GL[3], V["no_loading_site"]))
+case("t_shift_cross", 0, [r"LOAD v_t_shift OFF VALID group=OFF-IN-PLAY", r"^    clock_cross \(reported only\): .*: 1000 ms back across the two clocks",
+                          r"^WU2 RESULT: PASS$"], off_tags=sub(OFF_GOOD, GP[3], V["t_shift"]))
+case("tc_back1_ok", 0, [r"LOAD v_tc_back1 ON VALID group=ON", r"^WU2 RESULT: PASS$"], on_tags=sub(GON, GON[3], V["tc_back1"]))
+case("v_g_back_msg", 0, [r"clock_order: log line \d+ time_global \d+ after log line \d+ time_global \d+: time_global goes back"], off_tags=sub(OFF_GOOD, GP[3], V["g_back"]))
+case("v_tc_back2_msg", 0, [r"clock_order: log line \d+ Time continual (\d+) after log line \d+ Time continual \d+: Time continual goes back"], on_tags=sub(GON, GON[3], V["tc_back2"]))
 case("race_ok", 0, [r"LOAD v_race ON VALID group=ON", r"^WU2 RESULT: PASS$"], on_tags=sub(GON, GON[3], V["race"]))
 case("clk_14_ok", 0, [r"LOAD v_clk_14 ON VALID group=ON", r"^WU2 RESULT: PASS$"], on_tags=sub(GON, GON[3], V["clk_14"]))
 case("noplay_loadtime", 0, [r"LOAD v_noplay ON VALID group=ON .*\| load=33\.00 s$",
-                            r"load time: time_global 33000 ms at capture 71 \(from frame \d+ T \d+ plus \d+\.\d ms\)$", r"^WU2 RESULT: PASS$"],
+                            r"load time: time_global 33000 ms at capture 71 \(from frame \d+ T \d+ plus \d+\.\d ms; estimate: -\d+\.\d / \+\d+\.\d ms = frame E \d+\.\d ms / frame \d+ \d+\.\d ms, \+ 1 ms\)$", r"^WU2 RESULT: PASS$"],
      on_tags=sub(GON, GON[3], V["noplay"]))
 for nm, slot, pat in (("on_noflag", "on", r"-alife_warmup absent on an ON load"), ("off_flag", "offp", r"-alife_warmup present on an OFF load"),
-                      ("fixed_dt", "on", r"-perf_fixed_dt present"), ("warm600", "offl", r"-perf_capture is not 0,%d,v_warm600" % FR)):
+                      ("fixed_dt", "on", r"-perf_fixed_dt present"), ("warm600", "offl", r"-perf_capture is not 0,%d,v_warm600" % FR),
+                      ("no_nopresent", "on", r"arm_mismatch: -perf_nopresent absent \(registered measurement flag\)$"),
+                      ("no_noinput", "offp", r"arm_mismatch: -perf_noinput absent \(registered measurement flag\)$")):
     ot = sub(GON, GON[4], V[nm]) if slot == "on" else GON
     ft = OFF_GOOD if slot == "on" else sub(OFF_GOOD, GP[4] if slot == "offp" else GL[4], V[nm])
     case("a_" + nm, 1, [r"LOAD %s \S+ FAIL .*\[arm_mismatch\]" % V[nm], pat, r"^WU2 RESULT: FAIL"], on_tags=ot, off_tags=ft)
@@ -588,17 +637,34 @@ for lv, code in (("none", "lever_count"), ("two", "lever_count"), ("after_intro"
     case("l_" + lv, 1, [r"LOAD v_lever_%s ON FAIL \[%s\] group=" % (lv, code), r"^WU2 RESULT: FAIL \(1 load"], on_tags=sub(GON, GON[6], V["lever_" + lv]))
 # a cap hit holds 300 frames: the made fixture does not hold them, so its countdown also disagrees (VOID loading_end beside the FAIL)
 case("l_cap", 1, [r"LOAD v_lever_cap ON FAIL \[lever_cap\]", r"^WU2 RESULT: FAIL \(1 load"], on_tags=sub(GON, GON[6], V["lever_cap"]))
+# a hold of K = 12 frames ADDS 12 precache frames (device.cpp:166-168, 771-773): E = 71 + 12 = 83; the no-hold control 71
 case("l_held_ok", 0, [r"LOAD v_lever_held ON VALID .*\| load=33\.00 s$", r"precache held 12 frames \(cap 300\)",
-                      r"load time: time_global 33000 ms at capture 71 \(from frame 94 T \d+ minus \d+\.\d ms",
+                      r"window from capture 83; before the window: 83 frames \(13 loading 0\.\.12, 70 precache 13\.\.82\)",
+                      r"load time: time_global 33000 ms at capture 83 \(from frame 106 T \d+ minus \d+\.\d ms",
                       r"^WU2 RESULT: PASS$"],
      on_tags=sub(GON, GON[6], V["lever_held"]))
+case("l_held0_ok", 0, [r"LOAD v_lever_held0 ON VALID .*\| load=33\.00 s$",
+                       r"window from capture 71; before the window: 71 frames \(13 loading 0\.\.12, 58 precache 13\.\.70\)",
+                       r"load time: time_global 33000 ms at capture 71 \(from frame 94 T \d+ minus \d+\.\d ms",
+                       r"^WU2 RESULT: PASS$"],
+     on_tags=sub(GON, GON[6], V["lever_held0"]))
 for nm, pat in (("reset_late", r"pass lines end before the narrowing"), ("legacy_disagree", r"pass lines say in-loading, alife_slow lines say P"),
                 ("wide_in_play", r"wide pass only after loading ended")):
     ft = sub(OFF_GOOD, GL[1] if nm == "legacy_disagree" else GP[6], V[nm])
     case("c_" + nm, 0, [r"LOAD %s OFF VALID group=OFF-OTHER" % V[nm], pat, r"^WU2 RESULT: PASS$"], off_tags=ft)
 GROUP_OFF = [GP[0], GL[0], GL[1], GP[1], GL[2], GL[3], GP[2], GL[4], GL[5], GP[3], GL[6], GL[7], GP[4], GL[8], GL[9], GL[10]]
 case("grouping", 0, [r"GROUPS .*OFF-IN-PLAY 5, OFF-IN-LOADING 11", r"^WU2 RESULT: PASS$"], off_tags=GROUP_OFF)
-case("nv_few_on", 3, [r"NO VERDICT \[few_on: 7 valid ON loads < 8\]", r"^WU2 RESULT: NO VERDICT \(few_on\)$"], on_tags=CONF + GON[:7])
+case("nv_few_on", 3, [r"NO VERDICT \[few_on: 7 valid ON loads < 8\]", r"^WU2 RESULT: NO VERDICT \(few_on\)$"], on_tags=WSHORT + GON[:7])
+# the driver stops at the MAX_CONFOUNDED-th non-clean load (prime included); such a series is FAIL even with no folder missing
+case("s_stopped_last", 1, [r"^FAIL series stopped_series: 3 non-clean load\(s\) \(v_conf_0, v_conf_1, v_conf_2\) >= MAX_CONFOUNDED 3",
+                           r"^WU2 RESULT: FAIL \(0 load\(s\) failed a registered check, series stopped: stopped_series\)$"],
+     on_tags=sub(sub(sub(GON, GON[0], CONF[0]), GON[5], CONF[1]), GON[15], CONF[2]))
+case("s_stopped_prime", 1, [r"LOAD p_prime_conf prime: not scored \(VERDICT: CONFOUNDED",
+                            r"^FAIL series stopped_series: 3 non-clean load\(s\) \(p_prime_conf, v_conf_0, v_conf_1\)",
+                            r"^WU2 RESULT: FAIL \(0 load\(s\) failed a registered check, series stopped"],
+     on_tags=sub(sub(GON, GON[0], CONF[0]), GON[15], CONF[1]), prime="p_prime_conf")
+case("s_two_ok", 0, [r"LOAD v_conf_0 ON VOID \[not_clean\]", r"LOAD v_conf_1 ON VOID \[not_clean\]", r"^WU2 RESULT: PASS$"],
+     on_tags=sub(sub(GON, GON[0], CONF[0]), GON[15], CONF[1]))
 case("nv_few_inplay", 3, [r"NO VERDICT \[few_inplay: 2 valid", r"^WU2 RESULT: NO VERDICT \(few_inplay\)$"], off_tags=GP[:2] + GL[:14])
 case("nv_no_hitch", 3, [r"NO VERDICT \[no_stock_hitch", r"^WU2 RESULT: NO VERDICT \(no_stock_hitch\)$"], off_tags=QUIET + GL[:13])
 case("nv_no_train", 3, [r"NO VERDICT \[no_stock_train", r"^WU2 RESULT: NO VERDICT \(no_stock_train, stock_orders_alike\)$"], off_tags=NOTRAIN + GL[:13])
@@ -652,7 +718,8 @@ case("probe_ok", 0, [r"^PROBE info p_prime_ok group=OFF-IN-LOADING save=#\d+ 900
      lines=one_order("p_prime_ok", "prime"), one=("probe", "p_prime_ok"))
 for nm, pat in (("no_opu", r"no_measure_lines"), ("no_pass", r"no_measure_lines"), ("no_save", r"no_save_frame"),
                 ("no_cap", r"capture_lines"), ("lever", r"arm_mismatch: .*-alife_warmup present on an PRIME load"),
-                ("bad_row", r"unparsable"), ("move", r"clock_fit")):
+                ("bad_row", r"unparsable"), ("move", r"clock_fit"),
+                ("short", r"window_short: capture covers \d+\.\d s after the end of loading < 30 s")):
     case("probe_" + nm, 1, [r"^PROBE STOP p_prime_%s %s" % (nm, pat), r"^PROBE p_prime_%s FAIL$" % nm],
          lines=one_order("p_prime_" + nm, "prime"), one=("probe", "p_prime_" + nm))
 case("probe_refused", 2, [r"REFUSED: g_on_01 is not the prime load"], lines=one_order("p_prime_ok", "prime"), one=("probe", "g_on_01"))
@@ -678,7 +745,11 @@ chk("check_window_short", 0, V["window_short"], "on", [r"^CHECK note v_window_sh
 chk("check_loading_frames", 1, V["no_frame1"], "on", [r"^CHECK STOP v_no_frame1 loading_frames: perf_slow names CALifeSimulator::CALifeSimulator in capture frame\(s\) none"])
 chk("check_clock_fit", 1, V["move_pre_fit"], "off", [r"^CHECK STOP v_move_pre_fit clock_fit"])
 chk("check_loading_end", 1, V["move_pre_end"], "on", [r"^CHECK STOP v_move_pre_end loading_end: .* -> 72"])
-chk("check_clock_order", 1, V["t_shift"], "off", [r"^CHECK STOP v_t_shift clock_order: .*the engine clock goes back"])
+chk("check_clock_order", 1, V["g_back"], "off", [r"^CHECK STOP v_g_back clock_order: .*time_global goes back"])
+chk("check_clock_cross", 0, V["t_shift"], "off", [r"^CHECK note v_t_shift clock_cross \(reported only\)"])
+chk("check_no_nopresent", 1, V["no_nopresent"], "on", [r"^CHECK STOP v_no_nopresent arm_mismatch: -perf_nopresent absent"])
+chk("check_held", 0, V["lever_held"], "on", [r"^CHECK loading_end v_lever_held located: first play frame E=83 by the engine's counters, 83 by the countdown lines .* \+ 12 held;"])
+chk("check_held0", 0, V["lever_held0"], "on", [r"^CHECK loading_end v_lever_held0 located: first play frame E=71 by the engine's counters, 71 by the countdown lines \(.*frame 86 precache 3 -> 71\);"])
 chk("check_frames_slow", 1, V["frames_shift"], "on", [r"^CHECK STOP v_frames_shift frames_slow"])
 case("check_refused", 2, [r"REFUSED: wu2_prime is not a scored load"], lines=one_order("wu2_prime", "prime"), one=("check", "wu2_prime"))
 case("r_out_exists", 2, [r"REFUSED: .*score\.txt exists, not overwriting"], pre_out=True)
@@ -735,14 +806,19 @@ MUT = {"missing_fail": ["f_miss_xray"], "cr_strip": ["good_crlf"], "not_clean": 
        "h1_median": ["h_worst"], "h1_max": ["h_stray_two"],
        "h2": ["h_train"], "h3": ["h_price"], "refuse_out": ["r_out_exists"], "lowercase": ["r_uppercase"], "dup_tag": ["r_dup"],
        "finite": ["f_inf_frame", "f_inf_site", "f_nan_thr"], "verdict_form": ["f_verdictx", "f_verdict2"],
-       "log_num": ["f_full_ms", "f_slow_ms"], "held_k": ["l_held_ok"], "capture_order": ["v_cap_order", "v_cap_late", "check_cap_order"],
+       "log_num": ["f_full_ms", "f_slow_ms"], "held_k": ["l_held_ok", "check_held"], "capture_order": ["v_cap_order", "v_cap_late", "check_cap_order"],
        "measure_lines": ["f_no_opu", "f_no_pass", "f_opu_renamed", "probe_no_opu"], "probe_save": ["probe_no_save"],
        # wu2 hooks: the end of loading inside the capture
        "loading_frames": ["v_no_frame1", "v_no_loading_site_msg", "v_c6_three", "real_prime_sites_no_loading"],
        "clock_fit": ["v_move_pre_fit", "v_clk_16", "real_prime_opu31_to_32", "real_prime_pass40_to_41"], "clock_unique": ["v_flat"],
        "loading_end": ["v_move_pre_end", "v_move_pre_back", "v_race2", "real_prime_countdown_zeroed"],
        "handled_bracket": ["v_handled_early", "real_prime_pass102_early", "real_prime_handled_early"],
-       "clock_monotone": ["v_t_shift", "real_prime_t_plus_1000"], "frames_slow": ["v_frames_shift", "real_prime_frames_shift"],
+       "clock_monotone": ["v_g_back", "v_tc_back2", "check_clock_order", "real_prime_pass_swap", "real_prime_tcont_back"],
+       "clock_cross": ["t_shift_cross", "check_clock_cross", "real_prime_t_plus_1000"],
+       "frames_slow": ["v_frames_shift", "real_prime_frames_shift"],
+       # review pass 1 (2026-11-26)
+       "probe_window": ["probe_short"], "measure_flags": ["a_no_nopresent", "a_no_noinput", "check_no_nopresent"],
+       "series_stopped": ["s_stopped_last", "s_stopped_prime"],
        "window_from_e": ["loading_outside_window", "real_prime_probe"], "stock_loop_l": ["good", "real_prime_probe"]}
 src = open(SC).read()
 hook = 'def on(name):\n    """Self-test mutation hook: every check below is guarded by on("<name>"). Always True in this file."""\n    return True\n'
@@ -799,7 +875,12 @@ CMUT = {"window_15_headline": ("WINDOW_MS = 30000.0 ", "WINDOW_MS = 15000.0 ", [
         "clock_tol_17": ("CLOCK_TOL_MS = 15.0 ", "CLOCK_TOL_MS = 17.0 ", ["v_clk_16"]),
         "clock_tol_3": ("CLOCK_TOL_MS = 15.0 ", "CLOCK_TOL_MS = 3.0 ", ["real_prime_probe"]),
         "race_0": ("RACE_FRAMES = 1 ", "RACE_FRAMES = 0 ", ["race_ok", "real_prime_probe"]),
-        "race_2": ("RACE_FRAMES = 1 ", "RACE_FRAMES = 2 ", ["v_race2", "v_move_pre_back"])}
+        "race_2": ("RACE_FRAMES = 1 ", "RACE_FRAMES = 2 ", ["v_race2", "v_move_pre_back"]),
+        # review pass 1
+        "clock_back_0": ("CLOCK_BACK_MS = 1 ", "CLOCK_BACK_MS = 0 ", ["tc_back1_ok"]),
+        "clock_back_2": ("CLOCK_BACK_MS = 1 ", "CLOCK_BACK_MS = 2 ", ["v_tc_back2"]),
+        "max_conf_2": ("MAX_CONFOUNDED = 3 ", "MAX_CONFOUNDED = 2 ", ["s_two_ok"]),
+        "max_conf_4": ("MAX_CONFOUNDED = 3 ", "MAX_CONFOUNDED = 4 ", ["s_stopped_last", "s_stopped_prime"])}
 ncm = 0
 for m, spec in sorted(CMUT.items()):
     old, new, targets = spec[0], spec[1], spec[2]
@@ -819,6 +900,13 @@ for m, spec in sorted(CMUT.items()):
         npass += 1; ncm += 1; print("ok   constant mutant %-18s caught by %s" % (m, ", ".join(targets)))
     else:
         nfail += 1; print("FAIL constant mutant %s: %s" % (m, why))
+# ---------------- one value in two files: the scorer's MAX_CONFOUNDED must be the driver's (wu2_run.sh) ----------------
+drv = open(os.path.join(os.path.dirname(SC), "wu2_run.sh")).read()
+mc_d, mc_s = re.findall(r"\bMAX_CONFOUNDED=(\d+)", drv), re.findall(r"^MAX_CONFOUNDED = (\d+) ", src, re.M)
+if len(mc_d) == 1 and len(mc_s) == 1 and mc_d == mc_s:
+    npass += 1; print("ok   MAX_CONFOUNDED: scorer %s = driver %s" % (mc_s[0], mc_d[0]))
+else:
+    nfail += 1; print("FAIL MAX_CONFOUNDED: scorer %s, driver %s (each must be set exactly once, equal)" % (mc_s, mc_d))
 nmut = sum(1 for m in MUT if m in used) if src.count(hook) == 1 else 0
 with open(os.path.join(ST, "counts.txt"), "w") as f:
     f.write("%d %d %d %d %d %d\n" % (npass, nfail, nreal, nmade, nmut, ncm))
@@ -833,8 +921,92 @@ newer_count() {   # <dir> <stamp file>: prints the number of paths newer than th
   out=$(find "$1" -newer "$2" -print) || return 1
   printf '%s' "$out" | grep -c . || true
 }
-if newer_count "$ST/t1_no_such_dir" "$ST/.t0" >/dev/null 2>&1; then fail=$((fail+1)); echo "FAIL untouched check: a find error was not caught" | tee -a "$LOG"
-else pass=$((pass+1)); echo "ok   untouched check fails on a find error" | tee -a "$LOG"; fi
+newer_count_mut() {   # MUTANT of newer_count: find's exit status ignored (what review pass 1, finding 6, asked to catch)
+  local out
+  [ -d "$1" ] || { echo "missing $1" >&2; return 1; }
+  out=$(find "$1" -newer "$2" -print)
+  printf '%s' "$out" | grep -c . || true
+}
+nc_tests() {   # <function>: the untouched check's own tests; prints one line per failed test, returns how many failed
+  local fn=$1 f=0 n
+  "$fn" "$ST/t1_no_such_dir" "$ST/.t0" >/dev/null 2>&1 && { echo "missing directory counted as unchanged"; f=$((f+1)); }
+  mkdir -p "$ST/t1_dir" && : > "$ST/t1_dir/a"
+  # existing directory, find itself fails: the -newer reference does not exist
+  "$fn" "$ST/t1_dir" "$ST/t1_no_such_stamp" >/dev/null 2>&1 && { echo "find error (missing -newer file) on an existing directory counted as unchanged"; f=$((f+1)); }
+  # existing directory, find fails part-way (an unreadable subfolder; skipped as root, who reads everything)
+  if [ "$(id -u)" != 0 ]; then
+    mkdir -p "$ST/t1_dir/locked" && chmod 000 "$ST/t1_dir/locked"
+    "$fn" "$ST/t1_dir" "$ST/.t0" >/dev/null 2>&1 && { echo "find error (unreadable subfolder) counted as unchanged"; f=$((f+1)); }
+    chmod 700 "$ST/t1_dir/locked"
+  fi
+  # control: a readable directory works and counts its new paths
+  n=$("$fn" "$ST/t1_dir" "$ST/.t0" 2>/dev/null) || { echo "a readable directory reported as a find error"; f=$((f+1)); }
+  [ "${n:-0}" -ge 2 ] 2>/dev/null || { echo "a readable directory with new paths counted ${n:-nothing}"; f=$((f+1)); }
+  return $f
+}
+nfind=0
+if r=$(nc_tests newer_count); then pass=$((pass+1)); nfind=$((nfind+1)); echo "ok   untouched check fails on a missing folder and on find errors in an existing folder" | tee -a "$LOG"
+else fail=$((fail+1)); echo "FAIL untouched check: $r" | tee -a "$LOG"; fi
+if r=$(nc_tests newer_count_mut); then fail=$((fail+1)); echo "FAIL untouched-check mutant (find status ignored) survived" | tee -a "$LOG"
+else pass=$((pass+1)); nfind=$((nfind+1)); echo "ok   untouched-check mutant (find status ignored) caught by: $(echo "$r" | tr '\n' ';')" | tee -a "$LOG"; fi
+
+# ---- the driver's logic, offline (review pass 1, findings 3 and 9): wu2_run.sh is never run; its marked function
+# block is extracted and run on a copy of wu2_order.txt in this folder; no load, no queue, no display, no claim ----
+DRV="$HERE/wu2_run.sh"
+DT="$ST/driver"; mkdir -p "$DT"
+sed -n '/^# ---- BEGIN driver functions/,/^# ---- END driver functions/p' "$DRV" > "$DT/funcs.sh"
+drv_tests() {   # <function file> <work dir>: prints one line per failed test; exit status = number failed
+  ( set -u; EXE=Warm18.exe; NLOADS=33; NON=16; NOFF=16; D=$2; f=0
+    . "$1"
+    mkdir -p "$D"; src="$D/order_src.txt"; cp -- "$HERE/wu2_order.txt" "$src"; want=$(sha256sum "$src" | cut -d' ' -f1)
+    # 1. the registered order is copied, the copy has the hash, it is read-only, and dispatch reads the copy only
+    mkdir "$D/st1"; ST="$D/st1"; : > "$ST/done.txt"
+    order_copy "$src" "$want" "$ST" > "$D/t1.txt" 2>&1 || { echo "order_copy refused the registered order ($(tr '\n' ' ' < "$D/t1.txt"))"; f=$((f+1)); }
+    [ "$(sha256sum "$ST/wu2_order.txt" 2>/dev/null | cut -d' ' -f1)" = "$want" ] || { echo "the copy's hash differs"; f=$((f+1)); }
+    if [ "$(id -u)" != 0 ] && [ -w "$ST/wu2_order.txt" ]; then echo "the copy is writable"; f=$((f+1)); fi
+    p1=$(pending "$ST/wu2_order.txt")
+    printf 'wu2_99_evil|Warm18.exe|cordon1|0|20000|20|on\n' >> "$src"          # the original edited after the copy
+    p2=$(pending "$ST/wu2_order.txt")
+    [ "$p1" = "$p2" ] && [ "$(echo "$p2" | grep -c .)" = 33 ] && ! echo "$p2" | grep -q evil || { echo "dispatch from the copy changed after the original was edited"; f=$((f+1)); }
+    echo wu2_prime >> "$ST/done.txt"
+    [ "$(pending "$ST/wu2_order.txt" | head -1 | cut -d'|' -f1)" = wu2_01_on ] || { echo "pending does not skip a done load"; f=$((f+1)); }
+    # 2. the original changed between the preflight and the copy: the copy fails the registered hash
+    mkdir "$D/st2"; ST="$D/st2"
+    order_copy "$src" "$want" "$ST" > "$D/t2.txt" 2>&1 && { echo "a copy that is not the registered order was accepted"; f=$((f+1)); }
+    grep -q "failed its hash check" "$D/t2.txt" || { echo "the hash refusal is not named"; f=$((f+1)); }
+    # 3. no registered hash yet: refused
+    mkdir "$D/st3"; ST="$D/st3"; cp -- "$HERE/wu2_order.txt" "$D/order3.txt"
+    order_copy "$D/order3.txt" PIN_ME_ORDER "$ST" > "$D/t3.txt" 2>&1 && { echo "PIN_ME_ORDER accepted"; f=$((f+1)); }
+    # 4. the copy exists already: refused
+    order_copy "$D/order3.txt" "$want" "$D/st1" > "$D/t4.txt" 2>&1 && { echo "an existing copy was overwritten"; f=$((f+1)); }
+    # 5. the hash matches but the shape is not the registered one: refused by order_ok
+    mkdir "$D/st5"; ST="$D/st5"; head -3 "$HERE/wu2_order.txt" > "$D/order5.txt"
+    order_copy "$D/order5.txt" "$(sha256sum "$D/order5.txt" | cut -d' ' -f1)" "$ST" > "$D/t5.txt" 2>&1 && { echo "a 2-load order accepted"; f=$((f+1)); }
+    # 6. slice deadline: a load starts only with >= BENCH_TO + END_RESERVE s left
+    now=$(date +%s)
+    slice_ok $((now + 1100)) 1020 || { echo "slice_ok refused 1100 s left for 1020 s"; f=$((f+1)); }
+    slice_ok $((now + 1000)) 1020 && { echo "slice_ok accepted 1000 s left for 1020 s"; f=$((f+1)); }
+    slice_ok $((now - 5)) 0 && { echo "slice_ok accepted a passed deadline"; f=$((f+1)); }
+    exit $f )
+}
+ndrv=0
+if r=$(drv_tests "$DT/funcs.sh" "$DT/real"); then pass=$((pass+1)); ndrv=$((ndrv+1)); echo "ok   driver functions offline (order copy + hash, dispatch from the copy, slice deadline)" | tee -a "$LOG"
+else fail=$((fail+1)); echo "FAIL driver functions: $(echo "$r" | tr '\n' ';')" | tee -a "$LOG"; fi
+# driver mutants: each must be caught by the offline tests
+for m in no_copy_hash:'/pin "\$dst" "\$want"/d' copy_writable:'/chmod a-w "\$dst"/d' slice_always:'s/\[ \$(( \$1 - \$(date +%s) )) -ge "\$2" \]/true/'; do
+  name=${m%%:*}; expr=${m#*:}
+  sed "$expr" "$DT/funcs.sh" > "$DT/funcs_$name.sh"
+  if cmp -s "$DT/funcs.sh" "$DT/funcs_$name.sh"; then fail=$((fail+1)); echo "FAIL driver mutant $name: the sed did not change the functions" | tee -a "$LOG"; continue; fi
+  if [ "$name" = copy_writable ] && [ "$(id -u)" = 0 ]; then echo "skip driver mutant $name (root writes read-only files)" | tee -a "$LOG"; continue; fi
+  if r=$(drv_tests "$DT/funcs_$name.sh" "$DT/m_$name"); then fail=$((fail+1)); echo "FAIL driver mutant $name survived" | tee -a "$LOG"
+  else pass=$((pass+1)); ndrv=$((ndrv+1)); echo "ok   driver mutant $name caught by: $(echo "$r" | tr '\n' ';')" | tee -a "$LOG"; fi
+done
+# the main body (not in the function block) must use the copy and recheck the deadline before the bench: static checks
+if awk '/^order_copy "\$ORDER" "\$ORDER_SHA" "\$ST"/{c=NR} /^ORDER=\$ST\/wu2_order.txt$/{if (c && NR==c+1) ok=1} END{exit !ok}' "$DRV" && \
+   [ "$(grep -c 'pending "\$ORDER"' "$DRV")" = 3 ] && ! grep -q '\bpending |' "$DRV" && grep -q 'order=\$ORDER 2>&1' "$DRV" && \
+   awk '/quiet-required.sh" claim \$W 30 "\$WHAT" >\/dev\/null 2>&1 \|\| \{ stop="claim renewal/{r=NR} /slice_ok \$SL_END \$\(\(BENCH_TO \+ END_RESERVE\)\)/{s=NR} /tools\/s2_bench.sh "\$exe"/{b=NR} END{exit !(r && s > r && b > s)}' "$DRV"; then
+  pass=$((pass+1)); ndrv=$((ndrv+1)); echo "ok   driver body: ORDER = the state-dir copy right after order_copy; pending/check use it; deadline rechecked after the renewal, before the bench" | tee -a "$LOG"
+else fail=$((fail+1)); echo "FAIL driver body: copy not used everywhere, or the deadline recheck is not between the claim renewal and the bench" | tee -a "$LOG"; fi
 touched=0
 for t in cp1 cp2 cp3 cp4 uc1 lc1 lc2 lc3 cpl1 r1a_cor_1 wu1_prime; do
   if n=$(newer_count "$REAL/$t" "$ST/.t0"); then touched=$((touched + n))
@@ -843,5 +1015,5 @@ done
 if [ "$touched" != 0 ]; then fail=$((fail+1)); echo "FAIL real fixture folders changed during the self-test ($touched paths)" | tee -a "$LOG"
 else pass=$((pass+1)); echo "ok   real fixture folders unchanged" | tee -a "$LOG"; fi
 tot=$((pass+fail))
-if [ "$fail" = 0 ]; then echo "WU2 SELFTEST PASS $pass/$tot ($nreal real cases, $nmade made cases, $nmut hook mutants caught, $ncm constant mutants caught, 1 hook-coverage check, 1 find-error check, 1 untouched check) in $ST" | tee -a "$LOG"; exit 0
+if [ "$fail" = 0 ]; then echo "WU2 SELFTEST PASS $pass/$tot ($nreal real cases, $nmade made cases, $nmut hook mutants caught, $ncm constant mutants caught, 1 hook-coverage check, 1 MAX_CONFOUNDED agreement check, $nfind find-error checks, $ndrv driver checks, 1 untouched check) in $ST" | tee -a "$LOG"; exit 0
 else echo "WU2 SELFTEST FAIL $fail of $tot in $ST" | tee -a "$LOG"; exit 1; fi

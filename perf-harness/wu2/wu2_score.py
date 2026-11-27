@@ -69,6 +69,11 @@ VERDICTS = ("VERDICT: clean", "VERDICT: CONFOUNDED (other heavy process present)
             "VERDICT: functional run, timings are not measurements")   # the only three tools/s2_bench.sh:72-74 writes
 STOP_VOIDS = ("framecount", "capture_lines", "stock_loop", "frame_limiter", "threshold_header",
               "loading_frames", "clock_fit", "loading_end", "clock_order", "frames_slow")   # check=: driver stops
+CLOCK_BACK_MS = 1         # clock_order: a value of one clock kind may be at most this far below an earlier one of the
+                          #   SAME kind in log order (both are frame samples that only go forward by code: prereg 4.3)
+MEASURE_FLAGS = ("-perf_nopresent", "-perf_noinput")   # registered measurement flags (prereg 2): absent = arm_mismatch
+MAX_CONFOUNDED = 3        # wu2_run.sh MAX_CONFOUNDED (the self-test checks the two agree): the driver stops the series at
+                          #   the load that makes this many non-clean loads, prime included; such a series is FAIL (3.3)
 SAVE_ZONES = ("CALifeStorageManager::save", "CALifeStorageManager::prepare_objects_for_save")
 ARMS = ("on", "off", "prime")
 
@@ -352,13 +357,13 @@ def loading_layout(ms, N, calls, rows, g, tag):
     Code facts (prereg 5.1): every captured frame is one on_idle; an on_idle with a pending loading event runs that one
     event and returns before FrameMove (device.cpp:693-704), so it has no seqFrame and no time_global update (its
     LoadDraw may bump dwFrame, x_ray.cpp:1590-1591: not relied on, the offset D below is fitted on FrameMove frames
-    only, where dwFrame moves once a frame, device.cpp:1047); the 12 events of a save load run in a fixed order (Level_start.cpp:95-100, 221-235: net_start1..4, then
+    only, where dwFrame moves once a frame, device.cpp:1048); the 12 events of a save load run in a fixed order (Level_start.cpp:95-100, 221-235: net_start1..4, then
     net_start_client1..6 pushed to the front, then net_start5..6), net_start_client6 repeated while the map sync is not
     done; the precache countdown is counted down by End() (device.cpp:157-185) and "Handled Necessary Textures
     Destruction" is printed in the End() that reaches 0; 'Precache frame' (device.cpp:773) is called once in every
     FrameMove frame with the countdown > 0, 'Start xrSASH Benchmark' (device.cpp:709) once in every FrameMove frame with
     it at 0 before the frame."""
-    R = dict(void=[], E=None, L=None, Pc=None, D=None, lt=None, lt_why="", info=[], est=[], fit=None, fit2=None)
+    R = dict(void=[], E=None, L=None, Pc=None, D=None, lt=None, lt_why="", info=[], est=[], fit=None, fit2=None, cross=None)
     c = lambda n: calls.get(n, [0, 0])[0]
     # ---- (a) loading frames: capture frames 0 .. L-1, proven by the event counts and the frame-1 marker ----
     L, Pc, c6 = c("Loading..."), c("Precache frame"), c(EV_RETRY)
@@ -456,30 +461,63 @@ def loading_layout(ms, N, calls, rows, g, tag):
         if after and min(after) < E - 2:
             ob.append("a clock line of capture frame %d is logged after the loading-end line (printed in frame %d)"
                       % (min(after), E - 1))
+    # Each clock kind alone never goes back in log order (stop). Code (wt-simtick d77d70b5c): dwTimeGlobal and
+    # dwTimeContinual are written only in FrameMove (device.cpp:1051, 1112); every alife_pass line copies them at the
+    # start of its update and is logged at its end inside the GameThread task, which the main thread joins at
+    # device.cpp:918 before the next on_idle; alife_opu and the Lua stamp read them live in the same frame. So in log
+    # order each kind is a run of frame samples that only goes forward (TimerGlobal: frozen while paused, never back;
+    # dwTimeContinual goes back only at an app re-activation, device.cpp:1248, after a deactivation that pauses the game,
+    # GamePersistent.cpp:959). A wide or full pass and held frames only make an update longer inside its own frame.
+    # Across kinds (stamp vs time_global) the gap is TimerMM - TimerGlobal: 0 by code (Device_Initialize.cpp:40-41)
+    # unless the timer was paused (device.cpp:1153-1155), the app deactivated, or time_factor changed (device.h:363-367);
+    # whether a normal load does any of these is not settled by the source (a UI sequence's pause flag, a script's
+    # time_factor): REPORTED only (clock_cross), never a stop. MEASURED-PRIME: 0 ms in all 3 same-frame pairs.
+    seqs = {"time_global": sorted((x["i"], x["T"]) for x in g["passes"] + g["opus"]),
+            "Time continual": sorted((x["i"], x["T"]) for x in g["tcont"])}
     if on("clock_monotone"):
-        seq = sorted([(x["i"], x["T"], "time_global") for x in g["passes"] + g["opus"]] +
-                     [(x["i"], x["T"], "Time continual") for x in g["tcont"]])
-        hi = None
-        for i, T, kind in seq:
-            if hi is not None and T < hi[0] - 1:
-                ob.append("log line %d %s %d after log line %d at %d: the engine clock goes back" % (i + 1, kind, T, hi[1] + 1, hi[0]))
-                break
-            if hi is None or T > hi[0]:
-                hi = (T, i)
+        for kind in ("time_global", "Time continual"):
+            hi = None
+            for i, T in seqs[kind]:
+                if hi is not None and T < hi[0] - CLOCK_BACK_MS:
+                    ob.append("log line %d %s %d after log line %d %s %d: %s goes back" % (i + 1, kind, T, hi[1] + 1, kind, hi[0], kind))
+                    break
+                if hi is None or T > hi[0]:
+                    hi = (T, i)
     if ob:
         R["void"].append("clock_order: " + "; ".join(ob))
         return R
-    # ---- (e) engine time at the first play frame (load time, 5.4) ----
+    if on("clock_cross"):
+        seq = sorted([(i, T, "time_global") for i, T in seqs["time_global"]] + [(i, T, "Time continual") for i, T in seqs["Time continual"]])
+        hi, worst = None, None
+        for i, T, kind in seq:
+            if hi is not None and T < hi[0] - CLOCK_BACK_MS and (worst is None or hi[0] - T > worst[0]):
+                worst = (hi[0] - T, i, kind, T, hi)
+            if hi is None or T > hi[0]:
+                hi = (T, i, kind)
+        if worst:
+            d, i, kind, T, h = worst
+            R["cross"] = ("clock_cross (reported only): log line %d %s %d after log line %d %s %d: %d ms back across the two "
+                          "clocks (a timer pause, app deactivation or time_factor change, or a shifted time_global)"
+                          % (i + 1, kind, T, h[1] + 1, h[2], h[0], d))
+    # ---- (e) engine time at the first play frame (load time, 5.4): an ESTIMATE ----
+    # A clock line of capture frame c holds time_global read at device.cpp:1112, o_c ms after frame c's PROF_FRAME
+    # (device.cpp:675; the frames file's ms run PROF_FRAME to PROF_FRAME on the same QPC clock, profiler_agg.cpp:119-121),
+    # so 0 <= o_c <= ms[c]. The estimate is the start of frame E + o_c; the engine's own value at E is that + o_E. Error
+    # = o_c - o_E, in [-ms[E], +ms[c]], plus 1 ms of integer time_global; valid only with no timer pause between c and E.
+    # The clock fit does not narrow it (it compares offsets at clock-line frames only, never at E).
     aft = [x for x in cl if cap(x) >= E]
     bef = [x for x in cl if cap(x) < E]
     tA = (aft[0]["T"] - (pre[cap(aft[0])] - pre[E])) if aft else None
     tB = (bef[-1]["T"] + (pre[E] - pre[cap(bef[-1])])) if bef else None
     t = tA if tA is not None else tB
+    c0 = cap(aft[0]) if aft else cap(bef[-1])
     R["lt"] = t / 1000.0
-    R["lt_why"] = "time_global %.0f ms at capture %d (%s%s)" % (
+    R["lt_bound"] = (ms[E] + 1.0, ms[c0] + 1.0)
+    R["lt_why"] = "time_global %.0f ms at capture %d (%s%s; estimate: -%.1f / +%.1f ms = frame E %.1f ms / frame %d %.1f ms, + 1 ms)" % (
         t, E, ("from frame %d T %d minus %.1f ms" % (aft[0]["F"], aft[0]["T"], pre[cap(aft[0])] - pre[E])) if aft else
         ("from frame %d T %d plus %.1f ms" % (bef[-1]["F"], bef[-1]["T"], pre[E] - pre[cap(bef[-1])])),
-        ("; from the last countdown line %.0f ms" % tB) if (aft and tB is not None) else "")
+        ("; from the last countdown line %.0f ms" % tB) if (aft and tB is not None) else "",
+        ms[E] + 1.0, ms[c0] + 1.0, ms[E], c0, ms[c0])
     # ---- reported: where line HANDLED falls; the intro frame marker ----
     intro = sorted(set(r[0] for r in rows if r[4] == INTRO_SITE and L <= r[0] < E and r[3] >= SLOW1_MS))
     R["intro_marker"] = intro
@@ -548,6 +586,9 @@ def score_load(root, s):
     for bad in ("-perf_fixed_dt", "-det_mode", "-sim_tick"):
         if bad in tok:
             arm_bad.append("%s present (not real time / not stock loop)" % bad)
+    for need in MEASURE_FLAGS:
+        if on("measure_flags") and need not in tok:
+            arm_bad.append("%s absent (registered measurement flag)" % need)
     if ("-alife_warmup" in tok) != (s["arm"] == "on"):
         arm_bad.append("-alife_warmup %s on an %s load" % ("present" if "-alife_warmup" in tok else "absent", s["arm"].upper()))
     if on("arm_cmdline") and arm_bad:
@@ -614,6 +655,8 @@ def score_load(root, s):
     E = Y["E"] if Y["E"] is not None and not Y["void"] else None
     if E is None:
         return R
+    if Y.get("cross"):
+        R["notes"].append(Y["cross"])
     # ---- the scripted save (cordon1's start-of-game autosave) is excluded from the frame numbers ----
     if on("slow_cap") and len(rows) > SLOW_CAP_ROWS:
         R["void"].append("slow_cap: perf_slow has %d rows > %d: the profiler's 600-frame slow dump may be full, a save "
@@ -720,8 +763,9 @@ def one_load(folder, order, probe):
     """probe= / check= modes for the driver. Same rules as scoring (score_load), one load. Exit 0 = go on,
     1 = stop the series, 2 = refused. check=: stop on any FAIL and on the stop-VOIDs (STOP_VOIDS); not on not_clean
     (the driver counts those), window_short, save_unlocated, slow_cap.
-    probe= (the PRIME load, never scored): also needs a save frame located; prints the located end of loading and the
-    engine loading-end line's bracket as numbers."""
+    probe= (the PRIME load, never scored): also needs a save frame located and the whole 30 s headline window after E
+    covered (window_short is a PROBE STOP); prints the located end of loading and the engine loading-end line's bracket
+    as numbers."""
     slots, err = read_order(order)
     if err:
         print(err)
@@ -738,10 +782,13 @@ def one_load(folder, order, probe):
         stop.append("no_save_frame: no perf_slow row names %s inside the capture" % " / ".join(SAVE_ZONES))
     if probe and on("probe_save") and "w1" in R:
         stop += [v for v in R["void"] if v.split(":")[0] == "save_unlocated"]
+    # the probe must establish that the capture covers the whole 30 s headline window after E (prereg 8)
+    if probe and on("probe_window"):
+        stop += [v for v in R["void"] if v.split(":")[0] == "window_short"]
     word = "PROBE" if probe else "CHECK"
     for r in stop:
         print("%s STOP %s %s" % (word, tag, r))
-    for r in R["void"]:
+    for r in R["void"] + [n for n in R["notes"] if n.startswith("clock_cross")]:
         if r not in stop:
             print("%s note %s %s" % (word, tag, r))
     hl = None
@@ -810,9 +857,16 @@ def main(argv):
          STOCK_HITCH_MIN, STOCK_TRAIN_MIN, LEGACY_WIDE, N_M_MIN, P_MIN, CLOCK_TOL_MS, RACE_FRAMES))
     P("")
     loads = []
+    nonclean = []   # loads the driver counts as not clean (wu2_run.sh: VERDICT line != "VERDICT: clean", prime included)
     for s in slots:
         if s["arm"] == "prime":
-            P("LOAD %s prime: not scored" % s["tag"])
+            try:
+                pv = read_verdict(os.path.join(args["root"], s["tag"]))
+            except Bad as e:
+                pv = "unreadable (%s)" % e
+            if pv != "VERDICT: clean":
+                nonclean.append(s["tag"])
+            P("LOAD %s prime: not scored (%s)" % (s["tag"], pv))
             continue
         R = score_safe(args["root"], s)
         loads.append(R)
@@ -840,6 +894,12 @@ def main(argv):
             P("    load time: %s" % (R["lt_why"]))
     # ---------------- verdict (prereg 7) ----------------
     fails = [(R["tag"], r) for R in loads for r in R["fatal"]]
+    # (a scored load whose conditions.txt cannot be read is a FAIL by itself, so only its not_clean VOID is counted here)
+    nonclean += [R["tag"] for R in loads if any(v.startswith("not_clean:") for v in R["void"])]
+    if on("series_stopped") and len(nonclean) >= MAX_CONFOUNDED:
+        fails.append(("series", "stopped_series: %d non-clean load(s) (%s) >= MAX_CONFOUNDED %d: the driver stops the "
+                                "series at that load; a stopped series is FAIL (prereg 3.3), even with no folder missing"
+                      % (len(nonclean), ", ".join(nonclean), MAX_CONFOUNDED)))
     valid = [R for R in loads if not R["fatal"] and not R["void"]]
     for R in valid:   # wu2: a valid load always has a load time (E and the clock fit are stop-VOID conditions, 5.4)
         if R["lt"] is None:
@@ -882,8 +942,9 @@ def main(argv):
         P("")
         for t, r in fails:
             P("FAIL %s %s" % (t, r))
-        final, code = "FAIL (%d load(s) failed a registered check: %s)" % (
-            len(set(t for t, _ in fails)), ", ".join(sorted(set(r.split(":")[0] for _, r in fails)))), 1
+        final, code = "FAIL (%d load(s) failed a registered check%s: %s)" % (
+            len(set(t for t, _ in fails if t != "series")), ", series stopped" if any(t == "series" for t, _ in fails) else "",
+            ", ".join(sorted(set(r.split(":")[0] for _, r in fails)))), 1
     else:
         nv = []
         if on("nv_few_on") and len(on_v) < MIN_ON:

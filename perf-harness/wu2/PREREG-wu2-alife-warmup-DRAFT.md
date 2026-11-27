@@ -22,6 +22,12 @@ new margin rows for the window start), 7.2 (NO VERDICT `loadtime` withdrawn: it 
 (1 prime + 16 ON + 16 OFF, ABBA), OFF grouping rule, lever checks L1-L5, H1-H3 and their bounds, every other NO VERDICT
 rule, exit codes, the save-frame rule, probe before any scored load, score-once command form, no retry.
 
+**Review pass 1 (CodeRabbit, 2026-11-26; triage in wu2/coderabbit-triage-2026-11-26.md), still before registration:**
+the probe FAILs on window_short (8); the load time is called an estimate with a code bound (5.4); the driver runs
+from a hash-checked copy of the order file and rechecks the slice deadline right before each load (8, 3.3);
+FAIL stopped_series (4.3, 7.1); -perf_nopresent / -perf_noinput required (4.3); clock_order now checks each clock
+kind alone, the cross-clock comparison is reported only (4.3; one stated protection lost).
+
 Every check, rule, number of loads and bound below is fixed before any run. Nothing of wu2 has been run on the box.
 Sources: wu1 prereg (Revision 3) and NOTES; wu2/NOTES.md (the facts of out/wu1_prime with file:line); engine source
 wt-simtick perf/alife-warmup d77d70b5c. Labels: MEASURED (a number in a file, cited), DESK (my count or reading of
@@ -51,7 +57,13 @@ not scored, seen before this registration).
   the intro frame visible in the slow file. See 5.1.
 - **wu2: a one-frame move of one clock line in quiet frames is not detected** (about 4-6 ms, under the 15 ms clock
   tolerance). It cannot move the window (E comes from the counters). A renumbering of every device frame is invisible
-  and harmless. A uniform shift of every time_global is caught only through the mcm_log "Time continual is:" stamps.
+  and harmless. **A uniform shift of every time_global against the mcm_log "Time continual is:" stamps is REPORTED
+  (clock_cross), no longer a stop** (review pass 1, 4.3): the source does not settle that a normal load never pauses
+  the engine timer, so a cross-clock gap cannot be told apart from valid data; such a shift moves the load time (H3)
+  and is printed per load, not caught.
+- **wu2: the load time is an ESTIMATE** (5.4): the engine's own clock at E is not logged; it is inferred from a clock
+  line in another frame, with a bound from the code (|error| <= the longer of frame E and that line's frame + 1 ms),
+  not from the clock fit.
 - The load time is the engine's own clock at the end of loading (5.4): it misses Wine start-up and file-system init,
   which the lever cannot touch. The in-capture loading time (capture start -> E) is reported beside it.
 - A load with NO alife_pass line or NO alife_opu line at all is a FAIL `no_measure_lines` (wu1, unchanged). The
@@ -77,7 +89,7 @@ same as wu1). Settings: run/appdata/user.ltx as is, checked read-only before eve
 | BENCH_FIXED | 0 (real time) | wu1 (COPIED) | dwTimeGlobal = wall clock (device.cpp:1110-1113) |
 | `-perf_capture W,N,tag` | W = 0, N = 20000 (COPIED) | s2_bench.sh:56 | **wu2: the capture starts with the level's first loading event and holds 13 loading + 58 precache frames before play (5.1)**; the scorer finds the end of loading inside it |
 | `-perf_quit -nointro -dbg -start server(cordon1/single/alife/load) client(localhost)` | | wu1 (COPIED) | |
-| `-perf_noinput -perf_nopresent` | | wu1 (COPIED) | |
+| `-perf_noinput -perf_nopresent` | | wu1 (COPIED) | wu2 review pass 1: both REQUIRED in the logged command line (`arm_mismatch` by name, 4.3) |
 | `-perf_slow` | 20 (COPIED) | profiler_agg.cpp:79-80 | per frame > 20 ms, the 14 largest self times; used for the save frame (5.5) and, wu2, the frame-1 marker of the loading layout (5.1) and the frames_slow check (4.3) |
 | `-alife_warmup` | ON loads only | | the lever |
 | BENCH_EXCLUSIVE=1, BENCH_NOCLAIM=1, BENCH_LOWEND=0, BENCH_TIMEOUT=900 | | wu1 (COPIED) | |
@@ -101,9 +113,12 @@ MEASURED-PRIME: bench start 18:08:38, end 18:10:45 = 127 s (bench rc line: elaps
 device init to capture start, dump, quit, the bench's wait); the first load after idle may be the slowest of these.
 Per load: 25 s + 10.9 s + 19,929 play frames x 4.1-5.0 ms (81.7-99.6 s) = 118-136 s (155 s at 6 ms frames). Driver
 overhead per load: settle 20-60 s (GUESS, wu1; the prime had 0 s, it was the first), display grace 0-20 s. Per load
-138-216 s. **33 loads: 76-119 min** (130 min at 6 ms frames). Usable 165 min of the 3 h slice (the driver stops with
-< 15 min left): 1.39-2.2x, 1.27x at 6 ms frames: **UNDER 2x at the slow end** (as wu1). A stopped series is FAIL
-[missing] and needs a new registration. ON loads add the pass (0.5-0.75 s) and any held frames (<= 300 frames,
+138-216 s. **33 loads: 76-119 min** (130 min at 6 ms frames). Usable 163 min of the 3 h slice (review pass 1: a load
+starts only while >= BENCH_TIMEOUT 900 s + 120 s of cleanup = 17 min are left, rechecked right before the bench, after
+the settle, the display wait and the claim renewal; the old 15 min check stays and is now inside it): 1.37-2.14x,
+1.25x at 6 ms frames: **UNDER 2x at the slow end** (as wu1). A stopped series is FAIL and needs a new registration:
+FAIL [missing] for the loads it did not run, and, when the stop left no folder missing (the MAX_CONFOUNDED-th
+non-clean load was the last one), FAIL [stopped_series] (4.3, 7.1). ON loads add the pass (0.5-0.75 s) and any held frames (<= 300 frames,
 < 2 s): within the per-load range.
 
 ## 4. Per-load checks
@@ -121,7 +136,14 @@ pass lines reaching the narrowing's time_global and no frame with >= 50 alife_sl
 
 ### 4.3 Run validity (VOID: the load is not counted, no re-run; FAIL where marked)
 - `missing` / `empty` / `unparsable` file, `arm_mismatch`, `off_not_stock`, `no_measure_lines`, `scorer_error`: **FAIL**
-  by name (wu1, unchanged).
+  by name (wu1, unchanged). wu2 review pass 1: `arm_mismatch` also when `-perf_nopresent` or `-perf_noinput` is absent
+  from the logged command line (a capture scored standalone must show it ran with the registered measurement flags).
+- **FAIL `stopped_series`** (review pass 1): the driver stops the series at the load that makes MAX_CONFOUNDED = 3
+  non-clean loads (VERDICT not "clean"; the prime counts, as in wu2_run.sh). The scorer counts the same loads (the
+  prime's conditions.txt is read for its VERDICT only; unreadable counts as not clean, as the driver's empty VERDICT
+  does) and a series with >= 3 is FAIL by name, also when no folder is missing. wu2_score.py and wu2_run.sh hold the
+  same MAX_CONFOUNDED (self-test check). Before this fix the text (3.3: "a stopped series is FAIL") and the code (a
+  PASS was possible) disagreed; the code was fixed.
 - VOID (wu1, unchanged): `not_clean`, `framecount` (frames rows = sites header = 20000), `frame_limiter`,
   `threshold_header`, `window_short` (wu2: under 30 s of play AFTER E), `save_unlocated`, `slow_cap`.
 - VOID `capture_lines` **(corrected)**: xrprof started / finished lines with the tag and 20000 frames, in the log order
@@ -146,7 +168,29 @@ pass lines reaching the narrowing's time_global and no frame with >= 50 alife_sl
     (+ K if P > 3) in {E - 1, E} (RACE_FRAMES = 1: a line of the A-Life thread may read the countdown after that
     frame's End()). No countdown line: VOID.
   - `clock_order`: no clock line of capture > E-1 is logged before the textures-handled line and none of capture < E-2
-    after it; time_global and "Time continual is:" values never go back by more than 1 ms in log order.
+    after it; **each clock kind alone** (the time_global of the alife_pass / alife_opu lines; the "Time continual is:"
+    stamps) never goes back by more than CLOCK_BACK_MS = 1 ms in log order. Derivation (CODE, wt-simtick d77d70b5c):
+    dwTimeGlobal and dwTimeContinual are written only in FrameMove (device.cpp:1051, 1112); an alife_pass line copies
+    them at the start of its update and is logged at its end, inside the GameThread task (EngineThreading.cpp:161-166)
+    that the main thread joins at device.cpp:918 before the next on_idle; alife_opu (alife_simulator_script.cpp:508) and
+    the stamp (mcm_log.script:203-205 -> _g.script time_continual -> Device.dwTimeContinual,
+    script_render_device_script.cpp:45-48) read them live in the same frame. So each kind is a run of frame samples
+    that only goes forward: TimerGlobal is frozen while paused, never back; dwTimeContinual goes back only at an app
+    re-activation (device.cpp:1248), after a deactivation that pauses the game (GamePersistent.cpp:959), i.e. a load
+    that did not run as registered. The lever's full pass, a wide stock pass and held frames only make one update
+    longer inside its own frame: they cannot put a newer value before an older one (review pass 1, finding 8: the
+    concern is refuted by the code). MEASURED-PRIME: both kinds monotone.
+  - **reported only, `clock_cross`** (review pass 1; was part of clock_order): the largest step back across the two
+    kinds (a stamp below an earlier time_global or the reverse). Their same-frame gap is TimerMM - TimerGlobal: 0 by
+    code (started together, Device_Initialize.cpp:40-41; one QPC clock; read 61 lines apart in FrameMove) unless the
+    engine timer was paused (Device::Pause -> g_pauseMngr, device.cpp:1153-1155: UI sequences UIGameTutorial.cpp:192-194,
+    focus loss GamePersistent.cpp:959), the app deactivated (device.cpp:1248, 1266) or time_factor changed (TimerGlobal
+    only, device.h:363-367; console_commands.cpp:2049, 2160). Whether a normal load does one of these is NOT settled by
+    the source (the "game_loaded" sequence's pause flag is in an xml I could not read; scripts can run time_factor), so
+    a stop here could stop valid data. MEASURED-PRIME: gap 0 ms in all 3 same-frame pairs (log lines 7045/7046,
+    8130/8132, 8527/8553), before and after intro_start. **Protection lost:** a uniform shift of every time_global
+    against the stamps (self-test real_prime_t_plus_1000: +1000 ms) is no longer a stop; it is printed per load (probe /
+    check note, report line). Such a shift moves that load's load time, i.e. H3.
   - `frames_slow`: every perf_slow row's frame_ms equals the frames file's ms of that frame to 0.0005 ms (the profiler
     writes both from the same ticks with the same scale, profiler_agg.cpp:153, 166, 187, 210; MEASURED-PRIME 434 of 434).
 
@@ -208,8 +252,19 @@ worst 5.3 ms, n20 0; a mutant that starts the window at frame 0 is caught; MEASU
 ### 5.4 Load time (engine clock) (REWRITTEN)
 Load time = time_global (ms since device init) at the first play frame E. From the clock lines placed by D (5.1):
 from the first clock line with capture c >= E: T - sum(ms[E..c-1]); if there is none, from the last one before E:
-T + sum(ms[c..E-1]). The residual of either is the clock fit's (<= 15 ms, MEASURED-PRIME 4.27 ms max) plus 1 ms of
-integer time_global. MEASURED-PRIME: **19876 ms = 19.88 s** both ways (19876.37 / 19876.39 ms). The old 5.4 method
+T + sum(ms[c..E-1]). **This is an ESTIMATE of the engine's clock at E, which is not logged** (review pass 1, finding 2).
+What bounds it (CODE): a clock line of capture frame c holds time_global as read at device.cpp:1112, o_c ms after that
+frame's PROF_FRAME (device.cpp:675); the frames file's ms run from one PROF_FRAME to the next on the same QPC clock as
+TimerGlobal (profiler_agg.cpp:119-121 scales the TSC ticks to QPC time; FTimer.h CPU::QPC), and FrameMove (device.cpp:744)
+runs between them, so 0 <= o_c <= ms[c] and 0 <= o_E <= ms[E]. The estimate is the start of frame E + o_c; the engine's
+value at E is the start of frame E + o_E. **Error = o_c - o_E, in [-ms[E], +ms[c]], plus 1 ms of integer time_global**,
+provided the engine timer was not paused between frames c and E (clock_cross, 4.3, would show a pause against the
+stamps). The scorer prints this bound per load. **The clock fit does not narrow it:** its residual (<= 15 ms,
+MEASURED-PRIME 4.27 ms) compares the offsets o at the clock-line frames with each other; it says nothing about o_E.
+What the fit does support: the clock lines are placed in the right capture frames (D unique), and the offsets o at
+those frames agree to within the residual. MEASURED-PRIME: **19876 ms = 19.88 s** both ways (19876.37 / 19876.39 ms);
+bound -5.9 / +5.5 ms (frame E 4.9 ms, frame 84 4.5 ms). In H3 the bound enters as a difference of medians of ~5 ms
+terms against a 2.0 s bound: >= 300x. The old 5.4 method
 (F0 = F + P, frames counted from capture 0) is withdrawn: the capture now holds the frames between every clock line
 and E, and E comes from the counters. With held frames, the countdown check uses F + P + K for P > 3 and skips P = 3
 (wu1 Revision 3 rule, kept). Every valid load has a load time (E and the fit are stop-VOID conditions), so NO VERDICT
@@ -236,6 +291,9 @@ for a window that starts at the first play frame; wu2's window does start there 
 | E-2 / E-1 in clock_order | log-order bracket | DESK: a main-thread line of frame f is printed before End(f); an A-Life-thread line of frame f may be printed after End(f) (one frame), plus its read race (one frame) |
 | SLOW_MS_EQ | 0.0005 ms | DESK: frame_ms and the frames file are the same float ticks times the same ms_per_tick, printed with 4 decimals (profiler_agg.cpp:153, 166, 187, 210); MEASURED-PRIME 434 of 434 rows equal. Not a noise bound (none expected); no constant mutant |
 | loading event list | 11 single + net_start_client6 >= 1 | CODE (5.1); MEASURED-PRIME 13 |
+| CLOCK_BACK_MS | 1 ms | CODE (4.3): each clock kind is a run of frame samples that never goes back; 1 ms is the integer step of a u32 ms value; it was the literal 1 of clock_order before review pass 1. Constant mutants 0 / 2 |
+| MAX_CONFOUNDED (now also in the scorer) | 3 | wu1 GUESS (unchanged); the scorer holds the driver's value (self-test checks the two agree) for FAIL stopped_series. Constant mutants 2 / 4 |
+| END_RESERVE (driver) | 120 s | DESK: after a bench that runs to BENCH_TIMEOUT: the bench's own trap (wine + Xvfb), the check= run, withdraw / release, the notify call (timeout 60 s). GUESS for everything but the 60 s |
 
 ### 6.1 Margin table (wu1 Revision 3 rows kept as registered there; NEW rows for the window start; UNDER 2x flagged; COPIED flagged)
 **New rows (wu2, the window start):**
@@ -244,11 +302,12 @@ for a window that starts at the first play frame; wu2's window does start there 
 | E from the counters vs the countdown lines | 0 frames (MEASURED-PRIME: best line 0; per line 0, 0, -1, 0) | every line in {E-1, E} | 1 frame of slack on the one line that used it | DESK from MEASURED-PRIME (one load); exact by code otherwise |
 | engine loading-end line vs E | line 8492 in capture E-1 = 70 (counters), 70 (countdown), 70 (intro marker + 1) | E-1 | 0 frames | MEASURED-PRIME + CODE; the log order alone: 22 < 70 < 84 |
 | log-order bracket of the loading-end line | before it: clock lines up to capture 22; after it: from capture 84 | <= E-1 = 70 / >= E-2 = 69 | 48 frames / 15 frames | MEASURED-PRIME; the 15-frame side rests on the 10 s pass-log window's spacing (pass lines ~450 ms apart) |
-| clock fit residual | 4.27 ms max (23 pairs) | <= 15 ms | 3.5x | MEASURED-PRIME; one load: thin |
+| clock fit residual | 4.27 ms max (23 pairs) | <= 15 ms | 3.5x | MEASURED-PRIME; one load: thin. Not a bound on the load time at E (5.4) |
+| load-time estimate at E | MEASURED-PRIME bound -5.9 / +5.5 ms | (H3: 2.0 s) | >= 300x | CODE bound (5.4), per load in the report |
 | clock fit discrimination | next offset 1213.2 ms | > 15 ms | 81x | MEASURED-PRIME |
 | loading frames L | 13 = 11 + 2 | 11 + net_start_client6 calls, exact | exact | CODE + MEASURED-PRIME |
 | loading + precache frames outside the window | 71 frames, 10.94 s, worst 5761 ms | none in the window | by construction (5.2) | proven on made fixtures and on wu1_prime (self-test) |
-| play frames cover 30 s | 59.8 s at the 3.0 ms floor (19,929 frames); 58.9 s with K = 300 held; 81.7-99.6 s at 4.1-5.0 ms; MEASURED-PRIME 91.1 s | 30 s | **1.99x at the floor (UNDER 2x)**, 1.96x with the cap; 2.7-3.3x expected; 3.0x measured | re-derived; VOID window_short below 30 s |
+| play frames cover 30 s | 59.8 s at the 3.0 ms floor (19,929 frames); 58.9 s with K = 300 held; 81.7-99.6 s at 4.1-5.0 ms; MEASURED-PRIME 91.1 s | 30 s | **1.99x at the floor (UNDER 2x)**, 1.96x with the cap; 2.7-3.3x expected; 3.0x measured | re-derived; VOID window_short below 30 s on a scored load; on the PRIME load a PROBE FAIL (review pass 1, 8) |
 | capture covers 15 s (reported) | as above | 15 s | 3.9-6.6x | re-derived |
 | stock hitch after E | MEASURED-PRIME 6.44 s (339.8 ms); wu1 bound at most 7.8 s | inside 30 s | 4.7x (3.8x on wu1's bound) | one load; wu1's bound was derived for a window starting at the first play frame, which is E |
 | stock train end after E | MEASURED-PRIME 20.57 s (last frame > 20 ms in 30 s); wu1 bound at most 22.1 s | inside 30 s | 1.46x (1.36x on the bound) | **UNDER 2x** (as wu1); backed by no_stock_train |
@@ -257,7 +316,8 @@ for a window that starts at the first play frame; wu2's window does start there 
 | slow-dump cap | MEASURED-PRIME 434 rows (31 frames, 10 before E); expected < 770 | 8386 rows | 19x measured, 11x expected; not reachable before capture index 599 (save at 155) | recounted for wu2 (5.3) |
 | load time measurable | every valid load (E + fit are stop-VOIDs) | - | - | wu1's UNDER-2x row "load time measurable" is withdrawn |
 | load time | MEASURED-PRIME 19.88 s | (P11 18-25 s, a prediction) | - | |
-| series duration | 76-119 min (130 min at 6 ms frames) | 165 min usable | 1.39-2.2x; 1.27x at 6 ms | **UNDER 2x at the slow end** (re-derived from the prime's 127 s bench) |
+| series duration | 76-119 min (130 min at 6 ms frames) | 163 min usable (a load starts only with >= 900 + 120 s left) | 1.37-2.14x; 1.25x at 6 ms | **UNDER 2x at the slow end** (re-derived from the prime's 127 s bench; review pass 1: 165 -> 163 min) |
+| slice end vs a started load | a load starts with >= 1020 s left; it ends by BENCH_TIMEOUT 900 s + cleanup | slice end | 120 s of reserve after a timed-out bench | DESK; END_RESERVE GUESS except the notify's 60 s |
 | load duration (bench) | 118-136 s (MEASURED-PRIME 127 s) | BENCH_TIMEOUT 900 s | 6.6-7.6x | bound COPIED (bench default) |
 
 **wu1 rows kept as they were registered** (valid OFF-IN-PLAY loads 3.7x; H1 ON worst 2.0-7x, UNDER 2x at the high
@@ -267,7 +327,8 @@ frame; that is where wu2's window starts. Not re-derived; flagged as carried ove
 
 ## 7. Verdict rules (implemented exactly in wu2_score.py)
 1. **FAIL** (exit 1) if any scored load has: a missing/empty/unparsable file (named), arm_mismatch, off_not_stock, any
-   ON lever check L1-L5 failing, no_measure_lines, or scorer_error. A failing ON load is never dropped.
+   ON lever check L1-L5 failing, no_measure_lines, or scorer_error; or if the series has >= MAX_CONFOUNDED (3)
+   non-clean loads, prime included (`stopped_series`: the driver stopped it, 3.3). A failing ON load is never dropped.
 2. Else **NO VERDICT** (exit 3) if any of: `few_on` (< 8 valid ON), `few_inplay` (< 3 valid OFF-IN-PLAY),
    `no_stock_hitch` (median OFF-IN-PLAY worst < 150 ms), `no_stock_train` (median OFF-IN-PLAY n20 < 7),
    `stock_orders_alike`. All that apply are listed. **wu2: `loadtime` withdrawn** (5.4).
@@ -280,14 +341,16 @@ frame; that is where wu2's window starts. Not re-derived; flagged as carried ove
 ## 8. Scorer, self-test, driver
 `wu2_score.py` (stdlib, `python3 -I`), `wu2_selftest.sh`, `wu2_run.sh` (bash -n only), `wu2_order.txt`; hashes in
 NOTES.md; pinned into the driver at registration (PIN_ME until then: the driver refuses).
-Self-test 2026-11-26 (draft): `WU2 SELFTEST PASS 218/218 (26 real cases, 124 made cases, 51 hook mutants caught, 14
-constant mutants caught, 1 hook-coverage check, 1 find-error check, 1 untouched check)`; command
+Self-test 2026-11-26 (draft, after review pass 1): `WU2 SELFTEST PASS 251/251 (28 real cases, 140 made cases, 55 hook
+mutants caught, 18 constant mutants caught, 1 hook-coverage check, 1 MAX_CONFOUNDED agreement check, 2 find-error
+checks, 5 driver checks, 1 untouched check)`; command
 `cd wt-render-split/perf-harness/wu2 && nice -n 19 bash wu2_selftest.sh`; folder in NOTES section 6. It contains:
 out/wu1_prime read in place as a real fixture on which the probe PASSES with the numbers of 5.1; 12 spliced mutants of
 it (one changed file each, the rest symlinks), each failing by name or, for the two stated limits, passing as stated:
 opu line moved one frame onto the long frames (clock_fit), pass line frame 40 -> 41 (clock_fit, 17.0 ms), countdown
 lines removed (no_measure_lines + clock_fit ambiguous), countdown set to 0 (loading_end), all clock lines removed
-(no_measure_lines + clock_fit), every time_global + 1000 (clock_order against Time continual), a play line moved
+(no_measure_lines + clock_fit), every time_global + 1000 (review pass 1: PASSES with the clock_cross note, the stated
+limit of 4.3), two play pass lines swapped and one stamp lowered (clock_order, each kind alone), a play line moved
 before the loading-end line and the loading-end line moved before a countdown line (clock_order), frames file one frame
 early (frames_slow), frames file without the loading frames (framecount), sites file without "Loading..."
 (stock_loop + loading_frames), every device frame + 1 (passes, D = 19: limit), one play line moved one frame (passes,
@@ -295,7 +358,14 @@ early (frames_slow), frames file without the loading frames (framecount), sites 
 ms, 58 precache frames, then play; the clock lines' frames and times follow the frames file); every wu1 case kept,
 re-pointed; new made cases for each new check on both sides (race 1 ok / 2 VOID; clock 14 ms ok / 16 ms VOID; flat
 frames: ambiguous). Every hook mutant must be caught by EVERY listed target case. Constant mutants: wu1's 9 plus
-CLOCK_TOL 13 / 17 / 3 and RACE_FRAMES 0 / 2.
+CLOCK_TOL 13 / 17 / 3 and RACE_FRAMES 0 / 2, and (review pass 1) CLOCK_BACK_MS 0 / 2, MAX_CONFOUNDED 2 / 4. Review
+pass 1 also added: the held-frame fixture holds K = 12 frames IN ADDITION to the 58 (precache block 70 frames, E = 83,
+checked by the window start and the countdown lines; the same fixture with K = 0 gives E = 71); a prime whose capture
+covers 23.7 s after E (PROBE FAIL window_short); stopped series (3rd non-clean load last; non-clean prime + 2) and
+the 2-non-clean control (PASS); command lines without -perf_nopresent / -perf_noinput; the untouched check's find
+errors on an existing folder (missing -newer file; unreadable subfolder) with a mutant that ignores find's status;
+the driver's function block (order copy + hash, dispatch from the copy, slice deadline) run offline on a copy of
+wu2_order.txt with 3 driver mutants, plus a static check of the driver body.
 Score ONCE after the series, output written in the same call:
 `python3 -I wt-render-split/perf-harness/wu2/wu2_score.py root=out order=wt-render-split/perf-harness/wu2/wu2_order.txt out=out/wu2_state/wu2_score.txt`
 Driver: wu1_run.sh with wu2 names and paths (state out/wu2_state). Unchanged: hash preflight (PIN_ME refuses), display
@@ -307,11 +377,20 @@ look for other scripts), stop rules, no retry.
   this prereg to the prime load's real files, requires a located save frame, and **prints the located end of loading
   (E as capture index, ms from capture start, engine time at E), the offset D with its residual and the next offset's,
   each countdown line's E, and the engine loading-end line's frame from the counters and from the countdown lines,
-  its log-order bracket (capture indices) and the intro marker, as numbers.** A failed probe ends the attempt with NO
+  its log-order bracket (capture indices) and the intro marker, as numbers.** **It also requires the whole 30 s
+  headline window after E inside the capture: `window_short` is a PROBE FAIL by name on the prime (review pass 1),
+  while on a scored load it stays a VOID that does not stop the series.** A failed probe ends the attempt with NO
   verdict (wu1 8, unchanged).
 - **Per-load check.** After every scored load: `check=out/<tag>`; stop on any FAIL and on VOID framecount /
   capture_lines / stock_loop / frame_limiter / threshold_header and **wu2: loading_frames / clock_fit / loading_end /
-  clock_order / frames_slow**; not on not_clean (counted, stop at the third), window_short, save_unlocated, slow_cap.
+  clock_order / frames_slow**; not on not_clean (counted, stop at the third), window_short, save_unlocated, slow_cap;
+  clock_cross is printed as a note.
+- **Order file in the driver (review pass 1).** After the hash preflight the driver copies wu2_order.txt into the new
+  state folder (read-only), checks the COPY's sha256 against the registered pin and its shape again, and from then on
+  reads only the copy (dispatch and every probe= / check= call). The scorer does not check the order hash in code
+  (declined): its report prints the order file's sha256 in its header and I compare it with the pin by hand at scoring.
+- **Slice deadline (review pass 1).** Right before a load starts (after the settle, the display wait and the claim
+  renewal) the driver stops unless >= BENCH_TIMEOUT 900 s + END_RESERVE 120 s of the slice are left.
 
 ## 9. Predictions (registered; GUESS unless marked)
 P1-P10, P12-P13 as wu1 9 (unchanged). P11 (load time, engine clock at E, 18-25 s in every load; MEASURED-PRIME 19.88 s)

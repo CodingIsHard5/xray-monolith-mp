@@ -1,17 +1,18 @@
 # wu2 CodeRabbit triage, pass 1 (2026-11-26, base e6e1e9bc6, head 671ad4731; 11 findings: 9 wu2, 2 kj3)
 
-Full output: plan-facts/cr_wu2_kj3_2026-11-26.txt (main project dir). Status column is filled after the fix round.
+Full output: plan-facts/cr_wu2_kj3_2026-11-26.txt (main project dir). Status filled after the fix round (2026-11-26,
+desk only, self-test 251/251; facts with file:line in NOTES.md section 7).
 
-| # | where | finding | decision |
-|---|---|---|---|
-| 1 | wu2_score.py:736 | prime probe passes with a window shorter than 30 s (note only) | FIX: probe fails by name on window_short |
-| 2 | PREREG 5.4 text | clock-fit residual is not an error bound at E | FIX (text): load time called an estimate; the bound stated as what the fit supports |
-| 3 | wu2_run.sh:89 | order file reread after hash preflight | FIX: verified copy in the state dir used for dispatch. Scorer side: the order hash is pinned in the text and checked by hand at scoring, stated in the result (declined in code) |
-| 4 | wu2_score.py:882 | PASS possible for a series the driver stopped (3rd non-clean load is the last) | FIX: non-clean loads >= driver's stop count = no PASS, by name |
-| 5 | wu2_selftest.sh:591 | held-frame fixture keeps E=71 | FIX: hold extends the precache block, E=83, control 71 |
-| 6 | wu2_selftest.sh:836 | find-error test never reaches find | FIX |
-| 7 | wu2_score.py:548 | -perf_nopresent / -perf_noinput not required | FIX: arm_mismatch |
-| 8 | wu2_score.py:459 | clock_order 1 ms rule may stop valid ON data | VERIFY in the engine source; keep with derivation or loosen with derivation |
-| 9 | wu2_run.sh:142 | slice deadline not rechecked after the display wait | FIX |
-| 10 | kill6 :862 | forced-start line appended during a crossing is skipped | FIX in kill6 stage 3 |
-| 11 | kill6 :241 | eerr counted before the managers exist on a healthy boot | VERIFY in GAMMA scripts; not-ready state without eerr, in kill6 stage 3 |
+| # | where | finding | decision | status |
+|---|---|---|---|---|
+| 1 | wu2_score.py:736 | prime probe passes with a window shorter than 30 s (note only) | FIX: probe fails by name on window_short | FIXED: hook probe_window; window_short is a PROBE STOP on the prime (still a non-stop VOID on scored loads). Test probe_short (23.7 s after E -> PROBE FAIL), check_window_short (scored: note); mutant probe_window caught by probe_short. Prereg 8, 6.1 row |
+| 2 | PREREG 5.4 text | clock-fit residual is not an error bound at E | FIX (text): load time called an estimate; the bound stated as what the fit supports | FIXED (text + report line): 5.4 calls it an ESTIMATE; real bound from the code: error in [-ms[E], +ms[c]] + 1 ms (time_global read at device.cpp:1112 between PROF_FRAME device.cpp:675 and the next; frames file on the same QPC time, profiler_agg.cpp:119-121), no tighter engine bound on o_E; the fit only places the lines. Printed per load; MEASURED-PRIME -5.9/+5.5 ms. Tests real_prime_probe, noplay_loadtime (patterns) |
+| 3 | wu2_run.sh:89 | order file reread after hash preflight | FIX: verified copy in the state dir used for dispatch. Scorer side: the order hash is pinned in the text and checked by hand at scoring, stated in the result (declined in code) | FIXED (driver): order_copy (copy, chmod a-w, pin the copy with ORDER_SHA, order_ok), ORDER = the copy for pending / check_run. Offline test "driver functions" (6 tests on a copy of wu2_order.txt) + mutants no_copy_hash, copy_writable caught + static "driver body" check. DECLINED (scorer): hash printed in the report header, compared by hand (prereg 8) |
+| 4 | wu2_score.py:882 | PASS possible for a series the driver stopped (3rd non-clean load is the last) | FIX: non-clean loads >= driver's stop count = no PASS, by name | FIXED: FAIL stopped_series (prereg 3.3 says a stopped series is FAIL; text and code disagreed, code fixed); prime counted as the driver does; MAX_CONFOUNDED in both files, agreement check. Tests s_stopped_last, s_stopped_prime, s_two_ok (PASS); mutant series_stopped; constant mutants max_conf_2 / max_conf_4 |
+| 5 | wu2_selftest.sh:591 | held-frame fixture keeps E=71 | FIX: hold extends the precache block, E=83, control 71 | FIXED (fixture; the scorer was right): engine confirmed, held frames are 'Precache frame' frames (device.cpp:165-169, 771-773, 1048). Tests l_held_ok (E=83, 70 precache frames), l_held0_ok (K=0, E=71), check_held, check_held0; mutant held_k caught by l_held_ok, check_held |
+| 6 | wu2_selftest.sh:836 | find-error test never reaches find | FIX | FIXED: missing folder + existing folder with a missing -newer file + existing folder with an unreadable subfolder (skipped as root) + readable control; mutant newer_count_mut (find status ignored) caught by the two existing-folder cases |
+| 7 | wu2_score.py:548 | -perf_nopresent / -perf_noinput not required | FIX: arm_mismatch | FIXED: hook measure_flags (MEASURE_FLAGS). Tests a_no_nopresent, a_no_noinput, check_no_nopresent; mutant measure_flags caught by all three |
+| 8 | wu2_score.py:459 | clock_order 1 ms rule may stop valid ON data | VERIFY in the engine source; keep with derivation or loosen with derivation | VERIFIED: the ON concern is refuted (clocks written only in FrameMove device.cpp:1051/1112; an A-Life line is logged inside the GameThread task joined at device.cpp:918 before the next frame). Rule SPLIT: each kind alone never goes back (stop, derivation beside it; CLOCK_BACK_MS = 1); cross-kind (stamp vs time_global) made REPORT-ONLY clock_cross, since a timer pause / time_factor in a normal load is not settled by the source. Protection lost: a uniform time_global shift is no longer a stop. Tests v_g_back, v_tc_back2, tc_back1_ok, t_shift_cross, check_clock_order, check_clock_cross, real_prime_pass_swap, real_prime_tcont_back, real_prime_t_plus_1000 (now passes with the note); mutants clock_monotone, clock_cross; constant mutants clock_back_0 / _2 |
+| 9 | wu2_run.sh:142 | slice deadline not rechecked after the display wait | FIX | FIXED: slice_ok $SL_END $((BENCH_TO + END_RESERVE)) after the claim renewal, right before the bench (900 + 120 s). Offline test (3 slice cases) + mutant slice_always caught + static order check (renewal < recheck < bench). Prereg 3.3 / 6.1: usable 165 -> 163 min |
+| 10 | kill6 :862 | forced-start line appended during a crossing is skipped | FIX in kill6 stage 3 | not this round (kj3) |
+| 11 | kill6 :241 | eerr counted before the managers exist on a healthy boot | VERIFY in GAMMA scripts; not-ready state without eerr, in kill6 stage 3 | not this round (kj3) |
