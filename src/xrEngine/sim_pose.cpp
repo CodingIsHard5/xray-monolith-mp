@@ -6,6 +6,14 @@
 // the live bones, draw = per bone nlerp(prev, cur, alpha) with the bone's joint as the pivot. Every rule below falls
 // back to the live bones (stock) when it cannot show a real pair.
 //
+// Known limits of S4a (review 2026-11-27; visual only, with the bit on):
+// - an item attached to a bone (an NPC's weapon) is placed from the live hand bone, the hand is drawn blended: the item
+//   leads the hand by up to a tick of hand motion. Slice S4b; S4a does not reach players without it.
+// - software-skinned parts (CSkeletonX RM_SKINNING_SOFT) and wallmarks/bone-attached effects read the live bones.
+// - a frame that ran two or more ticks leaves no consecutive pair: below the tick rate the slice draws stock.
+// - players' bodies are not marked (GameObject.cpp OnChangeVisual): stock.
+// - a bone written after the frame's first evaluation without a capture is not re-checked in that frame.
+//
 // Rule One: nothing here writes a field the simulation reads. Writes: this file's storage (opaque to every other
 // file: IKinematics::m_sim_pose, friend SimPoseAccess below) and the witness statics. The only exception is the
 // test-only must-fail break (g_sim_4d_break & SIM4D_POSE, det_mode only).
@@ -19,7 +27,7 @@
 
 #include <atomic>
 
-// at most 64 bones (the visibility mask is a Flags64; SkeletonCustom.cpp Load asserts it)
+// at most 64 bones (the visibility mask is a Flags64; a skeleton with more is never captured: sim_pose_capture_body)
 static const u16 SIM_POSE_MAX_BONES = 64;
 // skeleton-level snap: a visible bone's joint moving more than this between prev and cur (model space) draws cur
 // (design 2.3, D7; the value is a guess)
@@ -208,15 +216,16 @@ static bool sim_pose_blend(SimPoseState* s, float u)
 		if ((s->vis & (u64(1) << b)) && pp[b].distance_to_sqr(pc[b]) > SIM_POSE_SNAP_SQ)
 			return false;
 	}
-	// endpoints exact (design 3.1): alpha 0 shows prev bitwise, alpha 1 cur (= the live bones, by the guard)
+	// endpoints exact (design 3.1): alpha 0 shows prev bitwise, alpha 1 cur (= the live bones, by the guard); a pose
+	// that did not change is drawn as cur bitwise (no rounding noise, no work)
+	if (u >= 1.f || 0 == memcmp(s->prev, s->cur, n * sizeof(Fmatrix)))
+	{
+		memcpy(s->draw, s->cur, n * sizeof(Fmatrix));
+		return true;
+	}
 	if (u <= 0.f)
 	{
 		memcpy(s->draw, s->prev, n * sizeof(Fmatrix));
-		return true;
-	}
-	if (u >= 1.f)
-	{
-		memcpy(s->draw, s->cur, n * sizeof(Fmatrix));
 		return true;
 	}
 	for (u16 b = 0; b < n; ++b)

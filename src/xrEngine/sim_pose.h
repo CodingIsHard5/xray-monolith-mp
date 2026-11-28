@@ -33,7 +33,7 @@ IC const Fmatrix* sim_pose_draw_frame(IKinematics* K)
 }
 
 // Release K's storage (CKinematics::IBoneInstances_Destroy and Spawn). Takes K->UCalc_Mutex. The caller tests
-// K->has_sim_pose() first, so a skeleton that never had storage (always, with sim_tick 0 or the bit off) costs one test.
+// K->has_sim_pose() first, so a skeleton that never had storage (every skeleton, if gated mode with the bit on never ran) costs one test.
 ENGINE_API void sim_pose_release(IKinematics* K);
 
 // ---- test-only (every function below does nothing unless -det_mode; see g_sim_synth_pose in device.h) ----

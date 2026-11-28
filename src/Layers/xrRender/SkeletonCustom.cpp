@@ -134,7 +134,7 @@ void CKinematics::IBoneInstances_Create()
 
 void CKinematics::IBoneInstances_Destroy()
 {
-	if (has_sim_pose()) sim_pose_release(this); // S2 stage 4d-2 S4a
+	if (has_sim_pose()) sim_pose_release(this); // S2 stage 4d-2 S4a (unlocked test: nothing else references the instance here)
 	if (bone_instances)
 	{
 		xr_free(bone_instances);

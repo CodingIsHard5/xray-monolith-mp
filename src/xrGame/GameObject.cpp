@@ -1357,8 +1357,12 @@ void CGameObject::OnChangeVisual()
 	// sim_tick gated mode with mask bit SIM4D_POSE; the flag is read nowhere else). Every visual change of a game object
 	// comes here (CObject::cNameVisual_set); the new instance came from model_Create, whose Spawn cleared the flag.
 	// First-person HUD models and other bare model_Create visuals (legs, VR items) never pass here: never marked.
-	if (IKinematics* K = Visual() ? Visual()->dcast_PKinematics() : nullptr)
-		K->LL_SetSimObjectVisual(true);
+	// Not a player's body (review 2026-11-27): the local player's root is deliberately drawn stock in a vehicle, on a
+	// mounted gun or with SIM4D_BODY off (sim_render_world_calc), and a blended pose on a stock root would disagree.
+	// Player bodies stay stock in S4a; to be decided with S4b.
+	if (!cast_actor())
+		if (IKinematics* K = Visual() ? Visual()->dcast_PKinematics() : nullptr)
+			K->LL_SetSimObjectVisual(true);
 	if (m_anim_mov_ctrl)
 		destroy_anim_mov_ctrl();
 }
