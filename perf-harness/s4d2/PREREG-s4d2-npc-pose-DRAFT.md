@@ -4,7 +4,7 @@ DRAFT. Nothing here has been run. It is not registered until every item of secti
 with the witness addition W1 and pinned, the probe (section 2) has said GO, every `PROBE_` value is filled in by the
 rules in 2.3, and the self-test has passed on the probe's real bytes (section 8). No box run without the Overseer's GO.
 
-**Code:** wt-simtick perf/tick-4d HEAD **HEAD_AFTER_W1 (to be filled at registration)**, on top of build 1
+**Code:** wt-simtick perf/tick-4d HEAD **555771502** (CI run 46116095777 green 2026-11-28 01:41; = 1abcc4049 + the re-read of the attachment record under the lock and one comment), on top of build 1
 (8527808c9..6acb77044). The chain:
 - S4a: 0dfdff031 (capture, draw, mark, witness p/pw/up/pn, tripwire `pose`, break 16) and 0a8e94094 (review fixes:
   players' bodies unmarked, unchanged pose drawn as cur).
@@ -89,7 +89,7 @@ Labels:
   one of the two known files (S3-1, S3-3, N3-10).
 - 2026-11-28, seventh revision (coordinator's fix round after plan-facts/s4d1-driver-review-2026-11-28.md, whose
   findings S-1, S-2, S-3, N-1 and N-5 also hold for this driver): **s4d2_run.sh is now sha256
-  65d13233266645973a39b3ac91213fc458e0099c441da3826f77d47fee1bee19** (was 2777c68f...). One claim per driver call, then
+  f885501efda874ce6d6bd1b6084eec730cd9458294107d5ab2c05de5fc0bd29d** (was 2777c68f...). One claim per driver call, then
   extended before every boot by `quiet-required.sh renew` with QR_CLAIM_ID = that claim's id (a repeated `claim` could
   nest new records that outlived the run and kept Caden's launcher refusing); finish() releases every claim id the call
   obtained. A lost claim (no live record carries the run's token) stops, before every boot and every ~5 s of one.
@@ -250,8 +250,8 @@ set in this frame. `<bone>` is the bone index, to be matched with pa's `ba`.
 ### 1.2 Exes
 - **Build 2.** Lever boots run only on an exe from the perf-build workflow: XRCORE_PROFILER_AGG, which makes det mode
   serial (DET_SERIAL, device.cpp:380-384), and all four tripwires assume it (S4b notes 11.4 T1). It is installed as
-  `run/bin/SimTick19.exe` (name proposed), sha256 **PIN_ME_EXE**. It must contain c216081fd and W1.
-- **Build 1** (for LB, 4.2) is s4d1's `run/bin/SimTick18.exe`, sha256 **PIN_ME_EXE_B1** (s4d1's PIN_ME_EXE), built
+  `run/bin/SimTick19.exe` (name proposed), sha256 **aa54104afb5734a27f42bce90264b09c2d3b15e9f215edeff90c72c13eba96a8 (SimTick19.exe)**. It must contain c216081fd and W1.
+- **Build 1** (for LB, 4.2) is s4d1's `run/bin/SimTick18.exe`, sha256 **40d2d37d810bdd9fdf0a19a094dea621a16a2f164fdb1e1b9d1b209d5a6b09d4 (SimTick18.exe)** (s4d1's aa54104afb5734a27f42bce90264b09c2d3b15e9f215edeff90c72c13eba96a8 (SimTick19.exe)), built
   from 7b1232ffc or 6acb77044 (comments only in between).
   - It does not parse `-det_synth_pose` or `-det_synth_pose_npc`. [D] `git grep det_synth 6acb77044 -- src` shows
     only `-det_synth_k`, `-det_synth_wallclock` and `-det_synth_tw`, and the stimulus script matches only
@@ -318,8 +318,8 @@ Without W1 in the exe:
    to sim_pose.cpp, and it changes two lines of the S4b draw (review N5) in GameObject.cpp.
 2. **c216081fd's independent review**, and the W1 review, done, and any finding fixed. Any code change means a new CI
    build, a new pin and a new probe.
-3. A CI perf-build of the result, installed as SimTick19.exe and pinned (PIN_ME_EXE).
-4. s4d1's build-1 exe built and pinned (PIN_ME_EXE_B1). LB cannot run without it.
+3. A CI perf-build of the result, installed as SimTick19.exe and pinned (aa54104afb5734a27f42bce90264b09c2d3b15e9f215edeff90c72c13eba96a8 (SimTick19.exe)).
+4. s4d1's build-1 exe built and pinned (40d2d37d810bdd9fdf0a19a094dea621a16a2f164fdb1e1b9d1b209d5a6b09d4 (SimTick18.exe)). LB cannot run without it.
 5. The stimulus script installed with its pinned hash 1777fb68... (s4d1 R3; with `-det_synth_item`).
 6. **The series script `s4d2_run.sh` (written and revised 2026-11-27, `bash -n` only, never run; R2 of 6.2).** It moves
    `run/appdata/logs/synth_<tag>.txt` into `out/det_<tag>/` after every boot. tools/det_run.sh does not: its lines 44-47
@@ -424,7 +424,7 @@ of boots. Its branch c makes PA2's cluster part reported only.
 | `PROBE_U_POSED` | n=0 frames with uu nposed > 0 | U1 minimum = floor(P x (K-1)/(Kp-1)/3) |
 | `PROBE_NPC` | the NPC named in the probe's pose line | F0: every pose run must name it |
 | `PROBE_BOOT_S` (series only) | the probe's det_run.sh `elapsed=` | BENCH_TIMEOUT = max(2000, ceil(5 x PROBE_BOOT_S / 60) x 60) |
-| `PIN_ME_EXE`, `PIN_ME_EXE_B1` (series only) | sha256 of SimTick19 / SimTick18 | the series refuses other hashes |
+| `aa54104afb5734a27f42bce90264b09c2d3b15e9f215edeff90c72c13eba96a8 (SimTick19.exe)`, `40d2d37d810bdd9fdf0a19a094dea621a16a2f164fdb1e1b9d1b209d5a6b09d4 (SimTick18.exe)` (series only) | sha256 of SimTick19 / SimTick18 | the series refuses other hashes |
 
 - The scorer REFUSES to score while any CONST value is still its placeholder string.
 - **Why "/3":** every count minimum is a third of what the probe, scaled to the run's K, says to expect. That is a 3x
@@ -914,3 +914,5 @@ and real-bytes self-test case.
     Only a drop of nposed below its floor would show it, and only for the HUD hands.
 - U1's nposed can be raised once by a freed skeleton's address reused one frame later (1.3); it is only a floor.
 - Anything after A-Life pass 320, any other save, native Windows.
+
+Change log 2026-11-28 (pins): build 2 exe = run/bin/SimTick19.exe aa54104afb5734a27f42bce90264b09c2d3b15e9f215edeff90c72c13eba96a8 (perf/tick-4d 555771502, CI run 46116095777); build 1 exe = run/bin/SimTick18.exe 40d2d37d810bdd9fdf0a19a094dea621a16a2f164fdb1e1b9d1b209d5a6b09d4 (6acb77044, CI run 46114135445); Stance14.exe and out/user_det.ltx.orig pinned by full sha256 as read today (equal to the values read 2026-11-27 22:40). s4d2_run.sh hash changes with the pins only.

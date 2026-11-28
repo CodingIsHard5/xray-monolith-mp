@@ -205,7 +205,7 @@ this run's det_run.sh (BP) and its sleep (SP); nothing else is signalled.
 No memory file was written under ~/Documents: the brief forbids writing there.
 
 ## 10. Fix round 2026-11-28 (plan-facts/s4d1-driver-review-2026-11-28.md: S-1, S-2, S-3, N-1, N-5 hold here too)
-s4d2_run.sh is now sha256 65d13233266645973a39b3ac91213fc458e0099c441da3826f77d47fee1bee19 (was 2777c68f...), the same changes
+s4d2_run.sh is now sha256 f885501efda874ce6d6bd1b6084eec730cd9458294107d5ab2c05de5fc0bd29d (was 2777c68f...), the same changes
 as s4d1_run.sh (s4d1/NOTES.md 9.8):
 - S-1: one `claim` per call (acquire); before every boot `renew engineperf <min>` with QR_CLAIM_ID = that claim's id
   (quiet-required.sh renew_own extends exactly that record when nested, keeps the id with one record), never a second

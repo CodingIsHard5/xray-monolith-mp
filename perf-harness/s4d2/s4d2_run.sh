@@ -102,15 +102,15 @@ BOXLIB_SHA=f8026040f2f9b3f6cd5c7c33b11062f7efc1ed726af03651ce16bbb0fccd53ef   # 
 BOXLIB_MARKER=engineperf-box-preflight-v2; BOXLIB_VERSION=2
 
 # ---- pins (PIN_ME_: before ANY boot, the probe included; prereg 1.2, 1.4 items 3-5) ----
-EXE2=PIN_ME_EXE2_NAME            # build 2 exe in run/bin (proposed name SimTick19.exe), c216081fd + the W1 commit
-EXE2_SHA=PIN_ME_EXE              # its sha256 (64 hex)
-EXE1=PIN_ME_EXE1_NAME            # build 1 exe in run/bin (s4d1's SimTick18.exe), 7b1232ffc or 6acb77044
-EXE1_SHA=PIN_ME_EXE_B1           # its sha256
-STOCK=Stance14.exe; STOCK_SHA=PIN_ME_STOCK_SHA      # full sha256 (N2-5). Read 2026-11-27 22:40:
+EXE2=SimTick19.exe            # build 2 exe in run/bin CI run 46116095777 of perf/tick-4d 555771502 (pinned 2026-11-28)
+EXE2_SHA=aa54104afb5734a27f42bce90264b09c2d3b15e9f215edeff90c72c13eba96a8              # its sha256 (64 hex)
+EXE1=SimTick18.exe            # build 1 exe in run/bin (s4d1's SimTick18.exe), 7b1232ffc or 6acb77044
+EXE1_SHA=40d2d37d810bdd9fdf0a19a094dea621a16a2f164fdb1e1b9d1b209d5a6b09d4           # its sha256
+STOCK=Stance14.exe; STOCK_SHA=b4ce9c772ae5fa4bf5ddb955f2dfcb943627d6c2b2e4ce66e21eac1168646cbe      # full sha256 (N2-5). Read 2026-11-27 22:40:
                                                     # b4ce9c772ae5fa4bf5ddb955f2dfcb943627d6c2b2e4ce66e21eac1168646cbe
 STIM=run/gamedata/scripts/zz_eperf_synth.script     # installed stimulus = harness/zz_eperf_synth.script (with -det_synth_item)
 STIM_SHA=1777fb6865cc5b56c80f197f3f95a250104d6c90ce0b8b2a35422e3bed39ff95
-USERDET=out/user_det.ltx.orig; USERDET_SHA=PIN_ME_USERDET_SHA   # full sha256 (N2-5). Read 2026-11-27 22:40:
+USERDET=out/user_det.ltx.orig; USERDET_SHA=3e0e0a6f1fe8010cd727a8f4e718b0486711fbcf8e4f7bfc8eb769d047411b81   # full sha256 (N2-5). Read 2026-11-27 22:40:
                                                     # 3e0e0a6f1fe8010cd727a8f4e718b0486711fbcf8e4f7bfc8eb769d047411b81
 DETRUN=tools/det_run.sh; DETRUN_SHA=e29800949b503a7f61a5f9b3a9a2289cdd01424fa87f3a55dacac464fa578f48   # 2026-11-28 third review (was 0b7a6edb..., da66e107..., 01fb40dc...)
 PIDLIB=tools/lib_engine_pids.sh; PIDLIB_SHA=cb183b7b894eab3edb200e2c03a3a96f2e935cd2d1e1f402f48be7aad238ed6e

@@ -60,7 +60,7 @@ registered and run with a result file; editing a closed driver breaks a recorded
 | tools/s4c_series.sh (6539d1ce) | yes | FO | yes, FO | no | no | no | no | PREREG-S2-4c; s4c_run.sh, s4c_input_run.sh | closed (s4c scored) | no. **RETIRED: do not run; use the shared-preflight driver instead.** |
 | tools/s4c_partA.sh (af4f021c) | no | FO | yes, FO | no | no | no | no | PREREG-S2-4c | closed | no. **RETIRED: do not run; use the shared-preflight driver instead.** |
 | s4d1/s4d1_run.sh (af73868b, written 2026-11-28 from s4d2_run.sh) | via common | FC | FC | yes (token; a lost claim stops) | yes | yes (:141 only) | yes (one claim, renewed by id; every id released; name only when no id was printed) | s4d1 PREREG DRAFT 6.2 (not registered) | open draft; stimulus pinned 1777fb68 (shared with s4d2); refuses until it is installed | yes (not run: `bash -n` and fixture preflight-only calls only) |
-| s4d2/s4d2_run.sh (65d13233, 2026-11-28 fix round) | via common | FC | FC | yes (token; a lost claim stops) | yes | yes (:141 only) | yes (one claim, renewed by id; every id released; name only when no id was printed) | not registered (draft) | open draft | yes |
+| s4d2/s4d2_run.sh (f885501e, 2026-11-28 fix round) | via common | FC | FC | yes (token; a lost claim stops) | yes | yes (:141 only) | yes (one claim, renewed by id; every id released; name only when no id was printed) | not registered (draft) | open draft | yes |
 
 ## The other runnable tools/ scripts (review S-5; NOT edited, read-only survey 2026-11-28)
 
