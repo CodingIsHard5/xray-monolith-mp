@@ -262,3 +262,16 @@ the exe pins kept). Same R-1 change as s4d1_run.sh (s4d1/NOTES.md 9.9), plus the
   8e7e33a93d3e1713....
 - **Not covered:** a contiguous no-actor line at or before cp3 passes as before (no new rule). Build 2's own probe has
   not run; whether its teardown also writes exactly one line is build 1's observation carried over, checked there.
+
+## Self-test exit code (2026-11-28, after the fault found in s4d1 at its registration)
+s4d2_selftest.sh exited 0 after a Python crash and after failed cases: its last command was an `echo`, the Python ran
+as `python3 | tee` and the pipe's status was not read, and the Python printed FAIL (n/m) without a non-zero exit.
+Earlier results were read from the printed `PASS (n/n)` line, which was right, so they stand. Fixed the same way as
+s4d1: finish() exits 1 unless every case passed; the wrapper reads PIPESTATUS and ends with a FAIL line and exit 1.
+Two cases added, selfcheck_crash and selfcheck_fail: they re-run this same file with S4D2_SELFTEST_SELFCHECK=crash|fail
+and require exit 1 and the wrapper's FAIL last line. No existing expectation changed. Result read by me:
+S4D2 SELFTEST: PASS (88/88), exit 0, 5.4 s, folder selftest-runs/20261128-125740-3233760; by hand, crash exit 1 and
+fail exit 1. s4d2_selftest.sh is now sha256 d957480e8e0da44e7eac05ac23939b4bfdc91c6d5c6399d821078ff36dc4b2a3
+(was 8e7e33a93d3e1713...). Scorer and driver unchanged.
+Still open: common/box_preflight_selftest.sh ends on an `echo` too, so it exits 0 on a FAIL (bash only, no hidden
+crash). To fix and re-run when no series of ours is on the box.

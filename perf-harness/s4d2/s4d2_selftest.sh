@@ -22,9 +22,17 @@ PARENT="${1:-$HERE/selftest-runs}"; mkdir -p "$PARENT" && PARENT="$(cd "$PARENT"
 ST="$PARENT/$(date +%Y%m%d-%H%M%S)-$$"
 [ -e "$ST" ] && { echo "S4D2 SELFTEST: FAIL (0/0) $ST exists"; exit 2; }
 mkdir -p "$ST"
-python3 -I - "$ST" "$SC" <<'PYEOF' 2>&1 | tee "$ST/selftest_output.txt"
+# Exit code (fixed 2026-11-28, the fault found in s4d1_selftest.sh at registration): this script used to exit 0 after a
+# Python crash and after failed cases (last command an echo; `python | tee` without the pipe's status; the Python
+# never exited non-zero). Now finish() exits 1 unless every case passed, and the wrapper reads PIPESTATUS. Cases
+# selfcheck_crash and selfcheck_fail re-run THIS file with S4D2_SELFTEST_SELFCHECK=crash|fail and require exit 1.
+python3 -I - "$ST" "$SC" "$HERE/$(basename "$0")" <<'PYEOF' 2>&1 | tee "$ST/selftest_output.txt"
 import hashlib, importlib.util, os, re, subprocess, sys
-ST, SC = sys.argv[1], sys.argv[2]
+ST, SC, WRAP = sys.argv[1], sys.argv[2], sys.argv[3]
+SELFCHECK = os.environ.get("S4D2_SELFTEST_SELFCHECK", "")
+if SELFCHECK == "crash":
+    raise RuntimeError("deliberate crash (S4D2_SELFTEST_SELFCHECK=crash)")
+assert SELFCHECK in ("", "fail"), SELFCHECK
 NPC = "sim_default_duty_428175"
 FILL = {"PROBE_P_LERP": 300, "PROBE_P_TICK": 150, "PROBE_UPLOADS": 600, "PROBE_PA_CR": 300, "PROBE_PA_CLUSTERS": 1,
         "PROBE_JOINT_LERP": 1, "PROBE_U_POSED": 300, "PROBE_NPC": NPC, "PROBE_TOL_LD": 0.001}
@@ -306,6 +314,19 @@ IDS = ["F0", "A1", "A2", "A3", "A4", "A5", "PAT", "PWC", "S0", "S0B", "SC", "LB"
        "P3", "P4", "U1", "PA1", "PA2"]
 WREAD = ("PAT", "S0B", "TW", "P1", "P2", "P3", "U1", "PA1", "PA2")   # checks that read an on run's witness
 results = []
+
+
+def finish():
+    n_ok = sum(1 for _, ok in results if ok)
+    good = bool(results) and n_ok == len(results)
+    print("S4D2 SELFTEST: %s (%d/%d)" % ("PASS" if good else "FAIL", n_ok, len(results)))
+    sys.stdout.flush()
+    sys.exit(0 if good else 1)
+
+
+if SELFCHECK == "fail":
+    results.append(("selfcheck_forced_bad_case", False)); print("BAD  selfcheck_forced_bad_case (S4D2_SELFTEST_SELFCHECK=fail)")
+    finish()
 
 def run_score(name, root, expect, code, scorer=SCF, must=()):
     out = os.path.join(ST, "cases", name, "score.txt") if os.path.isdir(os.path.join(ST, "cases", name)) else os.path.join(ST, name + "_score.txt")
@@ -753,7 +774,30 @@ td_case("td_no_cp3", "s4d_probe", 2, log_fn=td_nocp3, must=("dropped 0", "MISSIN
 # the scorer prints the dropped count itself in score mode (the synthetic good set has no teardown line: 0 per run)
 run_score("good_teardown_count", GOOD, {}, 0, must=(TDL + "s4p_off2a 0, s4p_off2b 0, ",))
 
-n_ok = sum(1 for _, ok in results if ok)
-print("S4D2 SELFTEST: %s (%d/%d)" % ("PASS" if n_ok == len(results) else "FAIL", n_ok, len(results)))
+
+
+def selfcheck(mode, must):
+    """Re-run this same file with the self-check switch: exit 1 and the wrapper's FAIL last line are required."""
+    par = os.path.join(ST, "selfcheck_" + mode); os.makedirs(par)
+    p = subprocess.run(["bash", WRAP, par], env=dict(os.environ, S4D2_SELFTEST_SELFCHECK=mode), capture_output=True,
+                       text=True, errors="replace")
+    out = p.stdout + p.stderr
+    lines = [l for l in out.splitlines() if l.strip()]
+    last = lines[-1] if lines else ""
+    ok = p.returncode == 1 and last.startswith("S4D2 SELFTEST: FAIL (self-test exit: python 1, tee 0") and all(m in out for m in must)
+    results.append(("selfcheck_" + mode, ok))
+    print("%-4s %-22s exit %d (want 1) last line: %s" % ("ok" if ok else "BAD", "selfcheck_" + mode, p.returncode, last[:120]))
+
+
+selfcheck("crash", ("Traceback", "RuntimeError: deliberate crash"))
+selfcheck("fail", ("BAD  selfcheck_forced_bad_case", "S4D2 SELFTEST: FAIL (0/1)"))
+
+finish()
 PYEOF
+ST_PIPE=("${PIPESTATUS[@]}")   # [0] = the embedded Python, [1] = tee (a pipeline's own status is its LAST command's)
 echo "output folder: $ST ($(du -sh "$ST" | cut -f1))"
+if [ "${ST_PIPE[0]}" != 0 ] || [ "${ST_PIPE[1]}" != 0 ]; then
+    echo "S4D2 SELFTEST: FAIL (self-test exit: python ${ST_PIPE[0]}, tee ${ST_PIPE[1]}; a crash or a failed case, see $ST/selftest_output.txt)" | tee -a "$ST/selftest_output.txt"
+    exit 1
+fi
+exit 0
