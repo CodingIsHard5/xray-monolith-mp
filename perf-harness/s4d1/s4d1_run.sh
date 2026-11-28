@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# DRAFT - NOT RUN, NOT REGISTERED. s4d1 series driver (PREREG-s4d1-leftovers-build1-DRAFT.md sections 2.1, 3, 4, 5, 6;
+# REGISTERED 2026-11-28 after the GO re-probe. s4d1 series driver (PREREG-s4d1-leftovers-build1-2026-11-28.md sections 2.1, 3, 4, 5, 6;
 # requirement R2 of s4d1/NOTES.md 4). Written 2026-11-28 at the desk from the template s4d2/s4d2_run.sh (sha256
 # 2777c68f..., four reviews). Only `bash -n` and fixture `--preflight-only` calls have been run on it (s4d1/NOTES.md 9).
 # Rule of the brief: where the draft and the template disagree, the DRAFT's test content wins (boots, tags, flags,
@@ -109,11 +109,11 @@ SAVE_C=run/appdata/savedgames/bench1.scoc; SAVE_C_SHA=7c2ddf33ccdaa75c341ba8a7c3
 AXR_SRC=run/appdata/axr_options_play.ltx; AXR_DST=run/gamedata/configs/axr_options.ltx
 AXR_SHA=27d54b9f59404d224258649598ca604ebfc174dd066be4a96ff392323244fb29   # template (sf1's value; matches 2026-11-28)
 # ---- values the probe supplies (prereg 2.3; series mode only; filled by hand from the GO reading) ----
-PROBE_BOOT_S=PROBE_BOOT_S        # the longer probe's det_run.sh `rc=0 elapsed=` seconds
-PROBE_S3_FRAMES=PROBE_S3_FRAMES  # = the scorer's CONST value (cross-checked below); decides whether s4d_brk2 boots
+PROBE_BOOT_S=402                 # the longer probe's det_run.sh `rc=0 elapsed=` seconds
+PROBE_S3_FRAMES=2746             # = the scorer's CONST value (cross-checked below); decides whether s4d_brk2 boots
 # ---- registration values (series mode only; prereg 2.5, 8: "record the hashes of scorer and self-test") ----
-SCORER_SHA=REG_ME_SCORER_SHA     # sha256 of s4d1_score.py as registered (CONST filled)
-SELFTEST_SHA=REG_ME_SELFTEST_SHA # sha256 of s4d1_selftest.sh as registered
+SCORER_SHA=28af1a58ccbaf15c0085ef869e67e4621181efb6c659af9c096cf831aa71b3ad # sha256 of s4d1_score.py as registered (CONST filled)
+SELFTEST_SHA=c2216766d8e216be412397502312bf61bd3a089134d8fa96ac01723a98ee2615 # sha256 of s4d1_selftest.sh as registered
 # ---- fixed by the prereg ----
 BASE="-det_passes 100,200,320 -det_lua_streams -det_counters"   # prereg 6.2 <base> (tools/s4c_partA.sh:11)
 REF="-det_passes 50,600,1650 -det_save -det_lua_streams -det_counters"   # the 11-19 counter method (s4c_partA.sh:10-16)

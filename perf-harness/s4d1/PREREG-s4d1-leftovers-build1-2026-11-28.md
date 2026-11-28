@@ -1,6 +1,8 @@
-# PREREG s4d1: stage 4d-1 build 1 (body, tracers, crosshair) under the synthetic gated lever, with the held-item nudge measured (DRAFT 2026-11-27, revision 2, NOT registered)
+# PREREG s4d1: stage 4d-1 build 1 (body, tracers, crosshair) under the synthetic gated lever, with the held-item nudge measured (REGISTERED 2026-11-28, revision 2 + Amendments 1-4)
 
-DRAFT. Nothing here has been run. Not registered until: the exe is built and pinned, the two probe boots (section 2)
+**REGISTERED 2026-11-28 12:5x EST (Amendment 4): the re-probe said GO, every `PROBE_` value is filled, the self-test
+passed 75/75 on the registered scorer with the probes' real bytes. Only the two probes (twice) have been booted; no
+scored boot has run.** The conditions as they stood in the draft: not registered until the exe is built and pinned, the two probe boots (section 2)
 have run and said GO, every `PROBE_` value is filled in by the rules in 2.3, and the self-test has passed on the
 probes' real bytes (section 8). No box run without the Overseer's GO.
 Code: wt-simtick perf/tick-4d HEAD `7b1232ffc`: 8527808c9 (lever, mask, tripwires, breaks, S2, S3, S1 crosshair),
@@ -152,6 +154,37 @@ earlier registration without re-deriving it).
 - A second probe stop (any rule) means a new plan, not a third probe on the spot.
 - Predictions for the re-probe, fixed now: item taken 85 %; teardown lines dropped = 1 on each boot 85 %; GO overall
   about 43 % (the item, the unseen s4 pattern with an item, and every earlier probe rule must all hold).
+
+### Amendment 4 (2026-11-28): the re-probe said GO; registration
+- **Re-probe** 12:27:56-12:40:43 EST, 2 boots, shared claim (4 other shared claims on the box, load 6-12), driver
+  dea3ec44..., read ONCE with scorer ef3746af... -> `probe_readings.txt` (in this folder): **S4D1 PROBE: GO**.
+- **Predictions (Amendment 3) against the outcome:** item taken (85 %): yes, slot 3 `wpn_ppsh41`, s4 on 15403 of 15403
+  and 15430 of 15430 lines (share 1.0000, rule >= 0.50). Teardown dropped = 1 per boot (85 %): yes, 1 and 1. GO
+  (~43 %): happened. Section 2.3's desk guess L = 1 for the body lag was WRONG on both probes: L = 0 fits 1.0000.
+- **Registered values** (scorer CONST): PROBE_S2_MOVING 10270, PROBE_S2_LAG 0, PROBE_S3_FRAMES 2746 (>= 300: S3 and
+  TWB2 registered, s4d_brk2 boots), PROBE_S1_FRAMES 15405 (>= 300: S1 registered; it was 0 on the first probe, which
+  held no item), PROBE_ALIFE_GAP16 0. Driver: PROBE_BOOT_S 402 (boots 354 s and 402 s; first probe 338 s) ->
+  BENCH_TIMEOUT = ceil(5 x 402 / 60) x 60 = **2040 s** = 5.07x the longest measured boot [M].
+- **Held item, descriptive (never gated):** with bit 8 on (mask 15) the item is drawn as with it off (item step d,d,
+  draw near, both probes): the registered case "weapon, desk prediction (nudge wiped by the render's rebuild)".
+- **Self-test fault found at registration and fixed (s4d1_selftest.sh only):** it exited 0 after a Python crash and
+  after failed cases (last command an `echo`; `python | tee` without the pipe's status; the Python never exited
+  non-zero). Earlier PASS readings were taken from the printed `PASS (n/n)` line, which was right, so they stand; the
+  exit code was not trustworthy. Now: non-zero on any crash or failed case, proven by two self-check cases that re-run
+  the same file. It also runs on the registered (filled) scorer now. 14 cases added (61 -> 75), among them the real
+  bytes of the GO probes with the item (teardown 1; item line; s4 share; mutants: item line removed, item NONE, s4
+  dashed 18 of 34 STOP and 17 of 34 pass, 3 trailing lines STOP and 2 pass). No existing expectation was changed.
+- **Registered hashes:** s4d1_score.py 28af1a58ccbaf15c0085ef869e67e4621181efb6c659af9c096cf831aa71b3ad (the probe
+  reader ef3746af... with CONST filled and this file's new name in a comment; `git diff` shows only those lines),
+  s4d1_selftest.sh c2216766d8e216be412397502312bf61bd3a089134d8fa96ac01723a98ee2615 (75/75, exit 0),
+  s4d1_run.sh 08f0cff1933668ec038b553031f058ddfaa38662b7ee0513efcb59ff9352ba01 (PROBE_BOOT_S, PROBE_S3_FRAMES and the
+  two pins filled; header line; no logic change). `s4d1_run.sh series --preflight-only`: ok, 19 boots, timeout 2040 s.
+- **Time, re-derived from the probes [M]** (replaces 6.3's 15 ms guess): K=3 boot 402 s under a shared box. Scaling
+  6.3's K=1 and K=2 guesses by 402/375: K=1 ~226 s, K=2 ~311 s. A 6 x 226 + 6 x 40 = 27 min; L 3 x 311 + 402 + 226 +
+  5 x 40 = 30 min; S 6 x 311 + 2 x 402 + 8 x 40 = 50 min. **Scored series (19 boots) ~1 h 47 min**, shared claim,
+  inside the 3 h slice. The K=1/K=2 scaling is a guess [G]; a boot over 2040 s is a stop, never a FAIL.
+- Nothing in sections 3-5 (checks, bounds) changes. The margin table's BENCH_TIMEOUT row now reads 2040 s, <= 402 s
+  [M], 5.07x.
 
 ## 0. Limits, first
 - **The det harness is not exact for online state or for `::Random`.** Two stock det runs of the same exe already differ
@@ -369,7 +402,7 @@ probes: s4d_probe, s4d_probe15 -> (GO, fill, self-test on real bytes, register) 
 s4d_s3 s4d_o3 -> L: s4d_l2a s4d_l3 s4d_l1 s4d_l2w s4d_l2b -> S: s4d_off2a s4d_on2a s4d_off3 s4d_on3 s4d_off2b s4d_on2b
 s4d_brk1 s4d_brk2 (brk2 only if S3 is registered). The arms of each pair are spread out, not back to back. The breaks
 go last; each boot starts fresh (det_run.sh restores user.ltx and loads the save).
-### 6.2 Command per boot (series script s4d1/s4d1_run.sh, sha256 dea3ec4428650e851f88886923856d098569b2d6c7a913c8dff3a1f2257925cd; NOTES.md 4 R2, 9, 10)
+### 6.2 Command per boot (series script s4d1/s4d1_run.sh, registered sha256 08f0cff1933668ec038b553031f058ddfaa38662b7ee0513efcb59ff9352ba01, Amendment 4; the probes ran dea3ec4428650e851f88886923856d098569b2d6c7a913c8dff3a1f2257925cd; NOTES.md 4 R2, 9, 10)
 The driver also restores the options file before every boot (template safety rule, kept by the coordinator's
 decision 2026-11-28): run/appdata/axr_options_play.ltx (pinned 27d54b9f...) is copied over
 run/gamedata/configs/axr_options.ltx inside box_guarded, because each exe rewrites that file's version line when it
@@ -462,7 +495,7 @@ series (fault). A boot is never re-run because of what its output shows. Scored 
 | probe drop / stop count | 300 | ~5440 x (K-1) [G] | ~36x | |
 | probe rule "item": ITEM_SHARE (Amendment 1) | >= 0.50 | >= 0.98 with an item (15,433 lines, <= ~273 of a draw animation [G]); 0.00 without (0 of 15,433 / 15,415 [M]) | 1.96x above (0.98 / 0.50); 0.50 above the no-item 0.00 | just under 2x on the upper side, flagged; a stop rule, not a verdict |
 | teardown lines dropped: TEARDOWN_MAX (Amendment 2) | <= 2 per run | 1 per boot on 2 of 2 real boots [M] | 2x | EXACTLY 2x, flagged |
-| BENCH_TIMEOUT | 1900 s | <= 375 s [G] | 5.1x | guess; reset from PROBE_BOOT_S |
+| BENCH_TIMEOUT | 2040 s (Amendment 4; was 1900 s on a guess) | <= 402 s [M, the longer re-probe boot] | 5.07x | measured under a shared box; K=3 is the slowest arm |
 | s4 reader: item step threshold (descriptive) | 0.05 m | ~0.5 m [G] | 10x | not a verdict bound |
 | s4 reader: draw near/far (descriptive) | 0.25 m | 0 or ~0.5 m | 2x either side | at 2x, flagged; not a verdict bound |
 | driver: TERM -> KILL grace (operational) | 250 s | det_run cleanup <= 165 s worst | 1.5x of the worst case | UNDER 2x, flagged; a hit loses det_run's cleanup, never a verdict |
@@ -509,7 +542,7 @@ run carries exactly its registered switches (the engine's own command line and d
 - Amendment 2: the real tails of both probes (teardown line dropped and counted) and mutants of them.
 Result 2026-11-27: `S4D1 SELFTEST: PASS (41/41)`
 (s4d1/selftest-runs/20261127-192126-3224414/selftest_output.txt). Result 2026-11-28 after Amendments 1 and 2:
-`S4D1 SELFTEST: PASS (61/61)` (s4d1/selftest-runs/20261128-042031-620954/selftest_output.txt). **Must be re-run with a case built on the probes'
+`S4D1 SELFTEST: PASS (61/61)` (s4d1/selftest-runs/20261128-042031-620954/selftest_output.txt). **Registered run (Amendment 4): `S4D1 SELFTEST: PASS (75/75)`, exit 0, s4d1/selftest-runs/20261128-125037-2937081/selftest_output.txt, on the registered scorer 28af1a58... with the GO probes' real bytes.** Earlier note: **Must be re-run with a case built on the probes'
 real folders before registration.** Hashes of scorer and self-test: to fill at registration.
 
 ## 9. Predictions (fixed before any run)

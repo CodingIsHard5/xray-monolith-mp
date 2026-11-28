@@ -1,0 +1,30 @@
+probe readings, s4d_probe (rules: prereg section 2.3):
+  lag fit (share of moving n=0 frames on the lerp of ticks T-L-1, T-L): L=0 1.0000, L=1 0.0000, L=2 0.0001
+  reported: tracer tick frames 1201, tracer life 7.98 ticks, drawn frames with stamp_ok 0: 0
+  highest 'bullets fired': 150; actor x/z range 3.998 m; witness lines 16131; A-Life calls 96
+  S1 registered (15405 frames); S3 and TWB2 registered (2746 frames)
+CONST values to register:
+    "PROBE_S2_MOVING": 10270,
+    "PROBE_S2_LAG": 0,
+    "PROBE_S3_FRAMES": 2746,
+    "PROBE_S1_FRAMES": 15405,
+    "PROBE_ALIFE_GAP16": 0,
+item s4d_probe: item slot 3 section wpn_ppsh41 (installed line: item true); s4 on 15403 of 15403 witness lines F 815..16217 (stimulus start to cp3): share 1.0000 (rule >= 0.50)
+item s4d_probe15: item slot 3 section wpn_ppsh41 (installed line: item true); s4 on 15430 of 15430 witness lines F 815..16244 (stimulus start to cp3): share 1.0000 (rule >= 0.50)
+s4 s4d_probe (mask 7), descriptive:
+  j=0 |draw - item - body offset|: n 5134 min 0.00000 median 0.00001 p90 0.00002 max 0.00003; draw absent on 1 of 5135 item frames
+  j=1 |item - item(j=0)|: n 5135 min 0.00198 median 0.65015 p90 0.95360 max 1.37125
+  j=1 |draw - item - body offset|: n 5134 min 0.00000 median 0.00001 p90 0.00002 max 0.00004; draw absent on 1 of 5135 item frames
+  j=2 |item - item(j=0)|: n 5135 min 0.00198 median 0.65015 p90 0.95360 max 1.37125
+  j=2 |draw - item - body offset|: n 5134 min 0.00000 median 0.00001 p90 0.00002 max 0.00004; draw absent on 1 of 5135 item frames
+  signature: item step d,d (ticks per signature {'d,d': 5125, '0,0': 10}), draw near
+s4 s4d_probe15 (mask 15), descriptive:
+  j=0 |draw - item - body offset|: n 5143 min 0.00000 median 0.00001 p90 0.00002 max 0.00004; draw absent on 1 of 5144 item frames
+  j=1 |item - item(j=0)|: n 5144 min 0.01268 median 0.65489 p90 0.95264 max 1.37012
+  j=1 |draw - item - body offset|: n 5143 min 0.00000 median 0.00001 p90 0.00002 max 0.00004; draw absent on 1 of 5144 item frames
+  j=2 |item - item(j=0)|: n 5144 min 0.01268 median 0.65489 p90 0.95264 max 1.37012
+  j=2 |draw - item - body offset|: n 5143 min 0.00000 median 0.00001 p90 0.00002 max 0.00004; draw absent on 1 of 5144 item frames
+  signature: item step d,d (ticks per signature {'d,d': 5133, '0,0': 11}), draw near
+S4 CASE (descriptive, never gated): weapon, desk prediction (nudge wiped by the render's rebuild: B+d, B, B)
+teardown witness lines dropped (trailing no-actor lines after cp3, at most 2): s4d_probe 1, s4d_probe15 1
+S4D1 PROBE: GO

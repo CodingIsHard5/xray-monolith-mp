@@ -28,7 +28,7 @@ Design documents (plan-facts/):
 - stage4d2-s4b-design-and-code-2026-11-27.md ("S4b notes"); its section 11 is current.
 - Reviews: stage4d2-s4a-review-, stage4d2-s4b-review- and stage4d2-s4b-rereview-2026-11-27.md.
 
-Model copied for form, flags and method: s4d1/PREREG-s4d1-leftovers-build1-DRAFT.md ("the s4d1 draft") and its
+Model copied for form, flags and method: s4d1/PREREG-s4d1-leftovers-build1-2026-11-28.md ("the s4d1 draft") and its
 scorer.
 
 Labels:

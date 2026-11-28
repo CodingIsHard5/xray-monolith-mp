@@ -1,6 +1,6 @@
 # s4d1 notes (2026-11-27, desk only: no game run, no build, no git change)
 
-Files: PREREG-s4d1-leftovers-build1-DRAFT.md, s4d1_score.py, s4d1_selftest.sh, this file, selftest-runs/<last>/.
+Files: PREREG-s4d1-leftovers-build1-2026-11-28.md, s4d1_score.py, s4d1_selftest.sh, this file, selftest-runs/<last>/.
 
 ## 1. Corrections from the coordinator, applied
 - **Legs and actor shadow are ON, not off.** The first brief said "legs are off". The det runs use out/user_det.ltx.orig
@@ -354,3 +354,22 @@ s4d1_run.sh is now sha256 33b1fd0a8f16aaf95f371ebb147bd11a4c77867da282d8a7e8d72a
   - The 3-s draw-animation bound in ITEM_SHARE's derivation is a guess; the re-probe's share reading shows it.
   - S1 had 0 crosshair frames on the first probe (dropped, Caden's eyes); with an item held this may change.
   - SCORER_SHA / SELFTEST_SHA in the driver are still REG_ME_ placeholders (filled at registration).
+
+## 11. Registration (2026-11-28, prereg Amendment 4)
+- Re-probe GO (probe_readings.txt). CONST and PROBE_BOOT_S / PROBE_S3_FRAMES filled; pins filled; draft renamed to
+  PREREG-s4d1-leftovers-build1-2026-11-28.md.
+- Self-test fault: exit 0 after a crash or failed cases. Three causes: the script's last command was an `echo`; the
+  Python ran as `python3 | tee` and the pipe's status was not read; the Python printed FAIL (n/m) and exited 0. Fixed:
+  finish() exits 1 unless all cases pass; the wrapper reads PIPESTATUS and ends with a FAIL line and exit 1. Cases
+  selfcheck_crash and selfcheck_fail re-run this same file (S4D1_SELFTEST_SELFCHECK=crash|fail) and require exit 1.
+  s4d2_selftest.sh has the same tail (python | tee, last command echo): to fix before s4d2 is registered. Other
+  self-tests from the same template (em1, kj*, common) are to be checked.
+- filled() now sets each CONST value whatever it holds (placeholder or number), one match per key. refuse_placeholders
+  runs on a copy with PROBE_S2_LAG put back; refuse_placeholders_all with all five. No existing expectation changed.
+- New case registered_const_filled ties the scorer's CONST to probe_readings.txt (read only; the self-test fails if
+  that file is missing or does not say GO). REAL2 cases: cut by script from out/det_s4d_probe and det_s4d_probe15 of
+  the re-probe (sha256 of each cut checked): teardown 1 with the item; two trailing lines pass (TEARDOWN_MAX is 2,
+  "at most 2"), three STOP; item line removed / NONE STOP; s4 dashed 18 of 34 STOP (0.4706), 17 of 34 pass (0.5000).
+  Item mutants are scored as a difference to the baseline cut's STOP lines, because a short cut always STOPs the
+  pattern and input rules.
+- Result: PASS (75/75), exit 0, selftest-runs/20261128-125037-2937081.

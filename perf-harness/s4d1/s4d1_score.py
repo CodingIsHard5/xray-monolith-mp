@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# s4d1 scorer (PREREG-s4d1-leftovers-build1-DRAFT.md). Stdlib only; run with python3 -I. Imports nothing from tools/.
+# s4d1 scorer (PREREG-s4d1-leftovers-build1-2026-11-28.md). Stdlib only; run with python3 -I. Imports nothing from tools/.
 #
 #   python3 -I s4d1_score.py root=<folder holding det_<tag> run folders> out=<new output file>     (score, ONCE)
 #   python3 -I s4d1_score.py mode=probe root=<folder holding det_s4d_probe and det_s4d_probe15> out=<new output file>
@@ -28,11 +28,11 @@ import sys
 # ---- constants the probe supplies (prereg section 2.3; each with its rule there). Scoring REFUSES while any value is
 # still the placeholder string. ----
 CONST = {
-    "PROBE_S2_MOVING": "PROBE_S2_MOVING",          # probe: n=0 frames with |s2 draw - s2 xform| > TOL_POS
-    "PROBE_S2_LAG": "PROBE_S2_LAG",                # probe: tick lag L of the drawn pair (0, 1 or 2); -1 = S2 (ii) reported
-    "PROBE_S3_FRAMES": "PROBE_S3_FRAMES",          # probe: n=0 frames with a tracer drawn and |head - pos| > TOL_POS
-    "PROBE_S1_FRAMES": "PROBE_S1_FRAMES",          # probe: frames with the s1 columns present
-    "PROBE_ALIFE_GAP16": "PROBE_ALIFE_GAP16",      # probe: number of 16-tick gaps between A-Life calls (0 or 1)
+    "PROBE_S2_MOVING": 10270,                      # probe: n=0 frames with |s2 draw - s2 xform| > TOL_POS
+    "PROBE_S2_LAG": 0,                             # probe: tick lag L of the drawn pair (0, 1 or 2); -1 = S2 (ii) reported
+    "PROBE_S3_FRAMES": 2746,                       # probe: n=0 frames with a tracer drawn and |head - pos| > TOL_POS
+    "PROBE_S1_FRAMES": 15405,                      # probe: frames with the s1 columns present
+    "PROBE_ALIFE_GAP16": 0,                        # probe: number of 16-tick gaps between A-Life calls (0 or 1)
 }
 # ---- registered constants (derivations in the prereg, margin table section 7) ----
 KP = 3                    # the probe's K
