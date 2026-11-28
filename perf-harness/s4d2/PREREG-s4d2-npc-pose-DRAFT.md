@@ -87,6 +87,15 @@ Labels:
   (S3-2), BENCH_SAVE=bench1 is passed to det_run.sh (N3-6), a title seen by this driver refuses for 180 s after (S3-5),
   and det_run.sh repeats `wineserver -k` in its stop wait, refuses a generic DET_BOX_TOKEN and a user.ltx that is not
   one of the two known files (S3-1, S3-3, N3-10).
+- 2026-11-28, seventh revision (coordinator's fix round after plan-facts/s4d1-driver-review-2026-11-28.md, whose
+  findings S-1, S-2, S-3, N-1 and N-5 also hold for this driver): **s4d2_run.sh is now sha256
+  65d13233266645973a39b3ac91213fc458e0099c441da3826f77d47fee1bee19** (was 2777c68f...). One claim per driver call, then
+  extended before every boot by `quiet-required.sh renew` with QR_CLAIM_ID = that claim's id (a repeated `claim` could
+  nest new records that outlived the run and kept Caden's launcher refusing); finish() releases every claim id the call
+  obtained. A lost claim (no live record carries the run's token) stops, before every boot and every ~5 s of one.
+  Right after det_run.sh returns (any rc), no engine of the run tree may use run/prefix (wineserver -k, 60 s, else a
+  fault stop with the claim kept), before the retry decision. Signals are held over the launch until the child's pid
+  is recorded. The 6-h claim wait checks its deadline before every attempt. Test content unchanged.
 
 ## 0. Limits, first
 - **The det harness is not exact for online state or for `::Random`**, even stock against stock (the s4d1 draft,

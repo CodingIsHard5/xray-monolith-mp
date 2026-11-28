@@ -15,6 +15,13 @@ Labels: **[D]** desk (file:line), **[M]** measured (a number in a file), **[G]**
 earlier registration without re-deriving it).
 
 **Change log.**
+- 2026-11-28 (fix round after plan-facts/s4d1-driver-review-2026-11-28.md; desk only): s4d1_run.sh is now sha256
+  af73868b8d5c32bbd1cd2569829ca54aad9be73a606c88618646694f126559ae (was 8dc70c49...): one claim per call, extended by id (`renew`), every
+  id released at the end (S-1); a lost claim stops (S-2, 6.4); engines checked right after each det_run.sh (S-3, 6.4);
+  signals held over the launch; the wait deadline before every claim attempt; the series needs both probe folders and
+  a PROBE_BOOT_S equal to the probe logs, which `probe` now prints. Text: 2.1 re-probe names out/s4d1_state/probe; 6.2
+  BENCH_TIMEOUT per mode, det_run.sh lines 259-266; 6.3 the probe's 5.1x marked [G] with the 3.0x desk bound; 6.4 the
+  l2a check after the boot, with the reason; 6.5 rc 4/5 and no probe retry; 7 the driver's operational bounds.
 - 2026-11-28 (coordinator's decisions on the script's three open points; desk only):
   - section 1: stimulus re-pinned to 1777fb6865cc5b56c80f197f3f95a250104d6c90ce0b8b2a35422e3bed39ff95 (was d7dbc6c5...). Reason: the file is a superset of the old one: its only addition is the -det_synth_item path, which is off unless that
   flag is on the command line (zz_eperf_synth.script:20 `item_on = det and string.find(cl, "-det_synth_item", ...)`),
@@ -155,8 +162,11 @@ Both SimTick18.exe, **K = 3** (accepted by the Overseer: K = 2 has one render-on
 Reader: `python3 -I s4d1_score.py mode=probe root=out out=s4d1/probe_readings.txt` (written once; reads
 out/det_s4d_probe and out/det_s4d_probe15; exit 0 GO, 1 STOP). Probe folders are kept; a probe is re-run only after a
 fix that a stop rule asks for. **No re-probe mode exists (coordinator 2026-11-28):** a re-probe needs a new decision
-from the supervisor and a registered place for the old probe folders; s4d1_run.sh refuses `probe` while any
-out/det_s4d_* folder or s4d1/probe_readings.txt exists.
+from the supervisor and a registered place for the old probe folders, the old reading AND the old state folder out/s4d1_state/probe;
+s4d1_run.sh refuses `probe` while any out/det_s4d_* folder, s4d1/probe_readings.txt or out/s4d1_state/probe exists.
+At the end of `probe` the driver logs `PROBE_BOOT_S=<n>` (the larger `rc=0 elapsed=` of the two run logs, also in
+out/s4d1_state/probe/probe_boot_s.txt) and the sha256 of the scorer and self-test to read with; the series refuses a
+PROBE_BOOT_S that differs from those logs, and refuses unless both probe folders exist.
 
 ### 2.2 Probe stop rules (any one = the series does not start)
 | code | rule | on | why |
@@ -274,14 +284,17 @@ probes: s4d_probe, s4d_probe15 -> (GO, fill, self-test on real bytes, register) 
 s4d_s3 s4d_o3 -> L: s4d_l2a s4d_l3 s4d_l1 s4d_l2w s4d_l2b -> S: s4d_off2a s4d_on2a s4d_off3 s4d_on3 s4d_off2b s4d_on2b
 s4d_brk1 s4d_brk2 (brk2 only if S3 is registered). The arms of each pair are spread out, not back to back. The breaks
 go last; each boot starts fresh (det_run.sh restores user.ltx and loads the save).
-### 6.2 Command per boot (series script s4d1/s4d1_run.sh, sha256 8dc70c49895379442933cfababd4768bbec2b1d11f5604c9eaf58398d19a1d66; NOTES.md 4 R2, 9)
+### 6.2 Command per boot (series script s4d1/s4d1_run.sh, sha256 af73868b8d5c32bbd1cd2569829ca54aad9be73a606c88618646694f126559ae; NOTES.md 4 R2, 9)
 The driver also restores the options file before every boot (template safety rule, kept by the coordinator's
 decision 2026-11-28): run/appdata/axr_options_play.ltx (pinned 27d54b9f...) is copied over
 run/gamedata/configs/axr_options.ltx inside box_guarded, because each exe rewrites that file's version line when it
 boots and part A alternates Stance14 and SimTick18, so the arms of a pair start from the same bytes.
-`DET_NOCLAIM=1 DET_BOX_TOKEN=<the series claim's token> DET_BOX_CLASS=shared BENCH_DISPLAY=:141 BENCH_TIMEOUT=1900
+`DET_NOCLAIM=1 DET_BOX_TOKEN=<the run's claim token> DET_BOX_CLASS=shared BENCH_DISPLAY=:141 BENCH_TIMEOUT=<T>
 DET_EXTRA="<base> <lever>" tools/det_run.sh <exe> <tag> 60 3` (det_run.sh pinned at e29800949b503a7f..., change log; add BENCH_SAVE=bench1), then
-`mv run/appdata/logs/synth_<tag>.txt out/det_<tag>/` (det_run.sh does not move the witness: det_run.sh:44-45).
+`mv run/appdata/logs/synth_<tag>.txt out/det_<tag>/` (det_run.sh does not move the witness: det_run.sh:259-266 moves only this tag's dumps, counters, traces and saves).
+`<T>` = 1900 s for the two probes; for the series the 2.3 value max(1900, ceil(5 x PROBE_BOOT_S / 60) x 60) (e.g.
+2040 s for PROBE_BOOT_S 401). The claim is taken once per driver call and extended by its id before every boot
+(`quiet-required.sh renew` with QR_CLAIM_ID); every claim id the call obtained is released at its end.
 `<base>` = `-det_passes 100,200,320 -det_lua_streams -det_counters` (tools/s4c_partA.sh:11, COPIED; "60 3" is ignored
 under -det_passes, PREREG-S2-simtick section 9).
 | tags | exe | `<lever>` |
@@ -305,7 +318,10 @@ boot between boots (6 boots took 1229 s, against 1191 s elapsed [M]).
 Probes 2 x 375 s + 2 x 40 s = 14 min. A 1191 s + 6 x 40 s = 24 min. L 3 x 290 + 375 + 211 s + 5 x 40 s = 28 min.
 S 6 x 290 + 2 x 375 s + 8 x 40 s = 47 min. **Scored series (19 boots) ~1 h 39 min; with the two probes (21 boots)
 ~1 h 53 min.** The probes' elapsed times replace the 15 ms guess before registration.
-BENCH_TIMEOUT 1900 s = 5.1x the K=3 guess and 9x the stock maximum (shared needs >= 5x, section 7).
+BENCH_TIMEOUT 1900 s = 5.1x the K=3 guess [G] and 9x the stock maximum (shared needs >= 5x, section 7). Desk upper
+bound without the guess: a render-only frame costs at most a full stock frame (211 s / 5473 = 38.6 ms), so K=3 <= 211 +
+10880 x 0.0386 = 631 s -> 3.0x; under 5x, but only a guess is under it, and a hit is a stop, never a false FAIL. The
+series value comes from the measured probe (2.3).
 ### 6.4 Stop rules (no check is scored before the end; these look only at each run's own completion)
 Before the series:
 - SimTick18 sha256 = 40d2d37d810bdd9fdf0a19a094dea621a16a2f164fdb1e1b9d1b209d5a6b09d4 (section 1); Stance14 b4ce9c77.
@@ -320,12 +336,21 @@ Before the series:
 - No `run/appdata/logs/synth_s4d_*.txt` and no `out/det_s4d_*` exist (except the two probe folders).
 - Flag preflight as tools/s4c_partA.sh:10-16 for the base flags.
 During:
-- A protected title or a lost claim -> stop (box).
+- A protected title or a lost claim -> stop (box). A lost claim = no live claim record carries the run's token
+  (checked before every boot and every ~5 s during one).
+- An engine of the run tree still using run/prefix right after det_run.sh returns (any rc) -> wineserver -k there; if
+  one is still there 60 s later -> stop (fault), claim kept.
 - A crash dump -> stop (fault).
-- In-run preflight on s4d_l2a at cp1: the counter file is present, the witness file is present and non-empty, and the
-  engine command line and det_synth line are as registered. Otherwise stop at once (as tools/s4c_partA.sh:38-41).
+- In-run preflight on s4d_l2a, checked right AFTER its boot (2026-11-28; it was "at cp1 ... stop at once", as
+  tools/s4c_partA.sh:38-41): the cp1 counter files are present, the witness file is present and non-empty, and the
+  engine command line and det_synth line are as registered. Otherwise the series stops before the next boot. Why after:
+  every item checked is fixed by cp1 and unchanged later, so the verdict is the same one boot (~5 min) later, while a
+  stop mid-boot TERMs det_run.sh, which then leaves run/appdata/user.ltx with the det settings and blocks every later
+  boot until a hand restore.
 ### 6.5 One-retry rule
-A boot that ends rc != 0 (timeout, early exit) is run once more right away as `<tag>_r1`, with the same switches.
+A boot that ends rc != 0 (timeout, early exit; i.e. det_run.sh rc 5 or rc 4, with no crash dump) is run once more
+right away as `<tag>_r1`, with the same switches. Every other rc is a stop (rc 3 box; a crash dump fault; others fault).
+Series only: the probes are not retried (2.1).
 The scorer reads `det_<tag>_r1` when it exists and names the substitution. A second failure of the same slot stops the
 series (fault). A boot is never re-run because of what its output shows. Scored ONCE, at the end:
 `python3 -I s4d1/s4d1_score.py root=out out=s4d1/s4d1_score_result.txt`; no re-score after a checker fix.
@@ -351,7 +376,10 @@ series (fault). A boot is never re-run because of what its output shows. Scored 
 | BENCH_TIMEOUT | 1900 s | <= 375 s [G] | 5.1x | guess; reset from PROBE_BOOT_S |
 | s4 reader: item step threshold (descriptive) | 0.05 m | ~0.5 m [G] | 10x | not a verdict bound |
 | s4 reader: draw near/far (descriptive) | 0.25 m | 0 or ~0.5 m | 2x either side | at 2x, flagged; not a verdict bound |
-No margin is under 2x. Four are at exactly 2x (calls to cp1, walk range, lerp ulps, and the descriptive draw
+| driver: TERM -> KILL grace (operational) | 250 s | det_run cleanup <= 165 s worst | 1.5x of the worst case | UNDER 2x, flagged; a hit loses det_run's cleanup, never a verdict |
+| driver: per-boot watch cap (operational) | BENCH_TIMEOUT + 900 s | det_run outside LIMIT <= ~679 s worst, ~40 s measured | 1.3x of the worst case, ~22x measured | UNDER 2x, flagged; a hit is a fault stop |
+| driver: claim wait cap (operational) | 6 h | - | - | COPIED from s4d2 (S2-7) |
+No verdict margin is under 2x (the two driver bounds above are operational and flagged; NOTES.md 9.5). Four are at exactly 2x (calls to cp1, walk range, lerp ulps, and the descriptive draw
 threshold) and one at 2.1x (A3 against a real extra pass). All are flagged. The first two are COPIED or set by the
 script's own geometry.
 **Claim class per run: shared, every run** (both probes, A, L, S). No verdict depends on frame or wall timing: under

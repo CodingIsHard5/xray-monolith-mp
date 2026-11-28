@@ -32,6 +32,11 @@
 # only when the claim carrying this run's token is the only one under our name); every exit path goes through finish(),
 # which kills and reaps only its own child (det_run.sh, KILL after CHILD_GRACE_S) and its own sleep. After det_run.sh
 # ends or is KILLed, no engine of the run tree may still use run/prefix (engines_gone), else the claim is NOT released.
+# Review 2026-11-28 (plan-facts/s4d1-driver-review-2026-11-28.md) applied: S-1 one claim, then `renew` by its id,
+# finish() releases every id obtained; S-2 a lost claim (no live record with our token) stops, in box_gate and
+# watch_boot; S-3 engines_gone right after det_run.sh returns; N-1 signals held over the launch until BP is set; N-5
+# the wait deadline before every claim attempt; N-7 the series needs both probe folders; N-4 PROBE_BOOT_S checked
+# against the probe logs and printed at the end of probe mode; N-3 the reader's hashes logged then.
 # Fourth-review leftovers (plan-facts/box-preflight-fourth-review-2026-11-28.md) applied here: N4-8 the five caller
 # variables det_run.sh refuses are refused HERE, before any claim; N4-9 the token stands last in the claim text (the
 # shared file's substring match is unchanged: residue named in NOTES.md 9); N4-11 a per-boot wall cap in watch_boot
@@ -219,6 +224,14 @@ if [ "$MODE" = series ]; then
 fi
 [ "$bad" = 0 ] || exit 2
 if [ "$MODE" = series ]; then TIMEOUT_RUN=$TIMEOUT; else TIMEOUT_RUN=$TIMEOUT_PROBE; fi
+# Claim length, extended by its id before every boot (gates, renew_call). It must outlast, from one renewal to the next:
+# the rest of the gates (display wait 20 s + two box passes <= 80 s + pins ~10 s = 110 s), the boot up to the watch cap
+# (TIMEOUT_RUN + WATCH_EXTRA_S) plus the poll that sees it (WATCH_NAP_S), a stop there (CHILD_GRACE_S + box_wine_kill
+# 60 s + ENG_GONE_S; the same engines_gone runs after a normal return, S-3), and the after-boot steps up to the next
+# renewal (one box pass <= 40 s): TIMEOUT_RUN + 900 + 5 + 110 + 250 + 60 + 60 + 40 = TIMEOUT_RUN + 1425 s, whole minutes
+# (probe: 3325 s -> 56 min). Refused above 180 min (the fleet's slice limit; the claim tool sets no maximum of its own).
+CLAIM_MIN=$(( (TIMEOUT_RUN + WATCH_EXTRA_S + WATCH_NAP_S + 110 + CHILD_GRACE_S + 60 + ENG_GONE_S + 40 + 59) / 60 ))
+[ "$CLAIM_MIN" -le 180 ] || { echo "REFUSED: one claim period would be $CLAIM_MIN min (> 180, the fleet's slice limit): BENCH_TIMEOUT ${TIMEOUT_RUN}s is too long"; exit 2; }
 BRK2=0; [ "$MODE" = series ] && [ "$PROBE_S3_FRAMES" -ge "$DROP_MIN" ] && BRK2=1   # prereg 2.3, 6.1
 
 pin() {   # <file> <full sha256>: by name
@@ -308,6 +321,14 @@ plan() {   # prints the boot list of this mode, one "tag|exe|lever-or-empty" per
   esac
 }
 PROBE_DIRS="out/det_s4d_probe out/det_s4d_probe15"
+probe_boot_s() {   # prereg 2.3 PROBE_BOOT_S: the larger det_run.sh `rc=0 elapsed=<n>s` of the two probe boots' logs, or rc 1
+  local f v m=""
+  for f in "$ST/probe/run_s4d_probe.log" "$ST/probe/run_s4d_probe15.log"; do
+    v=$(tr -d '\r' < "$f" 2>/dev/null | sed -n 's/^rc=0 elapsed=\([0-9][0-9]*\)s .*$/\1/p' | tail -1)
+    [ -n "$v" ] || return 1
+    { [ -z "$m" ] || [ "$v" -gt "$m" ]; } && m=$v
+  done
+  echo "$m"; }
 # NOITEM (coordinator 2026-11-28, with the stimulus re-pin): the shared stimulus takes an item into the actor's hands
 # only with -det_synth_item (zz_eperf_synth.script:20, :68); no s4d1 boot is registered with it. Refused by name.
 for _l in "$BASE" "$(plan | cut -d'|' -f3)"; do
@@ -335,7 +356,11 @@ case "$MODE" in
     [ -e "$RD0" ] && refuse "$RD0 exists: the probes were read already (no re-probe mode: NOTES.md 9)" ;;
   series)
     if [ ! -e "$RD0" ]; then refuse "missing file $RD0 (no probe reading, prereg 2.1)"
-    else [ "$(last_line "$RD0")" = "S4D1 PROBE: GO" ] || refuse "$RD0 does not end in 'S4D1 PROBE: GO' (last line: '$(last_line "$RD0")')"; fi ;;
+    else [ "$(last_line "$RD0")" = "S4D1 PROBE: GO" ] || refuse "$RD0 does not end in 'S4D1 PROBE: GO' (last line: '$(last_line "$RD0")')"; fi
+    for f in $PROBE_DIRS; do [ -d "$f" ] || refuse "missing folder $f (the probe the GO reading was made from; review :337)"; done
+    if _pb=$(probe_boot_s); then   # N-4: PROBE_BOOT_S must be the probe logs' own number (prereg 2.3)
+      case "$PROBE_BOOT_S" in PROBE_*) ;; *) [ "$_pb" = "$PROBE_BOOT_S" ] || refuse "PROBE_BOOT_S is $PROBE_BOOT_S, the probe logs say $_pb ($ST/probe/run_s4d_probe*.log)" ;; esac
+    else refuse "missing file or line: $ST/probe/run_s4d_probe.log and run_s4d_probe15.log must each hold 'rc=0 elapsed=<n>s' (PROBE_BOOT_S's source)"; fi ;;
 esac
 [ "$bad" = 0 ] || exit 2
 [ "$PRE" = "--preflight-only" ] && { echo "preflight ok ($MODE): $(plan | wc -l) boot(s), timeout ${TIMEOUT_RUN}s"; plan | cut -d'|' -f1,2 | tr '\n' ' '; echo; exit 0; }
@@ -348,11 +373,6 @@ WATCHWHY=""; sc=""; stop=""; rc=0; CLAIMTRY=0; CLAIMED=0; WANTED=0; OURQ=0; BOOT
 TOKEN="s4d1-$MODE-$(date +%Y%m%d%H%M%S)-$$"   # in the claim's <what>, LAST (N4-9): only THIS run's claim is ever released
 WHAT="headless Xvfb GAMMA A-Life equivalence series s4d1 ($MODE, $(plan | wc -l) boots, display $DISP) $TOKEN"
 case "$WHAT" in *EXCLUSIVE*) echo "REFUSED: the claim text names EXCLUSIVE"; exit 2 ;; esac
-# Claim length, renewed before every boot (gates). It must outlast, from one renewal to the next: the rest of the gates
-# (display wait 20 s + two box passes <= 80 s + pins ~10 s = 110 s), the boot up to the watch cap (TIMEOUT_RUN +
-# WATCH_EXTRA_S), a stop there (CHILD_GRACE_S + box_wine_kill 60 s + ENG_GONE_S), and the after-boot steps up to the next
-# renewal (one box pass <= 40 s): TIMEOUT_RUN + 900 + 110 + 250 + 60 + 60 + 40 = TIMEOUT_RUN + 1420 s, in whole minutes.
-CLAIM_MIN=$(( (TIMEOUT_RUN + WATCH_EXTRA_S + 110 + CHILD_GRACE_S + 60 + ENG_GONE_S + 40 + 59) / 60 ))
 qr() { env "${BOX_QR_UNSET[@]}" "$T/quiet-required.sh" "$@" >/dev/null 2>&1 </dev/null; }   # the tool's tuning variables dropped
 halt() { sc=$1; stop=$2; rc=1; }
 nap() { sleep "$1" </dev/null & SP=$!; wait $SP; SP=""; }   # a sleep a trapped signal interrupts at once
@@ -388,12 +408,15 @@ stop_child() {   # TERM our det_run.sh (its EXIT trap runs its cleanup), wait up
   wait "$BP" 2>/dev/null; BP=""
   engines_gone
 }
-release_mine() {   # release ONLY the claim this run made (kj4p release_mine)
-  local id
+release_mine() {   # release EVERY claim id this call obtained (review S-1, 2026-11-28): claim_calls.txt holds only this
+                   # run's own receipts (the acquire claim and the renewals, which normally repeat the same id); each
+                   # distinct id is released by id. By name only when no id was ever printed (kj4p release_mine).
+  local id ids
   [ "$CLAIMTRY" = 1 ] || return 0
-  id=$(tr -d '\r' < "$SD/claim_calls.txt" 2>/dev/null | sed -n 's/^claim-id: \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' | tail -1)
-  if [ -n "$id" ]; then
-    qr release $W "$id"; log "released claim $id (rc $?)"; return 0
+  ids=$(tr -d '\r' < "$SD/claim_calls.txt" 2>/dev/null | sed -n 's/^claim-id: \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' | awk '!s[$0]++')
+  if [ -n "$ids" ]; then
+    for id in $ids; do qr release $W "$id"; log "released claim $id (rc $?)"; done   # ids are [A-Za-z0-9._-]: no glob
+    return 0
   fi
   box_claim_has_token $W "$TOKEN"; case $? in
     0) if box_ok_claims $W "$TOKEN"; then
@@ -422,6 +445,18 @@ held() {   # run "$@" with TERM / INT / HUP held; act on a held signal right aft
   trap on_sig TERM INT HUP; [ "$SIGPEND" = 1 ] && on_sig
   return $r; }
 claim_call() { CLAIMTRY=1; env "${BOX_QR_UNSET[@]}" "$T/quiet-required.sh" claim $W "$CLAIM_MIN" "$WHAT" >> "$SD/claim_calls.txt" 2>&1 </dev/null; }
+# S-1 (review 2026-11-28): the claim is taken ONCE (acquire) and then only EXTENDED by its id, never claimed again: a
+# second `claim` by the same worker on its live slot can NEST a new record (quiet-required.sh nest_claim, header of the
+# claim records), and each nested record would outlive this run unless released. `renew <w> <min>` with QR_CLAIM_ID
+# set extends exactly that record when several are nested (renew_own: `QR_CLAIM_ID's ... extend only`), and with one
+# record rewrites the slot keeping the id (recs_fresh <id>). It prints `claim-id: <id>` (appended to claim_calls.txt,
+# so release_mine sees it). Before every renewal box_gate has checked that a live record carries our token and that no
+# other engineperf record is live, so the renewal can only touch ours. QR_CLAIM_ID is set AFTER BOX_QR_UNSET drops
+# any inherited value.
+CLAIM_ID0=""
+renew_call() {
+  [ -n "$CLAIM_ID0" ] || return 1
+  env "${BOX_QR_UNSET[@]}" QR_CLAIM_ID="$CLAIM_ID0" "$T/quiet-required.sh" renew $W "$CLAIM_MIN" >> "$SD/claim_calls.txt" 2>&1 </dev/null; }
 # The queue is keyed by the worker NAME only (common/README.md, S-3 known limit): want only when no entry exists (then the
 # entry is this run's: OURQ=1); withdraw only if OURQ=1 and exactly one entry exists then.
 want_call() {
@@ -441,34 +476,42 @@ withdraw_mine() {
 trap finish EXIT; trap on_sig TERM INT HUP
 
 # ---- one SHARED claim for the whole run (prereg 6.1 "one shared claim", 7 "shared, every run"; capped wait) ----
-acquire() {
-  local t0 out r said=""
+acquire() {   # review :456 / N-5 (2026-11-28): the 6-h deadline is checked before every claim attempt (also right
+              # after the box checks, which take up to ~40 s), and each sleep is cut to the time left
+  local t0 out="" r said="" left
   t0=$(date +%s)
   while :; do
+    left=$(( WAIT_MAX_S - ($(date +%s) - t0) ))
+    [ "$left" -le 0 ] && { halt box "no claim within $((WAIT_MAX_S / 3600)) h (last: $(echo "$out" | tr '\n' ' '))"; return 1; }
     box_preflight_all shared "$DISP" "$W" "$TOKEN" >/dev/null; r=$?; out=$BOX_OUT   # this shell: sightings kept (S3-5)
     if [ $r = 0 ]; then
+      [ $(( $(date +%s) - t0 )) -ge "$WAIT_MAX_S" ] && continue   # past the deadline after the checks: no claim
       held claim_call; r=$?
       [ $r = 0 ] && { CLAIMED=1; break; }
       [ "$said" = "claim rc $r" ] || { log "waiting: claim refused (rc $r)"; said="claim rc $r"; }
     else
       [ "$said" = "$out" ] || { log "waiting: $(echo "$out" | tr '\n' ' ')"; said=$out; }
     fi
-    [ $(( $(date +%s) - t0 )) -ge "$WAIT_MAX_S" ] && { halt box "no claim within $((WAIT_MAX_S / 3600)) h (last: $(echo "$out" | tr '\n' ' '))"; return 1; }
     held want_call
-    nap "$POLL_S"
+    left=$(( WAIT_MAX_S - ($(date +%s) - t0) )); [ "$left" -le 0 ] && continue
+    nap $(( left < POLL_S ? left : POLL_S ))
   done
   withdraw_mine
   return 0
 }
 acquire || finish
+CLAIM_ID0=$(tr -d '\r' < "$SD/claim_calls.txt" 2>/dev/null | sed -n 's/^claim-id: \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' | tail -1)
+[ -n "$CLAIM_ID0" ] || { halt box "the claim was granted but printed no claim-id: it cannot be renewed by id (S-1)"; finish; }
 log "claim granted ($MODE, $TOKEN, $CLAIM_MIN min), load $(cut -d' ' -f1-3 /proc/loadavg), timeout per boot ${TIMEOUT_RUN}s, s4d_brk2 $([ "$BRK2" = 1 ] && echo booted || echo 'not booted')"
 
 # ---- per boot ----
 box_gate() {   # <when>: box_preflight_all; 1 = stop (halt set)
   local out r
   box_preflight_all shared "$DISP" "$W" "$TOKEN" >/dev/null; r=$?; out=$BOX_OUT   # this shell (S3-5)
-  [ $r = 0 ] && return 0
-  halt box "$1: $(echo "$out" | tr '\n' ' ')"; return 1
+  [ $r = 0 ] || { halt box "$1: $(echo "$out" | tr '\n' ' ')"; return 1; }
+  # S-2 (review 2026-11-28): own_claim passes with NO record under our name, so a lost claim needs its own test
+  box_claim_has_token $W "$TOKEN" || { halt box "$1: lost claim: no live claim record under $W carries $TOKEN ($BOX_WHY)"; return 1; }
+  return 0
 }
 axr_restore() {   # the options file before THIS boot (header OPTIONS FILE); only with the claim held and the box clear.
   # Called in THIS shell (never inside `$(...)`, where the sticky BOX_STOPPED of box_guarded would be lost):
@@ -487,7 +530,7 @@ axr_restore() {   # the options file before THIS boot (header OPTIONS FILE); onl
 gates() {   # <tag> <exe>: every pre-boot check; 1 = stop (halt set)
   local t=$1 e=$2 r
   box_gate "before $t" || return 1
-  held claim_call || { halt box "claim renewal refused before $t"; return 1; }
+  held renew_call || { halt box "claim renewal (renew by id $CLAIM_ID0) refused before $t"; return 1; }
   for _ in $(seq 1 "$DISP_WAIT_N"); do box_ok_display_free "$DISP" && break; nap "$DISP_WAIT_S"; done
   box_ok_display_free "$DISP" || { halt fault "$BOX_WHY (before $t)"; return 1; }
   r=$(cfg0) || { halt fault "$r (before $t)"; return 1; }
@@ -554,6 +597,7 @@ watch_boot() {   # in THIS shell (no subshell: traps act at once): while our det
     box_ok_title     || { WATCHWHY="protected_title: $BOX_WHY"; return 1; }
     box_ok_roblox    || { WATCHWHY="roblox: $BOX_WHY"; return 1; }
     box_ok_claims $W "$TOKEN" || { WATCHWHY="own_claim: $BOX_WHY"; return 1; }
+    box_claim_has_token $W "$TOKEN" || { WATCHWHY="lost_claim: no live claim record under $W carries this run's token ($BOX_WHY)"; return 1; }   # S-2
     box_ok_exclusive || { WATCHWHY="exclusive: $BOX_WHY"; return 1; }
     [ $(( $(date +%s) - t0 )) -ge $(( TIMEOUT_RUN + WATCH_EXTRA_S )) ] && {
       WATCHCLS=fault; WATCHWHY="det_run.sh still running $(( $(date +%s) - t0 ))s after its start (cap ${TIMEOUT_RUN}+${WATCH_EXTRA_S}s)"; return 1; }
@@ -564,16 +608,21 @@ boot() {   # <tag> <exe> <lever>: one det_run.sh boot in the background; returns
   local t=$1 e=$2 lv=$3 r t0
   t0=$(date +%s)
   log "boot $t exe=$e extra=[$BASE${lv:+ $lv}] display=$DISP timeout=${TIMEOUT_RUN}s load $(cut -d' ' -f1-3 /proc/loadavg)"
-  LIVE=$t; BOOTED=1
+  LIVE=$t; BOOTED=1; SIGPEND=0; trap 'SIGPEND=1' TERM INT HUP   # review N-1 / (e): held until BP is recorded
   DET_NOCLAIM=1 DET_BOX_TOKEN=$TOKEN DET_BOX_CLASS=shared DET_BOX_WORKER=$W BENCH_SAVE=bench1 \
   BENCH_DISPLAY=$DISP BENCH_TIMEOUT=$TIMEOUT_RUN DET_EXTRA="$BASE${lv:+ $lv}" \
     "$DETRUN" "$e" "$t" 60 3 > "$SD/run_$t.log" 2>&1 </dev/null & BP=$!
+  trap on_sig TERM INT HUP; [ "$SIGPEND" = 1 ] && on_sig   # finish() now sees BP and stops this child
   if ! watch_boot; then
     log "$WATCHCLS condition during $t: $WATCHWHY; stopping this run's det_run.sh (pid $BP)"
     stop_child; BOXWHY=$WATCHWHY; BOXCLS=$WATCHCLS; LIVE=""; return 8
   fi
   wait "$BP"; r=$?; BP=""
   LIVE=""
+  # S-3 / (c) (review 2026-11-28): det_run.sh keeps its rc when its stop_wine left an engine (WINE_LEFT); check at once,
+  # before any retry or after-boot step, that no engine of the run tree uses run/prefix (engines_gone: wineserver -k
+  # there and a 60-s wait). Still one left: fault stop, claim not released (NORELEASE).
+  engines_gone || { DETRC=$r; return 10; }
   log "boot $t rc=$r wall=$(( $(date +%s) - t0 ))s: $(grep -aE '^rc=|TIMEOUT|ABORT|CRASH|REFUSED|exited early' "$SD/run_$t.log" | tr '\n' ' ')"
   { grep -aq "CRASH DUMP present" "$SD/run_$t.log" || ls out/det_"$t"/*.mdmp >/dev/null 2>&1; } && return 9
   return $r
@@ -592,6 +641,7 @@ while IFS='|' read -r -u 3 tag exe lv; do
       0) ;;
       8) halt "$BOXCLS" "during $t: $BOXWHY (this run's boot stopped)"; finish ;;
       9) halt fault "crash dump after $t"; finish ;;
+      10) halt fault "an engine of the run tree still used run/prefix after $t (det_run.sh rc ${DETRC:-?}): ${NORELEASE_WHY:-see the log}"; finish ;;
       3) halt box "det_run.sh rc 3 during $t: its box preflight refused, or it aborted for the play lock, a title or Sober ($(grep -aE '^(REFUSED|ABORT)' "$SD/run_$t.log" | head -2 | tr '\n' ' '))"; finish ;;
       4|5) # prereg 6.5: rc != 0 "(timeout, early exit)" = det_run.sh rc 5 / rc 4, no crash dump (rc 9 above): one retry
            # of THIS slot, at once, as <tag>_r1 with the same switches; a second failure of the same slot stops. Series only.
@@ -617,5 +667,10 @@ while IFS='|' read -r -u 3 tag exe lv; do
   done
 done 3< "$SD/plan.txt"
 sc=done; stop=""
+if [ "$MODE" = probe ]; then   # no judgement in the copy step: the number and the reader's bytes, from this run's own files
+  if _pb=$(probe_boot_s); then echo "PROBE_BOOT_S=$_pb" > "$SD/probe_boot_s.txt"; log "copy into s4d1_run.sh: PROBE_BOOT_S=$_pb (the larger det_run.sh elapsed of the two probes, prereg 2.3)"
+  else log "PROBE_BOOT_S: no 'rc=0 elapsed=' line in both run logs"; fi
+  log "read with: s4d1_score.py sha256 $(sha256sum < "$S4/s4d1_score.py" | cut -d' ' -f1), s4d1_selftest.sh sha256 $(sha256sum < "$S4/s4d1_selftest.sh" | cut -d' ' -f1) (review N-3)"
+fi
 log "all boots of $MODE done. Next (by hand, once): $([ "$MODE" = series ] && echo "python3 -I $S4/s4d1_score.py root=out out=$S4/s4d1_score_result.txt" || echo "python3 -I $S4/s4d1_score.py mode=probe root=out out=$RD0")"
 finish

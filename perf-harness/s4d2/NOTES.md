@@ -203,3 +203,18 @@ this run's det_run.sh (BP) and its sleep (SP); nothing else is signalled.
 | bash dies another way (KILL of the driver) | cannot be trapped | not written | left (the queue's TTL) | left to expire | det_run.sh keeps running to its own end or timeout: NOT covered | no |
 
 No memory file was written under ~/Documents: the brief forbids writing there.
+
+## 10. Fix round 2026-11-28 (plan-facts/s4d1-driver-review-2026-11-28.md: S-1, S-2, S-3, N-1, N-5 hold here too)
+s4d2_run.sh is now sha256 65d13233266645973a39b3ac91213fc458e0099c441da3826f77d47fee1bee19 (was 2777c68f...), the same changes
+as s4d1_run.sh (s4d1/NOTES.md 9.8):
+- S-1: one `claim` per call (acquire); before every boot `renew engineperf <min>` with QR_CLAIM_ID = that claim's id
+  (quiet-required.sh renew_own extends exactly that record when nested, keeps the id with one record), never a second
+  `claim`; finish()'s release_mine releases every distinct `claim-id:` in claim_calls.txt. Section 9's "own claim" now
+  means all of them.
+- S-2: box_claim_has_token in box_gate and watch_boot: a lost claim is a box stop.
+- S-3: engines_gone right after det_run.sh returns (rc 10 = fault stop "an engine still used run/prefix").
+- N-1: TERM/INT/HUP held from the launch until BP is set. N-5: deadline before every claim attempt, sleep cut to it.
+Not changed here: CLAIM_MIN (one boot's timeout + 10 min, renewed before every boot), test content, modes.
+Checked: `bash -n`; `--preflight-only` box mode on fixtures rc 0; `probe --preflight-only` refuses by name on the
+PIN_ME_ placeholders as before; common/box_preflight_selftest.sh (which runs this driver's refusals and its structure
+test) re-run, result in s4d1/NOTES.md 9.8 / the coordinator's report.

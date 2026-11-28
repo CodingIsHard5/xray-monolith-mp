@@ -161,7 +161,7 @@ The previous folder (20261127-185925-2916249, revision 1, 36/36) was removed by 
 - CInventoryItem::UpdateXForm (inventory_item.cpp:1292) has no per-frame guard; CWeapon and CMissile have one.
 - Do not bisect with c253fafdb as an endpoint: on its own it has default mask 15.
 
-## 9. The series script s4d1_run.sh (written 2026-11-28, desk only; sha256 8dc70c49895379442933cfababd4768bbec2b1d11f5604c9eaf58398d19a1d66, was e06358a8... before the coordinator's decisions, 9.7)
+## 9. The series script s4d1_run.sh (written 2026-11-28, desk only; sha256 af73868b8d5c32bbd1cd2569829ca54aad9be73a606c88618646694f126559ae after the review fix round 9.8; earlier 8dc70c49..., e06358a8...)
 Made from s4d2/s4d2_run.sh (2777c68f..., four reviews). Brief: the DRAFT's test content wins (boots, tags, flags, order,
 probe, stop / retry rules, pins); the TEMPLATE's safety rules win (shared box checks, one claim with a token, child
 handling, guarded writes under run/, refusals). Not run: only `bash -n` and fixture `--preflight-only` calls (9.5).
@@ -170,8 +170,8 @@ handling, guarded writes under run/, refusals). Not run: only `bash -n` and fixt
 | mode | boots (order) | expected | worst case by the bounds |
 |---|---|---|---|
 | `--preflight-only` | none: the shared box checks only | < 1 min | - |
-| `probe [--preflight-only]` | s4d_probe (K3 mask 7), s4d_probe15 (K3 mask 15) | 2 x 375 + 2 x 40 = 830 s = ~14 min | 2 x (1900 + 900 cap) = 5600 s, plus the claim wait (<= 6 h) |
-| `series [--preflight-only]` | A: s4d_s1 o1 s2 o2 s3 o3; L: l2a l3 l1 l2w l2b; S: off2a on2a off3 on3 off2b on2b brk1 [brk2] | 19 boots: 5897 s = ~98 min; 18 (no brk2): 5567 s = ~93 min | per boot BENCH_TIMEOUT + 900 s; each slot may run twice (6.5) |
+| `probe [--preflight-only]` | s4d_probe (K3 mask 7), s4d_probe15 (K3 mask 15) | 2 x 375 + 2 x 40 = 830 s = ~14 min | watch threshold per boot 1900 + 900 = 2800 s; wall time per boot after it up to + 5 (poll) + 250 (TERM grace) + 120 (engines_gone) + ~150 (gates) = ~3325 s, so <= ~6650 s, plus the claim wait (<= 6 h) |
+| `series [--preflight-only]` | A: s4d_s1 o1 s2 o2 s3 o3; L: l2a l3 l1 l2w l2b; S: off2a on2a off3 on3 off2b on2b brk1 [brk2] | 19 boots: 5897 s = ~98 min; 18 (no brk2): 5567 s = ~93 min | watch threshold per boot BENCH_TIMEOUT + 900 s; wall time per boot up to BENCH_TIMEOUT + ~1425 s (poll, TERM grace, engines_gone, gates); each slot may run twice (6.5) |
 Series arithmetic: A = 1191 s [M, 6 boots] + 6 x 40 = 1431 s; L = 3 x 290 (l2a, l2b, l2w, K=2) + 375 (l3) + 211 (l1)
 + 5 x 40 = 1656 s; S = 6 x 290 (off2a, on2a, off2b, on2b, brk1, brk2) + 2 x 375 (off3, on3) + 8 x 40 = 2810 s;
 1431 + 1656 + 2810 = 5897 s. Without brk2: 5897 - 290 - 40 = 5567 s. (The prereg rounds the same sums to 1 h 39 min.)
@@ -180,12 +180,14 @@ The probes' measured elapsed times replace the 15 ms guess before registration (
 ### 9.2 To install before the probe (the script only CHECKS it, by full sha256, and never installs it)
 - The stimulus: from `/home/caden/Projects/StalkerGameEngine/harness/zz_eperf_synth.script` to
   `run/gamedata/scripts/zz_eperf_synth.script` (not there on 2026-11-28). A write under run/: by hand, while Caden is
-  not playing. **Which bytes is OPEN (9.3 item 1)**; until decided, `STIM_SHA=PIN_ME_STIM_SHA` refuses every mode.
+  not playing. The bytes: harness/zz_eperf_synth.script as it is now, sha256 1777fb6865cc5b56c80f197f3f95a250104d6c90ce0b8b2a35422e3bed39ff95
+  (= STIM_SHA in the script; decided 9.7). Until it is installed, `probe` and `series` refuse by name ("missing file").
 - Already in place and pinned (read 2026-11-28): run/bin/SimTick18.exe 40d2d37d..., run/bin/Stance14.exe b4ce9c77...
   (series), out/user_det.ltx.orig 3e0e0a6f..., out/user.ltx.orig, tools/det_run.sh e2980094..., tools/lib_engine_pids.sh
   cb183b7b..., tools/run_noguard.sh 92729abc..., bench1.scop / .scoc, run/appdata/axr_options_play.ltx 27d54b9f...;
   run/appdata/user.ltx is byte-identical to out/user.ltx.orig.
-- Before the series, by hand: PROBE_BOOT_S and PROBE_S3_FRAMES in the script (the latter must equal the scorer's CONST
+- Before the series, by hand: PROBE_BOOT_S (copy the `PROBE_BOOT_S=<n>` line the probe run logs, also in
+  out/s4d1_state/probe/probe_boot_s.txt; the series refuses a value that differs from the probe logs) and PROBE_S3_FRAMES in the script (the latter must equal the scorer's CONST
   value: the script reads it and refuses a mismatch), SCORER_SHA / SELFTEST_SHA (REG_ME_) at registration, and
   s4d1/probe_readings.txt ending in `S4D1 PROBE: GO`.
 
@@ -268,3 +270,36 @@ WINESERVER rc 2; :0 rc 2; `probe --preflight-only` rc 2, ONLY "missing file run/
 path pointed at harness/: probe rc 0 (2 boots, 1900 s); a probe folder present: rc 2 by name; `-det_synth_item` added
 to a lever: rc 2 by name; PROBE_S3_FRAMES differing from the scorer: refused by name; every value filled: series rc 0,
 19 boots (P=812) / 18 (P=299), timeout 2040 s.
+
+### 9.8 Fix round after plan-facts/s4d1-driver-review-2026-11-28.md (and its automated findings), 2026-11-28
+s4d1_run.sh is now sha256 af73868b8d5c32bbd1cd2569829ca54aad9be73a606c88618646694f126559ae; s4d2_run.sh got the same fixes (s4d2/NOTES.md 10).
+- **S-1 (claims left live, blocking Caden's launcher):** choice (i). quiet-required.sh has a `renew <w> <min>` verb that,
+  with QR_CLAIM_ID=<id>, extends exactly that record when several are nested and, with one record, rewrites the slot
+  keeping the id (renew_own, recs_fresh). So the driver claims ONCE (acquire) and before every boot runs `renew` with
+  the acquire claim's id, never `claim` again; finish() releases EVERY distinct claim id in claim_calls.txt (normally
+  one). Before each renewal box_gate has checked that a live record carries our token and no other engineperf record is
+  live, so the renewal touches only ours. A claim period is boot-sized (probe 56 min) and refused above 180 min.
+- **S-2:** a lost claim stops: box_claim_has_token in box_gate (before every boot) and in watch_boot (every 5 s).
+- **S-3 / (c):** engines_gone right after det_run.sh returns, any rc, before the retry decision; an engine still there
+  60 s after `wineserver -k` is a fault stop (claim kept). A late-stopped engine no longer costs a slot's retry.
+- **N-1 / (e):** TERM/INT/HUP held from just before the launch until BP is recorded, then acted on.
+- **N-5 / :456:** the 6-h deadline is checked before every claim attempt, also right after the box checks; sleeps are
+  cut to the time left.
+- **N-7 / :337:** the series refuses unless out/det_s4d_probe and out/det_s4d_probe15 exist.
+- **N-4 / PROBE_BOOT_S:** the scorer is not changed; the driver logs `PROBE_BOOT_S=<n>` at the end of `probe` (the
+  larger `rc=0 elapsed=` of the two run logs, also written to out/s4d1_state/probe/probe_boot_s.txt), and the series
+  refuses a PROBE_BOOT_S that differs from those logs (or the logs missing).
+- **N-3:** the end of `probe` logs the sha256 of s4d1_score.py and s4d1_selftest.sh to read with.
+- **S-4 / S-5 / minor docs:** draft 6.2 BENCH_TIMEOUT per mode and det_run.sh:259-266; 6.3 the probe's 5.1x is [G],
+  desk bound 3.0x (N-2); 6.4 lost claim and engine check, the l2a check after the boot with the reason; 6.5 rc 4/5, no
+  probe retry; 7 the operational bounds under 2x flagged; 2.1 the re-probe must also move out/s4d1_state/probe (the
+  script refuses an existing state folder); NOTES 9.1 threshold vs wall time; 9.2 stimulus text.
+- **Not fixed (NOTE, listed):** N-6 `wineserver -k` in run/prefix stops any Wine process there, not only ours (the
+  documented exception; engine_running / own_claim make a foreign one unlikely). N-8 the options restore copies Caden's
+  play options into the bench file (his launcher restores its own copy; a change by him stops the run by AXR_SHA).
+  Residue of S-1: if our record expired in the instant between box_gate and renew, `renew` with an unmatched QR_CLAIM_ID
+  extends every live engineperf record (renew_own fallback); box_gate's own_claim test makes any other one unlikely.
+- Fixture checks re-run (9.6 form, all sub-second): every earlier result unchanged, plus: series without the probe
+  folders refused by name; PROBE_BOOT_S 400 vs logs 401 refused by name; with probe folders and logs present, series
+  rc 0 (19 / 18 boots). Not tested: renew, release-all, the lost-claim stop, engines_gone after a boot (no real claim
+  or engine in a fixture call).
