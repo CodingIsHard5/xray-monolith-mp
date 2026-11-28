@@ -15,6 +15,32 @@ Labels: **[D]** desk (file:line), **[M]** measured (a number in a file), **[G]**
 earlier registration without re-deriving it).
 
 **Change log.**
+- 2026-11-28 (coordinator's decisions on the script's three open points; desk only):
+  - section 1: stimulus re-pinned to 1777fb6865cc5b56c80f197f3f95a250104d6c90ce0b8b2a35422e3bed39ff95 (was d7dbc6c5...). Reason: the file is a superset of the old one: its only addition is the -det_synth_item path, which is off unless that
+  flag is on the command line (zz_eperf_synth.script:20 `item_on = det and string.find(cl, "-det_synth_item", ...)`),
+  and no s4d1 boot passes it (s4d1_run.sh refuses one that does). **The d7dbc6c5 bytes are gone**, so "superset"
+  rests on reading the whole new file (104 lines) and s4d2's change note, not on a diff. Read 2026-11-28: without the
+  flag, item_on is false, the item block (:68-79) never runs, and walk, tracer, START_UPD, the constants and the
+  update/fire logic do not depend on it; the one visible difference is the `installed` log line, which now ends
+  `, item false)` (:102). The scorer matches it as the substring `det_synth stimulus: installed`
+  (s4d1_score.py:206), so that does not change a check. Whether the old file had the same line text is not knowable.
+    Both series use the one installed path with this one hash. The script refuses any s4d1 boot whose flags carry
+    -det_synth_item.
+  - 2.1: no re-probe mode; a re-probe needs a new supervisor decision and a registered place for the old probe
+    folders; the script refuses `probe` while a probe output folder exists.
+  - 6.2: the options-file restore is kept (template safety rule) and stated there; the script's sha256 is now
+    8dc70c49895379442933cfababd4768bbec2b1d11f5604c9eaf58398d19a1d66 (was e06358a8...).
+- 2026-11-28 (series script written; desk only, nothing booted):
+  - section 1, 2.3 table, 6.4: `PIN_ME_EXE` filled with 40d2d37d810bdd9fdf0a19a094dea621a16a2f164fdb1e1b9d1b209d5a6b09d4
+    (run/bin/SimTick18.exe, read with sha256sum; CI run 46114135445 of 6acb77044, a comments-only child of 7b1232ffc).
+  - 6.2: "TO BE WRITTEN" replaced by the script s4d1/s4d1_run.sh and its sha256 (e06358a8...). Its modes, boots,
+    bounds and every point where it had to read this draft: NOTES.md 9. It refuses every mode while the stimulus pin
+    is open (section 1 pins prefix d7dbc6c5..., but harness/zz_eperf_synth.script is now 1777fb68..., s4d2's
+    revision; NOTES.md 9), and the series while PROBE_BOOT_S, PROBE_S3_FRAMES or the scorer / self-test hashes are
+    unfilled.
+  - 6.4 cfg0: fixed as s4d2's U-1 (reads out/user_det.ltx.orig; a missing sim_tick line = the engine default 0,
+    device.cpp:465); the change-log item of 2026-11-28 below ("Not yet decided for s4d1") is now decided this way.
+  - PROBE_* placeholders left as they are (filled after the probes).
 - 2026-11-28 (fix list after plan-facts/box-preflight-third-review-2026-11-28.md): **tools/det_run.sh changed again**
   (was 0b7a6edb..., now sha256 e29800949b503a7f61a5f9b3a9a2289cdd01424fa87f3a55dacac464fa578f48) and **common/box_preflight.sh revised** (was f3ad9351..., now sha256
   f8026040f2f9b3f6cd5c7c33b11062f7efc1ed726af03651ce16bbb0fccd53ef). **New caller rules for the s4d1 series script:** with DET_NOCLAIM=1 the DET_BOX_TOKEN must be
@@ -85,10 +111,20 @@ earlier registration without re-deriving it).
   `-sim_4d_break 1` (the actor's draw matrix is written into its XFORM) and `-sim_4d_break 2` (the drawn head is
   written into bullet_pos). The witness file is `$logs$/synth_<det_tag>.txt`.
 - **Exe:** lever and tripwire boots run only on an exe from the perf-build workflow (XRCORE_PROFILER_AGG, which makes
-  det mode serial; .github/workflows/perf-build.yml:48). Installed as `run/bin/SimTick18.exe`, sha256 **PIN_ME_EXE**
-  (to fill when CI has built 7b1232ffc or later). The same exe serves part A (switches absent), the probes, L and S.
+  det mode serial; .github/workflows/perf-build.yml:48). Installed as `run/bin/SimTick18.exe`, sha256
+  **40d2d37d810bdd9fdf0a19a094dea621a16a2f164fdb1e1b9d1b209d5a6b09d4** (was PIN_ME_EXE; CI perf-build run 46114135445 of
+  wt-simtick 6acb77044, which is 7b1232ffc plus one comments-only commit; read with sha256sum 2026-11-28). The same exe serves part A (switches absent), the probes, L and S.
   Stock reference for part A: `run/bin/Stance14.exe` b4ce9c77 (COPIED from 4b/4c).
-- Stimulus: `harness/zz_eperf_synth.script` sha256 prefix d7dbc6c54cd02600, NOT installed today
+- Stimulus: `harness/zz_eperf_synth.script` sha256 **1777fb6865cc5b56c80f197f3f95a250104d6c90ce0b8b2a35422e3bed39ff95**
+  (re-pinned 2026-11-28 by the coordinator's decision; was prefix d7dbc6c54cd02600). Why: the file is a superset of the old one: its only addition is the -det_synth_item path, which is off unless that
+  flag is on the command line (zz_eperf_synth.script:20 `item_on = det and string.find(cl, "-det_synth_item", ...)`),
+  and no s4d1 boot passes it (s4d1_run.sh refuses one that does). **The d7dbc6c5 bytes are gone**, so "superset"
+  rests on reading the whole new file (104 lines) and s4d2's change note, not on a diff. Read 2026-11-28: without the
+  flag, item_on is false, the item block (:68-79) never runs, and walk, tracer, START_UPD, the constants and the
+  update/fire logic do not depend on it; the one visible difference is the `installed` log line, which now ends
+  `, item false)` (:102). The scorer matches it as the substring `det_synth stimulus: installed`
+  (s4d1_score.py:206), so that does not change a check. Whether the old file had the same line text is not knowable.
+  The same installed file and hash serve s4d2. NOT installed today
   (`run/gamedata/scripts/zz_eperf_synth.script` does not exist). It must be copied there before the probes and stays for
   the whole series (inert without its flags: it reads `command_line()`). If the probe forces a change (requirement R1,
   NOTES.md 4), the new hash is pinned and both probes run once more.
@@ -118,7 +154,9 @@ Both SimTick18.exe, **K = 3** (accepted by the Overseer: K = 2 has one render-on
 - `s4d_probe15`, mask 15 (bit 8 on), otherwise the same: only to see the s4 pattern with the experiment on.
 Reader: `python3 -I s4d1_score.py mode=probe root=out out=s4d1/probe_readings.txt` (written once; reads
 out/det_s4d_probe and out/det_s4d_probe15; exit 0 GO, 1 STOP). Probe folders are kept; a probe is re-run only after a
-fix that a stop rule asks for.
+fix that a stop rule asks for. **No re-probe mode exists (coordinator 2026-11-28):** a re-probe needs a new decision
+from the supervisor and a registered place for the old probe folders; s4d1_run.sh refuses `probe` while any
+out/det_s4d_* folder or s4d1/probe_readings.txt exists.
 
 ### 2.2 Probe stop rules (any one = the series does not start)
 | code | rule | on | why |
@@ -143,7 +181,7 @@ description says so; requirement R1 (NOTES.md 4) is then a question for the Over
 | `PROBE_S1_FRAMES` | frames with the s1 columns present | S1 minimum = floor(P x K/Kp / 3); **P < 300 -> S1 dropped ("Caden's eyes only")** |
 | `PROBE_ALIFE_GAP16` | number of 16-tick gaps between A-Life calls (0 or 1) | L3: every lever run must show exactly this many |
 | `PROBE_BOOT_S` (series only) | the longer probe's elapsed seconds (det_run.sh `rc=0 elapsed=`) | BENCH_TIMEOUT = max(1900, ceil(5 x PROBE_BOOT_S / 60) x 60) |
-| `PIN_ME_EXE` (series only) | sha256 of the CI-built SimTick18.exe | the series refuses another hash |
+| `PIN_ME_EXE` (series only; FILLED 2026-11-28: 40d2d37d810bdd9fdf0a19a094dea621a16a2f164fdb1e1b9d1b209d5a6b09d4) | sha256 of the CI-built SimTick18.exe | the series refuses another hash (s4d1_run.sh refuses it in every mode) |
 The scorer holds the first five in its `CONST` dict and REFUSES to score while any is still the placeholder string.
 Reported by the reader, not a bound: tracer tick frames, tracer life in ticks, drawn frames with stamp_ok 0, the lag
 fit per L. "Why /3": every count minimum is a third of what the probe, scaled to the run's K, says to expect, which is
@@ -236,7 +274,11 @@ probes: s4d_probe, s4d_probe15 -> (GO, fill, self-test on real bytes, register) 
 s4d_s3 s4d_o3 -> L: s4d_l2a s4d_l3 s4d_l1 s4d_l2w s4d_l2b -> S: s4d_off2a s4d_on2a s4d_off3 s4d_on3 s4d_off2b s4d_on2b
 s4d_brk1 s4d_brk2 (brk2 only if S3 is registered). The arms of each pair are spread out, not back to back. The breaks
 go last; each boot starts fresh (det_run.sh restores user.ltx and loads the save).
-### 6.2 Command per boot (series script s4d1_run.sh: TO BE WRITTEN, NOTES.md 4, R2)
+### 6.2 Command per boot (series script s4d1/s4d1_run.sh, sha256 8dc70c49895379442933cfababd4768bbec2b1d11f5604c9eaf58398d19a1d66; NOTES.md 4 R2, 9)
+The driver also restores the options file before every boot (template safety rule, kept by the coordinator's
+decision 2026-11-28): run/appdata/axr_options_play.ltx (pinned 27d54b9f...) is copied over
+run/gamedata/configs/axr_options.ltx inside box_guarded, because each exe rewrites that file's version line when it
+boots and part A alternates Stance14 and SimTick18, so the arms of a pair start from the same bytes.
 `DET_NOCLAIM=1 DET_BOX_TOKEN=<the series claim's token> DET_BOX_CLASS=shared BENCH_DISPLAY=:141 BENCH_TIMEOUT=1900
 DET_EXTRA="<base> <lever>" tools/det_run.sh <exe> <tag> 60 3` (det_run.sh pinned at e29800949b503a7f..., change log; add BENCH_SAVE=bench1), then
 `mv run/appdata/logs/synth_<tag>.txt out/det_<tag>/` (det_run.sh does not move the witness: det_run.sh:44-45).
@@ -266,8 +308,13 @@ S 6 x 290 + 2 x 375 s + 8 x 40 s = 47 min. **Scored series (19 boots) ~1 h 39 mi
 BENCH_TIMEOUT 1900 s = 5.1x the K=3 guess and 9x the stock maximum (shared needs >= 5x, section 7).
 ### 6.4 Stop rules (no check is scored before the end; these look only at each run's own completion)
 Before the series:
-- SimTick18 sha256 = PIN_ME_EXE; Stance14 b4ce9c77.
-- run/appdata/user.ltx has sim_tick 0 and r__framelimit 0 (cfg0, tools/s4c_partA.sh:23).
+- SimTick18 sha256 = 40d2d37d810bdd9fdf0a19a094dea621a16a2f164fdb1e1b9d1b209d5a6b09d4 (section 1); Stance14 b4ce9c77.
+- cfg0 (tools/s4c_partA.sh:23, fixed 2026-11-28 as s4d2's U-1): the settings the engine RUNS with have sim_tick 0 and
+  r__framelimit 0. That is out/user_det.ltx.orig (pinned below), which det_run.sh copies over run/appdata/user.ltx
+  right before the engine start; neither user.ltx file has a sim_tick line, and a missing line reads as 0, the engine
+  default (wt-simtick/src/xrEngine/device.cpp:465 `int g_sim_tick_hz = 0;`; the only other setter is the `-sim_tick`
+  switch, which no boot passes). r__framelimit must be present and 0 (line 553). Separately, run/appdata/user.ltx must
+  be byte-identical to out/user.ltx.orig or out/user_det.ltx.orig (det_run.sh's swap rule).
 - out/user_det.ltx.orig sha256 3e0e0a6f1fe8010c (prefix; has g_legs 1 and r__actor_shadow on).
 - The stimulus script is installed with its pinned hash.
 - No `run/appdata/logs/synth_s4d_*.txt` and no `out/det_s4d_*` exist (except the two probe folders).

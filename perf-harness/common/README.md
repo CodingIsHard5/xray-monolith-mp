@@ -17,7 +17,7 @@
   in `BOX_OUT`; `box_is_own` (N3-8); `box_wine_kill <prefix> nowait` (-k only, 10 s, for S3-1's repeated kill).
 - `box_preflight_selftest.sh`: mutant self-test, fixtures only (no claim, no game, no real lock, no signal). One output
   folder is kept under `selftest-runs/`.
-- Users today: `s4d2/s4d2_run.sh` and `tools/det_run.sh` (both pin this file's sha256 and refuse without it).
+- Users today: `s4d2/s4d2_run.sh`, `s4d1/s4d1_run.sh` (2026-11-28) and `tools/det_run.sh` (all pin this file's sha256 and refuse without it).
 - Also: `box_ok_engine` counts a `pgrep -f` match only if its binary is a Wine loader (tools/lib_engine_pids.sh rule:
   no bare name match), so a watcher whose argv names the path is never taken for an engine.
 
@@ -59,7 +59,7 @@ registered and run with a result file; editing a closed driver breaks a recorded
 | tools/det_pair.sh (d4c38a79) = perf-harness/det_pair.sh | no | FO | no | no | no | no | no (name) | PREREG-S2-simtick | **UNSUPPORTED since det_run.sh's retrofit**: it calls det_run.sh with DET_NOCLAIM=1 and no DET_BOX_TOKEN, which det_run.sh now refuses by name. Its callers (tools/s2_partA*.sh, s4a/s4b/s4c_partA.sh) are closed. RETIRED: do not run; use the shared-preflight driver instead | no |
 | tools/s4c_series.sh (6539d1ce) | yes | FO | yes, FO | no | no | no | no | PREREG-S2-4c; s4c_run.sh, s4c_input_run.sh | closed (s4c scored) | no. **RETIRED: do not run; use the shared-preflight driver instead.** |
 | tools/s4c_partA.sh (af4f021c) | no | FO | yes, FO | no | no | no | no | PREREG-S2-4c | closed | no. **RETIRED: do not run; use the shared-preflight driver instead.** |
-| s4d1/s4d1_run.sh (planned) | - | - | - | - | - | - | - | not written (s4d1 PREREG DRAFT 6.2 "TO BE WRITTEN") | open draft | yes: can source common/box_preflight.sh from the start |
+| s4d1/s4d1_run.sh (8dc70c49, written 2026-11-28 from s4d2_run.sh) | via common | FC | FC | yes (token) | yes | yes (:141 only) | yes (claim-id; name only when its token claim is the only one) | s4d1 PREREG DRAFT 6.2 (not registered) | open draft; stimulus pinned 1777fb68 (shared with s4d2); refuses until it is installed | yes (not run: `bash -n` and fixture preflight-only calls only) |
 | s4d2/s4d2_run.sh | via common | FC | FC | yes (token) | yes | yes (:141 only) | yes (claim-id; name only when its token claim is the only one) | not registered (draft) | open draft | yes |
 
 ## The other runnable tools/ scripts (review S-5; NOT edited, read-only survey 2026-11-28)

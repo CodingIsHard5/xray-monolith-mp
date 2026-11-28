@@ -160,3 +160,111 @@ The previous folder (20261127-185925-2916249, revision 1, 36/36) was removed by 
   frame, they show the position from before the nudge, which is still what every later pass of that frame drew.
 - CInventoryItem::UpdateXForm (inventory_item.cpp:1292) has no per-frame guard; CWeapon and CMissile have one.
 - Do not bisect with c253fafdb as an endpoint: on its own it has default mask 15.
+
+## 9. The series script s4d1_run.sh (written 2026-11-28, desk only; sha256 8dc70c49895379442933cfababd4768bbec2b1d11f5604c9eaf58398d19a1d66, was e06358a8... before the coordinator's decisions, 9.7)
+Made from s4d2/s4d2_run.sh (2777c68f..., four reviews). Brief: the DRAFT's test content wins (boots, tags, flags, order,
+probe, stop / retry rules, pins); the TEMPLATE's safety rules win (shared box checks, one claim with a token, child
+handling, guarded writes under run/, refusals). Not run: only `bash -n` and fixture `--preflight-only` calls (9.5).
+
+### 9.1 Modes, boots, expected wall time (prereg 6.3 figures; [G] = its 15 ms per render-only frame guess)
+| mode | boots (order) | expected | worst case by the bounds |
+|---|---|---|---|
+| `--preflight-only` | none: the shared box checks only | < 1 min | - |
+| `probe [--preflight-only]` | s4d_probe (K3 mask 7), s4d_probe15 (K3 mask 15) | 2 x 375 + 2 x 40 = 830 s = ~14 min | 2 x (1900 + 900 cap) = 5600 s, plus the claim wait (<= 6 h) |
+| `series [--preflight-only]` | A: s4d_s1 o1 s2 o2 s3 o3; L: l2a l3 l1 l2w l2b; S: off2a on2a off3 on3 off2b on2b brk1 [brk2] | 19 boots: 5897 s = ~98 min; 18 (no brk2): 5567 s = ~93 min | per boot BENCH_TIMEOUT + 900 s; each slot may run twice (6.5) |
+Series arithmetic: A = 1191 s [M, 6 boots] + 6 x 40 = 1431 s; L = 3 x 290 (l2a, l2b, l2w, K=2) + 375 (l3) + 211 (l1)
++ 5 x 40 = 1656 s; S = 6 x 290 (off2a, on2a, off2b, on2b, brk1, brk2) + 2 x 375 (off3, on3) + 8 x 40 = 2810 s;
+1431 + 1656 + 2810 = 5897 s. Without brk2: 5897 - 290 - 40 = 5567 s. (The prereg rounds the same sums to 1 h 39 min.)
+The probes' measured elapsed times replace the 15 ms guess before registration (6.3).
+
+### 9.2 To install before the probe (the script only CHECKS it, by full sha256, and never installs it)
+- The stimulus: from `/home/caden/Projects/StalkerGameEngine/harness/zz_eperf_synth.script` to
+  `run/gamedata/scripts/zz_eperf_synth.script` (not there on 2026-11-28). A write under run/: by hand, while Caden is
+  not playing. **Which bytes is OPEN (9.3 item 1)**; until decided, `STIM_SHA=PIN_ME_STIM_SHA` refuses every mode.
+- Already in place and pinned (read 2026-11-28): run/bin/SimTick18.exe 40d2d37d..., run/bin/Stance14.exe b4ce9c77...
+  (series), out/user_det.ltx.orig 3e0e0a6f..., out/user.ltx.orig, tools/det_run.sh e2980094..., tools/lib_engine_pids.sh
+  cb183b7b..., tools/run_noguard.sh 92729abc..., bench1.scop / .scoc, run/appdata/axr_options_play.ltx 27d54b9f...;
+  run/appdata/user.ltx is byte-identical to out/user.ltx.orig.
+- Before the series, by hand: PROBE_BOOT_S and PROBE_S3_FRAMES in the script (the latter must equal the scorer's CONST
+  value: the script reads it and refuses a mismatch), SCORER_SHA / SELFTEST_SHA (REG_ME_) at registration, and
+  s4d1/probe_readings.txt ending in `S4D1 PROBE: GO`.
+
+### 9.3 Open: need a decision (the script refuses rather than choose)
+1. **Stimulus pin.** Prereg 1 pins harness/zz_eperf_synth.script at prefix d7dbc6c54cd02600. That file is now
+   1777fb6865cc5b56c80f197f3f95a250104d6c90ce0b8b2a35422e3bed39ff95 (s4d2's `-det_synth_item` revision, 2026-11-27 22:15);
+   no copy of the d7dbc6c5 bytes exists in the tree or in any worktree's git history (searched). Choices: (a) re-pin s4d1
+   to 1777fb68 (no s4d1 boot passes `-det_synth_item`, so the item branch should stay off; a draft change, and both probes
+   then run on it); (b) recover the d7dbc6c5 bytes. Note both series install to the SAME path, so s4d1 and s4d2 can only
+   share the box without swaps if they use the same file.
+2. **Re-probe.** 2.1 and 1 allow a re-run of both probes after a fix or a stimulus change, but do not register where the
+   first probes' folders and reading go (the scorer always reads out/det_s4d_probe(15) and the reading is "written
+   once"). No re-probe mode was written; `probe` refuses while any out/det_s4d_* folder or probe_readings.txt exists.
+3. **Options-file restore** (template, not in the draft): kept, so part A's Stance14 / SimTick18 arms start from the same
+   axr_options.ltx bytes (each exe rewrites its version line). Earlier part A runs (4b/4c, whose bounds A3/A4 copy) ran
+   without it. Keep or drop?
+
+### 9.4 Where I had to read the draft (draft-vs-template points)
+| point | draft | template | script |
+|---|---|---|---|
+| retry | 6.5: rc != 0 "(timeout, early exit)" -> `<tag>_r1` once; a second failure of the SAME slot stops | one retry per series, rc 4 only | rc 4 or 5 without a crash dump, once per slot, series only (draft) |
+| probe retry | 2.1: re-run only after a fix | none | none |
+| in-run preflight | s4d_l2a "at cp1 ... stop at once" (s4c_partA.sh:38-41, during the boot) | after the boot | after l2a's boot (a TERM mid-boot leaves user.ltx with the det settings, N4-12, and blocks later boots); checks det_counters + det_alife_counts cp1, witness non-empty, command line, det_synth line `k 2 wallclock 0 tw 0 break 0 mask 0`; no token count (the template's 58/138 is s4d2 content) |
+| in-run on the probe | not registered (the probe reader checks flags) | yes | no |
+| exe pin | 2.3 "PIN_ME_EXE (series only)"; 1: lever boots only on that exe | before any boot | every mode (safety) |
+| leftover folders | 6.4: no synth_s4d_*, no out/det_s4d_* except the two probe folders | per tag | the draft's globs (probe: none at all) |
+| cfg0 | run/appdata/user.ltx (would refuse: no sim_tick line) | out/user_det.ltx.orig, missing = 0 | template form, plus 6.4's "has g_legs 1 and r__actor_shadow on" |
+| user.ltx known file | change log caller rule | not in s4d2 | before start and every boot (N4-12, by name) |
+| brk2 | only if S3 registered (P >= 300) | - | from PROBE_S3_FRAMES, cross-checked with the scorer's CONST |
+| series timeout | 2.3 max(1900, ceil(5 P/60) x 60) | REG_ME constant | computed from PROBE_BOOT_S |
+| scorer / self-test hashes | "recorded at registration" (2.5, 8) | REG_ME_ pins | REG_ME_ pins, series only |
+| extra pins | not in the draft | pid lib, run_noguard, saves, options source | kept (safety / same inputs) |
+| after-boot files | 6.4 silent | xray.log + six counter files + lever witness | kept ("missing files fail by name") |
+| item line | - | s4d2 only | dropped |
+| N4-8 | det_run refuses 5 variables | not in s4d2 | refused first, before anything |
+| N4-11 | - | no per-boot cap | watch cap BENCH_TIMEOUT + 900 s (fault stop) |
+| N4-9 | - | token substring | token last in the claim text; the shared file's substring match is unchanged (contrived residue: same mode, same second, pid prefix) |
+
+### 9.5 Bounds in the script (each derivation is in a comment next to it)
+| bound | value | derivation / flag |
+|---|---|---|
+| probe BENCH_TIMEOUT | 1900 s | prereg 6.2/6.3: K=3 guess 375 s -> 5.1x |
+| series BENCH_TIMEOUT | max(1900, ceil(5 PROBE_BOOT_S/60) x 60) | prereg 2.3; >= 5x for K=3 S runs, more for the shorter arms |
+| CHILD_GRACE_S | 250 s | det_run cleanup after TERM <= 165 s worst -> 1.5x (template 180, the caller-rule minimum) |
+| WATCH_EXTRA_S | 900 s | det_run time outside LIMIT <= ~679 s worst -> 1.3x (new, N4-11) |
+| CLAIM_MIN | ceil((BENCH_TIMEOUT + 1420)/60) min | renewal-to-renewal sum (probe: 56 min) |
+| WAIT_MAX_S | 6 h | **COPIED** from s4d2 (S2-7); no s4d1 quantity sets it |
+| POLL_S | 60 s | start lags a cleared box <= ~1.7 min |
+| display wait | 10 x 2 s | Xvfb socket gone within ~1 s [G] -> ~20x |
+| ENG_GONE_S | 60 s | det_run.sh's own stop_wine wait (det_run.sh:156) |
+| watch interval | 5 s | det_run.sh's inboot rate (det_run.sh:244) |
+
+### 9.6 What was run (2026-11-28 01:2x, EXCLUSIVE held by another worker: each call < 1 s, nice 19, timeout 30)
+`bash -n` OK. common/selftest-runs/20261128-012128-3674898/fx/struct.awk (read-only use) over the script: no unguarded
+write under run/. Fixture calls (BOX_* pointed at a scratchpad fixture, real tree read only): `--preflight-only` rc 0;
+missing S4D1_BOX_LIB rc 3; WINESERVER set rc 2; BENCH_DISPLAY=:0 rc 2; `probe --preflight-only` rc 2 "STIM_SHA is still
+the placeholder"; `series --preflight-only` rc 2 naming STIM_SHA, PROBE_BOOT_S, PROBE_S3_FRAMES, SCORER_SHA,
+SELFTEST_SHA; with the stimulus pin filled in a copy: probe rc 2 only "missing file
+run/gamedata/scripts/zz_eperf_synth.script"; a PROBE_S3_FRAMES differing from the scorer refused by name; with every
+value filled in a copy (stimulus path pointed at harness/, a fake GO reading): series rc 0, 19 boots (P=812) / 18 (P=299),
+timeout 2040 s for PROBE_BOOT_S 401. Not tested: any real mode, the claim, det_run.sh calls, watch_boot, the retry, the
+witness moves, finish(). s4d1_selftest.sh was not re-run (scorer and self-test unchanged). HEAD of wt-render-split is
+5a7ca117d (one self-test-only commit after ac7a8a859).
+
+### 9.7 Coordinator's decisions (2026-11-28), applied
+1. **Stimulus re-pinned** to harness/zz_eperf_synth.script as it is now, 1777fb6865cc5b56c80f197f3f95a250104d6c90ce0b8b2a35422e3bed39ff95
+   (verified with sha256sum). **The old d7dbc6c5 bytes are gone**: "a superset of the old file" rests on reading all
+   104 lines of the new one and s4d2's change note, not on a diff. Without `-det_synth_item`, item_on (:20) is false, the
+   item block (:68-79) never runs, and nothing else reads it except the `installed` line, which now ends `, item false)`
+   (:102); the scorer matches only the substring `det_synth stimulus: installed` (s4d1_score.py:206). **s4d1 and s4d2
+   share the one installed path, run/gamedata/scripts/zz_eperf_synth.script, with this one hash.** The script refuses
+   any s4d1 boot whose flags contain `-det_synth_item` (NOITEM). 9.2's install step now has a definite file: copy
+   harness/zz_eperf_synth.script (1777fb68...) to run/gamedata/scripts/ by hand; the script only checks it.
+2. **No re-probe mode.** A re-probe needs a new decision from the supervisor and a registered place for the old probe
+   folders. `probe` refuses while any out/det_s4d_* folder (or the probe reading) exists: checked on a fixture copy.
+3. **Options-file restore kept** (template safety rule); one line in prereg 6.2 says so and why.
+Fixture checks re-run 2026-11-28 (sub-second, nice 19, EXCLUSIVE held elsewhere): box-only rc 0; missing lib rc 3;
+WINESERVER rc 2; :0 rc 2; `probe --preflight-only` rc 2, ONLY "missing file run/gamedata/scripts/zz_eperf_synth.script";
+`series --preflight-only` rc 2 naming PROBE_BOOT_S, PROBE_S3_FRAMES, SCORER_SHA, SELFTEST_SHA; with the stimulus
+path pointed at harness/: probe rc 0 (2 boots, 1900 s); a probe folder present: rc 2 by name; `-det_synth_item` added
+to a lever: rc 2 by name; PROBE_S3_FRAMES differing from the scorer: refused by name; every value filled: series rc 0,
+19 boots (P=812) / 18 (P=299), timeout 2040 s.
