@@ -895,6 +895,8 @@ bool CGameObject::sim_attach_correction(CObject* P, Fmatrix& C, Fmatrix& L, Fmat
 		return false;
 	}
 	xrCriticalSectionGuard guard(&K->UCalc_Mutex); // the record's writers hold it
+	if (r.kind == SIM_ATTACH_NONE) // read again under the lock: a writer may have cleared the record since the test above
+		return false;
 	info.kind = r.kind < sizeof(kinds) ? kinds[r.kind] : '?';
 	info.ba = r.bone_a;
 	info.bb = r.bone_b;

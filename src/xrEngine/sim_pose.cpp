@@ -330,7 +330,9 @@ static void sim_pose_capture_body(IKinematics* K)
 	{
 		// design 12 (C1), belt and braces: a calculation on a render-only frame. Byte-equal to cur (the F5 recalcs of
 		// armed NPCs are expected to be): nothing changes. Different: a model posed between ticks, whatever caused it:
-		// no history for it (prev = cur = new), so it is drawn live until two clean ticks make a pair again.
+		// no history for it (prev = cur = new), so it is drawn as it is for the rest of this tick. The next tick's capture
+		// pairs with it (the tick_c + 1 branch below): animation time does not advance on a render-only frame, so the
+		// recaptured pose is a pose at this tick's game time and the pair is a true one (traced 2026-11-28).
 		if (vis == s->vis && sim_pose_live_equals(K, s->cur, n))
 		{
 			if (g_sim_synth_pose)
