@@ -213,11 +213,13 @@ public:
 	Fmatrix* sim_render_lerp(IDSGraphManager* DM);
 	Fmatrix* sim_render_world();
 	Fmatrix* sim_render_world_calc(); // S2 stage 4d-1: the body of sim_render_world (which adds the test-only tripwire)
-	// S2 stage 4d-2 S4b: how the last bone-based placement of this object's XFORM() used its parent's bones (a held
-	// item: CWeapon/CMissile/CArtefact/CInventoryItem::UpdateXForm; an attached one: AttachmentCallback). Render-only
-	// side record: written only while g_sim_pose_active (so never with sim_tick 0 or mask bit 16 off), under the parent
-	// skeleton's UCalc_Mutex; read only by sim_render_world_calc's child rule, under the same lock. Valid only while
-	// XFORM() still equals the copy taken with it and the parent is the same. Nothing the simulation reads.
+	// S2 stage 4d-2 S4b: the last bone-based placement of this object's XFORM() (a held item:
+	// CWeapon/CMissile/CArtefact/CInventoryItem::UpdateXForm; an attached one: AttachmentCallback): which parent skeleton
+	// and bones it read, the bone matrices it READ, the parent XFORM() it used, and the XFORM() it produced.
+	// Render-only side record: written only while g_sim_pose_active (so never with sim_tick 0 or mask bit 16 off) and
+	// only for a marked parent skeleton, under that skeleton's UCalc_Mutex; read by sim_render_world_calc's child rule
+	// under the same lock (its first kind test and the test-only witness read it unlocked). Valid only while XFORM()
+	// still equals the copy and the parent and its skeleton are the same. Nothing the simulation reads.
 	enum
 	{
 		SIM_ATTACH_NONE = 0,
@@ -229,26 +231,34 @@ public:
 	struct SimAttachRecord
 	{
 		Fmatrix xform; // XFORM() as the placement left it
+		Fmatrix parent; // the parent's XFORM() when it was noted (the placement's P)
+		Fmatrix ta, tb; // the bone matrices the placement read (bone -> model; tb only for the two-hand kinds)
+		const IKinematics* K = nullptr; // the skeleton they were read from
 		u16 parent_id = u16(-1);
 		u16 bone_a = u16(-1), bone_b = u16(-1);
 		u8 kind = SIM_ATTACH_NONE;
 	};
-	// the record's writer (the placement code, right after it wrote XFORM(); the caller tests g_sim_pose_active)
-	void sim_attach_note(u8 kind, u16 bone_a, u16 bone_b);
-	// the child rule's correction: C (model space) such that parent_draw * C * inverse(parent XFORM) * XFORM() puts the
-	// item on its parent's drawn bones; A_d, A_c = the placement frames (drawn, captured) with C = A_d * inverse(A_c).
-	// false = no correction (the 4b rule alone). info: what the witness reports.
+	// the record's writer: the placement code, right after it wrote XFORM(), with the parent object, its skeleton K and
+	// the bone matrices as it read them (tb nullptr for one bone). The caller tests g_sim_pose_active first.
+	void sim_attach_note(u8 kind, CObject* parent, IKinematics* K, u16 bone_a, const Fmatrix& ta, u16 bone_b,
+		const Fmatrix* tb);
+	// what the child rule's correction reports to the test-only witness
 	struct SimAttachInfo
 	{
 		char kind = '-';
+		char form = 'P'; // C, R, O or P (sim_pose.h SimPoseAttachWit::form; S is decided by the caller)
+		char cls = '-';
 		u16 ba = u16(-1), bb = u16(-1); // the record's bones
 		bool have_u = false;
 		float u = 1.f;
-		Fvector hd, hc; // bone_a's origin, drawn / captured (model space)
+		Fvector hd, hr; // bone_a's origin, drawn / as the placement read it (model space)
 	};
 private:
 	SimAttachRecord m_sim_attach;
-	bool sim_attach_correction(CObject* P, Fmatrix& C, Fmatrix& A_d, Fmatrix& A_c, SimAttachInfo& info);
+	// the correction: C (model space) and L = inverse(recorded parent XFORM) * XFORM() (the placement in model space) such
+	// that parent_draw * C * L is the same placement redone from the drawn bones; A_d, A_c = the placement frames (from
+	// the drawn bones, from the bones read) with C = A_d * inverse(A_c). false = no correction (the 4b rule alone).
+	bool sim_attach_correction(CObject* P, Fmatrix& C, Fmatrix& L, Fmatrix& A_d, Fmatrix& A_c, SimAttachInfo& info);
 public:
 	virtual void OnEvent(NET_Packet& P, u16 type);
 

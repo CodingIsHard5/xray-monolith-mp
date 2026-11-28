@@ -76,9 +76,12 @@ void __stdcall AttachmentCallback(IKinematics* tpKinematics)
 		                                     (*I)->offset());
 		(*I)->item().object().XFORM().mulA_43(game_object->XFORM());
 		// S2 stage 4d-2 S4b: render-only side record of this placement (not taken with sim_tick 0 or mask bit 16
-		// off); here inside the parent's CalculateBones, under its UCalc_Mutex
-		if (g_sim_pose_active)
-			(*I)->item().object().sim_attach_note(CGameObject::SIM_ATTACH_BONE, (*I)->bone_id(), u16(-1));
+		// off); here inside the owner's CalculateBones, under tpKinematics' UCalc_Mutex. Only when the skeleton read
+		// is the one being calculated and the item's parent is this owner (review L1): the note then takes no second
+		// skeleton's lock. The bone matrix passed is the one read above (same thread, under the lock, unchanged).
+		if (g_sim_pose_active && kinematics == tpKinematics && (*I)->item().object().H_Parent() == game_object)
+			(*I)->item().object().sim_attach_note(CGameObject::SIM_ATTACH_BONE, game_object, tpKinematics,
+				(*I)->bone_id(), kinematics->LL_GetBoneInstance((*I)->bone_id()).mTransform, u16(-1), nullptr);
 	}
 }
 

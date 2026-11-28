@@ -1320,6 +1320,12 @@ void CInventoryItem::UpdateXForm()
 	V->CalculateBones();
 	Fmatrix& mL = V->LL_GetTransform(u16(boneL));
 	Fmatrix& mR = V->LL_GetTransform(u16(boneR));
+	// S2 stage 4d-2 S4b: the right hand as this placement reads it, for the render-only record below (not taken with
+	// sim_tick 0 or mask bit 16 off)
+	Fmatrix sim_mR;
+	const bool sim_note = g_sim_pose_active ? true : false;
+	if (sim_note)
+		sim_mR.set(mR);
 	// Calculate
 	Fmatrix mRes;
 	Fvector R, D,N;
@@ -1347,9 +1353,9 @@ void CInventoryItem::UpdateXForm()
 	object().Position().set(mRes.c);
 	// S2 stage 4d-2 S4b: render-only side record of this placement, the position only (not taken with sim_tick 0 or
 	// mask bit 16 off). The fis_zero branch above sets a model-space position: no record for it
-	if (g_sim_pose_active)
+	if (sim_note)
 		object().sim_attach_note(fis_zero(D.magnitude()) ? CGameObject::SIM_ATTACH_NONE : CGameObject::SIM_ATTACH_POS,
-			u16(boneR), u16(-1));
+			E, V, u16(boneR), sim_mR, u16(-1), nullptr);
 }
 
 

@@ -403,8 +403,8 @@ void CArtefact::UpdateXForm()
 	XFORM().mul			(mRes,offset());
 	// S2 stage 4d-2 S4b: render-only side record of this placement (not taken with sim_tick 0 or mask bit 16 off); the
 	// actor's branch above reads animation poses (Bone_GetAnimPos), not the bones: no record for it
-	if (g_sim_pose_active)
-		sim_attach_note(E->cast_actor() ? SIM_ATTACH_NONE : SIM_ATTACH_HANDS_N, u16(boneR), u16(boneL));
+	if (g_sim_pose_active) // mL, mR are this placement's own copies of the bones it read
+		sim_attach_note(E->cast_actor() ? SIM_ATTACH_NONE : SIM_ATTACH_HANDS_N, E, V, u16(boneR), mR, u16(boneL), &mL);
 }
 
 #include "xr_level_controller.h"

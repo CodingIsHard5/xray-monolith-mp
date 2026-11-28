@@ -32,14 +32,30 @@ IC const Fmatrix* sim_pose_draw_frame(IKinematics* K)
 	return (g_sim_render_lerp && g_sim_pose_active && K->has_sim_pose()) ? sim_pose_draw(K) : nullptr;
 }
 
-// S2 stage 4d-2 S4b: bone b of K as drawn in this frame (t_draw) and as captured in the newest tick (t_cur), both
-// bone -> model (the space of mTransform / LL_GetTransform; = the bind -> model matrix times inverse(m2b)), and the
-// pose's u. true only while this frame draws K's pose between ticks (form L) and b is a captured, visible bone;
-// t_draw == t_cur bitwise when the bone is drawn as captured (u = 1, unchanged pose, a bone the blend left at cur).
-// For placing an item that hangs on b (CGameObject::sim_render_world_calc, script_attachment::Render). Render path,
-// main thread; takes K->UCalc_Mutex (recursive). Reads only; evaluates K's draw pose for this frame if nothing did yet
-// (sim_pose_draw, the same evaluation CSkeletonX::_Render would make).
-ENGINE_API bool sim_pose_bone_xform(IKinematics* K, u16 b, Fmatrix& t_draw, Fmatrix& t_cur, float& u);
+// S2 stage 4d-2 S4b: unlocked pre-test: K's pose may be drawn between ticks in this frame (gated frame, slice on, K
+// marked and captured at least once). False means sim_pose_bone_drawn would return 0; callers use it to skip their
+// lock. The values it reads (globals written by the main thread, the mark, the storage slot) only decide whether the
+// locked path runs, which re-checks everything under the lock.
+IC bool sim_pose_maybe_drawn(IKinematics* K)
+{
+	return g_sim_render_lerp && g_sim_pose_active && K->has_sim_pose() && K->LL_GetSimObjectVisual();
+}
+
+// S4b: which captured pose a bone matrix a placement READ (t_read, bone -> model, as LL_GetTransform returned it) came
+// from, and bone b as drawn in this frame (t_draw, bone -> model). Returns 0 when K's pose is not drawn between ticks in
+// this frame (form not L) or b is not a captured visible bone (t_draw, u untouched); else u = the pose's draw u and
+// a mask: SIM_POSE_BONE_CUR (t_read == the newest capture's mTransform bitwise) | SIM_POSE_BONE_PREV (== the previous
+// one's), or SIM_POSE_BONE_OTHER alone (neither; t_draw untouched). t_draw is bitwise the captured mTransform when the
+// blend left b at that endpoint. For placing an item that hangs on b (CGameObject::sim_render_world_calc,
+// script_attachment::Render). Render path, main thread; takes K->UCalc_Mutex (recursive). Reads only; evaluates K's
+// draw pose for this frame if nothing did yet (sim_pose_draw, the same evaluation CSkeletonX::_Render would make).
+enum
+{
+	SIM_POSE_BONE_CUR = 1,
+	SIM_POSE_BONE_PREV = 2,
+	SIM_POSE_BONE_OTHER = 4,
+};
+ENGINE_API int sim_pose_bone_drawn(IKinematics* K, u16 b, const Fmatrix& t_read, Fmatrix& t_draw, float& u);
 
 // Release K's storage (CKinematics::IBoneInstances_Destroy and Spawn). Takes K->UCalc_Mutex. The caller tests
 // K->has_sim_pose() first, so a skeleton that never had storage (every skeleton, if gated mode with the bit on never ran) costs one test.
@@ -65,15 +81,21 @@ struct SimPoseAttachWit
 {
 	char kind; // the child's record: B one bone, T bone position only, W two hands (CWeapon), N two hands, unit axes
 	           // (CMissile, CArtefact); X = record stale (XFORM() placed some other way since); '-' = no record
-	char form; // C corrected to the drawn bones, P the 4b rule alone (no correction), S stock (drawn at its XFORM())
+	char form; // C corrected (the placement redone from the drawn bones), R corrected by the right hand alone (two-hand
+	           // frame unavailable), O not corrected: the placement read bones of neither drawn capture, P the 4b rule
+	           // alone (no correction needed or possible), S stock (drawn at its XFORM())
+	char cls; // which capture the placement read: c the newest (or both equal), p the previous one, o neither,
+	          // '-' not classified (no valid record, or the parent's pose is not drawn between ticks)
 	u16 ba, bb; // the record's bones (BI_NONE = none)
-	bool have_u; // the parent's pose is drawn between ticks in this frame (u, hd, hc set)
+	bool have_u; // the parent's pose is drawn between ticks in this frame and ba is a captured bone (u, hd, hr set)
 	float u;
 	Fvector wd; // where the child is drawn (world)
 	Fvector ws; // where the 4b rule alone would draw it (world): the stock placement relative to the drawn root
-	Fvector hd, hc; // bone ba's joint, drawn and as captured, both through the parent's drawn root (world)
-	bool have_l; // form C: ld, ls set
-	Fvector ld, ls; // the child's origin in its placement frame: drawn (wd in the drawn frame), stock (ws in the cur one)
+	Fvector hd; // bone ba's joint as drawn, through the parent's drawn root (world)
+	Fvector hr; // bone ba's joint as the placement read it, through the parent's drawn root (world)
+	bool have_l; // forms C and R: ld, ls set
+	Fvector ld, ls; // the child's origin in its placement frame: drawn (wd in parent_draw * drawn frame) and as placed
+	                // (the recorded placement in parent_draw * recorded frame); equal when the item follows the frame
 	u64 hx; // checksum of the child's XFORM() at the child rule
 	u16 child_id; // its ID (the print hashes XFORM() again after the render: hxe)
 };

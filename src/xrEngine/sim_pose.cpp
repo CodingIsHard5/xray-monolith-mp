@@ -8,7 +8,7 @@
 //
 // Known limits of S4a (review 2026-11-27; visual only, with the bit on):
 // - an item attached to a bone (an NPC's weapon) is placed from the live hand bone, the hand is drawn blended: the item
-//   would lead the hand by up to a tick of hand motion. Slice S4b corrects it (sim_pose_bone_xform, used by
+//   would lead the hand by up to a tick of hand motion. Slice S4b corrects it (sim_pose_bone_drawn, used by
 //   CGameObject::sim_render_world_calc's child rule and script_attachment::Render); see
 //   plan-facts/stage4d2-s4b-design-and-code-2026-11-27.md for what it does not cover (lights, particles on bones).
 // - software-skinned parts (CSkeletonX RM_SKINNING_SOFT) and wallmarks/bone-attached effects read the live bones.
@@ -64,6 +64,10 @@ struct SimPoseState
 	Fmatrix prev[SIM_POSE_MAX_BONES];
 	Fmatrix cur[SIM_POSE_MAX_BONES];
 	Fmatrix draw[SIM_POSE_MAX_BONES];
+	// S4b: the same two captures' mTransform (bone -> model, what LL_GetTransform returns for a visible bone), so that a
+	// placement's bone reads can be matched bitwise to the pose they came from (sim_pose_bone_drawn)
+	Fmatrix tprev[SIM_POSE_MAX_BONES];
+	Fmatrix tcur[SIM_POSE_MAX_BONES];
 };
 
 // the only access to IKinematics::m_sim_pose (declared friend in Include/xrRender/Kinematics.h)
@@ -120,10 +124,22 @@ static void sim_pose_joints(IKinematics* K, SimPoseState* s, u16 n)
 	}
 }
 
-static void sim_pose_copy_live(IKinematics* K, Fmatrix* dst, u16 n)
+// cur (mRenderTransform) and tcur (mTransform, S4b) from the live bones
+static void sim_pose_copy_live(IKinematics* K, SimPoseState* s, u16 n)
 {
 	for (u16 b = 0; b < n; ++b)
-		dst[b] = K->LL_GetBoneInstance(b).mRenderTransform;
+	{
+		const CBoneInstance& B = K->LL_GetBoneInstance(b);
+		s->cur[b] = B.mRenderTransform;
+		s->tcur[b] = B.mTransform;
+	}
+}
+
+// prev = cur (both spaces)
+static void sim_pose_cur_to_prev(SimPoseState* s, u16 n)
+{
+	memcpy(s->prev, s->cur, n * sizeof(Fmatrix));
+	memcpy(s->tprev, s->tcur, n * sizeof(Fmatrix));
 }
 
 static bool sim_pose_live_equals(IKinematics* K, const Fmatrix* m, u16 n)
@@ -298,29 +314,29 @@ static void sim_pose_capture_body(IKinematics* K)
 		}
 		if (g_sim_synth_pose)
 			s_wit_ro_diff++;
-		sim_pose_copy_live(K, s->cur, n);
-		memcpy(s->prev, s->cur, n * sizeof(Fmatrix));
+		sim_pose_copy_live(K, s, n);
+		sim_pose_cur_to_prev(s, n);
 		s->tick_p = tick;
 	}
 	else if (s->have && s->epoch == epoch && s->tick_c == tick)
 	{
 		// again in the same tick (another caller, or after an invalidate): the newer pose of the same tick
-		sim_pose_copy_live(K, s->cur, n);
+		sim_pose_copy_live(K, s, n);
 		if (vis != s->vis)
 			s->tick_p = tick; // the mask changed: prev is not comparable, no history
 	}
 	else if (s->have && s->epoch == epoch && s->tick_c + 1 == tick && vis == s->vis)
 	{
 		// the next tick: a pair
-		memcpy(s->prev, s->cur, n * sizeof(Fmatrix));
-		sim_pose_copy_live(K, s->cur, n);
+		sim_pose_cur_to_prev(s, n);
+		sim_pose_copy_live(K, s, n);
 		s->tick_p = s->tick_c;
 	}
 	else
 	{
 		// first capture, a gap, a resync (other epoch) or another mask: no history
-		sim_pose_copy_live(K, s->cur, n);
-		memcpy(s->prev, s->cur, n * sizeof(Fmatrix));
+		sim_pose_copy_live(K, s, n);
+		sim_pose_cur_to_prev(s, n);
 		s->tick_p = tick;
 	}
 	s->tick_c = tick;
@@ -431,24 +447,39 @@ ENGINE_API const Fmatrix* sim_pose_draw(IKinematics* K)
 	return r;
 }
 
-// S4b: see sim_pose.h. Rule One: reads K's bone data and this file's storage; writes only t_draw, t_cur, u (the
-// caller's locals) and, through sim_pose_draw, this file's storage (as the renderer's own call would).
-ENGINE_API bool sim_pose_bone_xform(IKinematics* K, u16 b, Fmatrix& t_draw, Fmatrix& t_cur, float& u)
+// S4b: see sim_pose.h. Rule One: reads K's bone data and this file's storage; writes only t_draw and u (the caller's
+// locals) and, through sim_pose_draw, this file's storage (as the renderer's own call would).
+ENGINE_API int sim_pose_bone_drawn(IKinematics* K, u16 b, const Fmatrix& t_read, Fmatrix& t_draw, float& u)
 {
-	if (!K || !(g_sim_render_lerp && g_sim_pose_active && K->has_sim_pose())) // sim_pose_draw_frame's test, unlocked
-		return false; // not drawn between ticks in this frame, slice off, or K never captured: the caller's stock rule
+	if (!K || !sim_pose_maybe_drawn(K))
+		return 0; // not drawn between ticks in this frame, slice off, K unmarked or never captured: the caller's stock rule
 	xrCriticalSectionGuard guard(&K->UCalc_Mutex); // recursive: the callers may hold it already
 	if (!sim_pose_draw(K))
-		return false; // this frame draws K's live bones (Sn, Sb, Sg, Ss, unmarked)
+		return 0; // this frame draws K's live bones (Sn, Sb, Sg, Ss)
 	const SimPoseState* s = SimPoseAccess::get(K);
 	if (b >= s->n || !(s->vis & (u64(1) << b)))
-		return false; // BI_NONE, out of range, or hidden (LL_GetTransform would read mTransformHidden): not blended
-	Fmatrix bind; // bone -> model at bind time: mRenderTransform = mTransform * m2b, so mTransform = R * inverse(m2b)
-	bind.invert(K->LL_GetData(b).m2b_transform);
-	t_draw.mul_43(s->draw[b], bind);
-	t_cur.mul_43(s->cur[b], bind);
+		return 0; // BI_NONE, out of range, or hidden (LL_GetTransform reads mTransformHidden): not blended
 	u = s->draw_u;
-	return true;
+	int cls = 0;
+	if (0 == memcmp(&t_read, &s->tcur[b], sizeof(Fmatrix)))
+		cls |= SIM_POSE_BONE_CUR;
+	if (0 == memcmp(&t_read, &s->tprev[b], sizeof(Fmatrix)))
+		cls |= SIM_POSE_BONE_PREV;
+	if (!cls)
+		return SIM_POSE_BONE_OTHER;
+	// the drawn bone -> model matrix: bitwise the captured one when the blend left the bone at an endpoint, else the
+	// drawn bind -> model matrix times inverse(m2b) (mRenderTransform = mTransform * m2b, SkeletonRigid.cpp CLBone)
+	if (0 == memcmp(&s->draw[b], &s->cur[b], sizeof(Fmatrix)))
+		t_draw = s->tcur[b];
+	else if (0 == memcmp(&s->draw[b], &s->prev[b], sizeof(Fmatrix)))
+		t_draw = s->tprev[b];
+	else
+	{
+		Fmatrix bind;
+		bind.invert(K->LL_GetData(b).m2b_transform);
+		t_draw.mul_43(s->draw[b], bind);
+	}
+	return cls;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -594,7 +625,7 @@ static void sim_pose_print_pa(FILE* f);
 
 // " p <neval> <nlerp> <nguard> <nsnap> <nro_diff> <nro_equal> | pw <form> <u> <ptick> <ctick> <hd> <hl> <hp> <hc> <hu>
 // <hdu> <jd xyz> <jp xyz> <jc xyz> | up <hu> <hl> | pn <form> <u> <hd> <hl> <hsim> |
-// pa <kind> <form> <ba> <bb> <u> <wd xyz> <ws xyz> <hd xyz> <hc xyz> <ld xyz> <ls xyz> <hx> <hxe> |"
+// pa <kind> <form> <cls> <ba> <bb> <u> <wd xyz> <ws xyz> <hd xyz> <hr xyz> <ld xyz> <ls xyz> <hx> <hxe> |"
 // (one "-" per absent value; pa is S4b's)
 ENGINE_API void sim_pose_witness_print(FILE* f)
 {
@@ -679,16 +710,16 @@ static void sim_pose_print_u16(FILE* f, u16 v)
 		fprintf(f, " %u", u32(v));
 }
 
-// pa (S4b): the witness NPC's active item as placed by the child rule in this frame; 25 values after "pa"
+// pa (S4b): the witness NPC's active item as placed by the child rule in this frame; 26 values after "pa"
 static void sim_pose_print_pa(FILE* f)
 {
 	if (!s_wit_pa)
 	{
-		fprintf(f, " pa - - - - - - - - - - - - - - - - - - - - - - - - - |");
+		fprintf(f, " pa - - - - - - - - - - - - - - - - - - - - - - - - - - |");
 		return;
 	}
 	const SimPoseAttachWit& a = s_wit_pa_v;
-	fprintf(f, " pa %c %c", a.kind, a.form);
+	fprintf(f, " pa %c %c %c", a.kind, a.form, a.cls);
 	sim_pose_print_u16(f, a.ba);
 	sim_pose_print_u16(f, a.bb);
 	if (a.have_u)
@@ -698,7 +729,7 @@ static void sim_pose_print_pa(FILE* f)
 	sim_pose_print_vec(f, true, a.wd);
 	sim_pose_print_vec(f, true, a.ws);
 	sim_pose_print_vec(f, a.have_u, a.hd);
-	sim_pose_print_vec(f, a.have_u, a.hc);
+	sim_pose_print_vec(f, a.have_u, a.hr);
 	sim_pose_print_vec(f, a.have_l, a.ld);
 	sim_pose_print_vec(f, a.have_l, a.ls);
 	sim_pose_print_hash(f, true, a.hx);

@@ -497,6 +497,15 @@ void CMissile::UpdateXForm()
 		V->CalculateBones();
 		Fmatrix& mL = V->LL_GetTransform(u16(boneL));
 		Fmatrix& mR = V->LL_GetTransform(u16(boneR));
+		// S2 stage 4d-2 S4b: the bones as this placement reads them, for the render-only record below (not taken with
+		// sim_tick 0 or mask bit 16 off)
+		Fmatrix sim_mL, sim_mR;
+		const bool sim_note = g_sim_pose_active ? true : false;
+		if (sim_note)
+		{
+			sim_mL.set(mL);
+			sim_mR.set(mR);
+		}
 
 		// Calculate
 		Fmatrix mRes;
@@ -511,8 +520,8 @@ void CMissile::UpdateXForm()
 		mRes.mulA_43(E->XFORM());
 		UpdatePosition(mRes);
 		// S2 stage 4d-2 S4b: render-only side record of this placement (not taken with sim_tick 0 or mask bit 16 off)
-		if (g_sim_pose_active)
-			sim_attach_note(SIM_ATTACH_HANDS_N, u16(boneR), u16(boneL));
+		if (sim_note)
+			sim_attach_note(SIM_ATTACH_HANDS_N, E, V, u16(boneR), sim_mR, u16(boneL), &sim_mL);
 	}
 }
 
