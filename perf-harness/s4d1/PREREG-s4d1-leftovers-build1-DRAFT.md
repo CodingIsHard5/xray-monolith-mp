@@ -141,9 +141,12 @@ earlier registration without re-deriving it).
 - Decision (Overseer, 2026-11-28 about 04:10): PROBE STOP stands; fix the scorer, then re-probe with 2 boots; the
   first probe's data is not re-read for a verdict. The driver has no re-probe mode and refuses while the first probe's
   outputs exist, so they were moved by hand, 2026-11-28 04:26, nothing deleted:
-  out/det_s4d_probe -> out/det_s4d_probe_p1, out/det_s4d_probe15 -> out/det_s4d_probe15_p1,
-  out/s4d1_state/probe -> out/s4d1_state/probe_p1, s4d1/probe_readings.txt -> s4d1/probe_readings_p1.txt.
-  Where Amendments 1 and 2 name out/det_s4d_probe or out/det_s4d_probe15 for the 03:56 probe, read the _p1 names.
+  out/det_s4d_probe -> out/s4d1_probe1_archive/det_s4d_probe, out/det_s4d_probe15 ->
+  out/s4d1_probe1_archive/det_s4d_probe15 (outside the out/det_s4d_* pattern that the driver's start check and 6.4
+  refuse on; a first move to out/det_s4d_probe_p1 names at 04:26 was still inside it, found by review and corrected
+  04:40 before any run), out/s4d1_state/probe -> out/s4d1_state/probe_p1, s4d1/probe_readings.txt ->
+  s4d1/probe_readings_p1.txt. Where Amendments 1 and 2 name out/det_s4d_probe or out/det_s4d_probe15 for the 03:56
+  probe, read the archive names.
 - The re-probe uses the same two tags (s4d_probe, s4d_probe15) and the same driver mode `probe`. It is the first run
   of this series with the item switch. Its reading is taken once, into s4d1/probe_readings.txt.
 - A second probe stop (any rule) means a new plan, not a third probe on the spot.
