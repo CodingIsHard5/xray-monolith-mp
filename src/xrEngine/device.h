@@ -634,7 +634,7 @@ struct SimSynthWitness
 	Fvector s4_draw; // that matrix's position: where the item (its shadow, in first person) was drawn
 };
 extern ENGINE_API SimSynthWitness g_sim_synth_wit;
-typedef void (*sim_synth_witness_fn)(); // fills the s2 columns of g_sim_synth_wit (set by xrGame while its actor exists)
+typedef void (*sim_synth_witness_fn)(); // fills the s2 and s4 columns of g_sim_synth_wit (set by xrGame while its actor exists)
 extern ENGINE_API sim_synth_witness_fn g_sim_synth_witness_s2;
 ENGINE_API void sim_4d_tw_bad(const char* slice); // tripwire report: count it in the witness, log one line
 // FNV-1a over raw bytes (tripwire checksums)
