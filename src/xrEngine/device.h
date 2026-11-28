@@ -630,6 +630,8 @@ struct SimSynthWitness
 	float s1_opacity; // and its opacity
 	bool s4; // the s4 column is set: the local player has an active item
 	Fvector s4_item; // its XFORM().c (simulation state) after this frame's render
+	bool s4_drawn; // the item was handed a matrix for this frame's render (its sim_render cache is of this frame)
+	Fvector s4_draw; // that matrix's position: where the item (its shadow, in first person) was drawn
 };
 extern ENGINE_API SimSynthWitness g_sim_synth_wit;
 typedef void (*sim_synth_witness_fn)(); // fills the s2 columns of g_sim_synth_wit (set by xrGame while its actor exists)

@@ -788,6 +788,13 @@ void CActor::sim_synth_witness()
 	{
 		g_sim_synth_wit.s4 = true;
 		g_sim_synth_wit.s4_item.set(pItem->object().XFORM().c);
+		// where it was drawn in this frame, read from the per-frame cache without computing it (no cache = not drawn)
+		const CObject::SimRenderState& sr = pItem->object().sim_render;
+		if (sr.ptr && sr.frame == Device.dwFrame)
+		{
+			g_sim_synth_wit.s4_drawn = true;
+			g_sim_synth_wit.s4_draw.set(sr.ptr->c);
+		}
 	}
 }
 // ---------------------------------------------------------------------------------------------------------------

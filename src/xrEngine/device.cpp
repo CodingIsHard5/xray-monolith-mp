@@ -559,10 +559,14 @@ static void sim_synth_witness_write(int n)
 		fprintf(f, " s1 %.6f %.5f %.5f %.5f %.6f |", w.s1_dt, w.s1_pos.x, w.s1_pos.y, w.s1_pos.z, w.s1_opacity);
 	else
 		fprintf(f, " s1 - - - - - |");
-	if (w.s4)
-		fprintf(f, " s4 %.5f %.5f %.5f |", w.s4_item.x, w.s4_item.y, w.s4_item.z);
+	// s4: the active item's XFORM().c, then where it was drawn in this frame (6 values; "-" for each absent one)
+	if (w.s4 && w.s4_drawn)
+		fprintf(f, " s4 %.5f %.5f %.5f %.5f %.5f %.5f |", w.s4_item.x, w.s4_item.y, w.s4_item.z, w.s4_draw.x, w.s4_draw.y,
+		        w.s4_draw.z);
+	else if (w.s4)
+		fprintf(f, " s4 %.5f %.5f %.5f - - - |", w.s4_item.x, w.s4_item.y, w.s4_item.z);
 	else
-		fprintf(f, " s4 - - - |");
+		fprintf(f, " s4 - - - - - - |");
 	fprintf(f, " tw %u\n", w.tw_bad);
 	fflush(f); // the harness quits the game from a script: nothing may wait in the buffer
 }
