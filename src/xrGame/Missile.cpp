@@ -520,8 +520,10 @@ void CMissile::UpdateXForm()
 		mRes.mulA_43(E->XFORM());
 		UpdatePosition(mRes);
 		// S2 stage 4d-2 S4b: render-only side record of this placement (not taken with sim_tick 0 or mask bit 16 off)
+		// (re-review S2: the copies were taken without the lock; if another thread recalculated the bones between the copy
+		// and the reads above, the copy is not what XFORM() was built from: no record, the 4b rule alone)
 		if (sim_note)
-			sim_attach_note(SIM_ATTACH_HANDS_N, E, V, u16(boneR), sim_mR, u16(boneL), &sim_mL);
+			sim_attach_note((0 == memcmp(&sim_mR, &mR, sizeof(Fmatrix)) && 0 == memcmp(&sim_mL, &mL, sizeof(Fmatrix))) ? SIM_ATTACH_HANDS_N : SIM_ATTACH_NONE, E, V, u16(boneR), sim_mR, u16(boneL), &sim_mL);
 	}
 }
 

@@ -1354,7 +1354,8 @@ void CInventoryItem::UpdateXForm()
 	// S2 stage 4d-2 S4b: render-only side record of this placement, the position only (not taken with sim_tick 0 or
 	// mask bit 16 off). The fis_zero branch above sets a model-space position: no record for it
 	if (sim_note)
-		object().sim_attach_note(fis_zero(D.magnitude()) ? CGameObject::SIM_ATTACH_NONE : CGameObject::SIM_ATTACH_POS,
+		object().sim_attach_note((fis_zero(D.magnitude()) || 0 != memcmp(&sim_mR, &mR, sizeof(Fmatrix))) // re-review S2: copy must still equal the bone read
+			? CGameObject::SIM_ATTACH_NONE : CGameObject::SIM_ATTACH_POS,
 			E, V, u16(boneR), sim_mR, u16(-1), nullptr);
 }
 

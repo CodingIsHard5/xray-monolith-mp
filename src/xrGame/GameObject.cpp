@@ -954,12 +954,21 @@ bool CGameObject::sim_attach_correction(CObject* P, Fmatrix& C, Fmatrix& L, Fmat
 			A_c.set(r.ta);
 		}
 	}
-	if (0 == memcmp(&A_d, &A_c, sizeof(Fmatrix)))
-		return false; // the bones are drawn as the placement read them: the 4b rule alone (bitwise S4a's result)
+	const bool same_frame = 0 == memcmp(&A_d, &A_c, sizeof(Fmatrix));
+	// the bones are drawn as the placement read them and the parent has not moved since the placement: the 4b rule
+	// alone (bitwise S4a's result). If the parent's XFORM() changed since (re-review S1: a mid-tick placement, drawn at
+	// u = 0), the 4b rule would use the wrong parent matrix: go on with C = identity and the recorded parent.
+	if (same_frame && 0 == memcmp(&r.parent, &P->XFORM(), sizeof(Fmatrix)))
+		return false;
 	info.form = (r.kind == SIM_ATTACH_HANDS || r.kind == SIM_ATTACH_HANDS_N) && !framed ? 'R' : 'C';
 	Fmatrix inv;
-	inv.invert(A_c);
-	C.mul_43(A_d, inv);
+	if (same_frame)
+		C.identity();
+	else
+	{
+		inv.invert(A_c);
+		C.mul_43(A_d, inv);
+	}
 	inv.invert(r.parent); // the placement's own parent matrix (review C3): L = F(read) * O exactly, whatever P did since
 	L.mul_43(inv, XFORM());
 	return true;
