@@ -38,6 +38,8 @@
 #include "debug_renderer.h"
 #include "../xrPhysics/PHElement.h"
 #include "Actor.h" // S2 stage 4b: g_actor, CActor::Holder
+#include "Inventory.h" // S2 stage 4d-2 S4b witness: the witness NPC's active item
+#include "../xrEngine/sim_pose.h" // S2 stage 4d-2 S4b: sim_pose_bone_xform
 
 extern MagicBox3 MagicMinBox(int iQuantity, const Fvector* akPoint);
 
@@ -822,6 +824,164 @@ static bool sim_render_interpolate(Fmatrix& out, const Fmatrix& a, const Fmatrix
 	return true;
 }
 
+// ---- S2 stage 4d-2 S4b: items on a bone of a skeleton drawn between ticks (design note
+// plan-facts/stage4d2-s4b-design-and-code-2026-11-27.md). Matrices: mul_43(A, B) = A * B applies B first (row vectors,
+// v * M); X = P * F * O for a held item (P parent XFORM, F the model-space placement frame, O the item's offset).
+
+// the model-space two-hand frame of CWeapon::UpdateXForm (unit_r false) and CMissile/CArtefact::UpdateXForm (unit_r
+// true) from the right hand mR and the left hand mL (bone -> model); false = degenerate (hands together, or the right
+// hand's j axis along them: the weapon's own fallback, or no inverse)
+static bool sim_attach_hands(Fmatrix& F, const Fmatrix& mR, const Fmatrix& mL, bool unit_r)
+{
+	Fvector R, D, N;
+	D.sub(mL.c, mR.c);
+	if (D.magnitude() < EPS_L)
+		return false;
+	D.normalize();
+	R.crossproduct(mR.j, D);
+	if (R.magnitude() < EPS_L)
+		return false;
+	if (unit_r)
+		R.normalize();
+	N.crossproduct(D, R);
+	N.normalize();
+	F.set(R, N, D, mR.c);
+	return true;
+}
+
+// the record's writer. Any thread that places the item (the tick, the render, CalculateBones' callback on a worker);
+// takes the parent skeleton's lock (recursive: AttachmentCallback already holds it). Writes only m_sim_attach.
+void CGameObject::sim_attach_note(u8 kind, u16 bone_a, u16 bone_b)
+{
+	CObject* P = H_Parent();
+	IRenderVisual* V = P ? P->Visual() : nullptr;
+	IKinematics* K = V ? V->dcast_PKinematics() : nullptr;
+	if (!K)
+		return;
+	xrCriticalSectionGuard guard(&K->UCalc_Mutex);
+	m_sim_attach.xform.set(XFORM());
+	m_sim_attach.parent_id = P->ID();
+	m_sim_attach.bone_a = bone_a;
+	m_sim_attach.bone_b = bone_b;
+	m_sim_attach.kind = kind;
+}
+
+// see GameObject.h. Main thread (the render). Reads the record, XFORM(), the parent's ID and sim_pose's drawn and
+// captured bones; writes only its outputs.
+bool CGameObject::sim_attach_correction(CObject* P, Fmatrix& C, Fmatrix& A_d, Fmatrix& A_c, SimAttachInfo& info)
+{
+	const SimAttachRecord& r = m_sim_attach;
+	if (r.kind == SIM_ATTACH_NONE)
+		return false;
+	IRenderVisual* V = P->Visual();
+	IKinematics* K = V ? V->dcast_PKinematics() : nullptr;
+	if (!K)
+		return false;
+	xrCriticalSectionGuard guard(&K->UCalc_Mutex); // the record's writers hold it (the test above read one byte)
+	static const char kinds[] = {'-', 'B', 'T', 'W', 'N'};
+	info.kind = r.kind < sizeof(kinds) ? kinds[r.kind] : '?';
+	info.ba = r.bone_a;
+	info.bb = r.bone_b;
+	if (!K->has_sim_pose())
+		return false; // the parent was never captured (unmarked, e.g. the actor's body): nothing to correct
+	if (r.parent_id != P->ID() || 0 != memcmp(&r.xform, &XFORM(), sizeof(Fmatrix)))
+	{
+		info.kind = 'X'; // XFORM() was placed some other way since (or for another parent): the 4b rule alone
+		return false;
+	}
+	Fmatrix da, ca;
+	float u = 1.f;
+	if (!sim_pose_bone_xform(K, r.bone_a, da, ca, u))
+		return false; // the parent's pose is drawn live in this frame (or bone_a is hidden): nothing to correct
+	info.have_u = true;
+	info.u = u;
+	info.hd.set(da.c);
+	info.hc.set(ca.c);
+	bool framed = false;
+	if (r.kind == SIM_ATTACH_HANDS || r.kind == SIM_ATTACH_HANDS_N)
+	{
+		Fmatrix db, cb;
+		float ub = 1.f;
+		const bool unit_r = r.kind == SIM_ATTACH_HANDS_N;
+		framed = sim_pose_bone_xform(K, r.bone_b, db, cb, ub) && sim_attach_hands(A_d, da, db, unit_r) &&
+			sim_attach_hands(A_c, ca, cb, unit_r);
+		// not framed (left hand hidden, or degenerate): the right hand alone carries the item (below)
+	}
+	if (!framed)
+	{
+		if (r.kind == SIM_ATTACH_POS)
+		{
+			A_d.translate(da.c);
+			A_c.translate(ca.c);
+		}
+		else
+		{
+			A_d.set(da);
+			A_c.set(ca);
+		}
+	}
+	if (0 == memcmp(&A_d, &A_c, sizeof(Fmatrix)))
+		return false; // the bones are drawn as captured: the 4b rule alone (bitwise S4a's result)
+	Fmatrix inv;
+	inv.invert(A_c);
+	C.mul_43(A_d, inv);
+	return true;
+}
+
+// test-only (-det_synth_pose): is this child the witness NPC's active item?
+static bool sim_attach_wit_child(CGameObject* PG, CGameObject* child)
+{
+	const shared_str& name = sim_pose_wit_npc();
+	if (!name.size() || PG->cName() != name)
+		return false;
+	CInventoryOwner* io = PG->cast_inventory_owner();
+	PIItem a = io ? io->inventory().ActiveItem() : nullptr;
+	return a && static_cast<CGameObject*>(&a->object()) == child;
+}
+
+// test-only: the "pa" witness of this child's placement (sim_pose.h, SimPoseAttachWit)
+static void sim_attach_wit_fill(CGameObject* child, const CGameObject::SimAttachInfo& info, bool corrected, bool stock,
+	const Fmatrix& parent_draw, const Fmatrix& drawn, const Fmatrix& plain, const Fmatrix& A_d, const Fmatrix& A_c, u64 hx)
+{
+	SimPoseAttachWit w;
+	w.kind = info.kind;
+	w.form = corrected ? 'C' : (stock ? 'S' : 'P');
+	w.ba = info.ba;
+	w.bb = info.bb;
+	w.have_u = info.have_u;
+	w.u = info.u;
+	w.wd.set(drawn.c);
+	w.ws.set(plain.c);
+	if (info.have_u)
+	{
+		parent_draw.transform_tiny(w.hd, info.hd);
+		parent_draw.transform_tiny(w.hc, info.hc);
+	}
+	else
+	{
+		w.hd.set(0.f, 0.f, 0.f);
+		w.hc.set(0.f, 0.f, 0.f);
+	}
+	w.have_l = corrected;
+	w.ld.set(0.f, 0.f, 0.f);
+	w.ls.set(0.f, 0.f, 0.f);
+	if (corrected)
+	{
+		// the child's origin in its placement frame, each by its own route: drawn wd in parent_draw * A_d, stock ws
+		// in parent_draw * A_c (equal to rounding when the child follows the drawn frame)
+		Fmatrix fd, fc, ifd, ifc;
+		fd.mul_43(parent_draw, A_d);
+		fc.mul_43(parent_draw, A_c);
+		ifd.invert(fd);
+		ifc.invert(fc);
+		ifd.transform_tiny(w.ld, w.wd);
+		ifc.transform_tiny(w.ls, w.ws);
+	}
+	w.hx = hx;
+	w.child_id = child->ID();
+	sim_pose_wit_attach(w);
+}
+
 // the renderer's matrix for this object in this frame: &XFORM() unless every condition in sim_render_world_calc holds.
 // S2 stage 4d-1 tripwire (test-only; g_sim_synth_tw is FALSE unless -det_mode -det_synth_tw): for the local actor and
 // its direct children, a checksum of the actor-side simulation fields S2 could reach (CActor::sim_4d_tw_hash) is taken
@@ -857,16 +1017,62 @@ Fmatrix* CGameObject::sim_render_world_calc()
 	{
 		// a child (a weapon in an NPC's hands, an attached torch): its XFORM() was computed during the tick (or by
 		// UpdateXForm just now) from the parent's XFORM() and bones; it follows the parent's drawn matrix:
-		// draw = parent_draw * inverse(parent XFORM()) * XFORM(). A parent drawn at its XFORM() means the child is too.
+		// draw = parent_draw * inverse(parent XFORM()) * XFORM(). A parent drawn at its XFORM() means the child is too,
+		// unless (S2 stage 4d-2 S4b) the parent's pose is drawn between ticks: then the bones the child hangs on are
+		// drawn elsewhere than XFORM() assumed, and the correction C moves it onto them:
+		// draw = parent_draw * C * inverse(parent XFORM()) * XFORM() (sim_attach_correction; design note S4b).
 		CGameObject* PG = P->cast_game_object();
 		Fmatrix* parent_draw = PG ? PG->sim_render_world() : &P->XFORM();
-		if (parent_draw == &P->XFORM())
+		// S4b (only while g_sim_pose_active: with sim_tick 0 or bit 16 off this is the not-taken test of one global)
+		const bool wit = g_sim_synth_pose && PG && sim_attach_wit_child(PG, this); // test-only (-det_synth_pose)
+		const u64 wit_hx = wit ? sim_4d_hash(sim_4d_hash_seed, &XFORM(), sizeof(Fmatrix)) : 0;
+		const bool tw = g_sim_synth_tw && g_sim_pose_active; // test-only tripwire (-det_synth_tw)
+		IKinematics* PK = (tw && P->Visual()) ? P->Visual()->dcast_PKinematics() : nullptr;
+		if (PK)
+		{
+			// test-only: evaluate the parent's draw pose before the bracket, so S4a's own break (16) and tripwire stay
+			// outside it, then hold the parent's lock over the bracket (no bone calculation can run inside it)
+			PK->UCalc_Mutex.Enter();
+			sim_pose_draw_frame(PK);
+		}
+		const u64 tw_before = PK ? sim_4d_hash(sim_pose_tw_bones(PK), &XFORM(), sizeof(Fmatrix)) : 0;
+		Fmatrix C, A_d, A_c;
+		SimAttachInfo info;
+		const bool corrected = g_sim_pose_active && sim_attach_correction(P, C, A_d, A_c, info);
+		const bool stock = parent_draw == &P->XFORM() && !corrected;
+		Fmatrix local, plain; // plain: the 4b rule alone (also the witness's stock placement)
+		if (!stock)
+		{
+			const Fmatrix parent_xform = P->XFORM();
+			Fmatrix parent_inv;
+			parent_inv.invert(parent_xform); // 4x3 invert: handles scale
+			local.mul_43(parent_inv, XFORM());
+			if (corrected)
+			{
+				Fmatrix moved;
+				moved.mul_43(C, local);
+				s.draw.mul_43(*parent_draw, moved);
+			}
+			else
+				s.draw.mul_43(*parent_draw, local);
+			if (wit)
+				plain.mul_43(*parent_draw, local);
+			// S4b must-fail break (test-only; g_sim_4d_break is 0 unless -det_mode): the corrected draw matrix is
+			// written into the item's XFORM() at render, a Rule One breach the bracket below must catch
+			if (corrected && (g_sim_4d_break & SIM4D_BREAK_ATTACH))
+				XFORM().set(s.draw);
+		}
+		if (PK)
+		{
+			if (sim_4d_hash(sim_pose_tw_bones(PK), &XFORM(), sizeof(Fmatrix)) != tw_before)
+				sim_4d_tw_bad("attach");
+			PK->UCalc_Mutex.Leave();
+		}
+		if (wit)
+			sim_attach_wit_fill(this, info, corrected, stock, *parent_draw, stock ? XFORM() : s.draw,
+				stock ? XFORM() : plain, A_d, A_c, wit_hx);
+		if (stock)
 			return s.ptr;
-		const Fmatrix parent_xform = P->XFORM();
-		Fmatrix parent_inv, local;
-		parent_inv.invert(parent_xform); // 4x3 invert: handles scale
-		local.mul_43(parent_inv, XFORM());
-		s.draw.mul_43(*parent_draw, local);
 	}
 	else
 	{
@@ -1359,7 +1565,8 @@ void CGameObject::OnChangeVisual()
 	// First-person HUD models and other bare model_Create visuals (legs, VR items) never pass here: never marked.
 	// Not a player's body (review 2026-11-27): the local player's root is deliberately drawn stock in a vehicle, on a
 	// mounted gun or with SIM4D_BODY off (sim_render_world_calc), and a blended pose on a stock root would disagree.
-	// Player bodies stay stock in S4a; to be decided with S4b.
+	// Player bodies stay stock (S4b decision, plan-facts/stage4d2-s4b-design-and-code-2026-11-27.md section 7: revisit
+	// with S4d, the first-person legs, which copy the body's live bones).
 	if (!cast_actor())
 		if (IKinematics* K = Visual() ? Visual()->dcast_PKinematics() : nullptr)
 			K->LL_SetSimObjectVisual(true);

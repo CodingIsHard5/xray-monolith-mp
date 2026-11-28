@@ -8,7 +8,9 @@
 //
 // Known limits of S4a (review 2026-11-27; visual only, with the bit on):
 // - an item attached to a bone (an NPC's weapon) is placed from the live hand bone, the hand is drawn blended: the item
-//   leads the hand by up to a tick of hand motion. Slice S4b; S4a does not reach players without it.
+//   would lead the hand by up to a tick of hand motion. Slice S4b corrects it (sim_pose_bone_xform, used by
+//   CGameObject::sim_render_world_calc's child rule and script_attachment::Render); see
+//   plan-facts/stage4d2-s4b-design-and-code-2026-11-27.md for what it does not cover (lights, particles on bones).
 // - software-skinned parts (CSkeletonX RM_SKINNING_SOFT) and wallmarks/bone-attached effects read the live bones.
 // - a frame that ran two or more ticks leaves no consecutive pair: below the tick rate the slice draws stock.
 // - players' bodies are not marked (GameObject.cpp OnChangeVisual): stock.
@@ -101,6 +103,9 @@ static std::atomic<u32> s_wit_ro_diff{0};
 static std::atomic<u32> s_wit_ro_equal{0};
 static string64 s_wit_npc_name = "sim_default_duty_428175"; // -det_synth_pose_npc <name>
 static shared_str s_wit_npc; // docked once at parse time, only with -det_synth_pose
+// S4b witness "pa" (written only while g_sim_synth_pose, main thread)
+static bool s_wit_pa = false;
+static SimPoseAttachWit s_wit_pa_v;
 
 // ---------------------------------------------------------------------------------------------------------------
 // helpers (all called with K->UCalc_Mutex held)
@@ -426,6 +431,26 @@ ENGINE_API const Fmatrix* sim_pose_draw(IKinematics* K)
 	return r;
 }
 
+// S4b: see sim_pose.h. Rule One: reads K's bone data and this file's storage; writes only t_draw, t_cur, u (the
+// caller's locals) and, through sim_pose_draw, this file's storage (as the renderer's own call would).
+ENGINE_API bool sim_pose_bone_xform(IKinematics* K, u16 b, Fmatrix& t_draw, Fmatrix& t_cur, float& u)
+{
+	if (!K || !(g_sim_render_lerp && g_sim_pose_active && K->has_sim_pose())) // sim_pose_draw_frame's test, unlocked
+		return false; // not drawn between ticks in this frame, slice off, or K never captured: the caller's stock rule
+	xrCriticalSectionGuard guard(&K->UCalc_Mutex); // recursive: the callers may hold it already
+	if (!sim_pose_draw(K))
+		return false; // this frame draws K's live bones (Sn, Sb, Sg, Ss, unmarked)
+	const SimPoseState* s = SimPoseAccess::get(K);
+	if (b >= s->n || !(s->vis & (u64(1) << b)))
+		return false; // BI_NONE, out of range, or hidden (LL_GetTransform would read mTransformHidden): not blended
+	Fmatrix bind; // bone -> model at bind time: mRenderTransform = mTransform * m2b, so mTransform = R * inverse(m2b)
+	bind.invert(K->LL_GetData(b).m2b_transform);
+	t_draw.mul_43(s->draw[b], bind);
+	t_cur.mul_43(s->cur[b], bind);
+	u = s->draw_u;
+	return true;
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // release
 
@@ -526,6 +551,26 @@ ENGINE_API void sim_pose_witness_reset()
 	s_wit = SimPoseWitness();
 	s_wit_ro_diff = 0;
 	s_wit_ro_equal = 0;
+	s_wit_pa = false; // S4b
+}
+
+// S4b (test-only): see sim_pose.h
+ENGINE_API u64 sim_pose_tw_bones(IKinematics* K)
+{
+	return sim_pose_tw_hash(K);
+}
+
+ENGINE_API const shared_str& sim_pose_wit_npc()
+{
+	return s_wit_npc;
+}
+
+ENGINE_API void sim_pose_wit_attach(const SimPoseAttachWit& w)
+{
+	if (!g_sim_synth_pose || s_wit_pa)
+		return; // the first placement of the frame wins (later passes reuse the child's cached matrix anyway)
+	s_wit_pa = true;
+	s_wit_pa_v = w;
 }
 
 static void sim_pose_print_hash(FILE* f, bool ok, u64 h)
@@ -544,8 +589,13 @@ static void sim_pose_print_vec(FILE* f, bool ok, const Fvector& v)
 		fprintf(f, " - - -");
 }
 
+static void sim_pose_print_pn(FILE* f);
+static void sim_pose_print_pa(FILE* f);
+
 // " p <neval> <nlerp> <nguard> <nsnap> <nro_diff> <nro_equal> | pw <form> <u> <ptick> <ctick> <hd> <hl> <hp> <hc> <hu>
-// <hdu> <jd xyz> <jp xyz> <jc xyz> | up <hu> <hl> | pn <form> <u> <hd> <hl> <hsim> |" (one "-" per absent value)
+// <hdu> <jd xyz> <jp xyz> <jc xyz> | up <hu> <hl> | pn <form> <u> <hd> <hl> <hsim> |
+// pa <kind> <form> <ba> <bb> <u> <wd xyz> <ws xyz> <hd xyz> <hc xyz> <ld xyz> <ls xyz> <hx> <hxe> |"
+// (one "-" per absent value; pa is S4b's)
 ENGINE_API void sim_pose_witness_print(FILE* f)
 {
 	if (!g_sim_synth_pose)
@@ -584,6 +634,12 @@ ENGINE_API void sim_pose_witness_print(FILE* f)
 	else
 		fprintf(f, " up - - |");
 
+	sim_pose_print_pn(f);
+	sim_pose_print_pa(f);
+}
+
+static void sim_pose_print_pn(FILE* f)
+{
 	// pn: the named NPC (reported only). Main thread, after the render's join; looked up by name every frame, so no
 	// pointer is kept across frames.
 	IKinematics* K = nullptr;
@@ -612,5 +668,42 @@ ENGINE_API void sim_pose_witness_print(FILE* f)
 	for (u16 b = 0; b < n; ++b)
 		hsim = sim_4d_hash(hsim, &K->LL_GetBoneInstance(b).mTransform, sizeof(Fmatrix));
 	sim_pose_print_hash(f, true, hsim);
+	fprintf(f, " |");
+}
+
+static void sim_pose_print_u16(FILE* f, u16 v)
+{
+	if (v == BI_NONE)
+		fprintf(f, " -");
+	else
+		fprintf(f, " %u", u32(v));
+}
+
+// pa (S4b): the witness NPC's active item as placed by the child rule in this frame; 25 values after "pa"
+static void sim_pose_print_pa(FILE* f)
+{
+	if (!s_wit_pa)
+	{
+		fprintf(f, " pa - - - - - - - - - - - - - - - - - - - - - - - - - |");
+		return;
+	}
+	const SimPoseAttachWit& a = s_wit_pa_v;
+	fprintf(f, " pa %c %c", a.kind, a.form);
+	sim_pose_print_u16(f, a.ba);
+	sim_pose_print_u16(f, a.bb);
+	if (a.have_u)
+		fprintf(f, " %.6f", a.u);
+	else
+		fprintf(f, " -");
+	sim_pose_print_vec(f, true, a.wd);
+	sim_pose_print_vec(f, true, a.ws);
+	sim_pose_print_vec(f, a.have_u, a.hd);
+	sim_pose_print_vec(f, a.have_u, a.hc);
+	sim_pose_print_vec(f, a.have_l, a.ld);
+	sim_pose_print_vec(f, a.have_l, a.ls);
+	sim_pose_print_hash(f, true, a.hx);
+	// hxe: the child's XFORM() again, after the render's join (main thread; looked up by ID, no pointer kept)
+	CObject* O = g_pGameLevel ? g_pGameLevel->Objects.net_Find(a.child_id) : nullptr;
+	sim_pose_print_hash(f, O != nullptr, O ? sim_4d_hash(sim_4d_hash_seed, &O->XFORM(), sizeof(Fmatrix)) : 0);
 	fprintf(f, " |");
 }

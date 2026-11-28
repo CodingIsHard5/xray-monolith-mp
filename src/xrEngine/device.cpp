@@ -642,7 +642,7 @@ static int sim_tick_plan()
 			if (LPCSTR p = strstr(Core.Params, "-sim_4d_break "))
 			{
 				int m = 0;
-				if (sscanf(p + xr_strlen("-sim_4d_break "), "%d", &m) == 1 && m >= 0 && m <= 31) // 4d-2: bit 16
+				if (sscanf(p + xr_strlen("-sim_4d_break "), "%d", &m) == 1 && m >= 0 && m <= 63) // 4d-2: 16, S4b 32
 					g_sim_4d_break = m;
 			}
 			if (g_sim_synth_k || g_sim_synth_tw || g_sim_4d_break)

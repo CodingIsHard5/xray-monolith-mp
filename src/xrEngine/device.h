@@ -600,7 +600,13 @@ enum
 	SIM4D_XHAIR = 4, // S1: crosshair easing with the render dt
 	SIM4D_NUDGE = 8, // EXPERIMENT, default off: the shadow pass's held-item nudge only on frames in which a tick ran
 	SIM4D_POSE = 16, // S2 stage 4d-2 S4a, default off: NPC/mutant skeletal poses drawn between ticks (sim_pose.h)
+	                 // S4b (same bit): items hanging on a bone of such a skeleton follow the drawn bone
 };
+// S2 stage 4d-2 S4b, TEST ONLY: a must-fail break value of g_sim_4d_break, never a mask bit (the mask stays 0..31):
+// the child rule's corrected draw matrix is written into the held item's XFORM() at render. Separate from
+// SIM4D_POSE's break so that the parent's bones (which that break overwrites) stay intact and the BAD lines of the two
+// breaks are not mixed.
+static const int SIM4D_BREAK_ATTACH = 32;
 extern ENGINE_API int g_sim_4d_mask; // default 7 (SIM4D_NUDGE and SIM4D_POSE off)
 // S2 stage 4d-2 S4a: TRUE from the start of a gated frame (before its ticks) to the end of its render's join, when the
 // mask has SIM4D_POSE; FALSE on every stock frame (so always FALSE with sim_tick 0). While TRUE, the marked skeletons'
@@ -621,7 +627,8 @@ extern ENGINE_API int g_sim_synth_k;
 extern ENGINE_API BOOL g_sim_synth_tw;
 extern ENGINE_API int g_sim_4d_break;
 // S2 stage 4d-2 (TEST ONLY, FALSE unless -det_mode): -det_synth_pose: the S4a witness columns (p, pw, up, pn) and their
-// hooks (sim_pose.h); -sim_4d_break 16 (SIM4D_POSE): the drawn pose is written into every bone's mRenderTransform
+// hooks (sim_pose.h); -sim_4d_break 16 (SIM4D_POSE): the drawn pose is written into every bone's mRenderTransform;
+// S4b: the "pa" witness column, and -sim_4d_break 32 (SIM4D_BREAK_ATTACH, above)
 extern ENGINE_API BOOL g_sim_synth_pose;
 // the witness of one gated frame under the lever (written to $logs$/synth_<det_tag>.txt by the device after the
 // render); xrGame fills its slice columns during the render, only while g_sim_synth_k != 0. Reset by the device

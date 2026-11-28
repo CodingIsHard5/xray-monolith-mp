@@ -1345,6 +1345,11 @@ void CInventoryItem::UpdateXForm()
 
 	//	UpdatePosition	(mRes);
 	object().Position().set(mRes.c);
+	// S2 stage 4d-2 S4b: render-only side record of this placement, the position only (not taken with sim_tick 0 or
+	// mask bit 16 off). The fis_zero branch above sets a model-space position: no record for it
+	if (g_sim_pose_active)
+		object().sim_attach_note(fis_zero(D.magnitude()) ? CGameObject::SIM_ATTACH_NONE : CGameObject::SIM_ATTACH_POS,
+			u16(boneR), u16(-1));
 }
 
 

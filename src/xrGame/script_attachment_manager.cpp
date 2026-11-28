@@ -11,6 +11,7 @@
 #include "physics_shell_scripted.h"
 #include "debug_renderer.h"
 #include "../Layers/xrRender/LightTrack.h"
+#include "../xrEngine/sim_pose.h" // S2 stage 4d-2 S4b: sim_pose_bone_xform
 
 static void update_visbox_attachment(IKinematics* k)
 {
@@ -415,7 +416,25 @@ void script_attachment::Render(IKinematics* model, const Fmatrix& parent_transfo
 	Fmatrix transform = parent_transform;
 	auto callback = m_bone_callbacks.find(0);
 	if (model && (callback == m_bone_callbacks.end() || !callback->second || callback->second->m_bone_id == BI_NONE))
-		transform.mulB_43(BoneTransform(model));
+	{
+		// S2 stage 4d-2 S4b: on a frame that draws the parent's pose between ticks, the bone as drawn: correction
+		// C = drawn * inverse(captured) times the live bone (BoneTransform, the stock factor), so the attachment sits on
+		// the drawn bone. sim_pose_bone_xform is a not-taken test with sim_tick 0, mask bit 16 off, or an unmarked model
+		// (every script attachment's own Kinematics, the actor's body); render-only locals, nothing written.
+		const u16 bone = model->LL_BoneCount() > m_parent_bone ? m_parent_bone : model->LL_GetBoneRoot(); // as BoneTransform
+		Fmatrix t_draw, t_cur;
+		float u;
+		if (sim_pose_bone_xform(model, bone, t_draw, t_cur, u) && 0 != memcmp(&t_draw, &t_cur, sizeof(Fmatrix)))
+		{
+			Fmatrix inv, C, bone_drawn;
+			inv.invert(t_cur);
+			C.mul_43(t_draw, inv);
+			bone_drawn.mul_43(C, BoneTransform(model));
+			transform.mulB_43(bone_drawn);
+		}
+		else
+			transform.mulB_43(BoneTransform(model));
+	}
 	transform.mulB_43(GetOffset());
 	RenderAt(DM, transform);
 }

@@ -510,6 +510,9 @@ void CMissile::UpdateXForm()
 		mRes.set(R,N, D, mR.c);
 		mRes.mulA_43(E->XFORM());
 		UpdatePosition(mRes);
+		// S2 stage 4d-2 S4b: render-only side record of this placement (not taken with sim_tick 0 or mask bit 16 off)
+		if (g_sim_pose_active)
+			sim_attach_note(SIM_ATTACH_HANDS_N, u16(boneR), u16(boneL));
 	}
 }
 

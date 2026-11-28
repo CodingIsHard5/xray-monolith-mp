@@ -213,6 +213,43 @@ public:
 	Fmatrix* sim_render_lerp(IDSGraphManager* DM);
 	Fmatrix* sim_render_world();
 	Fmatrix* sim_render_world_calc(); // S2 stage 4d-1: the body of sim_render_world (which adds the test-only tripwire)
+	// S2 stage 4d-2 S4b: how the last bone-based placement of this object's XFORM() used its parent's bones (a held
+	// item: CWeapon/CMissile/CArtefact/CInventoryItem::UpdateXForm; an attached one: AttachmentCallback). Render-only
+	// side record: written only while g_sim_pose_active (so never with sim_tick 0 or mask bit 16 off), under the parent
+	// skeleton's UCalc_Mutex; read only by sim_render_world_calc's child rule, under the same lock. Valid only while
+	// XFORM() still equals the copy taken with it and the parent is the same. Nothing the simulation reads.
+	enum
+	{
+		SIM_ATTACH_NONE = 0,
+		SIM_ATTACH_BONE, // XFORM = parent * bone_a(bone -> model) * offset
+		SIM_ATTACH_POS, // XFORM().c = parent(bone_a's origin); the rotation is not set from the bones
+		SIM_ATTACH_HANDS, // XFORM = parent * frame(bone_a = right hand, bone_b = left hand) * offset (CWeapon)
+		SIM_ATTACH_HANDS_N, // the same frame with its first axis normalized (CMissile, CArtefact)
+	};
+	struct SimAttachRecord
+	{
+		Fmatrix xform; // XFORM() as the placement left it
+		u16 parent_id = u16(-1);
+		u16 bone_a = u16(-1), bone_b = u16(-1);
+		u8 kind = SIM_ATTACH_NONE;
+	};
+	// the record's writer (the placement code, right after it wrote XFORM(); the caller tests g_sim_pose_active)
+	void sim_attach_note(u8 kind, u16 bone_a, u16 bone_b);
+	// the child rule's correction: C (model space) such that parent_draw * C * inverse(parent XFORM) * XFORM() puts the
+	// item on its parent's drawn bones; A_d, A_c = the placement frames (drawn, captured) with C = A_d * inverse(A_c).
+	// false = no correction (the 4b rule alone). info: what the witness reports.
+	struct SimAttachInfo
+	{
+		char kind = '-';
+		u16 ba = u16(-1), bb = u16(-1); // the record's bones
+		bool have_u = false;
+		float u = 1.f;
+		Fvector hd, hc; // bone_a's origin, drawn / captured (model space)
+	};
+private:
+	SimAttachRecord m_sim_attach;
+	bool sim_attach_correction(CObject* P, Fmatrix& C, Fmatrix& A_d, Fmatrix& A_c, SimAttachInfo& info);
+public:
 	virtual void OnEvent(NET_Packet& P, u16 type);
 
 	virtual void Hit(SHit* pHDS)

@@ -466,7 +466,7 @@ void CKinematics::Spawn()
 	Visibility_Invalidate();
 	LL_SetBoneRoot(0);
 	m_sim_object_visual = false; // S2 stage 4d-2 S4a: taken from the pool: not marked, no history
-	if (has_sim_pose()) sim_pose_release(this);
+	if (has_sim_pose()) sim_pose_release(this); // locks UCalc_Mutex itself; Spawn's callers (ModelPool.cpp) hold an instance nobody else references yet
 }
 
 void CKinematics::Depart()

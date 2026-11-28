@@ -75,6 +75,10 @@ void __stdcall AttachmentCallback(IKinematics* tpKinematics)
 		(*I)->item().object().XFORM().mul_43(kinematics->LL_GetBoneInstance((*I)->bone_id()).mTransform,
 		                                     (*I)->offset());
 		(*I)->item().object().XFORM().mulA_43(game_object->XFORM());
+		// S2 stage 4d-2 S4b: render-only side record of this placement (not taken with sim_tick 0 or mask bit 16
+		// off); here inside the parent's CalculateBones, under its UCalc_Mutex
+		if (g_sim_pose_active)
+			(*I)->item().object().sim_attach_note(CGameObject::SIM_ATTACH_BONE, (*I)->bone_id(), u16(-1));
 	}
 }
 

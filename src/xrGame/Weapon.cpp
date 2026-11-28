@@ -250,6 +250,9 @@ void CWeapon::UpdateXForm()
 	}
 
 	UpdatePosition(mRes);
+	// S2 stage 4d-2 S4b: render-only side record of this placement (not taken with sim_tick 0 or mask bit 16 off)
+	if (g_sim_pose_active)
+		sim_attach_note(fis_zero(D.magnitude()) ? SIM_ATTACH_NONE : SIM_ATTACH_HANDS, u16(boneR), u16(boneL));
 }
 
 void CWeapon::UpdateFireDependencies_internal()
