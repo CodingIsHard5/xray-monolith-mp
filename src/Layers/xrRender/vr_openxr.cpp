@@ -891,8 +891,11 @@ namespace
 				vr_quat_rotate(vr.grip[g].qx, vr.grip[g].qy, vr.grip[g].qz, vr.grip[g].qw, fw, fg);
 				vr_quat_rotate(vr.aim[g].qx, vr.aim[g].qy, vr.aim[g].qz, vr.aim[g].qw, fw, fa);
 				vr_quat_rotate(gi.gun.qx, gi.gun.qy, gi.gun.qz, gi.gun.qw, fw, fu);
-				Msg("* [vr23g] frame %u valid %d %d grip %.6f %.6f %.6f aim %.6f %.6f %.6f gun %.6f %.6f %.6f tilt %.3f",
-					vr.frames_run, vr.grip[g].valid ? 1 : 0, vr.aim[g].valid ? 1 : 0, fg.x, fg.y, fg.z, fa.x, fa.y, fa.z, fu.x, fu.y, fu.z, g_vr_gun_tilt);
+				Fvector au; // the aim pose's own up: the tilt setting turns the gun towards it
+				vr_quat_rotate(vr.aim[g].qx, vr.aim[g].qy, vr.aim[g].qz, vr.aim[g].qw, Fvector().set(0.f, 1.f, 0.f), au);
+				Msg("* [vr23g] frame %u valid %d %d grip %.6f %.6f %.6f aim %.6f %.6f %.6f gun %.6f %.6f %.6f aimup %.6f %.6f %.6f tilt %.3f",
+					vr.frames_run, vr.grip[g].valid ? 1 : 0, vr.aim[g].valid ? 1 : 0, fg.x, fg.y, fg.z, fa.x, fa.y, fa.z, fu.x, fu.y, fu.z,
+					au.x, au.y, au.z, g_vr_gun_tilt);
 			}
 		}
 		vr.in_head = vr.head_e;
