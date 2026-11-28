@@ -81,3 +81,16 @@ wu1-3, kw1, s4c_* and det_run.sh treated a failing title checker as "no title". 
 (not edited). det_run.sh is retrofitted; note that its old hash 01fb40dc is ALSO recorded in the registered, closed
 PREREG-S2-simtick-2026-11-25 (lines 130 and 285), not only in the two drafts: that record now names bytes that live
 only in git history. det_pair.sh is unsupported (refused by det_run.sh) and RETIRED.
+
+## Retired bytes kept for closed records (added 2026-11-27, supervisor's order)
+
+A closed registration names a file by hash. When that file is later changed, the old bytes are kept here, non-executable,
+so the recorded hash still points at a file that exists. Do not run anything in `retired/`. Closed registrations are never
+edited.
+
+| registration (closed) | lines | file as named there | sha256 recorded | retired copy |
+|---|---|---|---|---|
+| perf-harness/PREREG-S2-simtick-2026-11-25.md | 130, 285 | tools/det_run.sh | 01fb40dc2891d0602f3f596b8cde9664d05edd89eaa42a664cc9a34fbdc70f38 | common/retired/det_run.sh.S2-01fb40dc (mode 444; bytes of git 99b59a9f5~1:perf-harness/det_run.sh, unchanged since 450f7cfb9) |
+
+The live helper is `~/Projects/StalkerGameEngine/tools/det_run.sh`, OUTSIDE git; `perf-harness/det_run.sh` is its tracked,
+byte-identical copy. A change to it must be reported to the security worker so its file baseline gets the new hash.
