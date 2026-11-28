@@ -45,6 +45,14 @@
 # name only when the claim carrying this run's token is the only one under our name); every exit path (normal, stop,
 # error, TERM, INT, HUP) goes through finish(), which kills and reaps only its own child (det_run.sh, then KILL after
 # 60 s) and its own sleep. Exit-path table: s4d2/NOTES.md section 9.
+# 2026-11-28 (plan-facts/box-preflight-second-review-2026-11-27.md): box_preflight.sh v2 (claims read from the claim
+# tool's files, no `check` call; Sober by its flatpak; the title's 180-s linger; PTC_* refused). Each of this driver's
+# own writes under run/ (the options copy, the witness moves) runs inside box_guarded: the box is checked again on the
+# line before (B-1), and after a refusal nothing more under run/ is touched (B-2; det_run.sh does the same on a stop or
+# a signal and lists what it left). After det_run.sh ends or is KILLed, no engine of the run tree may still use
+# run/prefix: wineserver -k there (box_wine_kill), a 60-s wait from date, and if one is still left the claim is NOT
+# released and the pids are logged (S-2). The queue entry: see want_call (S-3; a known limit, common/README.md).
+# done.txt lists completed boots only; boots.txt lists every boot with its rc (N-13).
 #
 # Other rules (the brief of 2026-11-27 and prereg 6):
 #   - display :141 only (BENCH_DISPLAY must be unset or :141); the display must be free before every boot;
@@ -80,8 +88,8 @@ S4=wt-render-split/perf-harness/s4d2; ST=out/s4d2_state; LOGS=run/appdata/logs; 
 # ---- the shared box checks (pinned; S4D2_BOX_LIB / S4D2_BOX_LIB_SHA are honoured ONLY by the two preflight-only
 # ---- forms, for common/box_preflight_selftest.sh; a real run refuses while either, or any BOX_* input, is set)
 BOXLIB_DEF=wt-render-split/perf-harness/common/box_preflight.sh
-BOXLIB_SHA=420c5f2af6272e341559b10a4c9cad7f99e5276a90afe470fcd5e4e0f916e8d1   # common/box_preflight.sh v1, 2026-11-27
-BOXLIB_MARKER=engineperf-box-preflight-v1; BOXLIB_VERSION=1
+BOXLIB_SHA=f3ad9351c517393c8e8f6b3e947a9b5a2435074bd62508932a9410d4c6d6e4fa   # common/box_preflight.sh v2, 2026-11-28 (v1 was 420c5f2a...)
+BOXLIB_MARKER=engineperf-box-preflight-v2; BOXLIB_VERSION=2
 
 # ---- pins (PIN_ME_: before ANY boot, the probe included; prereg 1.2, 1.4 items 3-5) ----
 EXE2=PIN_ME_EXE2_NAME            # build 2 exe in run/bin (proposed name SimTick19.exe), c216081fd + the W1 commit
@@ -94,7 +102,7 @@ STIM=run/gamedata/scripts/zz_eperf_synth.script     # installed stimulus = harne
 STIM_SHA=1777fb6865cc5b56c80f197f3f95a250104d6c90ce0b8b2a35422e3bed39ff95
 USERDET=out/user_det.ltx.orig; USERDET_SHA=PIN_ME_USERDET_SHA   # full sha256 (N2-5). Read 2026-11-27 22:40:
                                                     # 3e0e0a6f1fe8010cd727a8f4e718b0486711fbcf8e4f7bfc8eb769d047411b81
-DETRUN=tools/det_run.sh; DETRUN_SHA=da66e107b79fb76481c04f7de4d4b079f486941aa00941c8a7f806ff321c6222   # 2026-11-27: sources common/box_preflight.sh (was 01fb40dc...)
+DETRUN=tools/det_run.sh; DETRUN_SHA=0b7a6edb5f575dea379fb8a4185b4a39605849bab5809e5ddafe45fe313035e0   # 2026-11-28: box_preflight.sh v2, guarded writes (was da66e107..., before that 01fb40dc...)
 PIDLIB=tools/lib_engine_pids.sh; PIDLIB_SHA=cb183b7b894eab3edb200e2c03a3a96f2e935cd2d1e1f402f48be7aad238ed6e
 NOGUARD=tools/run_noguard.sh; NOGUARD_SHA=92729abc420784053cee4b1b1832f5d112f74979a4760e2173d45578358455d5
 SAVE_P=run/appdata/savedgames/bench1.scop; SAVE_P_SHA=891693c5e318ad1e97e8437476654200eb39d3bab89de79a778fa9b90ff89ffa  # S2-8 (sf1:192)
@@ -146,9 +154,11 @@ unset BOX_PREFLIGHT_MARKER BOX_PREFLIGHT_VERSION
 [ "${BOX_PREFLIGHT_MARKER:-}" = "$BOXLIB_MARKER" ] || libfail "$BOXLIB did not set the marker $BOXLIB_MARKER"
 [ "${BOX_PREFLIGHT_VERSION:-}" = "$BOXLIB_VERSION" ] || libfail "$BOXLIB is version '${BOX_PREFLIGHT_VERSION:-none}', not $BOXLIB_VERSION"
 for _f in box_preflight_all box_ok_play_lock box_ok_title box_ok_roblox box_ok_engine box_ok_claims box_ok_exclusive \
-          box_ok_display box_ok_display_free box_claim_has_token; do
+          box_ok_display box_ok_display_free box_claim_has_token box_queue_count box_engines_in_prefix box_wine_kill \
+          box_guarded box_fresh; do
   declare -F "$_f" >/dev/null || libfail "$BOXLIB does not define $_f"
 done
+declare -p BOX_QR_UNSET >/dev/null 2>&1 || libfail "$BOXLIB does not define BOX_QR_UNSET"
 if [ "$MODE" = --preflight-only ]; then
   _o=$(box_preflight_all shared "$DISP" "$W"); _r=$?
   [ -n "$_o" ] && echo "$_o"
@@ -311,15 +321,15 @@ esac
 [ "$PRE" = "--preflight-only" ] && { echo "preflight ok ($MODE$FIXN): $(plan | wc -l) boot(s)"; plan | cut -d'|' -f1,2 | tr '\n' ' '; echo; exit 0; }
 
 # ---- state, log, one way out ----
-mkdir -p "$ST" 2>/dev/null && mkdir "$SD" 2>/dev/null && : > "$SD/series.log" && : > "$SD/done.txt" && : > "$SD/claim_calls.txt" || {
+mkdir -p "$ST" 2>/dev/null && mkdir "$SD" 2>/dev/null && : > "$SD/series.log" && : > "$SD/done.txt" && : > "$SD/boots.txt" && : > "$SD/claim_calls.txt" || {
   echo "REFUSED: cannot create the state folder $SD"; exit 2; }
 log() { echo "$(date '+%F %T') $*" | tee -a "$SD/series.log"; }
-WATCHWHY=""; sc=""; stop=""; rc=0; CLAIMTRY=0; CLAIMED=0; WANTED=0; RETRIED=0; LIVE=""; BP=""; SP=""; SIGPEND=0; ITEM_FIRST=""
+WATCHWHY=""; sc=""; stop=""; rc=0; CLAIMTRY=0; CLAIMED=0; WANTED=0; OURQ=0; BOOTED=0; NORELEASE=0; NORELEASE_WHY=""; RETRIED=0; LIVE=""; BP=""; SP=""; SIGPEND=0; ITEM_FIRST=""
 TOKEN="s4d2-$MODE$FIXN-$(date +%Y%m%d%H%M%S)-$$"   # in the claim's <what>: only THIS run's claim is ever released
 WHAT="headless Xvfb GAMMA A-Life equivalence series s4d2 ($MODE$FIXN, $(plan | wc -l) boots, display $DISP) $TOKEN"
 case "$WHAT" in *EXCLUSIVE*) echo "REFUSED: the claim text names EXCLUSIVE"; exit 2 ;; esac
 CLAIM_MIN=$(( (TIMEOUT_RUN + 59) / 60 + 10 ))   # one boot's timeout + 10 min; renewed before every boot
-qr() { "$T/quiet-required.sh" "$@" >/dev/null 2>&1 </dev/null; }
+qr() { env "${BOX_QR_UNSET[@]}" "$T/quiet-required.sh" "$@" >/dev/null 2>&1 </dev/null; }   # the tool's tuning variables dropped
 halt() { sc=$1; stop=$2; rc=1; }
 nap() { sleep "$1" </dev/null & SP=$!; wait $SP; SP=""; }   # a sleep a trapped signal interrupts at once
 own_pid() {   # <pid>: 0 only if it is a live (not zombie) process whose parent is THIS driver: a reused pid is never signalled
@@ -328,23 +338,38 @@ own_pid() {   # <pid>: 0 only if it is a live (not zombie) process whose parent 
   s=${s##*) }; set -- $s
   [ "$1" != Z ] && [ "$2" = "$$" ]; }
 child_alive() { own_pid "$BP"; }   # BP is only ever this driver's own det_run.sh
-stop_child() {   # TERM our det_run.sh (its EXIT trap runs its cleanup), wait up to CHILD_GRACE_S, then KILL; reap
-  local i=0
-  child_alive || { BP=""; return 0; }
+PFX="$(pwd -P)/run/prefix"   # this driver's Wine prefix (det_run.sh's run/prefix); never prefix_play (box_wine_kill)
+engines_gone() {   # S-2: after our det_run.sh ended, no engine of the run tree may still use run/prefix; else
+                   # wineserver -k there and wait (from date, 60 s). Still one left: the claim is NOT released (NORELEASE).
+  local t0
+  box_engines_in_prefix "$PFX" && return 0
+  log "after det_run.sh: $BOX_WHY; wineserver -k in $PFX"
+  box_wine_kill "$PFX" || { NORELEASE=1; NORELEASE_WHY="$BOX_WHY"; log "$BOX_WHY"; return 1; }
+  t0=$(date +%s)
+  until box_engines_in_prefix "$PFX"; do
+    [ $(( $(date +%s) - t0 )) -ge 60 ] && { NORELEASE=1; NORELEASE_WHY="still running 60 s after wineserver -k: $BOX_WHY"; log "$NORELEASE_WHY"; return 1; }
+    sleep 1
+  done
+  log "no engine left in $PFX"; return 0; }
+stop_child() {   # TERM our det_run.sh (its EXIT trap runs its cleanup), wait up to CHILD_GRACE_S (from date), then KILL; reap
+  local t0
+  child_alive || { BP=""; [ "$BOOTED" = 1 ] && engines_gone; return 0; }
   kill -TERM "$BP" 2>/dev/null
-  while child_alive && [ $i -lt "$CHILD_GRACE_S" ]; do sleep 1; i=$((i + 1)); done
+  t0=$(date +%s)
+  while child_alive && [ $(( $(date +%s) - t0 )) -lt "$CHILD_GRACE_S" ]; do sleep 1; done
   if child_alive; then
     child_alive && kill -KILL "$BP" 2>/dev/null
-    log "det_run.sh (pid $BP) did not end ${CHILD_GRACE_S}s after TERM: KILLed; its cleanup did not run (Xvfb $DISP and Wine in run/prefix may be left; run/appdata/user.ltx not restored)"
+    log "det_run.sh (pid $BP) did not end ${CHILD_GRACE_S}s after TERM: KILLed; its cleanup did not run (its Xvfb on $DISP may be left; run/appdata/user.ltx not restored, by design after a stop)"
   fi
   wait "$BP" 2>/dev/null; BP=""
+  engines_gone
 }
 release_mine() {   # release ONLY the claim this run made (kj4p release_mine)
   local id
   [ "$CLAIMTRY" = 1 ] || return 0
   id=$(tr -d '\r' < "$SD/claim_calls.txt" 2>/dev/null | sed -n 's/^claim-id: \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' | tail -1)
   if [ -n "$id" ]; then
-    "$T/quiet-required.sh" release $W "$id" >/dev/null 2>&1 </dev/null; log "released claim $id (rc $?)"; return 0
+    qr release $W "$id"; log "released claim $id (rc $?)"; return 0
   fi
   box_claim_has_token $W "$TOKEN"; case $? in
     0) if box_ok_claims $W "$TOKEN"; then
@@ -361,8 +386,8 @@ finish() {   # the ONE way out: stop record, own child, own queue entry, own cla
     || { echo "stop record NOT written ($SD/stop.txt)" >&2; [ "$rc" = 0 ] && rc=1; }
   own_pid "$SP" && { kill "$SP" 2>/dev/null; wait "$SP" 2>/dev/null; }; SP=""
   stop_child
-  [ "$WANTED" = 1 ] && qr withdraw $W
-  release_mine
+  withdraw_mine
+  if [ "$NORELEASE" = 1 ]; then log "claim NOT released: $NORELEASE_WHY; it expires by itself (<= $CLAIM_MIN min)"; else release_mine; fi
   log "end ($MODE$FIXN): $(grep -c . "$SD/done.txt") boot(s) done, retries $RETRIED of 1. $(cat "$SD/stop.txt" 2>/dev/null)"
   timeout 60 "$T/notify-overseer.sh" engineperf - >/dev/null 2>&1 <<<"EnginePerf s4d2 $MODE$FIXN: ended $(date +%T), $(grep -c . "$SD/done.txt") boot(s) done, retries $RETRIED of 1. $(cat "$SD/stop.txt" 2>/dev/null). $([ "$sc" = done ] && echo "Not read or scored yet (by hand, once${RD_NEXT:+: out=$RD_NEXT})." || echo "Stopped: nothing is resumed without the supervisor's word (prereg 6.4).")"
   exit $rc; }
@@ -372,8 +397,26 @@ held() {   # run "$@" with TERM / INT / HUP held; act on a held signal right aft
   "$@"; r=$?
   trap on_sig TERM INT HUP; [ "$SIGPEND" = 1 ] && on_sig
   return $r; }
-claim_call() { CLAIMTRY=1; "$T/quiet-required.sh" claim $W "$CLAIM_MIN" "$WHAT" >> "$SD/claim_calls.txt" 2>&1 </dev/null; }
-want_call() { WANTED=1; qr want $W; }   # SHARED: no EXCLUSIVE word
+claim_call() { CLAIMTRY=1; env "${BOX_QR_UNSET[@]}" "$T/quiet-required.sh" claim $W "$CLAIM_MIN" "$WHAT" >> "$SD/claim_calls.txt" 2>&1 </dev/null; }
+# S-3: the queue is keyed by the worker NAME only (quiet-required.sh `want` dedupes by name, `withdraw <w>` drops every
+# entry of <w>, and the name must be a tmux session overseer-<name>, so a per-run queue name is not possible). Known
+# without `check`, by reading QUIET-QUEUE: whether an entry under our name exists BEFORE a want. Rule: want only when no
+# entry exists (then the entry is this run's: OURQ=1); withdraw only if OURQ=1 and exactly one entry exists then. NOT
+# knowable: another engineperf job's want that landed on our entry (deduped into it); withdraw then removes it too.
+want_call() {
+  box_queue_count $W || { log "queue unreadable ($BOX_WHY): want not sent"; return 0; }
+  [ "$BOX_QN" -gt 0 ] && return 0   # an entry under our name exists (ours, or another job's: either way not re-sent)
+  qr want $W && { WANTED=1; OURQ=1; }; return 0; }   # SHARED: no EXCLUSIVE word
+withdraw_mine() {
+  [ "$WANTED" = 1 ] && [ "$OURQ" = 1 ] || return 0
+  WANTED=0
+  box_queue_count $W || { log "queue unreadable ($BOX_WHY): not withdrawn (the entry is dropped by the tool's QUEUE_TTL or a later claim)"; return 0; }
+  case "$BOX_QN" in
+    0) log "no queue entry under $W left: nothing to withdraw" ;;
+    1) qr withdraw $W; log "withdrew the queue entry under $W (rc $?)" ;;
+    *) log "NOT withdrawn: $BOX_QN entries under $W (not only this run's)" ;;
+  esac
+  OURQ=0; }
 trap finish EXIT; trap on_sig TERM INT HUP
 
 # ---- one SHARED claim for the whole run (prereg 7: SHARED; exit codes only; capped wait) ----
@@ -393,7 +436,7 @@ acquire() {
     held want_call
     nap "$POLL_S"
   done
-  [ "$WANTED" = 1 ] && { qr withdraw $W; WANTED=0; }
+  withdraw_mine
   return 0
 }
 acquire || finish
@@ -411,7 +454,9 @@ axr_restore() {   # the options file before THIS boot (header OPTIONS FILE); onl
   r=$(pin "$AXR_SRC" "$AXR_SHA") || { echo "$r"; return 1; }
   { [ -L "$AXR_DST" ] || ! [ -f "$AXR_DST" ] || [ "$(realpath -- "$AXR_DST")" != "$(realpath -- .)/$AXR_DST" ]; } && {
     echo "REFUSED: $AXR_DST is a link or not a plain file inside run/ (not written)"; return 1; }
-  cp -f -- "$AXR_SRC" "$AXR_DST" || { echo "REFUSED: cannot copy $AXR_SRC over $AXR_DST"; return 1; }
+  box_guarded "copy $AXR_SRC over $AXR_DST" cp -f -- "$AXR_SRC" "$AXR_DST" || {
+    [ -n "$BOX_STOPPED" ] && { echo "REFUSED (box): $BOX_STOPPED: $AXR_DST not written"; return 1; }
+    echo "REFUSED: cannot copy $AXR_SRC over $AXR_DST"; return 1; }
   r=$(pin "$AXR_DST" "$AXR_SHA") || { echo "$r (after the copy)"; return 1; }
 }
 gates() {   # <tag> <exe>: every pre-boot check; 1 = stop (halt set)
@@ -425,7 +470,7 @@ gates() {   # <tag> <exe>: every pre-boot check; 1 = stop (halt set)
   [ -e "run/bin/$e" ] || { halt fault "missing file run/bin/$e (before $t)"; return 1; }
   dumps_left && { halt fault "a crash dump is already in $LOGS before $t ($(ls "$LOGS"/*.mdmp 2>/dev/null | head -3 | tr '\n' ' ')): not moved"; return 1; }
   box_gate "before the options restore of $t" || return 1
-  r=$(axr_restore) || { halt fault "options restore before $t: $r"; return 1; }
+  r=$(axr_restore) || { case "$r" in *"REFUSED (box)"*) halt box "options restore before $t: $r" ;; *) halt fault "options restore before $t: $r" ;; esac; return 1; }
   box_gate "last check before $t" || return 1
   if [ -n "$MOVE_TO" ] && [ -d out/det_s4p_probe ]; then   # S2-5: the re-probe's rename, only once the gates passed
     [ -e "$MOVE_TO" ] && { halt fault "$MOVE_TO exists before the re-probe"; return 1; }
@@ -443,8 +488,9 @@ after() {   # <tag> <lever>: move the witness, check what every boot must leave;
   local t=$1 lv=$2 d=out/det_$1 w f it
   [ -d "$d" ] || { halt fault "missing folder $d after the boot"; return 1; }
   if [ -e "$LOGS/synth_$t.txt" ]; then
-    box_ok_play_lock || { halt box "play lock before moving $LOGS/synth_$t.txt ($BOX_WHY): not moved"; return 1; }
-    mv -- "$LOGS/synth_$t.txt" "$d/" || { halt fault "cannot move $LOGS/synth_$t.txt into $d/"; return 1; }
+    box_guarded "move $LOGS/synth_$t.txt" mv -- "$LOGS/synth_$t.txt" "$d/" || {
+      [ -n "$BOX_STOPPED" ] && { halt box "$BOX_STOPPED: $LOGS/synth_$t.txt not moved"; return 1; }
+      halt fault "cannot move $LOGS/synth_$t.txt into $d/"; return 1; }
     log "moved $LOGS/synth_$t.txt -> $d/"
   fi
   for f in "$d/xray.log" "$d"/det_alife_counts_"$t"_{1,2,3}.txt "$d"/det_counters_"$t"_{1,2,3}.txt; do
@@ -501,7 +547,7 @@ boot() {   # <tag> <exe> <lever>: one det_run.sh boot in the background (S2-3); 
   local t=$1 e=$2 lv=$3 r t0
   t0=$(date +%s)
   log "boot $t exe=$e extra=[$BASE $ITEM${lv:+ $lv}] display=$DISP timeout=${TIMEOUT_RUN}s load $(cut -d' ' -f1-3 /proc/loadavg)"
-  LIVE=$t
+  LIVE=$t; BOOTED=1
   DET_NOCLAIM=1 DET_BOX_TOKEN=$TOKEN DET_BOX_CLASS=shared DET_BOX_WORKER=$W \
   BENCH_DISPLAY=$DISP BENCH_TIMEOUT=$TIMEOUT_RUN DET_EXTRA="$BASE $ITEM${lv:+ $lv}" \
     "$DETRUN" "$e" "$t" 60 3 > "$SD/run_$t.log" 2>&1 </dev/null & BP=$!
@@ -523,7 +569,8 @@ while IFS='|' read -r -u 3 tag exe lv; do
   while :; do
     gates "$t" "$exe" || finish
     boot "$t" "$exe" "$lv"; brc=$?
-    echo "$t" >> "$SD/done.txt" || { halt fault "cannot append to $SD/done.txt"; finish; }
+    echo "$t rc=$brc" >> "$SD/boots.txt" || { halt fault "cannot append to $SD/boots.txt"; finish; }
+    [ "$brc" = 0 ] && { echo "$t" >> "$SD/done.txt" || { halt fault "cannot append to $SD/done.txt"; finish; }; }   # N-13: completed boots only
     case $brc in
       0) ;;
       8) halt box "during $t: $BOXWHY (this run's boot stopped)"; finish ;;
@@ -534,8 +581,8 @@ while IFS='|' read -r -u 3 tag exe lv; do
            RETRIED=1; t=${tag}_r1; log "boot $tag exited early (rc 4, no crash dump): the one retry of the series, as $t"
            # the failed boot may have left a witness in the logs folder: keep it with its own folder (N2-3: checked)
            if [ -e "$LOGS/synth_$tag.txt" ]; then
-             box_ok_play_lock || { halt box "play lock before moving $LOGS/synth_$tag.txt ($BOX_WHY): not moved"; finish; }
-             if [ -d "out/det_$tag" ] && mv -- "$LOGS/synth_$tag.txt" "out/det_$tag/"; then log "moved $LOGS/synth_$tag.txt -> out/det_$tag/"
+             if [ -d "out/det_$tag" ] && box_guarded "move $LOGS/synth_$tag.txt" mv -- "$LOGS/synth_$tag.txt" "out/det_$tag/"; then log "moved $LOGS/synth_$tag.txt -> out/det_$tag/"
+             elif [ -n "$BOX_STOPPED" ]; then halt box "$BOX_STOPPED: $LOGS/synth_$tag.txt not moved"; finish
              else log "NOT moved: $LOGS/synth_$tag.txt (out/det_$tag missing or mv failed); it stays in $LOGS and does not clash with $t"; fi
            fi
            continue

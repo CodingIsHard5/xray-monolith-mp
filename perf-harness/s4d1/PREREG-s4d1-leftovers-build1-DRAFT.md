@@ -15,6 +15,14 @@ Labels: **[D]** desk (file:line), **[M]** measured (a number in a file), **[G]**
 earlier registration without re-deriving it).
 
 **Change log.**
+- 2026-11-28 (coordinator's fix list after plan-facts/box-preflight-second-review-2026-11-27.md): **tools/det_run.sh
+  changed again** (was da66e107..., now sha256 0b7a6edb5f575dea379fb8a4185b4a39605849bab5809e5ddafe45fe313035e0) and **common/box_preflight.sh is v2** (was 420c5f2a...,
+  now sha256 f3ad9351c517393c8e8f6b3e947a9b5a2435074bd62508932a9410d4c6d6e4fa). Why: the box is checked again right after the claim and on the line before every write under run/;
+  after a stop (play lock, title, Sober, a signal) nothing under run/ is written, moved or deleted, only `wineserver -k`
+  in run/prefix and its own Xvfb; claims are read from the claim tool's files (no `check` call); Sober is found by its
+  flatpak; only crash dumps newer than the boot's start are moved. **New caller rules:** `BENCH_DISPLAY=:141` is required
+  (no default display any more), and tags must be `[a-z0-9_]+`. On a stop det_run.sh leaves user.ltx with the det
+  settings and lists what it left (restored by hand later). The s4d1 series script must handle that.
 - 2026-11-27 (supervisor's decision, after the s4d2 run-script review): **tools/det_run.sh changed** (was 01fb40dc...,
   now sha256 da66e107b79fb76481c04f7de4d4b079f486941aa00941c8a7f806ff321c6222). Why: it now sources
   perf-harness/common/box_preflight.sh and refuses to start without it; its fail-open title check is replaced by the
@@ -218,8 +226,8 @@ s4d_s3 s4d_o3 -> L: s4d_l2a s4d_l3 s4d_l1 s4d_l2w s4d_l2b -> S: s4d_off2a s4d_on
 s4d_brk1 s4d_brk2 (brk2 only if S3 is registered). The arms of each pair are spread out, not back to back. The breaks
 go last; each boot starts fresh (det_run.sh restores user.ltx and loads the save).
 ### 6.2 Command per boot (series script s4d1_run.sh: TO BE WRITTEN, NOTES.md 4, R2)
-`DET_NOCLAIM=1 DET_BOX_TOKEN=<the series claim's token> DET_BOX_CLASS=shared BENCH_TIMEOUT=1900 DET_EXTRA="<base> <lever>"
-tools/det_run.sh <exe> <tag> 60 3` (det_run.sh pinned at da66e107b79fb764..., change log), then
+`DET_NOCLAIM=1 DET_BOX_TOKEN=<the series claim's token> DET_BOX_CLASS=shared BENCH_DISPLAY=:141 BENCH_TIMEOUT=1900
+DET_EXTRA="<base> <lever>" tools/det_run.sh <exe> <tag> 60 3` (det_run.sh pinned at 0b7a6edb5f575dea..., change log), then
 `mv run/appdata/logs/synth_<tag>.txt out/det_<tag>/` (det_run.sh does not move the witness: det_run.sh:44-45).
 `<base>` = `-det_passes 100,200,320 -det_lua_streams -det_counters` (tools/s4c_partA.sh:11, COPIED; "60 3" is ignored
 under -det_passes, PREREG-S2-simtick section 9).

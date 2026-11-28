@@ -63,6 +63,19 @@ Labels:
   crash dump is not moved while the play lock is live. s4d2_run.sh passes it `DET_BOX_TOKEN` (its claim token),
   `DET_BOX_CLASS=shared` and the worker, and pins the new hash. The shared file's engine test now counts only Wine
   binaries (tools/lib_engine_pids.sh rule), so the shared file's hash changed too (420c5f2a...).
+- 2026-11-28, fifth revision (coordinator's fix list after plan-facts/box-preflight-second-review-2026-11-27.md):
+  **common/box_preflight.sh is v2** (was 420c5f2a..., now sha256 f3ad9351c517393c8e8f6b3e947a9b5a2435074bd62508932a9410d4c6d6e4fa) and **tools/det_run.sh changed
+  again** (was da66e107..., now sha256 0b7a6edb5f575dea379fb8a4185b4a39605849bab5809e5ddafe45fe313035e0); s4d2_run.sh pins both. Why: (B-1) the box is checked again
+  right after the claim and on the line before every write under run/ (det_run.sh's user.ltx swap, log clean-up,
+  engine start, collection, restore; s4d2_run.sh's options copy and witness moves); (B-2) after a stop by the play lock,
+  a title, Sober or a signal nothing under run/ is written, moved or deleted, only `wineserver -k` in run/prefix and the
+  run's own Xvfb, and the files left are listed by name; (S-1) Sober is found by its flatpak (the old `pgrep -x sober`
+  never matched: the process is "Main"); (S-6) the claim tool's 180-s title memory is honoured and PTC_* refused;
+  (S-7, N-1) claims are read from the claim tool's own files, every nested record counted, and no claim-tool verb is
+  called by the checks (`check` is not read-only); (S-2) after det_run.sh ends or is KILLed no engine may be left in
+  run/prefix, else the claim is not released; (S-3) the queue entry is withdrawn only if this run made it (a known
+  limit remains, 6.2); (S-4) det_run.sh requires display :141; (N-7) only crash dumps newer than the boot's start are
+  moved; (N-13) done.txt lists completed boots only.
 
 ## 0. Limits, first
 - **The det harness is not exact for online state or for `::Random`**, even stock against stock (the s4d1 draft,
@@ -558,12 +571,12 @@ loads the save).
 ### 6.2 Command per boot (series script s4d2_run.sh: written and revised 2026-11-27, `bash -n` only, requirement R2)
 `DET_NOCLAIM=1 DET_BOX_TOKEN=<this run's claim token> DET_BOX_CLASS=shared DET_BOX_WORKER=engineperf BENCH_DISPLAY=:141
 BENCH_TIMEOUT=<2000 for the probe; REG_ME_BENCH_TIMEOUT from PROBE_BOOT_S> DET_EXTRA="<base> -det_synth_item <lever>"
-tools/det_run.sh <exe> <tag> 60 3` (det_run.sh da66e107b79fb764..., which runs the shared box checks again itself), started
+tools/det_run.sh <exe> <tag> 60 3` (det_run.sh 0b7a6edb5f575dea..., which runs the shared box checks again itself), started
 in the background, then
 `mv run/appdata/logs/synth_<tag>.txt out/det_<tag>/`. "60 3" is ignored under -det_passes. `<lever>` is per section
 4's table, with the NPC = PROBE_NPC (empty in part A).
 Modes: `probe`, `probe_b`, `probe_fix <n>` (2.1) and `series` (16 boots in the order of 6.1); each keeps its own new
-state folder `out/s4d2_state/<mode>/` (series.log, plan.txt, done.txt, claim_calls.txt, run_<tag>.log, stop.txt with
+state folder `out/s4d2_state/<mode>/` (series.log, plan.txt, done.txt (completed boots), boots.txt (every boot and its rc), claim_calls.txt, run_<tag>.log, stop.txt with
 `class=done|box|fault`). `--preflight-only` alone runs only the shared box checks; `<mode> --preflight-only` runs
 every start check of the mode; both exit before any state folder, queue entry or claim.
 
@@ -581,7 +594,7 @@ What the script does (each item is a refusal or a stop BY NAME):
   scorer and self-test hashes);
 - pins, by full sha256, by name, before the first boot and again before every boot: the shared box file, build 2,
   build 1 (series), Stance14 (series), out/user_det.ltx.orig, the installed stimulus (1777fb68...), the bench saves
-  bench1.scop / .scoc, run/appdata/axr_options_play.ltx, tools/det_run.sh (da66e107b79fb764...), lib_engine_pids.sh, run_noguard.sh, and in
+  bench1.scop / .scoc, run/appdata/axr_options_play.ltx, tools/det_run.sh (0b7a6edb5f575dea...), lib_engine_pids.sh, run_noguard.sh, and in
   series mode the registered scorer and self-test;
 - checks cfg0 (sim_tick 0, r__framelimit 0 in run/appdata/user.ltx; tools/s4c_partA.sh:23) before every boot;
 - runs the flag preflight of tools/s4c_partA.sh:10-16 for the base flags;
@@ -595,7 +608,8 @@ What the script does (each item is a refusal or a stop BY NAME):
   RESULTs), and s4d2 alternates three exes, so without it the arms of a pair would not start from the same bytes;
 - refuses if any out/det_<tag>, out/det_<tag>_r1 or run/appdata/logs/synth_<tag>[_r1].txt of its plan exists; the
   reading chain of 2.1 (probe_b, probe_fix, series);
-- after every boot: moves the witness (only while no play lock is live), then needs xray.log, det_alife_counts and
+- after every boot: moves the witness (only through box_guarded: title, Sober, engine and play lock checked on the line
+  before; refused = class box, nothing moved), then needs xray.log, det_alife_counts and
   det_counters at cp1, cp2 and cp3 (the scorer's C reads all six), exactly one item line that is not NONE and the same
   item as the first boot of the run, and for a lever boot a non-empty witness;
 - **the in-run preflight**, after the boot of s4p_off2a (and of the probe) ends: every witness line has the registered
@@ -606,8 +620,12 @@ What the script does (each item is a refusal or a stop BY NAME):
 - keeps one SHARED claim (`want` without EXCLUSIVE, re-sent every 60 s; `claim` with a per-run token in its text, signals
   held over the call; renewed by the same claim before every boot; exit codes only; the wait is capped at 6 h, then
   class=box). It releases only its own claim (by the claim-id the claim printed; by name only if its token claim is
-  the only one under `engineperf`), withdraws its own queue entry only if it queued, kills and reaps its own
-  det_run.sh on every exit (TERM, KILL after 60 s), and sends the Overseer one notify line at the end (as sf1).
+  the only one under `engineperf`), withdraws the queue entry only if this run made it (no entry under `engineperf`
+  before its `want`) and exactly one is there (KNOWN LIMIT: the queue is keyed by name only, so another engineperf
+  job's `want` that landed on the same entry is withdrawn with it), kills and reaps its own det_run.sh on every exit
+  (TERM, KILL after 60 s, from `date`), then makes sure no engine is left in run/prefix (`wineserver -k` there, 60 s;
+  if one is left the claim is NOT released and the pids are logged), and sends the Overseer one notify line at the end
+  (as sf1).
   det_pair.sh cannot be used: it passes one DET_EXTRA to all its runs.
 ### 6.3 Time per boot (derivation)
 These figures are from the s4d1 draft 6.3; they are not measured for build 2:
@@ -767,8 +785,9 @@ Flags:
 **Result 2026-11-27 23:37 (third revision, with the item switch):** `S4D2 SELFTEST: PASS (76/76)`, folder
 s4d2/selftest-runs/20261127-233722-880626 (NOTES.md 7). Hashes at that run (not registered): s4d2_score.py
 76a1ab794ce98047..., s4d2_selftest.sh 4a53bd2d97016fb5.... (Second revision: 70/70.) The shared box checks have their
-own self-test: common/box_preflight_selftest.sh `BOX SELFTEST: PASS (75/75)` (23:41, after the det_run.sh retrofit), folder
-common/selftest-runs/20261127-234139-942947.
+own self-test: common/box_preflight_selftest.sh, v2 after the second review `BOX SELFTEST: PASS (143/143)` (2026-11-28
+00:15), folder common/selftest-runs/20261128-001517-1467978. This self-test re-run 2026-11-28 00:19: `S4D2 SELFTEST:
+PASS (76/76)`, folder s4d2/selftest-runs/20261128-001900-1524685 (scorer and self-test unchanged).
 **It must be re-run with a case built on the probe's real folder before registration.** The hashes of the scorer and
 the self-test are to be filled at registration.
 
