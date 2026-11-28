@@ -4980,7 +4980,8 @@ static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
 	if (!H.rd_off) // ---- B3c: the ammo objects at the actor, and the rounds the actor owns of their kinds ----
 	{
 		vr_rd_state& S = s_vr_rd;
-		S.n = vr_bpt_ammo_list(A, S.list, VR_RD_CAP, true);
+		// if a round model could not be made, no box is hidden: the item must never be left with nothing drawn
+		S.n = vr_bpt_ammo_list(A, S.list, VR_RD_CAP, !(S.failed[0] || S.failed[1] || S.failed[2]));
 		string64 kinds[8];
 		int nk = 0;
 		auto kind = [&](LPCSTR ks) {

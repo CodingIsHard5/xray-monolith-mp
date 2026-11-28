@@ -1391,9 +1391,9 @@ int vr_bpt_ammo_list(CActor* A, vr_rd_obj* out, int cap, bool hide)
 		if (!a || O->H_Parent() || O->getDestroy() || !O->Visual() || a->m_boxSize < 2)
 			continue;
 		const bool rv = vr_bpt_round_vis(O);
-		if (hide)
-		{
-			const bool want = rv || a->m_boxCurr != 1;
+		{ // without hide every box model is shown again (a round model that could not be made)
+			// an object the list has no room for is never hidden: nothing would draw a round in its place
+			const bool want = !hide || rv || a->m_boxCurr != 1 || n >= cap;
 			if (want != !!O->getVisible())
 				O->setVisible(want ? TRUE : FALSE);
 		}
