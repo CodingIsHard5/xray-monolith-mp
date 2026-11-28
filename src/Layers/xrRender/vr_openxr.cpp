@@ -730,6 +730,7 @@ namespace
 		out.valid = valid;
 	}
 
+	bool vr_get_grip(vr_grip_info* out); // below
 	// milestone 3: xrSyncActions and the grip pose of both hands at the frame's predicted display time
 	void vr_locate_grips()
 	{
@@ -879,6 +880,21 @@ namespace
 		// milestone 7: the poses that belong to this read (vr_input_info::grip / head)
 		vr.in_grip[0] = vr.grip[0];
 		vr.in_grip[1] = vr.grip[1];
+		{
+			// H1 check line, every read: the gun hand's grip, aim and gun directions (tracking space, engine axes)
+			vr_grip_info gi;
+			if (vr_get_grip(&gi))
+			{
+				const int g = vr.gun_hand;
+				Fvector fg, fa, fu;
+				const Fvector fw = Fvector().set(0.f, 0.f, 1.f);
+				vr_quat_rotate(vr.grip[g].qx, vr.grip[g].qy, vr.grip[g].qz, vr.grip[g].qw, fw, fg);
+				vr_quat_rotate(vr.aim[g].qx, vr.aim[g].qy, vr.aim[g].qz, vr.aim[g].qw, fw, fa);
+				vr_quat_rotate(gi.gun.qx, gi.gun.qy, gi.gun.qz, gi.gun.qw, fw, fu);
+				Msg("* [vr23g] frame %u valid %d %d grip %.6f %.6f %.6f aim %.6f %.6f %.6f gun %.6f %.6f %.6f tilt %.3f",
+					vr.frames_run, vr.grip[g].valid ? 1 : 0, vr.aim[g].valid ? 1 : 0, fg.x, fg.y, fg.z, fa.x, fa.y, fa.z, fu.x, fu.y, fu.z, g_vr_gun_tilt);
+			}
+		}
 		vr.in_head = vr.head_e;
 		// milestone 7b: the head's height above the floor (VIEW in STAGE), same time as the head pose; y is the same axis in
 		// OpenXR and engine axes

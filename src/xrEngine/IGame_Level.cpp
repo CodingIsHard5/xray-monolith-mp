@@ -280,15 +280,15 @@ void IGame_Level::OnRender()
 					Fvector r = head0.i, f = head0.k;
 					r.y = 0.f;
 					f.y = 0.f;
-					if (r.magnitude() > 0.3f)
+					if (f.magnitude() > 0.3f)
 					{
-						r.normalize();
-						f.crossproduct(r, up); // k = i x j
+						f.normalize(); // the level part of where the head looks: the heading
+						r.crossproduct(up, f); // i = j x k
 					}
 					else
 					{
-						f.normalize(); // rolled on its side: the level part of forward
-						r.crossproduct(up, f); // i = j x k
+						r.normalize(); // looking almost straight up or down: the level part of the head's right
+						f.crossproduct(r, up); // k = i x j
 					}
 					head0.i = r;
 					head0.j = up;
