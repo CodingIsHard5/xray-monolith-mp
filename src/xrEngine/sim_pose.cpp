@@ -115,7 +115,8 @@ static SimPoseWitness s_wit;
 // W1 (test-only): each unmarked skeleton's live-pose hash at its first upload of a frame. Fixed static slots, no heap
 // (the off arm must not allocate where build 1 does not: LB); never reset per frame (the previous frame is the point).
 // Main thread only: written from CSkeletonX::_Render's upload loop, which runs only while g_sim_synth_pose (det mode,
-// serial render). A full table evicts the oldest slot, so a missed lookup can only lower nposed, never raise it.
+// serial render). A full table evicts the oldest slot, so a missed lookup can only lower nposed. The one way it can be raised: a
+// freed skeleton's address (same bone count) reused by another unmarked skeleton in the very next frame, once.
 struct SimPoseUnmarkedSlot
 {
 	IKinematics* k = nullptr;
