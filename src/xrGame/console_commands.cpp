@@ -1395,6 +1395,7 @@ public:
 // GammaVR milestone 7b (Amendment 23): stand straight, then "vr_stand_calibrate": the physical-crouch standing calibration is
 // taken again at the next VR read (registered only with -vr_m3 -vr_openxr)
 void vr_stand_calibrate_request(); // player_hud.cpp
+extern Fvector g_vr_hol_hip, g_vr_hol_sho; // player_hud.cpp (H1)
 
 class CCC_VrStandCalibrate : public IConsole_Command
 {
@@ -2723,6 +2724,10 @@ void CCC_RegisterCommands()
 	CMD1(CCC_ClearLog, "clear_log");
 	if (vr_m3_vr())
 		CMD1(CCC_VrStandCalibrate, "vr_stand_calibrate"); // GammaVR milestone 7b
+		// GammaVR H1 (Amendment 42): gun tilt (degrees, positive = muzzle up) and the holster places (side,down,forward)
+		CMD4(CCC_Float, "vr_gun_tilt", &g_vr_gun_tilt, -90.f, 90.f);
+		CMD4(CCC_Vector3, "vr_holster_hip", &g_vr_hol_hip, Fvector().set(-1.f, -1.f, -1.f), Fvector().set(1.f, 2.f, 1.f));
+		CMD4(CCC_Vector3, "vr_holster_shoulder", &g_vr_hol_sho, Fvector().set(-1.f, -1.f, -1.f), Fvector().set(1.f, 2.f, 1.f));
 
 #ifndef MASTER_GOLD
 	CMD1(CCC_ALifeTimeFactor, "al_time_factor");		// set time factor

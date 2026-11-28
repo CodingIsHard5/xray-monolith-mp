@@ -157,6 +157,9 @@ struct vr_track_state
 	float head0_y;
 };
 extern ENGINE_API vr_track_state g_vr_track;
+// H1 (Amendment 42): the gun follows the controller's AIM pose; this turns it about the hand's own side axis on top of
+// that (degrees, -90..90, positive = muzzle up). Console setting vr_gun_tilt, kept in the user's settings.
+extern ENGINE_API float g_vr_gun_tilt;
 
 // -vr_nogun: the weapon HUD model (with the arms) is not drawn in VR frames
 inline bool vr_nogun()

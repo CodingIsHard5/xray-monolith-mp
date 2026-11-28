@@ -1550,6 +1550,11 @@ struct vr_holster_state
 	bool prev_grab;
 };
 static vr_holster_state s_vr_hol = {false, false, {0.20f, 0.60f, 0.05f}, {0.20f, 0.10f, -0.15f}, 0.15f, false};
+// H1 (Amendment 42): the places are console settings (vr_holster_hip / vr_holster_shoulder "side,down,forward" in metres
+// for a 1.66 m standing eye height; kept in the user's settings). "down" is scaled by calibrated height / 1.66, so the
+// places stay on the body of a seated or a short player. The command-line switches, when given, replace the settings.
+Fvector g_vr_hol_hip = {0.20f, 0.60f, 0.05f}, g_vr_hol_sho = {0.20f, 0.10f, -0.15f};
+float vr_calib_height();
 
 static void vr_holster_update(const vr_input_info& I, CActor* A, bool allowed, bool grab_gun, bool log)
 {
@@ -1561,10 +1566,10 @@ static void vr_holster_update(const vr_input_info& I, CActor* A, bool allowed, b
 		float a, b, c;
 		if (LPCSTR q = strstr(Core.Params, "-vr_holster_hip "))
 			if (sscanf(q + 16, "%f %f %f", &a, &b, &c) == 3)
-				S.hip[0] = a, S.hip[1] = b, S.hip[2] = c;
+				g_vr_hol_hip.set(a, b, c);
 		if (LPCSTR q = strstr(Core.Params, "-vr_holster_shoulder "))
 			if (sscanf(q + 21, "%f %f %f", &a, &b, &c) == 3)
-				S.sho[0] = a, S.sho[1] = b, S.sho[2] = c;
+				g_vr_hol_sho.set(a, b, c);
 		if (LPCSTR q = strstr(Core.Params, "-vr_holster_radius "))
 			if (sscanf(q + 19, "%f", &a) == 1 && a > 0.01f && a < 1.f)
 				S.radius = a;
@@ -1572,8 +1577,15 @@ static void vr_holster_update(const vr_input_info& I, CActor* A, bool allowed, b
 			Msg("* [vr3hol] holsters OFF (-vr_holster_off)");
 		else
 			Msg("* [vr3hol] holsters on: hip (slot 2) side %.3f down %.3f forward %.3f, shoulder (slot 3) side %.3f down %.3f forward %.3f, radius %.3f",
-				S.hip[0], S.hip[1], S.hip[2], S.sho[0], S.sho[1], S.sho[2], S.radius);
+				g_vr_hol_hip.x, g_vr_hol_hip.y, g_vr_hol_hip.z, g_vr_hol_sho.x, g_vr_hol_sho.y, g_vr_hol_sho.z, S.radius);
 	}
+	// H1: this read's places from the settings; "down" scaled by the calibrated height
+	const float hk = vr_calib_height() / 1.66f;
+	S.hip[0] = g_vr_hol_hip.x, S.hip[1] = g_vr_hol_hip.y * hk, S.hip[2] = g_vr_hol_hip.z;
+	S.sho[0] = g_vr_hol_sho.x, S.sho[1] = g_vr_hol_sho.y * hk, S.sho[2] = g_vr_hol_sho.z;
+	if (log && I.frame % 100 == 0)
+		Msg("* [vr23h] frame %u holster places: scale %.4f (calibrated height %.4f); hip side %.3f down %.4f forward %.3f; shoulder side %.3f down %.4f forward %.3f",
+			I.frame, hk, vr_calib_height(), S.hip[0], S.hip[1], S.hip[2], S.sho[0], S.sho[1], S.sho[2]);
 	const bool press = grab_gun && !S.prev_grab;
 	S.prev_grab = grab_gun; // a press seen while the zones cannot act is consumed, not kept for later
 	const int gun = I.gun ? 1 : 0;
@@ -3429,6 +3441,8 @@ struct vr_crouch_state
 	int applied;          // last state handed to g_cl_CheckControls: 0/1/2 as 'want', 3 = button crouch (see vr_crouch_bits)
 	u32 wf;               // wish bits g_cl_CheckControls used last (log only)
 	float off;            // calibration offset: y_calib - start head y (g_vr_track.head0_y); set only at calibration
+	bool floor_rule;      // H1: the runtime gave a floor at calibration: camera height above the feet = head above the floor
+	float floor_h;        // H1: the head's height above the runtime's floor at calibration (not clamped)
 	bool btn;             // crouch button toggle flag (opt-in action crouch_toggle)
 	bool btn_prev[2];     // raw button state of the last read, per hand (rising edge)
 	bool btn_raw;         // raw button state of the last read, either hand (log)
@@ -3519,7 +3533,18 @@ static void vr_crouch_update(const vr_input_info& I, CActor* A, bool allowed, bo
 		// height at calibration above that start pose: at the calibrated pose the eyes are at the standing eye height
 		C.off = g_vr_track.head0_set ? C.y_calib - g_vr_track.head0_y : 0.f;
 		Msg("* [vr3] stand height %.3f m (source %s)", C.H, src);
+		// H1 (Amendment 42): the game's ground is the real floor. With a floor from the runtime the VR base hangs at the
+		// head's real height above it (vr_base_height), so the camera is always (head above the floor) above the feet.
+		// No floor, or -vr_floor_old (control; the earlier steps' hand places were laid out for it): the old rule, the
+		// calibrated pose is at the game's standing eye height.
+		static const bool s_floor_old = !!strstr(Core.Params, "-vr_floor_old");
+		C.floor_rule = I.floor_valid && !s_floor_old;
+		C.floor_h = I.floor_valid ? I.floor_head_y : 0.f;
+		Msg("* [vr23] floor rule %s: head %.4f m above the runtime's floor at calibration%s", C.floor_rule ? "ON" : "OFF", C.floor_h,
+			I.floor_valid ? (s_floor_old ? " (-vr_floor_old)" : "") : " (the runtime gave no floor)");
 	}
+	// H1 check line, every read: the head's height above the runtime's floor now
+	Msg("* [vr23f] frame %u floor %d head_above_floor %.4f state %d H %.4f", I.frame, I.floor_valid ? 1 : 0, I.floor_head_y, C.want, C.H);
 	C.dy = I.head.pos.y - C.y_calib;
 	C.r = (C.H + C.dy) / C.H;
 	C.want = vr_crouch_physical() ? vr_crouch_step(C.want, C.r) : 0;
@@ -3573,8 +3598,17 @@ float vr_base_height(const CActor* A, float current_h, float standing_h)
 		return current_h;
 	const vr_crouch_state& C = s_vr_crouch;
 	const bool mine = A && A == C.actor && C.calibrated;
-	const float h = (mine && C.btn && C.want == 0) ? current_h : standing_h;
+	float h = (mine && C.btn && C.want == 0) ? current_h : standing_h;
+	// H1: the floor rule. The calibrated pose sits floor_h above the feet instead of at the game's standing height (the
+	// button crouch still lowers it by what the game's crouch lowers the camera).
+	if (mine && C.floor_rule)
+		h = C.floor_h - (standing_h - h);
 	return h - (mine ? C.off : 0.f);
+}
+// H1: the calibrated standing eye height (1.66 before any calibration); the holster places scale with it
+float vr_calib_height()
+{
+	return s_vr_crouch.calibrated ? s_vr_crouch.H : 1.66f;
 }
 // for CActor::g_cl_CheckControls: the wish bits it used (log only)
 void vr_crouch_note(u32 wf)

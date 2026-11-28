@@ -269,6 +269,38 @@ void IGame_Level::OnRender()
 					game_cam.set(right0, top0, dir0, pos0);
 				}
 				vr_pose_matrix(s_head0, head0);
+				// H1 (Amendment 42): the tracking space hangs on the world by the first head pose's HEADING only. With its
+				// pitch and roll in (as before), a head tilted on the first VR frame tilted the whole world for good
+				// (Caden's first headset session: 11.3 and 38.7 degrees). -vr_tilt_old: the old rule (control).
+				static const bool s_tilt_old = !!strstr(Core.Params, "-vr_tilt_old");
+				if (!s_tilt_old)
+				{
+					const Fvector up = Fvector().set(0.f, 1.f, 0.f);
+					const float tilt0 = acosf(_max(-1.f, _min(1.f, head0.j.y)));
+					Fvector r = head0.i, f = head0.k;
+					r.y = 0.f;
+					f.y = 0.f;
+					if (r.magnitude() > 0.3f)
+					{
+						r.normalize();
+						f.crossproduct(r, up); // k = i x j
+					}
+					else
+					{
+						f.normalize(); // rolled on its side: the level part of forward
+						r.crossproduct(up, f); // i = j x k
+					}
+					head0.i = r;
+					head0.j = up;
+					head0.k = f;
+					static bool s_level_logged = false;
+					if (!s_level_logged)
+					{
+						s_level_logged = true;
+						Msg("* [vr23] level start: first head pose tilted %.3f deg from upright; heading only is used (forward %.5f %.5f %.5f)",
+							rad2deg(tilt0), f.x, f.y, f.z);
+					}
+				}
 				head0_inv.invert(head0);
 				g_vr_track.track_to_world.mul_43(game_cam, head0_inv); // head0_inv first, then the game camera
 				vr_pose_matrix(vr_info.head, head_now);
@@ -285,6 +317,17 @@ void IGame_Level::OnRender()
 				g_vr_track.track_to_world.transform_tiny(g_vr_track.pivot, s_head0.pos); // = game_cam.c
 				g_vr_track.head_world = head_world.c;
 				g_vr_track.actor_pos = use_base ? g_vr_base.actor_pos : pos0;
+				{
+					// H1 check line, every VR frame: tracking up in the world, the camera's and the head's tilt from up
+					// (degrees), camera height and the actor's feet height
+					const Fvector& tu = g_vr_track.track_to_world.j;
+					Fvector hu;
+					vr_quat_rotate(vr_info.head.qx, vr_info.head.qy, vr_info.head.qz, vr_info.head.qw, Fvector().set(0.f, 1.f, 0.f), hu);
+					Msg("* [vr23] frame %u up %.6f %.6f %.6f cam_tilt %.4f head_tilt %.4f cam_y %.4f feet_y %.4f fwd0 %.5f %.5f",
+						vr_info.frame, tu.x, tu.y, tu.z, rad2deg(acosf(_max(-1.f, _min(1.f, head_top.y)))),
+						rad2deg(acosf(_max(-1.f, _min(1.f, hu.y)))), head_pos.y, g_vr_track.actor_pos.y,
+						g_vr_track.track_to_world.k.x, g_vr_track.track_to_world.k.z);
+				}
 
 				if (vr_info.frame % 100 == 0)
 				{

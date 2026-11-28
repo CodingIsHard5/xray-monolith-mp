@@ -61,6 +61,11 @@ namespace
 		XrAction grip_action = XR_NULL_HANDLE;
 		XrPath hand_path[2] = { XR_NULL_PATH, XR_NULL_PATH }; // 0 = left, 1 = right
 		XrSpace grip_space[2] = { XR_NULL_HANDLE, XR_NULL_HANDLE };
+		// H1 (Amendment 42): the AIM pose (where the controller points); the gun's direction comes from it
+		XrAction aim_action = XR_NULL_HANDLE;
+		XrSpace aim_space[2] = { XR_NULL_HANDLE, XR_NULL_HANDLE };
+		vr_pose aim[2];           // located this frame, engine axes, LOCAL space
+		bool aim_old = false;     // -vr_aim_old: the gun's direction is the grip pose's, as before (control)
 		vr_pose grip[2];          // located this frame, engine axes, LOCAL space
 		vr_pose head_e;           // head pose this frame, engine axes, LOCAL space
 		bool grip_located = false;
@@ -189,6 +194,10 @@ namespace
 		aci.subactionPaths = vr.hand_path;
 		if (!vr_check(vr.CreateAction(vr.action_set, &aci, &vr.grip_action), "xrCreateAction(grip_pose)"))
 			return false;
+		xr_strcpy(aci.actionName, "aim_pose");
+		xr_strcpy(aci.localizedActionName, "Aim pose");
+		if (!vr_check(vr.CreateAction(vr.action_set, &aci, &vr.aim_action), "xrCreateAction(aim_pose)"))
+			return false;
 
 		// milestone 6 (Amendment 19): button actions "fire" and "grab" (float) for both hands. A failure here leaves the
 		// action null (no button input, the grip pose still works).
@@ -277,7 +286,7 @@ namespace
 			XrPath prof = XR_NULL_PATH;
 			if (!vr_check(vr.StringToPath(vr.instance, P.path, &prof), "xrStringToPath(profile)"))
 				continue;
-			XrActionSuggestedBinding b[12]; // 2 hands x (grip pose, fire, grab, stick, next_weapon, crouch_toggle)
+			XrActionSuggestedBinding b[14]; // 2 hands x (grip pose, fire, grab, stick, next_weapon, crouch_toggle, aim pose)
 			u32 nb = 0;
 			bool path_ok = true;
 			for (int h = 0; h < 2 && path_ok; ++h)
@@ -285,9 +294,9 @@ namespace
 				// crouch_toggle: only the test binding (-vr_dbg_crouch_bind: WMR left menu click), never by default
 				const char* crouch = (crouch_test_bind && h == 0 &&
 					!xr_strcmp(P.path, "/interaction_profiles/microsoft/motion_controller")) ? "/input/menu/click" : nullptr;
-				const char* what[6] = { "/input/grip/pose", P.fire, P.grab, P.stick, P.next[h], crouch };
-				const XrAction act[6] = { vr.grip_action, vr.fire_action, vr.grab_action, vr.stick_action, vr.next_action, vr.crouch_action };
-				for (int k = 0; k < 6; ++k)
+				const char* what[7] = { "/input/grip/pose", P.fire, P.grab, P.stick, P.next[h], crouch, "/input/aim/pose" };
+				const XrAction act[7] = { vr.grip_action, vr.fire_action, vr.grab_action, vr.stick_action, vr.next_action, vr.crouch_action, vr.aim_action };
+				for (int k = 0; k < 7; ++k)
 				{
 					if (!what[k] || act[k] == XR_NULL_HANDLE)
 						continue;
@@ -335,6 +344,9 @@ namespace
 			sci.subactionPath = vr.hand_path[h];
 			sci.poseInActionSpace.orientation.w = 1.f;
 			if (!vr_check(vr.CreateActionSpace(vr.session, &sci, &vr.grip_space[h]), "xrCreateActionSpace(grip)"))
+				return false;
+			sci.action = vr.aim_action;
+			if (!vr_check(vr.CreateActionSpace(vr.session, &sci, &vr.aim_space[h]), "xrCreateActionSpace(aim)"))
 				return false;
 		}
 		return true;
@@ -644,6 +656,7 @@ namespace
 			}
 			vr.gun_hand = strstr(Core.Params, "-vr_gun_hand left") ? 0 : 1;
 			vr.gun_on_head = !!strstr(Core.Params, "-vr_gun_on_head");
+			vr.aim_old = !!strstr(Core.Params, "-vr_aim_old");
 			Msg("* [vr3] gun hand %c, nogun %d, gun on head %d (DELIBERATELY BROKEN test mode if 1)",
 				vr.gun_hand ? 'R' : 'L', vr_nogun() ? 1 : 0, vr.gun_on_head ? 1 : 0);
 			// -vr_grip_rot <yaw_deg> <pitch_deg>: the gun's grip orientation becomes q_inject * q_runtime, where q_inject
@@ -727,6 +740,7 @@ namespace
 			vr.grip[h].qx = vr.grip[h].qy = vr.grip[h].qz = 0.f;
 			vr.grip[h].qw = 1.f;
 			vr.grip[h].valid = false;
+			vr.aim[h] = vr.grip[h];
 		}
 		if (!vr.actions_ok)
 			return;
@@ -836,6 +850,30 @@ namespace
 			if (XR_SUCCEEDED(r))
 				vr_to_engine(loc.pose, valid, vr.grip[h]);
 			vr.grip_raw[h] = XR_SUCCEEDED(r) ? loc.pose : XrPosef{ { 0.f, 0.f, 0.f, 1.f }, { 0.f, 0.f, 0.f } };
+			// H1: the aim pose of the same hand at the same time
+			XrSpaceLocation al = { XR_TYPE_SPACE_LOCATION };
+			const XrResult ra = vr.LocateSpace(vr.aim_space[h], vr.local, vr.fs.predictedDisplayTime, &al);
+			if (XR_SUCCEEDED(ra))
+				vr_to_engine(al.pose, (al.locationFlags & need) == need, vr.aim[h]);
+		}
+		{
+			// H1 log, every 100th read: the angle between the grip and the aim axes per hand (a real controller's differ;
+			// the next headset session measures it), and the tilt setting
+			static u32 s_n = 0;
+			if (s_n++ % 100 == 0)
+			{
+				float ang[2] = { -1.f, -1.f };
+				for (int h = 0; h < 2; ++h)
+					if (vr.grip[h].valid && vr.aim[h].valid)
+					{
+						Fvector g, a;
+						vr_quat_rotate(vr.grip[h].qx, vr.grip[h].qy, vr.grip[h].qz, vr.grip[h].qw, Fvector().set(0.f, 0.f, 1.f), g);
+						vr_quat_rotate(vr.aim[h].qx, vr.aim[h].qy, vr.aim[h].qz, vr.aim[h].qw, Fvector().set(0.f, 0.f, 1.f), a);
+						ang[h] = rad2deg(acosf(_max(-1.f, _min(1.f, g.dotproduct(a)))));
+					}
+				Msg("* [vr23a] read %u grip-to-aim angle L %.3f R %.3f deg (-1 = not located); gun follows %s; vr_gun_tilt %.2f",
+					s_n - 1, ang[0], ang[1], vr.aim_old ? "GRIP (-vr_aim_old)" : "aim", g_vr_gun_tilt);
+			}
 		}
 		vr.grip_located = true;
 		// milestone 7: the poses that belong to this read (vr_input_info::grip / head)
@@ -921,11 +959,28 @@ namespace
 		else
 		{
 			out->gun = placed;
+			// H1 (Amendment 42): the gun's DIRECTION is the aim pose's (current frame), turned by the tilt setting about
+			// the hand's own side axis; its place stays the grip pose's. Not with -vr_aim_old, -vr_grip_lag or an aim
+			// pose that was not located (then the grip pose's direction, as before).
+			if (!vr.aim_old && vr.grip_lag == 0 && vr.aim[vr.gun_hand].valid)
+			{
+				Fmatrix m;
+				vr_pose_matrix(vr.aim[vr.gun_hand], m);
+				float t = g_vr_gun_tilt;
+				clamp(t, -90.f, 90.f);
+				const float c = cosf(deg2rad(t)), s = sinf(deg2rad(t));
+				Fvector k2, j2;
+				k2.mul(m.k, c);
+				k2.mad(m.j, s);   // forward turned up by t
+				j2.mul(m.j, c);
+				j2.mad(m.k, -s);
+				vr_matrix_quat(m.i, j2, k2, out->gun.qx, out->gun.qy, out->gun.qz, out->gun.qw);
+			}
 			if (vr.grip_rot)
 			{
 				// test switch -vr_grip_rot: orientation = q_inject * q_runtime (Hamilton product), position untouched
 				const float x1 = vr.grip_rot_q[0], y1 = vr.grip_rot_q[1], z1 = vr.grip_rot_q[2], w1 = vr.grip_rot_q[3];
-				const vr_pose& R = placed;
+				const vr_pose R = out->gun; // (H1: on top of the aim direction; the same as before when aim = grip)
 				out->gun.qx = w1 * R.qx + x1 * R.qw + y1 * R.qz - z1 * R.qy;
 				out->gun.qy = w1 * R.qy - x1 * R.qz + y1 * R.qw + z1 * R.qx;
 				out->gun.qz = w1 * R.qz + x1 * R.qy - y1 * R.qx + z1 * R.qw;
