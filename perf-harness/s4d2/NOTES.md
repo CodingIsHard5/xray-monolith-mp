@@ -185,7 +185,7 @@ only, boots.txt for every boot with its rc (N-13); the claim tool's tuning varia
 
 ## 9. Exit paths of s4d2_run.sh (what each one releases and stops)
 "Own claim" = released by its claim-id from claim_calls.txt; with no id, by name only if the claim carrying this run's
-token is the only claim under engineperf; else left to expire (<= one boot timeout + 10 min). "Own child" =
+token is the only claim under engineperf; else left to expire (<= one claim period, CLAIM_MIN, section 11). "Own child" =
 this run's det_run.sh (BP) and its sleep (SP); nothing else is signalled.
 
 | exit path | when | stop record | queue entry | claim | child | notify |
@@ -205,12 +205,12 @@ this run's det_run.sh (BP) and its sleep (SP); nothing else is signalled.
 No memory file was written under ~/Documents: the brief forbids writing there.
 
 ## 10. Fix round 2026-11-28 (plan-facts/s4d1-driver-review-2026-11-28.md: S-1, S-2, S-3, N-1, N-5 hold here too)
-s4d2_run.sh is now sha256 f885501efda874ce6d6bd1b6084eec730cd9458294107d5ab2c05de5fc0bd29d (was 2777c68f...), the same changes
+s4d2_run.sh was then sha256 65d13233... (f885501efda874ce6d6bd1b6084eec730cd9458294107d5ab2c05de5fc0bd29d with the exe pins of d32946fee; was 2777c68f...; now fd07a9c4..., section 11), the same changes
 as s4d1_run.sh (s4d1/NOTES.md 9.8):
 - S-1: one `claim` per call (acquire); before every boot `renew engineperf <min>` with QR_CLAIM_ID = that claim's id
   (quiet-required.sh renew_own extends exactly that record when nested, keeps the id with one record), never a second
   `claim`; finish()'s release_mine releases every distinct `claim-id:` in claim_calls.txt. Section 9's "own claim" now
-  means all of them.
+  means all of them. (Superseded in section 11: only the call's own claim id is released.)
 - S-2: box_claim_has_token in box_gate and watch_boot: a lost claim is a box stop.
 - S-3: engines_gone right after det_run.sh returns (rc 10 = fault stop "an engine still used run/prefix").
 - N-1: TERM/INT/HUP held from the launch until BP is set. N-5: deadline before every claim attempt, sleep cut to it.
@@ -218,3 +218,28 @@ Not changed here: CLAIM_MIN (one boot's timeout + 10 min, renewed before every b
 Checked: `bash -n`; `--preflight-only` box mode on fixtures rc 0; `probe --preflight-only` refuses by name on the
 PIN_ME_ placeholders as before; common/box_preflight_selftest.sh (which runs this driver's refusals and its structure
 test) re-run, result in s4d1/NOTES.md 9.8 / the coordinator's report.
+
+## 11. Re-check 2026-11-28 (plan-facts/s4d1-driver-review-2026-11-28.md "Re-check after fixes", R-1)
+s4d2_run.sh is now sha256 fd07a9c4a6cb3eeab34de532370e348855a3d29f06265679d92bfda2c28cdada (edited over the pinned f885501e...,
+the exe pins kept). Same R-1 change as s4d1_run.sh (s4d1/NOTES.md 9.9), plus the claim period and the watch cap:
+- **Renew id:** renew_call keeps the tool's output (renew_last.txt, all in renew_calls.txt) and compares the last
+  `claim-id:` with CLAIM_ID0; another id or none is a box stop before the boot (nothing under run/ touched).
+- **Release:** only CLAIM_ID0 (or, before it was set, the acquire claim's one printed id); never an id a renewal
+  printed. Section 9's "own claim" means that one id.
+- **Claim period:** s4d1's renewal-to-renewal formula, each term for this driver: GATE_AFTER_S 150 (display wait 20 +
+  cfg0 / pins 10 + box_gate 40 + the options copy's box_fresh 40 + the last box_gate 40), BENCH_TIMEOUT + WATCH_EXTRA_S
+  1020 + one watch pass (5 + 30), the stop (CHILD_GRACE_S 180 + 1 + box_wine_kill 60 + ENG_GONE_S 60), AFTER_BOOT_S 80
+  (the witness move's box_fresh 40 + the next box_gate 40): BENCH_TIMEOUT + 1586 s in whole minutes. Probe and a 2000-s
+  series: 60 min per period. Refused above 180 min, so BENCH_TIMEOUT may be up to 9180 s (PROBE_BOOT_S up to
+  ~1836 s, against ~390 s [G]). Each period covers one boot (renewed before every boot), so the series' total time is
+  not bounded by 180 min: the draft's 6.3 estimate is ~1 h 24 min for the 16 scored boots, ~1 h 31 min with the probe.
+- **Watch cap:** watch_boot stops a boot still running BENCH_TIMEOUT + WATCH_EXTRA_S after its start, class fault.
+  WATCH_EXTRA_S 1020 = 1.5x det_run.sh's own worst time outside its LIMIT for this driver's call (no claim, no
+  -det_save): <= ~382 s before the engine start + <= ~296 s after LIMIT (derivation in the script). Flagged: under 2x.
+- **Not changed, flagged:** CHILD_GRACE_S 180 against det_run.sh's cleanup after a TERM of up to ~166 s by the same
+  bounds (the command in flight, up to wineserver -w 30 s, then stop_wine <= 131 s and its own kills ~5 s): 1.08x.
+  s4d1 uses 250 s for the same cleanup. Raising it would lengthen the claim period by the same amount.
+- Fixture checks (sub-second, nice 19): box-only rc 0; probe preflight rc 0 printing CLAIM_MIN=60; TIMEOUT_PROBE 9180
+  gives 180 and passes, 9240 is refused by name (181 min); series preflight refuses the four REG_ME_ values by name;
+  renew_call and release_mine alone against a fake claim tool: our id rc 0, a foreign id rc 3, no id rc 3, a refusal
+  rc 1, and in every case only our id released. Not tested: the wall cap firing, the real claim tool, any real mode.

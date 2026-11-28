@@ -161,7 +161,7 @@ The previous folder (20261127-185925-2916249, revision 1, 36/36) was removed by 
 - CInventoryItem::UpdateXForm (inventory_item.cpp:1292) has no per-frame guard; CWeapon and CMissile have one.
 - Do not bisect with c253fafdb as an endpoint: on its own it has default mask 15.
 
-## 9. The series script s4d1_run.sh (written 2026-11-28, desk only; sha256 af73868b8d5c32bbd1cd2569829ca54aad9be73a606c88618646694f126559ae after the review fix round 9.8; earlier 8dc70c49..., e06358a8...)
+## 9. The series script s4d1_run.sh (written 2026-11-28, desk only; sha256 33b1fd0a8f16aaf95f371ebb147bd11a4c77867da282d8a7e8d72afb8bf28b43 after the re-check 9.9; earlier af73868b... (9.8), 8dc70c49..., e06358a8...)
 Made from s4d2/s4d2_run.sh (2777c68f..., four reviews). Brief: the DRAFT's test content wins (boots, tags, flags, order,
 probe, stop / retry rules, pins); the TEMPLATE's safety rules win (shared box checks, one claim with a token, child
 handling, guarded writes under run/, refusals). Not run: only `bash -n` and fixture `--preflight-only` calls (9.5).
@@ -171,7 +171,7 @@ handling, guarded writes under run/, refusals). Not run: only `bash -n` and fixt
 |---|---|---|---|
 | `--preflight-only` | none: the shared box checks only | < 1 min | - |
 | `probe [--preflight-only]` | s4d_probe (K3 mask 7), s4d_probe15 (K3 mask 15) | 2 x 375 + 2 x 40 = 830 s = ~14 min | watch threshold per boot 1900 + 900 = 2800 s; wall time per boot after it up to + 5 (poll) + 250 (TERM grace) + 120 (engines_gone) + ~150 (gates) = ~3325 s, so <= ~6650 s, plus the claim wait (<= 6 h) |
-| `series [--preflight-only]` | A: s4d_s1 o1 s2 o2 s3 o3; L: l2a l3 l1 l2w l2b; S: off2a on2a off3 on3 off2b on2b brk1 [brk2] | 19 boots: 5897 s = ~98 min; 18 (no brk2): 5567 s = ~93 min | watch threshold per boot BENCH_TIMEOUT + 900 s; wall time per boot up to BENCH_TIMEOUT + ~1425 s (poll, TERM grace, engines_gone, gates); each slot may run twice (6.5) |
+| `series [--preflight-only]` | A: s4d_s1 o1 s2 o2 s3 o3; L: l2a l3 l1 l2w l2b; S: off2a on2a off3 on3 off2b on2b brk1 [brk2] | 19 boots: 5897 s = ~98 min; 18 (no brk2): 5567 s = ~93 min | watch threshold per boot BENCH_TIMEOUT + 900 s; wall time per boot up to BENCH_TIMEOUT + ~1536 s (poll, TERM grace, engines_gone, gates; 9.9); each slot may run twice (6.5) |
 Series arithmetic: A = 1191 s [M, 6 boots] + 6 x 40 = 1431 s; L = 3 x 290 (l2a, l2b, l2w, K=2) + 375 (l3) + 211 (l1)
 + 5 x 40 = 1656 s; S = 6 x 290 (off2a, on2a, off2b, on2b, brk1, brk2) + 2 x 375 (off3, on3) + 8 x 40 = 2810 s;
 1431 + 1656 + 2810 = 5897 s. Without brk2: 5897 - 290 - 40 = 5567 s. (The prereg rounds the same sums to 1 h 39 min.)
@@ -233,7 +233,7 @@ The probes' measured elapsed times replace the 15 ms guess before registration (
 | series BENCH_TIMEOUT | max(1900, ceil(5 PROBE_BOOT_S/60) x 60) | prereg 2.3; >= 5x for K=3 S runs, more for the shorter arms |
 | CHILD_GRACE_S | 250 s | det_run cleanup after TERM <= 165 s worst -> 1.5x (template 180, the caller-rule minimum) |
 | WATCH_EXTRA_S | 900 s | det_run time outside LIMIT <= ~679 s worst -> 1.3x (new, N4-11) |
-| CLAIM_MIN | ceil((BENCH_TIMEOUT + 1420)/60) min | renewal-to-renewal sum (probe: 56 min) |
+| CLAIM_MIN | ceil((BENCH_TIMEOUT + 1536)/60) min | renewal-to-renewal sum, terms in the script's comment (probe: 58 min); refused above 180 min (9.9) |
 | WAIT_MAX_S | 6 h | **COPIED** from s4d2 (S2-7); no s4d1 quantity sets it |
 | POLL_S | 60 s | start lags a cleared box <= ~1.7 min |
 | display wait | 10 x 2 s | Xvfb socket gone within ~1 s [G] -> ~20x |
@@ -272,13 +272,14 @@ to a lever: rc 2 by name; PROBE_S3_FRAMES differing from the scorer: refused by 
 19 boots (P=812) / 18 (P=299), timeout 2040 s.
 
 ### 9.8 Fix round after plan-facts/s4d1-driver-review-2026-11-28.md (and its automated findings), 2026-11-28
-s4d1_run.sh is now sha256 af73868b8d5c32bbd1cd2569829ca54aad9be73a606c88618646694f126559ae; s4d2_run.sh got the same fixes (s4d2/NOTES.md 10).
+s4d1_run.sh was then sha256 af73868b8d5c32bbd1cd2569829ca54aad9be73a606c88618646694f126559ae (now 33b1fd0a..., 9.9); s4d2_run.sh got the same fixes (s4d2/NOTES.md 10).
 - **S-1 (claims left live, blocking Caden's launcher):** choice (i). quiet-required.sh has a `renew <w> <min>` verb that,
   with QR_CLAIM_ID=<id>, extends exactly that record when several are nested and, with one record, rewrites the slot
   keeping the id (renew_own, recs_fresh). So the driver claims ONCE (acquire) and before every boot runs `renew` with
   the acquire claim's id, never `claim` again; finish() releases EVERY distinct claim id in claim_calls.txt (normally
   one). Before each renewal box_gate has checked that a live record carries our token and no other engineperf record is
   live, so the renewal touches only ours. A claim period is boot-sized (probe 56 min) and refused above 180 min.
+  (Superseded in 9.9: only CLAIM_ID0 is released, and the period is 58 min.)
 - **S-2:** a lost claim stops: box_claim_has_token in box_gate (before every boot) and in watch_boot (every 5 s).
 - **S-3 / (c):** engines_gone right after det_run.sh returns, any rc, before the retry decision; an engine still there
   60 s after `wineserver -k` is a fault stop (claim kept). A late-stopped engine no longer costs a slot's retry.
@@ -303,3 +304,23 @@ s4d1_run.sh is now sha256 af73868b8d5c32bbd1cd2569829ca54aad9be73a606c8861864669
   folders refused by name; PROBE_BOOT_S 400 vs logs 401 refused by name; with probe folders and logs present, series
   rc 0 (19 / 18 boots). Not tested: renew, release-all, the lost-claim stop, engines_gone after a boot (no real claim
   or engine in a fixture call).
+
+### 9.9 Re-check after the fix round (plan-facts/s4d1-driver-review-2026-11-28.md "Re-check after fixes"), 2026-11-28
+s4d1_run.sh is now sha256 33b1fd0a8f16aaf95f371ebb147bd11a4c77867da282d8a7e8d72afb8bf28b43 (was af73868b...); s4d2_run.sh got R-1 too (s4d2/NOTES.md 11).
+- **R-1 renew id:** renew_call keeps the tool's output (out/s4d1_state/<mode>/renew_last.txt, all of them in
+  renew_calls.txt) and compares the last `claim-id:` with CLAIM_ID0. Another id or none: renew_call rc 3, gates stops
+  the run as class box before the boot (nothing under run/ touched), the reason naming both ids. That catches the
+  renew_own fallback (our record gone, every engineperf record extended, the first, foreign, id printed): with ours
+  absent the fallback can never print ours.
+- **R-1 release:** release_mine releases ONLY CLAIM_ID0 (or, if a signal came before it was set, the one id the acquire
+  claim printed; claim_calls.txt now holds claim output only). An id a renewal printed is never released; by name only
+  when no id was ever printed, as before.
+- **R-3 claim period:** the first sum (+1425; NOTES said +1420) missed three terms: the options copy's box_fresh in the
+  gates (40 s), one watch pass's checks (title 10 + flatpak 10 + systemctl 10 = 30 s) and the witness move's
+  box_fresh after the boot (40 s), plus stop_child's 1-s poll. Corrected: BENCH_TIMEOUT + 900 + 5 + 30 + 150 + 250 + 1 +
+  60 + 60 + 80 = BENCH_TIMEOUT + 1536 s; the probe's period is 58 min (was 56), refused above 180 min.
+- Fixture checks (sub-second, nice 19): probe preflight prints CLAIM_MIN=58; TIMEOUT_PROBE 9300 refused by name
+  (181 min); renew_call and release_mine run alone against a fake claim tool: our id rc 0, a foreign id rc 3, no id
+  rc 3, a refusal rc 1, renew called with QR_CLAIM_ID=<ours>, and in every case only <ours> released. Every 9.8
+  fixture result unchanged. Note: the probe preflight now passes against the real run/ (the stimulus is installed).
+  Not tested: the real claim tool's renew and release, the lost-claim stop, any real mode.

@@ -96,6 +96,16 @@ Labels:
   Right after det_run.sh returns (any rc), no engine of the run tree may use run/prefix (wineserver -k, 60 s, else a
   fault stop with the claim kept), before the retry decision. Signals are held over the launch until the child's pid
   is recorded. The 6-h claim wait checks its deadline before every attempt. Test content unchanged.
+- 2026-11-28, eighth revision (re-check, plan-facts/s4d1-driver-review-2026-11-28.md "Re-check after fixes" R-1; over
+  the pinned f885501e..., pins kept): **s4d2_run.sh is now sha256
+  fd07a9c4a6cb3eeab34de532370e348855a3d29f06265679d92bfda2c28cdada**. The id each renewal prints must be this call's claim id,
+  else the run stops (class box, nothing under run/ touched); only that id is released at the end, never an id a
+  renewal printed (a renewal after our record vanished extends every engineperf record and prints a foreign id). One
+  claim period is now s4d1's renewal-to-renewal sum with this driver's own terms, BENCH_TIMEOUT + 1586 s in whole
+  minutes (60 min at 2000 s; was the timeout + 10 min, which a slow boot could outlast), refused above 180 min, i.e.
+  BENCH_TIMEOUT up to 9180 s (PROBE_BOOT_S up to ~1836 s). watch_boot stops a boot still running BENCH_TIMEOUT +
+  1020 s after its start (class fault; det_run.sh's own time outside its LIMIT is <= ~678 s by its bounds). Table 7.
+  Test content unchanged.
 
 ## 0. Limits, first
 - **The det harness is not exact for online state or for `::Random`**, even stock against stock (the s4d1 draft,
@@ -673,8 +683,9 @@ would be only 4.9x here, because of the added hashing: flagged, and not COPIED.
 ### 6.4 Stop rules (no check is scored before the end; these look only at each run's own completion)
 - **Before the series:** the pins, cfg0 (on out/user_det.ltx.orig, 6.2) and the user_det hash of 6.2; no leftover witness files or out folders.
 - **During the series:**
-  - any box check of 6.2 refusing before a boot or during one (the boot is stopped), or a refused claim renewal: stop
-    (box);
+  - any box check of 6.2 refusing before a boot or during one (the boot is stopped), or a refused claim renewal, or a
+    renewal that printed another claim id than the run's own: stop (box);
+  - a boot still running BENCH_TIMEOUT + 1020 s after its start (the driver's wall cap): stop (fault);
   - a boot whose stimulus took no item, or another item than the run's first boot: stop (fault);
   - a crash dump already in run/appdata/logs before a boot: stop (fault);
   - a crash dump (det_run.sh's "CRASH DUMP present" or a .mdmp in the folder): stop (fault);
@@ -718,6 +729,8 @@ refuses an existing out file and has no override, so there is no re-score after 
 | probe stops: counts | 300 | ~5440 x (K-1) for pose [G]; the NPC's frames unknown | ~36x for pose; unknown for attach and optin | these are decision rules, not verdict bounds |
 | probe stops: npc share / f5 share | 0.5 / 0.5 | ~1.0 / ~0 [G] | **2x** / n.a. | decision rules, flagged |
 | BENCH_TIMEOUT | 2000 s | <= 390 s [G] | 5.1x | reset from PROBE_BOOT_S |
+| driver wall cap per boot (WATCH_EXTRA_S) | BENCH_TIMEOUT + 1020 s | det_run.sh outside its LIMIT <= ~678 s [D] | 1.5x | operational; **under 2x, flagged** |
+| one claim period (CLAIM_MIN) | ceil((BENCH_TIMEOUT + 1586)/60) min, <= 180 | renewal-to-renewal worst sum [D] (terms in s4d2_run.sh) | it is the sum itself (every term a worst case) | operational |
 
 ### 7.1 TOL_LD, its own line (PA2's ld cluster radius)
 - **Expected noise.** ld = inverse(parent_draw x A_d) x wd, in float32 from world coordinates up to ~270 m [G]. The

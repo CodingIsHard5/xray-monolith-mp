@@ -37,6 +37,9 @@
 # watch_boot; S-3 engines_gone right after det_run.sh returns; N-1 signals held over the launch until BP is set; N-5
 # the wait deadline before every claim attempt; N-7 the series needs both probe folders; N-4 PROBE_BOOT_S checked
 # against the probe logs and printed at the end of probe mode; N-3 the reader's hashes logged then.
+# Re-check 2026-11-28 (same file, "Re-check after fixes"): R-1 the id every renewal prints must be CLAIM_ID0, else a
+# box stop (renew_call rc 3); finish() releases ONLY CLAIM_ID0, never an id a renewal printed; CLAIM_MIN's sum
+# corrected (+1425 -> +1536: the options copy's and the witness move's box_fresh, one watch pass; probe 58 min).
 # Fourth-review leftovers (plan-facts/box-preflight-fourth-review-2026-11-28.md) applied here: N4-8 the five caller
 # variables det_run.sh refuses are refused HERE, before any claim; N4-9 the token stands last in the claim text (the
 # shared file's substring match is unchanged: residue named in NOTES.md 9); N4-11 a per-boot wall cap in watch_boot
@@ -224,13 +227,22 @@ if [ "$MODE" = series ]; then
 fi
 [ "$bad" = 0 ] || exit 2
 if [ "$MODE" = series ]; then TIMEOUT_RUN=$TIMEOUT; else TIMEOUT_RUN=$TIMEOUT_PROBE; fi
-# Claim length, extended by its id before every boot (gates, renew_call). It must outlast, from one renewal to the next:
-# the rest of the gates (display wait 20 s + two box passes <= 80 s + pins ~10 s = 110 s), the boot up to the watch cap
-# (TIMEOUT_RUN + WATCH_EXTRA_S) plus the poll that sees it (WATCH_NAP_S), a stop there (CHILD_GRACE_S + box_wine_kill
-# 60 s + ENG_GONE_S; the same engines_gone runs after a normal return, S-3), and the after-boot steps up to the next
-# renewal (one box pass <= 40 s): TIMEOUT_RUN + 900 + 5 + 110 + 250 + 60 + 60 + 40 = TIMEOUT_RUN + 1425 s, whole minutes
-# (probe: 3325 s -> 56 min). Refused above 180 min (the fleet's slice limit; the claim tool sets no maximum of its own).
-CLAIM_MIN=$(( (TIMEOUT_RUN + WATCH_EXTRA_S + WATCH_NAP_S + 110 + CHILD_GRACE_S + 60 + ENG_GONE_S + 40 + 59) / 60 ))
+# Claim length, extended by its id before every boot (gates, renew_call). It must outlast, from one renewal to the next
+# (re-check 2026-11-28: the first sum, +1425, missed the options copy's box_fresh, the watch pass itself and the witness
+# move's box_fresh). Box pass bounds (common/box_preflight.sh): box_preflight_all and box_fresh <= 40 s each (title
+# checker 10 s + Sober flatpak 10 s + systemctl 10 s timeouts, the rest file reads and one ps scan).
+#   GATE_AFTER_S 150   the gates after renew_call: display wait 20 s + cfg0, ltx_known, pins (~1 s hashing measured;
+#                      10 s allowed) + box_gate 40 + the options copy's box_guarded (box_fresh) 40 + box_gate 40
+#   boot               TIMEOUT_RUN + WATCH_EXTRA_S (the watch cap) + one watch pass that sees it: WATCH_NAP_S + its
+#                      checks WATCH_CHK_S 30 (title 10 + flatpak 10 + systemctl 10; lock, claims, EXCLUSIVE read files)
+#   stop there         CHILD_GRACE_S + 1 (stop_child's 1-s poll) + box_wine_kill 60 (-k 30 + -w 30) + ENG_GONE_S
+#   AFTER_BOOT_S 80    after a normal return: the witness move's box_guarded 40 + the next gates' box_gate 40 (engines_gone
+#                      after a normal return is the same 120 s as in the stop line, which is counted instead)
+# Sum (both the stop and the after-boot steps counted, an upper bound): TIMEOUT_RUN + 900 + 5 + 30 + 150 + 250 + 1 + 60
+# + 60 + 80 = TIMEOUT_RUN + 1536 s, whole minutes (probe: 3436 s -> 58 min). Refused above 180 min (the fleet's slice
+# limit; the claim tool sets no maximum of its own).
+WATCH_CHK_S=30; GATE_AFTER_S=150; AFTER_BOOT_S=80
+CLAIM_MIN=$(( (TIMEOUT_RUN + WATCH_EXTRA_S + WATCH_NAP_S + WATCH_CHK_S + GATE_AFTER_S + CHILD_GRACE_S + 1 + 60 + ENG_GONE_S + AFTER_BOOT_S + 59) / 60 ))
 [ "$CLAIM_MIN" -le 180 ] || { echo "REFUSED: one claim period would be $CLAIM_MIN min (> 180, the fleet's slice limit): BENCH_TIMEOUT ${TIMEOUT_RUN}s is too long"; exit 2; }
 BRK2=0; [ "$MODE" = series ] && [ "$PROBE_S3_FRAMES" -ge "$DROP_MIN" ] && BRK2=1   # prereg 2.3, 6.1
 
@@ -408,16 +420,16 @@ stop_child() {   # TERM our det_run.sh (its EXIT trap runs its cleanup), wait up
   wait "$BP" 2>/dev/null; BP=""
   engines_gone
 }
-release_mine() {   # release EVERY claim id this call obtained (review S-1, 2026-11-28): claim_calls.txt holds only this
-                   # run's own receipts (the acquire claim and the renewals, which normally repeat the same id); each
-                   # distinct id is released by id. By name only when no id was ever printed (kj4p release_mine).
-  local id ids
+release_mine() {   # release ONLY this call's own claim, by its id (re-check R-1, 2026-11-28): CLAIM_ID0, the id the one
+                   # acquire claim printed (claim_calls.txt holds claim output only; renewals go to renew_calls.txt).
+                   # Never an id a renewal printed: if our record had vanished, `renew` extends every engineperf record
+                   # and prints a foreign id, and releasing that would release another job's claim. By name only when
+                   # no id was ever printed (kj4p release_mine).
+  local id
   [ "$CLAIMTRY" = 1 ] || return 0
-  ids=$(tr -d '\r' < "$SD/claim_calls.txt" 2>/dev/null | sed -n 's/^claim-id: \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' | awk '!s[$0]++')
-  if [ -n "$ids" ]; then
-    for id in $ids; do qr release $W "$id"; log "released claim $id (rc $?)"; done   # ids are [A-Za-z0-9._-]: no glob
-    return 0
-  fi
+  id=$CLAIM_ID0
+  [ -n "$id" ] || id=$(tr -d '\r' < "$SD/claim_calls.txt" 2>/dev/null | sed -n 's/^claim-id: \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' | tail -1)
+  if [ -n "$id" ]; then qr release $W "$id"; log "released claim $id (rc $?)"; return 0; fi   # [A-Za-z0-9._-]: no glob
   box_claim_has_token $W "$TOKEN"; case $? in
     0) if box_ok_claims $W "$TOKEN"; then
          qr release $W; log "released the claim carrying $TOKEN by name (no claim-id; it was the only claim under $W) rc $?"
@@ -449,14 +461,24 @@ claim_call() { CLAIMTRY=1; env "${BOX_QR_UNSET[@]}" "$T/quiet-required.sh" claim
 # second `claim` by the same worker on its live slot can NEST a new record (quiet-required.sh nest_claim, header of the
 # claim records), and each nested record would outlive this run unless released. `renew <w> <min>` with QR_CLAIM_ID
 # set extends exactly that record when several are nested (renew_own: `QR_CLAIM_ID's ... extend only`), and with one
-# record rewrites the slot keeping the id (recs_fresh <id>). It prints `claim-id: <id>` (appended to claim_calls.txt,
-# so release_mine sees it). Before every renewal box_gate has checked that a live record carries our token and that no
-# other engineperf record is live, so the renewal can only touch ours. QR_CLAIM_ID is set AFTER BOX_QR_UNSET drops
-# any inherited value.
+# record rewrites the slot keeping the id (recs_fresh <id>). It prints `claim-id: <id>` (kept in renew_calls.txt; the
+# last call's output in renew_last.txt). Before every renewal box_gate has checked that a live record carries our token
+# and that no other engineperf record is live. If our record vanished in the moment between that check and the renewal,
+# renew_own extends EVERY engineperf record and prints the first (foreign) id (quiet-required.sh renew_own fallback;
+# review re-check R-1), so the printed id is compared with CLAIM_ID0 after every renewal and a mismatch stops the run
+# (rc 3 here, box stop in gates; nothing under run/ touched). QR_CLAIM_ID is set AFTER BOX_QR_UNSET drops any
+# inherited value.
 CLAIM_ID0=""
-renew_call() {
-  [ -n "$CLAIM_ID0" ] || return 1
-  env "${BOX_QR_UNSET[@]}" QR_CLAIM_ID="$CLAIM_ID0" "$T/quiet-required.sh" renew $W "$CLAIM_MIN" >> "$SD/claim_calls.txt" 2>&1 </dev/null; }
+RENEW_WHY=""
+renew_call() {   # 0 = our claim extended; 1 = refused or no id; 3 = it printed another id (or none)
+  local r rid
+  RENEW_WHY=""; [ -n "$CLAIM_ID0" ] || { RENEW_WHY="no claim id"; return 1; }
+  env "${BOX_QR_UNSET[@]}" QR_CLAIM_ID="$CLAIM_ID0" "$T/quiet-required.sh" renew $W "$CLAIM_MIN" > "$SD/renew_last.txt" 2>&1 </dev/null; r=$?
+  cat "$SD/renew_last.txt" >> "$SD/renew_calls.txt" 2>/dev/null
+  [ "$r" = 0 ] || { RENEW_WHY="quiet-required.sh renew rc $r"; return 1; }
+  rid=$(tr -d '\r' < "$SD/renew_last.txt" 2>/dev/null | sed -n 's/^claim-id: \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' | tail -1)
+  [ "$rid" = "$CLAIM_ID0" ] || { RENEW_WHY="renew printed claim-id '${rid:-none}', not this run's $CLAIM_ID0: our record was gone and the renewal may have extended another job's claim (not released by this run)"; return 3; }
+  return 0; }
 # The queue is keyed by the worker NAME only (common/README.md, S-3 known limit): want only when no entry exists (then the
 # entry is this run's: OURQ=1); withdraw only if OURQ=1 and exactly one entry exists then.
 want_call() {
@@ -530,7 +552,7 @@ axr_restore() {   # the options file before THIS boot (header OPTIONS FILE); onl
 gates() {   # <tag> <exe>: every pre-boot check; 1 = stop (halt set)
   local t=$1 e=$2 r
   box_gate "before $t" || return 1
-  held renew_call || { halt box "claim renewal (renew by id $CLAIM_ID0) refused before $t"; return 1; }
+  held renew_call || { halt box "claim renewal (renew by id $CLAIM_ID0) failed before $t: $RENEW_WHY"; return 1; }
   for _ in $(seq 1 "$DISP_WAIT_N"); do box_ok_display_free "$DISP" && break; nap "$DISP_WAIT_S"; done
   box_ok_display_free "$DISP" || { halt fault "$BOX_WHY (before $t)"; return 1; }
   r=$(cfg0) || { halt fault "$r (before $t)"; return 1; }

@@ -15,6 +15,11 @@ Labels: **[D]** desk (file:line), **[M]** measured (a number in a file), **[G]**
 earlier registration without re-deriving it).
 
 **Change log.**
+- 2026-11-28 (re-check after the fix round, plan-facts/s4d1-driver-review-2026-11-28.md "Re-check after fixes" R-1/R-3;
+  desk only): s4d1_run.sh is now sha256 33b1fd0a8f16aaf95f371ebb147bd11a4c77867da282d8a7e8d72afb8bf28b43 (was af73868b...). The
+  id each renewal prints must be this call's claim id, else the run stops (class box, nothing under run/ touched);
+  only that one id is released at the end, never an id a renewal printed (6.2). The claim period's sum is corrected to
+  BENCH_TIMEOUT + 1536 s (58 min for the probe; was + 1425 s, 56 min), refused above 180 min. No test content changed.
 - 2026-11-28 (fix round after plan-facts/s4d1-driver-review-2026-11-28.md; desk only): s4d1_run.sh is now sha256
   af73868b8d5c32bbd1cd2569829ca54aad9be73a606c88618646694f126559ae (was 8dc70c49...): one claim per call, extended by id (`renew`), every
   id released at the end (S-1); a lost claim stops (S-2, 6.4); engines checked right after each det_run.sh (S-3, 6.4);
@@ -284,7 +289,7 @@ probes: s4d_probe, s4d_probe15 -> (GO, fill, self-test on real bytes, register) 
 s4d_s3 s4d_o3 -> L: s4d_l2a s4d_l3 s4d_l1 s4d_l2w s4d_l2b -> S: s4d_off2a s4d_on2a s4d_off3 s4d_on3 s4d_off2b s4d_on2b
 s4d_brk1 s4d_brk2 (brk2 only if S3 is registered). The arms of each pair are spread out, not back to back. The breaks
 go last; each boot starts fresh (det_run.sh restores user.ltx and loads the save).
-### 6.2 Command per boot (series script s4d1/s4d1_run.sh, sha256 af73868b8d5c32bbd1cd2569829ca54aad9be73a606c88618646694f126559ae; NOTES.md 4 R2, 9)
+### 6.2 Command per boot (series script s4d1/s4d1_run.sh, sha256 33b1fd0a8f16aaf95f371ebb147bd11a4c77867da282d8a7e8d72afb8bf28b43; NOTES.md 4 R2, 9)
 The driver also restores the options file before every boot (template safety rule, kept by the coordinator's
 decision 2026-11-28): run/appdata/axr_options_play.ltx (pinned 27d54b9f...) is copied over
 run/gamedata/configs/axr_options.ltx inside box_guarded, because each exe rewrites that file's version line when it
@@ -294,7 +299,8 @@ DET_EXTRA="<base> <lever>" tools/det_run.sh <exe> <tag> 60 3` (det_run.sh pinned
 `mv run/appdata/logs/synth_<tag>.txt out/det_<tag>/` (det_run.sh does not move the witness: det_run.sh:259-266 moves only this tag's dumps, counters, traces and saves).
 `<T>` = 1900 s for the two probes; for the series the 2.3 value max(1900, ceil(5 x PROBE_BOOT_S / 60) x 60) (e.g.
 2040 s for PROBE_BOOT_S 401). The claim is taken once per driver call and extended by its id before every boot
-(`quiet-required.sh renew` with QR_CLAIM_ID); every claim id the call obtained is released at its end.
+(`quiet-required.sh renew` with QR_CLAIM_ID); a renewal that prints another id stops the run (box), and only the
+call's own claim id is released at its end. One claim period is BENCH_TIMEOUT + 1536 s in whole minutes (NOTES.md 9).
 `<base>` = `-det_passes 100,200,320 -det_lua_streams -det_counters` (tools/s4c_partA.sh:11, COPIED; "60 3" is ignored
 under -det_passes, PREREG-S2-simtick section 9).
 | tags | exe | `<lever>` |

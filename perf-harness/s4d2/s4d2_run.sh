@@ -56,6 +56,10 @@
 # 2026-11-28 (plan-facts/s4d1-driver-review-2026-11-28.md, the faults it found here too): S-1 one claim, then `renew`
 # by its id, finish() releases every id obtained; S-2 a lost claim stops (box_gate, watch_boot); S-3 engines_gone right
 # after det_run.sh returns; N-1 signals held over the launch until BP is set; N-5 the wait deadline before every claim.
+# Re-check 2026-11-28 (same file, "Re-check after fixes", R-1): the id every renewal prints must be CLAIM_ID0, else a
+# box stop; finish() releases ONLY CLAIM_ID0; CLAIM_MIN = s4d1's renewal-to-renewal sum with s4d2's own terms
+# (BENCH_TIMEOUT + 1586 s, probe 60 min, refused above 180 min; was timeout + 10 min); watch_boot's wall cap
+# BENCH_TIMEOUT + WATCH_EXTRA_S 1020 s (class fault). CHILD_GRACE_S 180 unchanged.
 # 2026-11-28 (plan-facts/box-preflight-third-review-2026-11-28.md): U-1 cfg0 reads out/user_det.ltx.orig (the bytes the
 # engine runs with; a missing sim_tick = the engine default 0); S3-2 the physical project root must be
 # $HOME/Projects/StalkerGameEngine; S3-7 CHILD_GRACE_S 180; N3-4 axr_restore returns a code (no subshell); N3-6
@@ -138,6 +142,22 @@ CHILD_GRACE_S=180                # det_run.sh gets this long after TERM before K
                                  # run/prefix (its repeated -k is bounded inside the 60 s), its own Xvfb/openbox, the
                                  # claim-tool release (not bounded; normally < 1 s): 30 + 30 + 60 + release + margin. After
                                  # a TERM the user.ltx restore is skipped (a signal is a stop), so no box_fresh is in it.
+WATCH_EXTRA_S=1020               # re-check R-1 (2026-11-28), s4d1's N4-11 cap derived for s4d2's boots: watch_boot stops
+                                 # det_run.sh (class fault) once it has run BENCH_TIMEOUT + this. det_run.sh's time outside
+                                 # its LIMIT (which starts at the engine start, det_run.sh START), worst case by its own
+                                 # bounds, for s4d2's call (DET_NOCLAIM=1, so no claim; no -det_save in BASE, ITEM or any
+                                 # lever, so no save wait). Before the engine start: box_preflight_all <= 40 s, box_fresh
+                                 # <= 40, Xvfb socket 10 + 0.5 + settle 1, wmctrl 5 + openbox 30 x (5 + 0.5) = 165, three
+                                 # guarded steps (box_fresh 40 each) 120: <= 382 s + run_noguard.sh's find (seconds [G]).
+                                 # After LIMIT: one loop pass late (sleep 5 + inboot <= 30) and, if the cp3 dump landed in
+                                 # that pass, waitchk 8 (+ one inboot 30 + 1) = 74; stop_wine -k 30 + -w 30 + the 60-s wait
+                                 # with its 10-s `-k nowait` + 1 = 131; collect guarded 40 + moves ~5; the user.ltx restore
+                                 # guarded 40 + 1; own openbox / Xvfb kill < 5: <= 296 s. Sum ~678 s; 1020 = 1.5x
+WATCH_NAP_S=5                    # box checks during a boot: every 5 s, the rate of det_run.sh's own inboot (det_run.sh:244)
+WATCH_CHK_S=30                   # one watch pass's checks: title 10 + Sober flatpak 10 + systemctl 10 (box_preflight.sh
+                                 # timeouts); the play lock, claim and EXCLUSIVE tests read files
+ENG_GONE_S=60                    # engines_gone: after box_wine_kill (-k 30 + -w 30) the engines of run/prefix must be gone
+                                 # within the same 60 s det_run.sh's stop_wine allows (det_run.sh:156)
 
 usage() { echo "usage: $0 --preflight-only | probe|probe_b|series [--preflight-only] | probe_fix <1-9> [--preflight-only]"; exit 2; }
 MODE=${1:-}; FIXN=""; PRE=""
@@ -341,6 +361,22 @@ case "$MODE" in
 esac
 [ -e "$LOGS/synth_s4p_probe.txt" ] && refuse "$LOGS/synth_s4p_probe.txt exists (a probe witness was not moved)"
 [ "$bad" = 0 ] || exit 2
+# Claim length (re-check R-1, 2026-11-28: was one boot's timeout + 10 min, which a slow boot could outlast), extended by
+# its id before every boot (gates, renew_call). s4d1's formula, each term for s4d2's own steps. It must outlast, from one
+# renewal to the next (box_preflight_all and box_fresh <= 40 s each, common/box_preflight.sh timeouts):
+#   GATE_AFTER_S 150   the gates after renew_call: display wait 10 x 2 s = 20 + cfg0 and pins (~1 s hashing measured
+#                      2026-11-28 for the exes and saves; 10 s allowed) + box_gate 40 + the options copy's box_guarded
+#                      (box_fresh) 40 + the last box_gate 40
+#   boot               TIMEOUT_RUN + WATCH_EXTRA_S (the watch cap) + one watch pass that sees it, WATCH_NAP_S + WATCH_CHK_S
+#   stop there         CHILD_GRACE_S + 1 (stop_child's 1-s poll) + box_wine_kill 60 + ENG_GONE_S (engines_gone)
+#   AFTER_BOOT_S 80    after a normal return: the witness move's box_guarded 40 + the next gates' box_gate 40 (engines_gone
+#                      after a normal return is the same 120 s as in the stop line, which is counted instead)
+# Sum (stop and after-boot both counted, an upper bound): TIMEOUT_RUN + 1020 + 5 + 30 + 150 + 180 + 1 + 60 + 60 + 80 =
+# TIMEOUT_RUN + 1586 s, whole minutes (probe and a 2000-s series: 3586 s -> 60 min). Refused above 180 min (the fleet's
+# slice limit, as s4d1): that allows BENCH_TIMEOUT up to 9180 s, i.e. PROBE_BOOT_S up to ~1836 s.
+GATE_AFTER_S=150; AFTER_BOOT_S=80
+CLAIM_MIN=$(( (TIMEOUT_RUN + WATCH_EXTRA_S + WATCH_NAP_S + WATCH_CHK_S + GATE_AFTER_S + CHILD_GRACE_S + 1 + 60 + ENG_GONE_S + AFTER_BOOT_S + 59) / 60 ))
+[ "$CLAIM_MIN" -le 180 ] || { echo "REFUSED: one claim period would be $CLAIM_MIN min (> 180, the fleet's slice limit): BENCH_TIMEOUT ${TIMEOUT_RUN}s is too long"; exit 2; }
 [ "$PRE" = "--preflight-only" ] && { echo "preflight ok ($MODE$FIXN): $(plan | wc -l) boot(s)"; plan | cut -d'|' -f1,2 | tr '\n' ' '; echo; exit 0; }
 
 # ---- state, log, one way out ----
@@ -351,7 +387,6 @@ WATCHWHY=""; sc=""; stop=""; rc=0; CLAIMTRY=0; CLAIMED=0; WANTED=0; OURQ=0; BOOT
 TOKEN="s4d2-$MODE$FIXN-$(date +%Y%m%d%H%M%S)-$$"   # in the claim's <what>: only THIS run's claim is ever released
 WHAT="headless Xvfb GAMMA A-Life equivalence series s4d2 ($MODE$FIXN, $(plan | wc -l) boots, display $DISP) $TOKEN"
 case "$WHAT" in *EXCLUSIVE*) echo "REFUSED: the claim text names EXCLUSIVE"; exit 2 ;; esac
-CLAIM_MIN=$(( (TIMEOUT_RUN + 59) / 60 + 10 ))   # one boot's timeout + 10 min; renewed before every boot
 qr() { env "${BOX_QR_UNSET[@]}" "$T/quiet-required.sh" "$@" >/dev/null 2>&1 </dev/null; }   # the tool's tuning variables dropped
 halt() { sc=$1; stop=$2; rc=1; }
 nap() { sleep "$1" </dev/null & SP=$!; wait $SP; SP=""; }   # a sleep a trapped signal interrupts at once
@@ -370,7 +405,7 @@ engines_gone() {   # S-2: after our det_run.sh ended, no engine of the run tree 
   box_wine_kill "$PFX" || { NORELEASE=1; NORELEASE_WHY="$BOX_WHY"; log "$BOX_WHY"; return 1; }
   t0=$(date +%s)
   until box_engines_in_prefix "$PFX"; do
-    [ $(( $(date +%s) - t0 )) -ge 60 ] && { NORELEASE=1; NORELEASE_WHY="still running 60 s after wineserver -k: $BOX_WHY"; log "$NORELEASE_WHY"; return 1; }
+    [ $(( $(date +%s) - t0 )) -ge "$ENG_GONE_S" ] && { NORELEASE=1; NORELEASE_WHY="still running ${ENG_GONE_S} s after wineserver -k: $BOX_WHY"; log "$NORELEASE_WHY"; return 1; }
     sleep 1
   done
   log "no engine left in $PFX"; return 0; }
@@ -387,16 +422,16 @@ stop_child() {   # TERM our det_run.sh (its EXIT trap runs its cleanup), wait up
   wait "$BP" 2>/dev/null; BP=""
   engines_gone
 }
-release_mine() {   # release EVERY claim id this call obtained (review S-1, 2026-11-28): claim_calls.txt holds only this
-                   # run's own receipts (the acquire claim and the renewals, which normally repeat the same id); each
-                   # distinct id is released by id. By name only when no id was ever printed (kj4p release_mine).
-  local id ids
+release_mine() {   # release ONLY this call's own claim, by its id (re-check R-1, 2026-11-28): CLAIM_ID0, the id the one
+                   # acquire claim printed (claim_calls.txt holds claim output only; renewals go to renew_calls.txt).
+                   # Never an id a renewal printed: if our record had vanished, `renew` extends every engineperf record
+                   # and prints a foreign id, and releasing that would release another job's claim. By name only when
+                   # no id was ever printed (kj4p release_mine).
+  local id
   [ "$CLAIMTRY" = 1 ] || return 0
-  ids=$(tr -d '\r' < "$SD/claim_calls.txt" 2>/dev/null | sed -n 's/^claim-id: \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' | awk '!s[$0]++')
-  if [ -n "$ids" ]; then
-    for id in $ids; do qr release $W "$id"; log "released claim $id (rc $?)"; done   # ids are [A-Za-z0-9._-]: no glob
-    return 0
-  fi
+  id=$CLAIM_ID0
+  [ -n "$id" ] || id=$(tr -d '\r' < "$SD/claim_calls.txt" 2>/dev/null | sed -n 's/^claim-id: \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' | tail -1)
+  if [ -n "$id" ]; then qr release $W "$id"; log "released claim $id (rc $?)"; return 0; fi   # [A-Za-z0-9._-]: no glob
   box_claim_has_token $W "$TOKEN"; case $? in
     0) if box_ok_claims $W "$TOKEN"; then
          qr release $W; log "released the claim carrying $TOKEN by name (no claim-id; it was the only claim under $W) rc $?"
@@ -428,14 +463,24 @@ claim_call() { CLAIMTRY=1; env "${BOX_QR_UNSET[@]}" "$T/quiet-required.sh" claim
 # second `claim` by the same worker on its live slot can NEST a new record (quiet-required.sh nest_claim, header of the
 # claim records), and each nested record would outlive this run unless released. `renew <w> <min>` with QR_CLAIM_ID
 # set extends exactly that record when several are nested (renew_own: `QR_CLAIM_ID's ... extend only`), and with one
-# record rewrites the slot keeping the id (recs_fresh <id>). It prints `claim-id: <id>` (appended to claim_calls.txt,
-# so release_mine sees it). Before every renewal box_gate has checked that a live record carries our token and that no
-# other engineperf record is live, so the renewal can only touch ours. QR_CLAIM_ID is set AFTER BOX_QR_UNSET drops
-# any inherited value.
+# record rewrites the slot keeping the id (recs_fresh <id>). It prints `claim-id: <id>` (kept in renew_calls.txt; the
+# last call's output in renew_last.txt). Before every renewal box_gate has checked that a live record carries our token
+# and that no other engineperf record is live. If our record vanished in the moment between that check and the renewal,
+# renew_own extends EVERY engineperf record and prints the first (foreign) id (quiet-required.sh renew_own fallback;
+# review re-check R-1), so the printed id is compared with CLAIM_ID0 after every renewal and a mismatch stops the run
+# (rc 3 here, box stop in gates; nothing under run/ touched). QR_CLAIM_ID is set AFTER BOX_QR_UNSET drops any
+# inherited value.
 CLAIM_ID0=""
-renew_call() {
-  [ -n "$CLAIM_ID0" ] || return 1
-  env "${BOX_QR_UNSET[@]}" QR_CLAIM_ID="$CLAIM_ID0" "$T/quiet-required.sh" renew $W "$CLAIM_MIN" >> "$SD/claim_calls.txt" 2>&1 </dev/null; }
+RENEW_WHY=""
+renew_call() {   # 0 = our claim extended; 1 = refused or no id; 3 = it printed another id (or none)
+  local r rid
+  RENEW_WHY=""; [ -n "$CLAIM_ID0" ] || { RENEW_WHY="no claim id"; return 1; }
+  env "${BOX_QR_UNSET[@]}" QR_CLAIM_ID="$CLAIM_ID0" "$T/quiet-required.sh" renew $W "$CLAIM_MIN" > "$SD/renew_last.txt" 2>&1 </dev/null; r=$?
+  cat "$SD/renew_last.txt" >> "$SD/renew_calls.txt" 2>/dev/null
+  [ "$r" = 0 ] || { RENEW_WHY="quiet-required.sh renew rc $r"; return 1; }
+  rid=$(tr -d '\r' < "$SD/renew_last.txt" 2>/dev/null | sed -n 's/^claim-id: \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' | tail -1)
+  [ "$rid" = "$CLAIM_ID0" ] || { RENEW_WHY="renew printed claim-id '${rid:-none}', not this run's $CLAIM_ID0: our record was gone and the renewal may have extended another job's claim (not released by this run)"; return 3; }
+  return 0; }
 # S-3: the queue is keyed by the worker NAME only (quiet-required.sh `want` dedupes by name, `withdraw <w>` drops every
 # entry of <w>, and the name must be a tmux session overseer-<name>, so a per-run queue name is not possible). Known
 # without `check`, by reading QUIET-QUEUE: whether an entry under our name exists BEFORE a want. Rule: want only when no
@@ -512,7 +557,7 @@ axr_restore() {   # the options file before THIS boot (header OPTIONS FILE); onl
 gates() {   # <tag> <exe>: every pre-boot check; 1 = stop (halt set)
   local t=$1 e=$2 r
   box_gate "before $t" || return 1
-  held renew_call || { halt box "claim renewal (renew by id $CLAIM_ID0) refused before $t"; return 1; }
+  held renew_call || { halt box "claim renewal (renew by id $CLAIM_ID0) failed before $t: $RENEW_WHY"; return 1; }
   for _ in 1 2 3 4 5 6 7 8 9 10; do box_ok_display_free "$DISP" && break; nap 2; done
   box_ok_display_free "$DISP" || { halt fault "$BOX_WHY (before $t)"; return 1; }
   r=$(cfg0) || { halt fault "$r (before $t)"; return 1; }
@@ -584,10 +629,12 @@ inrun_check() {   # <tag> <exe> <lever>: prereg 6.2 in-run preflight on s4p_off2
   return 0
 }
 watch_boot() {   # in THIS shell (no subshell: traps act at once): while our det_run.sh runs, the box conditions
-                 # every ~5 s (engine_running excluded: ours runs); sets WATCHWHY and returns 1 to stop
-  WATCHWHY=""
+                 # every WATCH_NAP_S (engine_running excluded: ours runs), and the wall cap (re-check R-1, s4d1 N4-11);
+                 # sets WATCHWHY and returns 1 to stop (WATCHCLS box or fault)
+  local t0; t0=$(date +%s)
+  WATCHWHY=""; WATCHCLS=box
   while child_alive; do
-    nap 5
+    nap "$WATCH_NAP_S"
     child_alive || return 0
     box_ok_play_lock || { WATCHWHY="play_lock: $BOX_WHY"; return 1; }
     box_ok_title     || { WATCHWHY="protected_title: $BOX_WHY"; return 1; }
@@ -595,6 +642,8 @@ watch_boot() {   # in THIS shell (no subshell: traps act at once): while our det
     box_ok_claims $W "$TOKEN" || { WATCHWHY="own_claim: $BOX_WHY"; return 1; }
     box_claim_has_token $W "$TOKEN" || { WATCHWHY="lost_claim: no live claim record under $W carries this run's token ($BOX_WHY)"; return 1; }   # S-2
     box_ok_exclusive || { WATCHWHY="exclusive: $BOX_WHY"; return 1; }
+    [ $(( $(date +%s) - t0 )) -ge $(( TIMEOUT_RUN + WATCH_EXTRA_S )) ] && {
+      WATCHCLS=fault; WATCHWHY="det_run.sh still running $(( $(date +%s) - t0 ))s after its start (cap ${TIMEOUT_RUN}+${WATCH_EXTRA_S}s)"; return 1; }
   done
   return 0
 }
@@ -608,8 +657,8 @@ boot() {   # <tag> <exe> <lever>: one det_run.sh boot in the background (S2-3); 
     "$DETRUN" "$e" "$t" 60 3 > "$SD/run_$t.log" 2>&1 </dev/null & BP=$!
   trap on_sig TERM INT HUP; [ "$SIGPEND" = 1 ] && on_sig   # finish() now sees BP and stops this child
   if ! watch_boot; then
-    log "box condition during $t: $WATCHWHY; stopping this run's det_run.sh (pid $BP)"
-    stop_child; BOXWHY=$WATCHWHY; LIVE=""; return 8
+    log "$WATCHCLS condition during $t: $WATCHWHY; stopping this run's det_run.sh (pid $BP)"
+    stop_child; BOXWHY=$WATCHWHY; BOXCLS=$WATCHCLS; LIVE=""; return 8
   fi
   wait "$BP"; r=$?; BP=""
   LIVE=""
@@ -623,7 +672,7 @@ boot() {   # <tag> <exe> <lever>: one det_run.sh boot in the background (S2-3); 
 }
 
 plan > "$SD/plan.txt" || { halt fault "cannot write $SD/plan.txt"; finish; }
-BOXWHY=""
+BOXWHY=""; BOXCLS=box
 while IFS='|' read -r -u 3 tag exe lv; do
   t=$tag
   while :; do
@@ -633,7 +682,7 @@ while IFS='|' read -r -u 3 tag exe lv; do
     [ "$brc" = 0 ] && { echo "$t" >> "$SD/done.txt" || { halt fault "cannot append to $SD/done.txt"; finish; }; }   # N-13: completed boots only
     case $brc in
       0) ;;
-      8) halt box "during $t: $BOXWHY (this run's boot stopped)"; finish ;;
+      8) halt "$BOXCLS" "during $t: $BOXWHY (this run's boot stopped)"; finish ;;
       9) halt fault "crash dump after $t"; finish ;;
       5) halt fault "timeout of $t (${TIMEOUT_RUN}s)"; finish ;;
       10) halt fault "an engine of the run tree still used run/prefix after $t (det_run.sh rc ${DETRC:-?}): ${NORELEASE_WHY:-see the log}"; finish ;;
