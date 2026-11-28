@@ -1289,6 +1289,23 @@ void vr_bpt_near_diag(CActor* A, const Fvector& p, float reach, u32 frame)
 	if (!shown)
 		Msg("* [vr19n] frame %u nothing taken; no free item within 1 m of the hand", frame);
 }
+// L2 (TEST ONLY, with -vr_sl): every free inventory item the actor's pick-up sees, at its model box's centre
+void vr_bpt_item_list(CActor* A, u32 frame)
+{
+	if (!A)
+		return;
+	for (CObject* O : A->feel_touch)
+	{
+		CInventoryItem* it = O ? smart_cast<CInventoryItem*>(O) : nullptr;
+		if (!it || O->H_Parent() || O->getDestroy() || !O->Visual())
+			continue;
+		CWeaponAmmo* am = smart_cast<CWeaponAmmo*>(O);
+		Fvector c;
+		O->Visual()->getVisData().box.getcenter(c);
+		O->XFORM().transform_tiny(c);
+		Msg("* [vr22s] frame %u item id %u sect '%s' count %d at %.4f %.4f %.4f", frame, u32(O->ID()), O->cNameSect().c_str(), am ? int(am->m_boxCurr) : -1, c.x, c.y, c.z);
+	}
+}
 // B3b2: where is the item? 0 gone, 1 the actor's, 2 not the actor's (free in the world, or someone else's)
 int vr_bpt_where(CActor* A, int id)
 {

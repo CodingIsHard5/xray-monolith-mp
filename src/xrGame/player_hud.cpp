@@ -4808,6 +4808,238 @@ static void vr_bph_fh_end(vr_bph_state& H)
 	H.fh_id1 = 0;
 	vr_bph_out_clear(H);
 }
+// ---- L2 (Amendment 41 notes 37-39), TEST ONLY: -vr_sl <S> <L> saves the game as gvr_l2 at VR frame S and loads it at L ----
+// Hard rule (Overseer): only the run tree's own save folder. The switch refuses unless the name is a plain name, the save
+// folder lies inside the game's root folder, and the save folder holds the marker file gvr_run_tree with this run's token
+// (tools/sl_guard.sh writes it only after its real-path check on the Linux side).
+extern u32 g_vr_actor_spawns;               // Actor_Network.cpp
+void vr_bpt_item_list(CActor* A, u32 frame); // ActorInput.cpp
+struct vr_sl_state
+{
+	bool parsed, on, done, asked, loaded, put_wait, hand;
+	int stage; // 0 before the save, 1 the save was asked, 2 the file is there
+	u32 fs, fl, spawns, loaded_frame;
+	string64 name, token;
+	string_path root, saves, file;
+	int h_id;
+	string64 h_sect;
+	Fmatrix h_w;
+	Fvector h_bc, h_ext;
+};
+static vr_sl_state s_vr_sl;
+static bool vr_sl_inside(LPCSTR saves, LPCSTR root)
+{
+	const size_t n = xr_strlen(root);
+	if (!n || xr_strlen(saves) <= n || _strnicmp(saves, root, n))
+		return false;
+	return root[n - 1] == '\\' || root[n - 1] == '/' || saves[n] == '\\' || saves[n] == '/';
+}
+// nullptr = allowed; else the reason
+static LPCSTR vr_sl_check(LPCSTR root, LPCSTR saves, LPCSTR name, bool marker)
+{
+	if (!name || !name[0] || xr_strlen(name) > 32)
+		return "not a plain name";
+	for (LPCSTR c = name; *c; ++c)
+		if (!((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') || *c == '_'))
+			return "not a plain name";
+	if (!vr_sl_inside(saves, root))
+		return "the save folder is not inside the game's root folder";
+	if (!marker)
+		return "no marker for this run in the save folder";
+	return nullptr;
+}
+static bool vr_sl_marker(const vr_sl_state& S)
+{
+	if (!S.token[0])
+		return false;
+	string_path mf;
+	strconcat(sizeof(mf), mf, S.saves, "gvr_run_tree");
+	if (GetFileAttributesA(mf) == INVALID_FILE_ATTRIBUTES)
+		return false;
+	IReader* r = FS.r_open(mf);
+	if (!r)
+		return false;
+	string256 line = "";
+	if (!r->eof())
+		r->r_string(line, sizeof(line));
+	FS.r_close(r);
+	for (int k = xr_strlen(line) - 1; k >= 0 && (line[k] == '\r' || line[k] == '\n' || line[k] == ' '); --k)
+		line[k] = 0;
+	return !xr_strcmp(line, S.token);
+}
+static void vr_sl_parse()
+{
+	vr_sl_state& S = s_vr_sl;
+	if (S.parsed)
+		return;
+	S.parsed = true;
+	LPCSTR q = strstr(Core.Params, "-vr_sl ");
+	S.on = q && sscanf(q + 7, "%u %u", &S.fs, &S.fl) == 2 && S.fl > S.fs;
+	xr_strcpy(S.name, "gvr_l2");
+	if (LPCSTR n = strstr(Core.Params, "-vr_sl_name "))
+		sscanf(n + 12, "%63s", S.name);
+	S.token[0] = 0;
+	if (LPCSTR t = strstr(Core.Params, "-vr_sl_token "))
+		sscanf(t + 13, "%63s", S.token);
+	xr_strcpy(S.root, FS.get_path("$fs_root$")->m_Path);
+	xr_strcpy(S.saves, FS.get_path("$game_saves$")->m_Path);
+	if (!S.on)
+		return;
+	Msg("* [vr22] root '%s' saves '%s' marker %s", S.root, S.saves, vr_sl_marker(S) ? "found" : "missing");
+	Msg("* [vr22] save at VR frame %u as '%s', load at %u (-vr_sl, TEST ONLY)", S.fs, S.name, S.fl);
+	if (strstr(Core.Params, "-vr_sl_selftest"))
+	{
+		struct { LPCSTR root, saves, name; bool marker; } T[7] = {
+			{"c:\\game\\", "c:\\game\\appdata\\savedgames\\", "gvr_l2", true},
+			{"c:\\game\\", "c:\\game\\appdata\\savedgames\\", "..\\..\\outside", true},
+			{"c:\\game\\", "c:\\game\\appdata\\savedgames\\", "\\elsewhere\\save", true},
+			{"c:\\game\\", "c:\\game\\appdata\\savedgames\\", "d:save", true},
+			{"c:\\game\\", "c:\\other\\savedgames\\", "gvr_l2", true},
+			{"c:\\game", "c:\\game2\\savedgames\\", "gvr_l2", true},
+			{"c:\\game\\", "c:\\game\\appdata\\savedgames\\", "gvr_l2", false}};
+		for (int k = 0; k < 7; ++k)
+		{
+			LPCSTR why = vr_sl_check(T[k].root, T[k].saves, T[k].name, T[k].marker);
+			if (why)
+				Msg("* [vr22t] case %d root '%s' saves '%s' name '%s' marker %d: refused (%s)", k + 1, T[k].root, T[k].saves, T[k].name, T[k].marker ? 1 : 0, why);
+			else
+				Msg("* [vr22t] case %d root '%s' saves '%s' name '%s' marker %d: ok", k + 1, T[k].root, T[k].saves, T[k].name, T[k].marker ? 1 : 0);
+		}
+	}
+}
+static void vr_bph_let_go(vr_bph_state& H, const vr_input_info& I, CActor* A, LPCSTR sect, int id, const Fmatrix& w, const Fvector& bc, const Fvector& ext);
+static void vr_bph_fh_end(vr_bph_state& H);
+static void vr_sl_step(vr_bph_state& H, const vr_input_info& I, CActor* A, const Fmatrix& hand)
+{
+	vr_sl_state& S = s_vr_sl;
+	vr_sl_parse();
+	if (!S.on || !A)
+		return;
+	vr_bpt_item_list(A, I.frame);
+	if (!S.done && S.stage == 0 && I.frame >= S.fs)
+	{
+		LPCSTR why = vr_sl_check(S.root, S.saves, S.name, vr_sl_marker(S));
+		if (why)
+		{
+			Msg("* [vr22] frame %u save refused: %s", I.frame, why);
+			S.done = true;
+			return;
+		}
+		string_path gf;
+		strconcat(sizeof(S.file), S.file, S.saves, S.name, ".scop");
+		strconcat(sizeof(gf), gf, S.saves, S.name, ".gvr");
+		// the item in the hand: our own small file beside the save (the game's save does not know the hand)
+		S.hand = H.fh_id1 > 0 && vr_bpt_where(A, H.fh_id1 - 1) == 1;
+		IWriter* w = FS.w_open(gf);
+		if (S.hand)
+		{
+			S.h_id = H.fh_id1 - 1;
+			xr_strcpy(S.h_sect, H.fh_sect);
+			S.h_w.mul_43(hand, H.hand_local);
+			S.h_bc = H.fh_bc;
+			S.h_ext = H.fh_ext;
+			Fvector c;
+			S.h_w.transform_tiny(c, S.h_bc);
+			if (w)
+				w->w_printf("%d %s %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f\r\n", S.h_id, S.h_sect, S.h_w.i.x, S.h_w.i.y, S.h_w.i.z, S.h_w.j.x, S.h_w.j.y, S.h_w.j.z,
+					S.h_w.k.x, S.h_w.k.y, S.h_w.k.z, S.h_w.c.x, S.h_w.c.y, S.h_w.c.z, S.h_bc.x, S.h_bc.y, S.h_bc.z, S.h_ext.x, S.h_ext.y, S.h_ext.z);
+			Msg("* [vr22] frame %u hand item saved: '%s' id %d at %.4f %.4f %.4f", I.frame, S.h_sect, S.h_id, c.x, c.y, c.z);
+		}
+		else
+		{
+			if (w)
+				w->w_printf("-1 none\r\n");
+			Msg("* [vr22] frame %u hand item saved: none", I.frame);
+		}
+		if (w)
+			FS.w_close(w);
+		string128 cmd;
+		xr_sprintf(cmd, "save %s", S.name);
+		Console->Execute(cmd); // the game's own save
+		Msg("* [vr22] frame %u save '%s': asked", I.frame, S.name);
+		S.stage = 1;
+		return;
+	}
+	if (S.stage == 1)
+	{
+		if (GetFileAttributesA(S.file) != INVALID_FILE_ATTRIBUTES)
+		{
+			Msg("* [vr22] frame %u save '%s': saved to '%s'", I.frame, S.name, S.file);
+			S.stage = 2;
+		}
+		else if (I.frame >= S.fl)
+		{
+			Msg("* [vr22] frame %u save '%s': no file by the load frame; nothing is loaded", I.frame, S.name);
+			S.done = true;
+			S.stage = 3;
+		}
+		return;
+	}
+	if (S.stage == 2 && !S.asked && I.frame >= S.fl)
+	{
+		S.asked = true;
+		S.spawns = g_vr_actor_spawns;
+		string128 cmd;
+		xr_sprintf(cmd, "load %s", S.name);
+		Msg("* [vr22] frame %u load '%s': asked", I.frame, S.name);
+		Console->Execute(cmd); // the game's own load
+		return;
+	}
+	if (S.asked && !S.loaded && g_vr_actor_spawns != S.spawns && g_pGameLevel && Level().bReady)
+	{
+		S.loaded = true;
+		S.loaded_frame = I.frame;
+		Msg("* [vr22] frame %u loaded '%s'", I.frame, S.name);
+		// the hand is empty after a load: our records of the item in the hand, the last drop and the ammo box are ended
+		vr_bph_fh_end(H);
+		H.drop_id1 = 0;
+		H.ammo_id1 = 0;
+		S.put_wait = false;
+		// read our file back (it is what a later session would have)
+		string_path gf;
+		strconcat(sizeof(gf), gf, S.saves, S.name, ".gvr");
+		if (GetFileAttributesA(gf) != INVALID_FILE_ATTRIBUTES)
+			if (IReader* r = FS.r_open(gf))
+			{
+				string512 line = "";
+				if (!r->eof())
+					r->r_string(line, sizeof(line));
+				FS.r_close(r);
+				int id = -1;
+				string64 sect = "";
+				Fmatrix m;
+				m.identity();
+				Fvector bc, ext;
+				if (sscanf(line, "%d %63s %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f", &id, sect, &m.i.x, &m.i.y, &m.i.z, &m.j.x, &m.j.y, &m.j.z, &m.k.x, &m.k.y, &m.k.z,
+						&m.c.x, &m.c.y, &m.c.z, &bc.x, &bc.y, &bc.z, &ext.x, &ext.y, &ext.z) == 20 && id >= 0)
+				{
+					S.h_id = id;
+					xr_strcpy(S.h_sect, sect);
+					S.h_w = m;
+					S.h_bc = bc;
+					S.h_ext = ext;
+					S.put_wait = true;
+				}
+			}
+		return;
+	}
+	if (S.loaded && S.put_wait)
+	{
+		const int st = vr_bpt_where(A, S.h_id);
+		if (st == 1)
+		{
+			S.put_wait = false;
+			H.vok[0] = false; // from rest: no hand velocity
+			Msg("* [vr22] frame %u hand item '%s' id %d put down where the hand was", I.frame, S.h_sect, S.h_id);
+			vr_bph_let_go(H, I, A, S.h_sect, S.h_id, S.h_w, S.h_bc, S.h_ext);
+		}
+		else if (I.frame > S.loaded_frame + 120)
+		{
+			S.put_wait = false;
+			Msg("* [vr22] frame %u hand item '%s' id %d is not the actor's after the load; nothing is put down", I.frame, S.h_sect, S.h_id);
+		}
+	}
+}
 // B3b / B3b2: a grip press of the empty gun-side hand away from the bag: a world item at the hand is picked up through the
 // game's own pick-up. With the bag held and the kind in its list it becomes the carried model (B3b); otherwise a free hand item.
 static bool vr_bph_pick_world(vr_bph_state& H, vr_bpi_state& B, const vr_input_info& I, CActor* A, const Fmatrix& hand, bool bag_ok)
@@ -5020,6 +5252,7 @@ static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
 		for (int k = 0; k < nk; ++k)
 			Msg("* [vr21t] frame %u sect '%s' actor_rounds %d", I.frame, kinds[k], vr_bpt_actor_rounds(A, kinds[k]));
 	}
+	vr_sl_step(H, I, A, hand); // L2 (TEST ONLY, -vr_sl)
 	if (H.fh_id1 > 0) // ---- B3b2: the free hand item ----
 	{
 		const int id = H.fh_id1 - 1;

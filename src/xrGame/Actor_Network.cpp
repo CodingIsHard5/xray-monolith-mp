@@ -508,8 +508,10 @@ void CActor::net_Import_Physic_proceed()
 	CrPr_SetActivationStep(0);
 };
 
+u32 g_vr_actor_spawns = 0; // GammaVR L2: a load makes a new actor object; the save/load test switch reads this
 BOOL CActor::net_Spawn(CSE_Abstract* DC)
 {
+	++g_vr_actor_spawns;
 	m_holder_id = ALife::_OBJECT_ID(-1);
 	m_feel_touch_characters = 0;
 	m_snd_noise = 0.0f;
