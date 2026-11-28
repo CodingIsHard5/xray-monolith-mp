@@ -4830,8 +4830,8 @@ static vr_sl_state s_vr_sl;
 static bool vr_sl_inside(LPCSTR saves, LPCSTR root)
 {
 	const size_t n = xr_strlen(root);
-	if (!n || xr_strlen(saves) <= n || _strnicmp(saves, root, n))
-		return false;
+	if (!n || xr_strlen(saves) <= n || _strnicmp(saves, root, n) || strstr(saves, ".."))
+		return false; // a path that climbs with ".." is never "inside", whatever it begins with
 	return root[n - 1] == '\\' || root[n - 1] == '/' || saves[n] == '\\' || saves[n] == '/';
 }
 // nullptr = allowed; else the reason
@@ -4918,6 +4918,10 @@ static void vr_sl_step(vr_bph_state& H, const vr_input_info& I, CActor* A, const
 	vr_bpt_item_list(A, I.frame);
 	if (!S.done && S.stage == 0 && I.frame >= S.fs)
 	{
+		// an item is in the hand but the hand's pose is not valid this frame: wait (at most 5 frames) so its place is a real one
+		const bool pose = I.grip[I.gun ? 1 : 0].valid;
+		if (H.fh_id1 > 0 && !pose && I.frame < S.fs + 5)
+			return;
 		LPCSTR why = vr_sl_check(S.root, S.saves, S.name, vr_sl_marker(S));
 		if (why)
 		{
@@ -4929,7 +4933,7 @@ static void vr_sl_step(vr_bph_state& H, const vr_input_info& I, CActor* A, const
 		strconcat(sizeof(S.file), S.file, S.saves, S.name, ".scop");
 		strconcat(sizeof(gf), gf, S.saves, S.name, ".gvr");
 		// the item in the hand: our own small file beside the save (the game's save does not know the hand)
-		S.hand = H.fh_id1 > 0 && vr_bpt_where(A, H.fh_id1 - 1) == 1;
+		S.hand = pose && H.fh_id1 > 0 && vr_bpt_where(A, H.fh_id1 - 1) == 1;
 		IWriter* w = FS.w_open(gf);
 		if (S.hand)
 		{
@@ -4992,6 +4996,7 @@ static void vr_sl_step(vr_bph_state& H, const vr_input_info& I, CActor* A, const
 		Msg("* [vr22] frame %u loaded '%s'", I.frame, S.name);
 		// the hand is empty after a load: our records of the item in the hand, the last drop and the ammo box are ended
 		vr_bph_fh_end(H);
+		H.carried1 = 0;
 		H.drop_id1 = 0;
 		H.ammo_id1 = 0;
 		S.put_wait = false;
