@@ -597,9 +597,9 @@ enum
 	SIM4D_BODY = 1, // S2: player body, shadow root, legs
 	SIM4D_TRACERS = 2, // S3: tracers drawn between ticks
 	SIM4D_XHAIR = 4, // S1: crosshair easing with the render dt
-	SIM4D_NUDGE = 8, // the shadow pass's held-item nudge only on frames in which a tick ran (Actor.cpp)
+	SIM4D_NUDGE = 8, // EXPERIMENT, default off: the shadow pass's held-item nudge only on frames in which a tick ran
 };
-extern ENGINE_API int g_sim_4d_mask; // default 15
+extern ENGINE_API int g_sim_4d_mask; // default 7 (SIM4D_NUDGE off until measured)
 // TRUE while g_sim_render_lerp is TRUE and this frame ran no tick (render-only frame); written by the presentation step,
 // cleared with g_sim_render_lerp. Read by the local player's shadow pass (Actor.cpp) under SIM4D_NUDGE.
 extern ENGINE_API BOOL g_sim_render_notick;

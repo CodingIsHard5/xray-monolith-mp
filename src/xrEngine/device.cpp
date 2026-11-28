@@ -486,7 +486,8 @@ static u32 s_sv_last_epoch = 0;      // g_sim_view_epoch at the previous present
 static float s_sv_dt = 0.f;          // smoothed real frame time handed to the presentation step
 // S2 stage 4d-1 (declared in device.h): render dt, slice mask, and the test-only synthetic gated lever
 ENGINE_API float g_sim_render_dt = 0.f;
-ENGINE_API int g_sim_4d_mask = SIM4D_BODY | SIM4D_TRACERS | SIM4D_XHAIR | SIM4D_NUDGE;
+// SIM4D_NUDGE is OFF by default: its premise is not verified (the lever's s4 witness column is to settle it first)
+ENGINE_API int g_sim_4d_mask = SIM4D_BODY | SIM4D_TRACERS | SIM4D_XHAIR;
 ENGINE_API BOOL g_sim_render_notick = FALSE;
 ENGINE_API int g_sim_synth_k = 0;    // 0 = lever off (always 0 without -det_mode)
 ENGINE_API BOOL g_sim_synth_tw = FALSE;
