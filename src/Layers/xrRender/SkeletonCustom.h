@@ -5,6 +5,7 @@
 #include		"fhierrarhyvisual.h"
 #include		"../../xrEngine/bone.h"
 #include		"../../Include/xrRender/Kinematics.h"
+#include "../../xrEngine/sim_pose.h" // S2 stage 4d-2 S4a: hooks only, logic in xrEngine
 #include "../../xrEngine/IRenderable.h"
 #include <optional>
 
@@ -360,6 +361,8 @@ public:
 	virtual void* GetUpdateCallbackParam() { return Update_Callback_Param; }
 
 	virtual bool NeedUCalc() { return UCalc_ThisFrame; }
+	void LL_SetSimObjectVisual(bool on) override { m_sim_object_visual = on; } // S2 stage 4d-2 S4a (sim_pose.h)
+	bool LL_GetSimObjectVisual() const override { return m_sim_object_visual; }
 
 	// debug
 #ifdef DEBUG
@@ -396,6 +399,7 @@ public:
 
 private:
 	bool m_is_original_lod;
+	bool m_sim_object_visual = false; // S2 stage 4d-2 S4a: marked by xrGame; cleared by Spawn/Copy
 };
 
 IC CKinematics* PCKinematics(dxRender_Visual* V) { return V ? (CKinematics*)V->dcast_PKinematics() : 0; }

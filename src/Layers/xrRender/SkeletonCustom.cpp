@@ -134,6 +134,7 @@ void CKinematics::IBoneInstances_Create()
 
 void CKinematics::IBoneInstances_Destroy()
 {
+	if (has_sim_pose()) sim_pose_release(this); // S2 stage 4d-2 S4a
 	if (bone_instances)
 	{
 		xr_free(bone_instances);
@@ -434,6 +435,7 @@ void CKinematics::Copy(dxRender_Visual* P)
 	bone_map_P = pFrom->bone_map_P;
 	visimask = pFrom->visimask;
 	hidden_bones = pFrom->hidden_bones;
+	m_sim_object_visual = false; // S2 stage 4d-2 S4a: a new instance is not marked
 
 	IBoneInstances_Create();
 
@@ -463,6 +465,8 @@ void CKinematics::Spawn()
 	ClearWallmarks();
 	Visibility_Invalidate();
 	LL_SetBoneRoot(0);
+	m_sim_object_visual = false; // S2 stage 4d-2 S4a: taken from the pool: not marked, no history
+	if (has_sim_pose()) sim_pose_release(this);
 }
 
 void CKinematics::Depart()

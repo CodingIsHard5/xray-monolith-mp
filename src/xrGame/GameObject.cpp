@@ -1353,6 +1353,12 @@ bool CGameObject::is_ai_obstacle() const
 void CGameObject::OnChangeVisual()
 {
 	inherited::OnChangeVisual();
+	// S2 stage 4d-2 S4a: this skeleton is the visual of a simulated object, so it may be drawn between ticks (only in
+	// sim_tick gated mode with mask bit SIM4D_POSE; the flag is read nowhere else). Every visual change of a game object
+	// comes here (CObject::cNameVisual_set); the new instance came from model_Create, whose Spawn cleared the flag.
+	// First-person HUD models and other bare model_Create visuals (legs, VR items) never pass here: never marked.
+	if (IKinematics* K = Visual() ? Visual()->dcast_PKinematics() : nullptr)
+		K->LL_SetSimObjectVisual(true);
 	if (m_anim_mov_ctrl)
 		destroy_anim_mov_ctrl();
 }

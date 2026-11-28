@@ -38,6 +38,7 @@
 #include "CustomHUD.h"
 #include "EngineThreading.h"
 #include "IGame_Level.h"
+#include "sim_pose.h" // S2 stage 4d-2 S4a
 
 #include "Rain.h"
 
@@ -492,6 +493,8 @@ ENGINE_API BOOL g_sim_render_notick = FALSE;
 ENGINE_API int g_sim_synth_k = 0;    // 0 = lever off (always 0 without -det_mode)
 ENGINE_API BOOL g_sim_synth_tw = FALSE;
 ENGINE_API int g_sim_4d_break = 0;
+ENGINE_API BOOL g_sim_pose_active = FALSE; // S2 stage 4d-2 S4a (device.h)
+ENGINE_API BOOL g_sim_synth_pose = FALSE;  // S2 stage 4d-2, test-only: -det_synth_pose (det_mode only)
 ENGINE_API SimSynthWitness g_sim_synth_wit = {};
 ENGINE_API sim_synth_witness_fn g_sim_synth_witness_s2 = nullptr;
 static int s_synth_j = 0;            // lever: index of this frame in its cycle of K (0 = the tick frame)
@@ -567,6 +570,8 @@ static void sim_synth_witness_write(int n)
 		fprintf(f, " s4 %.5f %.5f %.5f - - - |", w.s4_item.x, w.s4_item.y, w.s4_item.z);
 	else
 		fprintf(f, " s4 - - - - - - |");
+	if (g_sim_synth_pose)
+		sim_pose_witness_print(f); // S2 stage 4d-2 S4a: " p .. | pw .. | up .. | pn .. |" (only with -det_synth_pose)
 	fprintf(f, " tw %u\n", w.tw_bad);
 	fflush(f); // the harness quits the game from a script: nothing may wait in the buffer
 }
@@ -575,6 +580,8 @@ static void sim_synth_witness_reset()
 {
 	g_sim_synth_wit = SimSynthWitness();
 	g_sim_synth_wit.s3_drawn = u32(-1);
+	if (g_sim_synth_pose)
+		sim_pose_witness_reset(); // S2 stage 4d-2 S4a
 }
 
 // simulated time advances by one tick; sets the four time values the update reads
@@ -619,7 +626,7 @@ static int sim_tick_plan()
 		if (LPCSTR p = strstr(Core.Params, "-sim_4d_mask "))
 		{
 			int m = 0;
-			if (sscanf(p + xr_strlen("-sim_4d_mask "), "%d", &m) == 1 && m >= 0 && m <= 15)
+			if (sscanf(p + xr_strlen("-sim_4d_mask "), "%d", &m) == 1 && m >= 0 && m <= 31) // S2 stage 4d-2: bit 16
 				g_sim_4d_mask = m;
 		}
 		if (xr_det_mode())
@@ -635,12 +642,13 @@ static int sim_tick_plan()
 			if (LPCSTR p = strstr(Core.Params, "-sim_4d_break "))
 			{
 				int m = 0;
-				if (sscanf(p + xr_strlen("-sim_4d_break "), "%d", &m) == 1 && m >= 0 && m <= 15)
+				if (sscanf(p + xr_strlen("-sim_4d_break "), "%d", &m) == 1 && m >= 0 && m <= 31) // 4d-2: bit 16
 					g_sim_4d_break = m;
 			}
 			if (g_sim_synth_k || g_sim_synth_tw || g_sim_4d_break)
 				Msg("* det_synth: k %d wallclock %d tw %d break %d mask %d", g_sim_synth_k, s_synth_wallclock ? 1 : 0,
 				    g_sim_synth_tw ? 1 : 0, g_sim_4d_break, g_sim_4d_mask);
+			sim_pose_parse_switches(); // S2 stage 4d-2: -det_synth_pose, -det_synth_pose_npc (own log line if on)
 		}
 	}
 	s_sim_hz = g_sim_tick_hz;
@@ -928,6 +936,8 @@ void CRenderDevice::on_idle()
 		// sets it, so a stock frame (sim_n < 0) renders every object at &XFORM()
 		if (g_sim_synth_k)
 			sim_synth_witness_reset(); // S2 stage 4d-1 lever (det_mode only): this frame's witness starts empty
+		// S2 stage 4d-2 S4a: captures of the marked skeletons from here (the ticks) to the end of the render's join
+		g_sim_pose_active = (g_sim_4d_mask & SIM4D_POSE) ? TRUE : FALSE;
 		g_sim_view_gate = TRUE;
 		sim_tick_run(sim_n);
 		sim_view_present(sim_n);
@@ -1102,6 +1112,7 @@ void CRenderDevice::on_idle()
 		sim_synth_witness_write(sim_n);
 	g_sim_render_lerp = FALSE; // S2 stage 4b: set by sim_view_present for this frame's render only; cleared after the join
 	g_sim_render_notick = FALSE; // S2 stage 4d-1: with it
+	g_sim_pose_active = FALSE; // S2 stage 4d-2 S4a: no capture outside a gated frame
 #ifdef XRCORE_PROFILER_AGG
 	xr_det_set_role(1); // render phase over: anything the main thread does outside it (level load, spawns) is gameplay
 #endif

@@ -132,6 +132,7 @@ void CKinematics::CalculateBones(BOOL bForceExact)
 		UCalc_ThisFrame = false;
 	//
 	if (Update_Callback) Update_Callback(this);
+	if (g_sim_pose_active && m_sim_object_visual) sim_pose_capture(this); // S2 stage 4d-2 S4a (under UCalc_Mutex)
 }
 
 #ifdef DEBUG

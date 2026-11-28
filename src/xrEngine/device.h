@@ -592,16 +592,23 @@ extern ENGINE_API double g_sim_hud_ms;
 extern ENGINE_API float g_sim_render_dt;
 // S2 stage 4d-1: per-slice switch, console `sim_4d_mask` or start switch `-sim_4d_mask <m>` (read once at start).
 // Read only while g_sim_render_lerp is TRUE, so with sim_tick 0 it is never read. Bit 8: see SIM4D_NUDGE.
+// S2 stage 4d-2: bit 16 (SIM4D_POSE) is also read at the start of every gated frame (g_sim_pose_active below).
 enum
 {
 	SIM4D_BODY = 1, // S2: player body, shadow root, legs
 	SIM4D_TRACERS = 2, // S3: tracers drawn between ticks
 	SIM4D_XHAIR = 4, // S1: crosshair easing with the render dt
 	SIM4D_NUDGE = 8, // EXPERIMENT, default off: the shadow pass's held-item nudge only on frames in which a tick ran
+	SIM4D_POSE = 16, // S2 stage 4d-2 S4a, default off: NPC/mutant skeletal poses drawn between ticks (sim_pose.h)
 };
-extern ENGINE_API int g_sim_4d_mask; // default 7 (SIM4D_NUDGE off until measured)
+extern ENGINE_API int g_sim_4d_mask; // default 7 (SIM4D_NUDGE and SIM4D_POSE off)
+// S2 stage 4d-2 S4a: TRUE from the start of a gated frame (before its ticks) to the end of its render's join, when the
+// mask has SIM4D_POSE; FALSE on every stock frame (so always FALSE with sim_tick 0). While TRUE, the marked skeletons'
+// bone calculations are captured (sim_pose_capture); drawing between ticks also needs g_sim_render_lerp.
+extern ENGINE_API BOOL g_sim_pose_active;
 // TRUE while g_sim_render_lerp is TRUE and this frame ran no tick (render-only frame); written by the presentation step,
-// cleared with g_sim_render_lerp. Read by the local player's shadow pass (Actor.cpp) under SIM4D_NUDGE.
+// cleared with g_sim_render_lerp. Read by the local player's shadow pass (Actor.cpp) under SIM4D_NUDGE, and by
+// sim_pose_capture (S2 stage 4d-2 S4a: a capture on a render-only frame).
 extern ENGINE_API BOOL g_sim_render_notick;
 // S2 stage 4d-1, TEST ONLY, every value below is 0 / FALSE / nullptr unless the engine was started with -det_mode:
 // g_sim_synth_k    -det_synth_k <K> (1..8): the "synthetic gated" lever; under det_mode the gate runs a fixed pattern
@@ -613,6 +620,9 @@ extern ENGINE_API BOOL g_sim_render_notick;
 extern ENGINE_API int g_sim_synth_k;
 extern ENGINE_API BOOL g_sim_synth_tw;
 extern ENGINE_API int g_sim_4d_break;
+// S2 stage 4d-2 (TEST ONLY, FALSE unless -det_mode): -det_synth_pose: the S4a witness columns (p, pw, up, pn) and their
+// hooks (sim_pose.h); -sim_4d_break 16 (SIM4D_POSE): the drawn pose is written into every bone's mRenderTransform
+extern ENGINE_API BOOL g_sim_synth_pose;
 // the witness of one gated frame under the lever (written to $logs$/synth_<det_tag>.txt by the device after the
 // render); xrGame fills its slice columns during the render, only while g_sim_synth_k != 0. Reset by the device
 // before every gated frame. Never read by the game.

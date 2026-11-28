@@ -1360,7 +1360,7 @@ void CCC_Register()
 
 	CMD4(CCC_Integer, "r__framelimit", &ps_framelimiter, 0, 500);
 	CMD4(CCC_Integer, "sim_tick", &g_sim_tick_hz, 0, 240);
-	CMD4(CCC_Integer, "sim_4d_mask", &g_sim_4d_mask, 0, 15); // S2 stage 4d-1: 1 body, 2 tracers, 4 crosshair, 8 shadow nudge once per tick
+	CMD4(CCC_Integer, "sim_4d_mask", &g_sim_4d_mask, 0, 31); // S2 stage 4d-1: 1 body, 2 tracers, 4 crosshair, 8 shadow nudge once per tick; 4d-2: 16 skeletal poses
 	CMD3(CCC_Mask, "rs_refresh_60hz", &psDeviceFlags, rsRefresh60hz);
 	CMD3(CCC_Mask, "dbg_ph_shapes", &psDeviceFlags2, rsDBGDrawPHShapes);
 	CMD3(CCC_Mask, "dbg_ph_bones", &psDeviceFlags2, rsDBGDrawPHBones);

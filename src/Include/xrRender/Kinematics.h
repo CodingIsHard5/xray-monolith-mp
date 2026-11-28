@@ -115,6 +115,19 @@ public:
 	virtual void						DebugRender			(Fmatrix& XFORM) = 0;
 #endif
 	virtual shared_str getDebugName() = 0;
+
+	// S2 stage 4d-2 S4a (xrEngine/sim_pose.h; sim_tick gated mode with mask bit SIM4D_POSE only): xrGame marks the
+	// visual of a simulated object (CGameObject::OnChangeVisual); only a marked skeleton is drawn between ticks.
+	// Implemented by CKinematics (cleared by its Spawn and Copy); the defaults here are "never marked".
+	virtual void LL_SetSimObjectVisual(bool on) {}
+	virtual bool LL_GetSimObjectVisual() const { return false; }
+	// the slice's per-skeleton storage exists (allocated by the first capture; never with sim_tick 0 or the bit off)
+	bool has_sim_pose() const { return m_sim_pose != nullptr; }
+
+private:
+	// S2 stage 4d-2 S4a: opaque storage owned by xrEngine/sim_pose.cpp (its only friend); nothing else can name it
+	friend struct SimPoseAccess;
+	void* m_sim_pose = nullptr;
 };
 
 IC IKinematics* PKinematics(IRenderVisual* V) { return V ? V->dcast_PKinematics() : 0; }

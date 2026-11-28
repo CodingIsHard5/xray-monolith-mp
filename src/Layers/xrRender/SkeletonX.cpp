@@ -60,6 +60,7 @@ void CSkeletonX::_Render(ref_geom& hGeom, u32 vCount, u32 iOffset, u32 pCount)
 {
 	xrCriticalSectionGuard guard(&Parent->UCalc_Mutex);
 	PROF_EVENT("CSkeletonX::_Render");
+	const Fmatrix* simR = sim_pose_draw_frame(Parent); // S2 stage 4d-2 S4a: nullptr = stock (always with sim_tick 0)
 	Fmatrix p_WV, p_WVP;
 
 #ifdef USE_DX11 //
@@ -79,7 +80,7 @@ void CSkeletonX::_Render(ref_geom& hGeom, u32 vCount, u32 iOffset, u32 pCount)
 			{
 				CBoneInstance& Bone = Parent->LL_GetBoneInstance(b);
 				Bone.mRenderTransform_prev.set(Bone.mRenderTransform_temp);
-				Bone.mRenderTransform_temp.set(Bone.mRenderTransform);
+				Bone.mRenderTransform_temp.set(simR ? simR[b] : Bone.mRenderTransform);
 			}
 		}
 
@@ -114,7 +115,7 @@ void CSkeletonX::_Render(ref_geom& hGeom, u32 vCount, u32 iOffset, u32 pCount)
 		{
 			PROF_EVENT("RM_SINGLE");
 			Fmatrix W;
-			W.mul_43(RCache.xforms.m_w, Parent->LL_GetTransform_R(u16(RMS_boneid)));
+			W.mul_43(RCache.xforms.m_w, simR ? simR[RMS_boneid] : Parent->LL_GetTransform_R(u16(RMS_boneid)));
 			RCache.set_xform_world(W);
 			//
 			RCache.set_Geometry(hGeom);
@@ -137,7 +138,8 @@ void CSkeletonX::_Render(ref_geom& hGeom, u32 vCount, u32 iOffset, u32 pCount)
 				u32 count = RMS_bonecount;
 				for (u32 mid = 0; mid < count; mid++)
 				{
-					Fmatrix& M = Parent->LL_GetTransform_R(u16(mid));
+					const Fmatrix& M = simR ? simR[mid] : Parent->LL_GetTransform_R(u16(mid));
+					if (g_sim_synth_pose) sim_pose_wit_upload(Parent, mid, count, M); // S2 stage 4d-2: test-only
 					u32 id = mid * 3;
 					RCache.set_ca(&*array, id + 0, M._11, M._21, M._31, M._41);
 					RCache.set_ca(&*array, id + 1, M._12, M._22, M._32, M._42);

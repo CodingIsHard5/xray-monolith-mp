@@ -930,6 +930,7 @@
     <ClInclude Include="device.h" />
     <ClInclude Include="GIFResource.h" />
     <ClInclude Include="MonitorList.h" />
+    <ClInclude Include="sim_pose.h" />
     <ClInclude Include="edit_actions.h" />
     <ClInclude Include="Effector.h" />
     <ClInclude Include="EffectorPP.h" />
@@ -1041,6 +1042,7 @@
     <ClCompile Include="device.cpp" />
     <ClCompile Include="GIFResource.cpp" />
     <ClCompile Include="MonitorList.cpp" />
+    <ClCompile Include="sim_pose.cpp" />
     <ClCompile Include="Device_create.cpp" />
     <ClCompile Include="Device_destroy.cpp" />
     <ClCompile Include="Device_Initialize.cpp" />
