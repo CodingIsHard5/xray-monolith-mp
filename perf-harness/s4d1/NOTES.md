@@ -150,3 +150,13 @@ lowers ALIFE_MIN_CALLS from 50 to 3 for them; that rule's code is unchanged and 
   shadow pass), each named correctly. Garbage and no-item fixtures give "none of the registered cases". The rest are
   CRLF, no stimulus (STOP), no crosshair (S1 dropped) and a missing mask-15 probe (STOP).
 The previous folder (20261127-185925-2916249, revision 1, 36/36) was removed by its literal path.
+
+## Review of the three follow-up commits (independent Opus review, 2026-11-27) — for reading s4
+- No compile/link finding; no behaviour change at mask 7, with sim_tick 0, or without -det_mode.
+- s4 values 4-6 (where the item was drawn) are read after the render from the item's per-frame cache. When that cache
+  points at the item's own XFORM (parent drawn at its XFORM, or body bit off), values 4-6 simply repeat values 1-3 as
+  they are AFTER the frame, not as they were when drawn. Only when the item was drawn through its in-between matrix
+  (body bit on, the probe's case) do they show the drawn position. If the cache was filled in an earlier pass of the
+  frame, they show the position from before the nudge, which is still what every later pass of that frame drew.
+- CInventoryItem::UpdateXForm (inventory_item.cpp:1292) has no per-frame guard; CWeapon and CMissile have one.
+- Do not bisect with c253fafdb as an endpoint: on its own it has default mask 15.
