@@ -95,8 +95,10 @@ STIM=run/gamedata/scripts/zz_eperf_synth.script   # the installed stimulus (prer
 STIM_SHA=1777fb6865cc5b56c80f197f3f95a250104d6c90ce0b8b2a35422e3bed39ff95   # = harness/zz_eperf_synth.script
                                  # (2026-11-27 22:15), re-pinned 2026-11-28 by the coordinator's decision (was prefix
                                  # d7dbc6c5...; those bytes are gone). The same installed file and hash as s4d2_run.sh.
-                                 # Its one addition, the -det_synth_item path, is off without that switch (script:20);
-                                 # no s4d1 boot may pass it (NOITEM check below).
+                                 # Its one addition, the -det_synth_item path, is off without that switch (script:20).
+                                 # Prereg Amendment 1 (2026-11-28): every stimulus boot (both probes, every part-S boot,
+                                 # the breaks included) passes it, so the actor holds an item (script:68-79); the boots
+                                 # without the stimulus (parts A and L) do not (ITEM check below).
 USERDET=out/user_det.ltx.orig; USERDET_SHA=3e0e0a6f1fe8010cd727a8f4e718b0486711fbcf8e4f7bfc8eb769d047411b81   # prereg 6.4 "3e0e0a6f1fe8010c"
 USERORIG=out/user.ltx.orig       # what det_run.sh restores after a boot (not pinned by the draft; must exist)
 DETRUN=tools/det_run.sh; DETRUN_SHA=e29800949b503a7f61a5f9b3a9a2289cdd01424fa87f3a55dacac464fa578f48   # prereg 6.2 / change log 2026-11-28
@@ -116,7 +118,8 @@ SELFTEST_SHA=REG_ME_SELFTEST_SHA # sha256 of s4d1_selftest.sh as registered
 BASE="-det_passes 100,200,320 -det_lua_streams -det_counters"   # prereg 6.2 <base> (tools/s4c_partA.sh:11)
 REF="-det_passes 50,600,1650 -det_save -det_lua_streams -det_counters"   # the 11-19 counter method (s4c_partA.sh:10-16)
 ALLOWED="-:50,600,1650 -:-det_save +:100,200,320"
-STIMSW="-det_synth_tw -det_synth_walk -det_synth_tracer"   # prereg 2.1 / 5: tripwires + stimulus (probes, part S)
+STIMSW="-det_synth_tw -det_synth_walk -det_synth_tracer -det_synth_item"   # prereg 2.1 / 5, Amendment 1: tripwires +
+                                 # stimulus + the held item (probes, part S)
 DROP_MIN=300                     # prereg 2.3: PROBE_S3_FRAMES < 300 -> S3, TWB2 dropped, s4d_brk2 not booted
 DISP=:141
 # Timeouts (det_run.sh BENCH_TIMEOUT: from the engine start to the last checkpoint, det_run.sh:234, :256), per arm:
@@ -327,8 +330,8 @@ plan() {   # prints the boot list of this mode, one "tag|exe|lever-or-empty" per
       echo "s4d_on3|$EXE|-det_synth_k 3 -sim_4d_mask 7 $STIMSW"
       echo "s4d_off2b|$EXE|-det_synth_k 2 -sim_4d_mask 0 $STIMSW"
       echo "s4d_on2b|$EXE|-det_synth_k 2 -sim_4d_mask 7 $STIMSW"
-      echo "s4d_brk1|$EXE|-det_synth_k 2 -sim_4d_mask 7 -det_synth_tw -sim_4d_break 1 -det_synth_walk -det_synth_tracer"
-      [ "$BRK2" = 1 ] && echo "s4d_brk2|$EXE|-det_synth_k 2 -sim_4d_mask 7 -det_synth_tw -sim_4d_break 2 -det_synth_walk -det_synth_tracer"
+      echo "s4d_brk1|$EXE|-det_synth_k 2 -sim_4d_mask 7 -det_synth_tw -sim_4d_break 1 -det_synth_walk -det_synth_tracer -det_synth_item"
+      [ "$BRK2" = 1 ] && echo "s4d_brk2|$EXE|-det_synth_k 2 -sim_4d_mask 7 -det_synth_tw -sim_4d_break 2 -det_synth_walk -det_synth_tracer -det_synth_item"
       return 0 ;;
   esac
 }
@@ -341,11 +344,16 @@ probe_boot_s() {   # prereg 2.3 PROBE_BOOT_S: the larger det_run.sh `rc=0 elapse
     { [ -z "$m" ] || [ "$v" -gt "$m" ]; } && m=$v
   done
   echo "$m"; }
-# NOITEM (coordinator 2026-11-28, with the stimulus re-pin): the shared stimulus takes an item into the actor's hands
-# only with -det_synth_item (zz_eperf_synth.script:20, :68); no s4d1 boot is registered with it. Refused by name.
-for _l in "$BASE" "$(plan | cut -d'|' -f3)"; do
-  case " $(printf '%s\n' "$_l" | tr '\n\t' '  ') " in *" -det_synth_item "*) refuse "-det_synth_item is in the flags of an s4d1 boot (not registered; the stimulus would activate an item)" ;; esac
-done
+# ITEM (prereg Amendment 1, 2026-11-28; it reverses the coordinator's NOITEM rule of the same day): the shared stimulus
+# takes an item into the actor's hands only with -det_synth_item (zz_eperf_synth.script:20, :68). Every boot that
+# carries the stimulus (-det_synth_walk) must carry it, and no other boot (parts A, L; BASE) may. Refused by name.
+case " $BASE " in *" -det_synth_item "*) refuse "-det_synth_item is in BASE (only stimulus boots carry it, prereg Amendment 1)" ;; esac
+while IFS='|' read -r _t _e _l; do
+  case " $_l " in
+    *" -det_synth_walk "*) case " $_l " in *" -det_synth_item "*) ;; *) refuse "$_t carries the stimulus (-det_synth_walk) without -det_synth_item (prereg Amendment 1)" ;; esac ;;
+    *" -det_synth_item "*) refuse "$_t carries -det_synth_item without the stimulus (-det_synth_walk): only stimulus boots carry it (prereg Amendment 1)" ;;
+  esac
+done < <(plan)
 
 # ---- preflight (nothing below this block boots anything until it passed) ----
 flags_ok || bad=1

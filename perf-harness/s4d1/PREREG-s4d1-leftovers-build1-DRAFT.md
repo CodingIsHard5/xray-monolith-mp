@@ -15,6 +15,12 @@ Labels: **[D]** desk (file:line), **[M]** measured (a number in a file), **[G]**
 earlier registration without re-deriving it).
 
 **Change log.**
+- 2026-11-28 (Amendments 1 and 2 below, after the probe of 03:56-04:08; desk only, nothing booted): s4d1_run.sh is now
+  sha256 dea3ec4428650e851f88886923856d098569b2d6c7a913c8dff3a1f2257925cd (was 33b1fd0a...), s4d1_score.py ef3746af380a292157beba53dc9c0160ca860b2ff52d308332edd9b0acc8679d (was 62ad4c39...), s4d1_selftest.sh f3335991e96c7a9944be01704dda233d80c58a2b3145747f2a81270eb23f25ad
+  (was d04bdd14...). **Amendment 1 reverses the coordinator's item rule of the same day** (the entry below: "no s4d1
+  boot passes it", "The script refuses any s4d1 boot whose flags carry -det_synth_item"): every stimulus boot now
+  passes -det_synth_item, and the script refuses a stimulus boot WITHOUT it. Amendment 2 records the teardown fix of
+  the scorer. Text changed: 1, 1.1, 2.1, 2.2, 2.4 (note), 5, 6.2, 7, 8, 9.
 - 2026-11-28 (re-check after the fix round, plan-facts/s4d1-driver-review-2026-11-28.md "Re-check after fixes" R-1/R-3;
   desk only): s4d1_run.sh is now sha256 33b1fd0a8f16aaf95f371ebb147bd11a4c77867da282d8a7e8d72afb8bf28b43 (was af73868b...). The
   id each renewal prints must be this call's claim id, else the run stops (class box, nothing under run/ touched);
@@ -38,6 +44,7 @@ earlier registration without re-deriving it).
   (s4d1_score.py:206), so that does not change a check. Whether the old file had the same line text is not knowable.
     Both series use the one installed path with this one hash. The script refuses any s4d1 boot whose flags carry
     -det_synth_item.
+    2026-11-28, later: the item part of this entry ("no s4d1 boot passes it", the refusal) is reversed by Amendment 1.
   - 2.1: no re-probe mode; a re-probe needs a new supervisor decision and a registered place for the old probe
     folders; the script refuses `probe` while a probe output folder exists.
   - 6.2: the options-file restore is kept (template safety rule) and stated there; the script's sha256 is now
@@ -79,6 +86,69 @@ earlier registration without re-deriving it).
   display :0), all before it creates, deletes or moves anything. **New caller rule:** with `DET_NOCLAIM=1` the caller
   must pass `DET_BOX_TOKEN` (a text in its own claim) and may pass `DET_BOX_CLASS` (shared, the default); the s4d1 series
   script (not yet written, R2) must do so, and should source the shared file itself as s4d2_run.sh does.
+
+## Amendment 1 (2026-11-28): the actor holds an item in every stimulus boot
+- **What changed.** The installed stimulus's own switch `-det_synth_item` (zz_eperf_synth.script, the same file and
+  hash 1777fb68..., section 1) is added to every boot that carries the stimulus: s4d_probe, s4d_probe15, s4d_off2a,
+  s4d_on2a, s4d_off3, s4d_on3, s4d_off2b, s4d_on2b, s4d_brk1, s4d_brk2. At update 300 (START_UPD) the actor takes an
+  item it already carries into its hands: the first filled slot of 3, 2, 1, 5, 6 (script :43-45, :68-79). Nothing is
+  spawned. The script logs `* det_synth stimulus: item slot <n> section <name>` or `* det_synth stimulus: item NONE
+  (no filled slot)`, and its `installed` line ends `, item true)`.
+- **Why.** The probe of 2026-11-28 03:56-04:08 (out/det_s4d_probe, out/det_s4d_probe15) had the six s4 values as
+  dashes on every witness line: all 16,161 lines of s4d_probe and all 16,143 of s4d_probe15 (counted after the
+  teardown line, Amendment 2). The actor held nothing. Every held-item line this series reports (the s4 description,
+  S4X, the mask-15 nudge description) would be empty. NOTES.md 4 R1 foresaw this.
+- **What it changes in the scene the gated checks run in.** With an item in the hands, the actor's animation is a
+  holding pose, so its body and its shadow differ from the 03:56 probe. The first-person hands model is drawn. The
+  crosshair ray may sit over other geometry. Every gated check of the probes and of part S runs in that scene. The
+  switch is the same in both arms of every pair (off2a/off2b, on2a/off2a, on2b/off2a, on3/off3, and the breaks against
+  off2a), so every on/off comparison stays like for like. Parts A and L carry no stimulus and are untouched: same
+  flags, same scene.
+- **New probe stop rule "item"** (2.2), on BOTH probe boots; both parts must hold. (i) xray.log has the item line and
+  it is not NONE. (ii) s4 is present (not six dashes) on >= ITEM_SHARE = 0.50 of the witness lines from the stimulus
+  start frame to the cp3 frame, inclusive. Start frame = the first witness line whose hud >= the `time` of the `start
+  at update` line. That time is the script's time_global at update 300; under the lever the hud of a tick frame is
+  dwTimeGlobal of that tick (NOTES.md 2, item 14). On the 03:56 probes: time 9966 = the hud of F 815, the first tick
+  frame whose xform moves. Window F 815..16247 = 15,433 lines (s4d_probe), F 815..16229 = 15,415 lines (s4d_probe15).
+- **Derivation of ITEM_SHARE = 0.50.** The item is taken at the start update, so s4 should be present from the start
+  frame on. Even if s4 were absent for a whole draw animation (at most about 3 s [G] = about 273 lines at 11 ms of hud
+  per line, K = 3), the share is >= (15,433 - 273) / 15,433 = 0.98. A run with no item gives 0.00 (both 03:56 probes:
+  0 of 15,433 and 0 of 15,415). 0.50 is 0.98 / 1.96, and 0.50 above 0.00: about 2x from each side. The reader prints
+  the measured share and the item taken for each probe.
+- **No item taken is a PROBE STOP, and a new plan is needed.** It is not a fallback: no spawned item, no other slot
+  list, no series without s4.
+- **What can be taken.** The save's A-Life dump (out/det_s4d_probe/alife_dump_s4d_probe_1.txt, objects whose parent
+  column is 0, the actor) holds wpn_ppsh41, wpn_bm16, wpn_binoc_inv and bolts_pack (also wpn_knife2 and
+  wpn_sks_b_wpn_addon_scope_pu). Whether one of them sits in slot 3, 2, 1, 5 or 6 is not known before the probe. Guess:
+  85 % that an item is taken.
+- **Score mode.** F0 requires `-det_synth_item` on every stimulus run and fails it by name on any other run. S0B also
+  requires the item line, taken (not NONE, not missing), in every part-S run, by name. The item taken per part-S run is
+  a reported line. s4's values stay descriptive: no gate reads them.
+- **Driver.** s4d1_run.sh refuses, by name, a stimulus boot (one carrying -det_synth_walk) without -det_synth_item,
+  and a boot without the stimulus that carries it.
+
+### Amendment 2 (2026-11-28): teardown witness line
+- On both 03:56 probes the witness has one line written after the quit's `- Disconnect`: s4d_probe F 16270 right
+  after F 16249, with cp3 at F 16247 (s4d_probe15: F 16252 after F 16231, cp3 at F 16229). It has no actor (s2 all
+  dashes). The old scorer read it as a break in the frame pattern and stopped the probe by rule "pattern"
+  (s4d1/probe_readings.txt).
+- The scorer now drops the trailing no-actor lines after the cp3 frame, at most TEARDOWN_MAX = 2 per run, and counts
+  them in a reported line. More than 2: none dropped, and the existing rules read them. Observed: 1 per boot on 2 of 2
+  boots, so the margin is exactly 2x (flagged in 7).
+- A re-probe follows (with Amendment 1's switch). The first probe's data is not re-read for a verdict.
+
+### Amendment 3 (2026-11-28): the re-probe, and where the first probe went
+- Decision (Overseer, 2026-11-28 about 04:10): PROBE STOP stands; fix the scorer, then re-probe with 2 boots; the
+  first probe's data is not re-read for a verdict. The driver has no re-probe mode and refuses while the first probe's
+  outputs exist, so they were moved by hand, 2026-11-28 04:26, nothing deleted:
+  out/det_s4d_probe -> out/det_s4d_probe_p1, out/det_s4d_probe15 -> out/det_s4d_probe15_p1,
+  out/s4d1_state/probe -> out/s4d1_state/probe_p1, s4d1/probe_readings.txt -> s4d1/probe_readings_p1.txt.
+  Where Amendments 1 and 2 name out/det_s4d_probe or out/det_s4d_probe15 for the 03:56 probe, read the _p1 names.
+- The re-probe uses the same two tags (s4d_probe, s4d_probe15) and the same driver mode `probe`. It is the first run
+  of this series with the item switch. Its reading is taken once, into s4d1/probe_readings.txt.
+- A second probe stop (any rule) means a new plan, not a third probe on the spot.
+- Predictions for the re-probe, fixed now: item taken 85 %; teardown lines dropped = 1 on each boot 85 %; GO overall
+  about 43 % (the item, the unseen s4 pattern with an item, and every earlier probe rule must all hold).
 
 ## 0. Limits, first
 - **The det harness is not exact for online state or for `::Random`.** Two stock det runs of the same exe already differ
@@ -130,12 +200,13 @@ earlier registration without re-deriving it).
 - Stimulus: `harness/zz_eperf_synth.script` sha256 **1777fb6865cc5b56c80f197f3f95a250104d6c90ce0b8b2a35422e3bed39ff95**
   (re-pinned 2026-11-28 by the coordinator's decision; was prefix d7dbc6c54cd02600). Why: the file is a superset of the old one: its only addition is the -det_synth_item path, which is off unless that
   flag is on the command line (zz_eperf_synth.script:20 `item_on = det and string.find(cl, "-det_synth_item", ...)`),
-  and no s4d1 boot passes it (s4d1_run.sh refuses one that does). **The d7dbc6c5 bytes are gone**, so "superset"
+  and, at the re-pin, no s4d1 boot passed it. **Amendment 1 (2026-11-28) reverses that:** every stimulus boot passes
+  it and the item block runs (see the amendment). **The d7dbc6c5 bytes are gone**, so "superset"
   rests on reading the whole new file (104 lines) and s4d2's change note, not on a diff. Read 2026-11-28: without the
   flag, item_on is false, the item block (:68-79) never runs, and walk, tracer, START_UPD, the constants and the
   update/fire logic do not depend on it; the one visible difference is the `installed` log line, which now ends
-  `, item false)` (:102). The scorer matches it as the substring `det_synth stimulus: installed`
-  (s4d1_score.py:206), so that does not change a check. Whether the old file had the same line text is not knowable.
+  `, item false)` (:102; `, item true)` with the flag). The scorer matches it as the substring `det_synth stimulus: installed`
+  (s4d1_score.py:240), so that does not change a check. Whether the old file had the same line text is not knowable.
   The same installed file and hash serve s4d2. NOT installed today
   (`run/gamedata/scripts/zz_eperf_synth.script` does not exist). It must be copied there before the probes and stays for
   the whole series (inert without its flags: it reads `command_line()`). If the probe forces a change (requirement R1,
@@ -155,14 +226,15 @@ too (then draw = XFORM). s4 item = the active item's XFORM().c (simulation state
 per-frame sim_render cache, read without computing it.
 Engine log lines read: `command line ...`; `* det_synth: k K wallclock W tw T break B mask M`; `* det_rng_state <name>:
 Random=... frame=<f> time_ms=<ms> tick=<T>` (the ` tick=` suffix only under the lever); `* tw <s2|s3> BAD <frame>`;
-`det_synth stimulus: installed / start at update / <N> bullets fired`.
+`det_synth stimulus: installed / start at update ... time <ms> / item slot <n> section <name> | item NONE / <N> bullets
+fired` (the item line and the start time since Amendment 1).
 
 ## 2. Probes (two boots, unscored, FIRST, before registration)
 ### 2.1 The runs
 Both SimTick18.exe, **K = 3** (accepted by the Overseer: K = 2 has one render-only frame per tick and cannot separate
-"wiped" from "adds up"), walk + tracer stimulus, tripwires on, no break:
+"wiped" from "adds up"), walk + tracer + held-item stimulus (item since Amendment 1), tripwires on, no break:
 - `s4d_probe`, mask 7 (as shipped; bit 8 off): `DET_EXTRA="-det_passes 100,200,320 -det_lua_streams -det_counters
-  -det_synth_k 3 -sim_4d_mask 7 -det_synth_tw -det_synth_walk -det_synth_tracer"`.
+  -det_synth_k 3 -sim_4d_mask 7 -det_synth_tw -det_synth_walk -det_synth_tracer -det_synth_item"`.
 - `s4d_probe15`, mask 15 (bit 8 on), otherwise the same: only to see the s4 pattern with the experiment on.
 Reader: `python3 -I s4d1_score.py mode=probe root=out out=s4d1/probe_readings.txt` (written once; reads
 out/det_s4d_probe and out/det_s4d_probe15; exit 0 GO, 1 STOP). Probe folders are kept; a probe is re-run only after a
@@ -184,8 +256,10 @@ PROBE_BOOT_S that differs from those logs, and refuses unless both probe folders
 | tripwire | 0 `* tw` lines | mask 7 | the slices write no simulation field |
 | alife | >= 50 A-Life calls to cp1, all on tick frames, gaps in ticks 16/17/18, at most one 16 | mask 7 | L3's rule is usable in ticks |
 | body | >= 300 render-only frames with draw != xform | mask 7 | S2 draws between ticks at all |
-**What s4 shows never stops the series** (Overseer: the nudge is not gated). If no item is held headless, the s4
-description says so; requirement R1 (NOTES.md 4) is then a question for the Overseer, not a stop.
+| item (Amendment 1) | (i) the `det_synth stimulus: item` line is present and not NONE; (ii) s4 present on >= 0.50 (ITEM_SHARE) of the witness lines from the stimulus start frame (first line with hud >= the start line's `time`) to the cp3 frame | both | the actor holds an item, so the s4 lines are not empty; derivation in Amendment 1 |
+**What s4's values show never stops the series** (Overseer: the nudge is not gated). Since Amendment 1, WHETHER an
+item is held does: rule "item" (only presence, never the values). Requirement R1 (NOTES.md 4) is carried out by the
+switch; no item taken is a PROBE STOP and a new plan.
 
 ### 2.3 Placeholders the probe supplies (mask-7 probe; rule from reading to registered bound). Kp = 3
 | placeholder | probe reading | registered bound |
@@ -221,6 +295,8 @@ item frames undrawn), "near" (median <= 0.25 m) or "far". The reader names the f
 | no active item headless (s4 all dashes) | - | - | reader: "none of the registered cases", item step "no item" | 30 % |
 | anything else | | | "none of the registered cases" | 7 % |
 Attachments (nudge note section 1: +d, +2d, +d with a weapon held) are not in s4: not measurable here.
+Amendment 1 note: the table's probabilities were set before the item switch and are kept as written. With the switch,
+the row "no active item headless" is a PROBE STOP (rule "item"), not a reading; the new prediction is in 9.
 
 ### 2.5 After the probes
 Fill CONST and the placeholders here. Add a self-test case built from the probes' real folders (real witness, log and
@@ -252,14 +328,14 @@ Tags s4d_l2a, s4d_l2b (K=2), s4d_l3 (K=3), s4d_l1 (K=1), s4d_l2w (K=2 + `-det_sy
 | L5 K=2 vs K=3 | reported: C of l2a against l3; and l2w against l2a | section 10 |
 L3 FAIL = the lever is not usable: every part-S check is NO VERDICT.
 
-## 5. Part S: slices (8 boots; all with `-det_synth_walk -det_synth_tracer -det_synth_tw`)
+## 5. Part S: slices (8 boots; all with `-det_synth_walk -det_synth_tracer -det_synth_item -det_synth_tw`; the item switch since Amendment 1)
 s4d_off2a, s4d_off2b (K=2 mask 0), s4d_on2a, s4d_on2b (K=2 mask 7), s4d_off3 (K=3 mask 0), s4d_on3 (K=3 mask 7),
 s4d_brk1 (K=2 mask 7, `-sim_4d_break 1`), s4d_brk2 (K=2 mask 7, `-sim_4d_break 2`). "On runs" = on2a, on2b, on3;
 "off runs" = off2a, off2b, off3. Bit 8 is off in every part-S run.
 | check | PASS when | bound and derivation |
 |---|---|---|
 | S0 stimulus keeps det (harness) | off2a vs off2b: C = 0 at 1, 2, 3; cp1 ticks within 8 | exact / COPIED. FAIL -> SC NO VERDICT |
-| S0B stimulus ran | every S run: `installed`, `start at update`, highest `bullets fired` >= 50, no script error line, actor x/z range >= 1.5 m | walk spans 3.0 m (2 x WALK_HALF 1.5, script) -> 2.0x; bullets ~171 [G: (5440-300)/30] -> 3.4x, probe-checked |
+| S0B stimulus ran | every S run: `installed`, `start at update`, the item line with an item taken (not NONE, not missing; Amendment 1), highest `bullets fired` >= 50, no script error line, actor x/z range >= 1.5 m | walk spans 3.0 m (2 x WALK_HALF 1.5, script) -> 2.0x; bullets ~171 [G: (5440-300)/30] -> 3.4x, probe-checked |
 | SC same work | C = 0 at 1, 2, 3 and cp1 ticks within 8: on2a vs off2a, on2b vs off2a, on3 vs off3 | exact |
 | TW tripwire | every S run except the breaks: 0 `* tw` lines; every S run: per frame to cp3, the number of `* tw` log lines = the witness tw column, and every such line is on a witnessed frame | exact (sim_4d_tw_bad counts and logs in one call) |
 | TWB1 must-fail | brk1: `s2` BAD on >= floor(PROBE_S2_MOVING/2/3) distinct frames, and 0 `s3` BAD lines | the break writes XFORM on every frame whose drawn matrix differs from XFORM, at least the moving n=0 frames -> >= 3x (the brk1 witness cannot be used: its xform is printed after the break wrote it) |
@@ -268,6 +344,7 @@ s4d_brk1 (K=2 mask 7, `-sim_4d_break 1`), s4d_brk2 (K=2 mask 7, `-sim_4d_break 2
 | S3 tracers | on runs: n=0 frames with head != pos >= floor(PROBE_S3_FRAMES x (K-1)/2/3); on every frame with a tracer drawn: stamp_ok 1 -> head = lerp(start, pos, a); stamp_ok 0 -> head = pos; off runs: head = pos on every drawn frame | exact to 1e-4 + 4 ulp; 3x. Dropped with the probe rule |
 | S1 crosshair dt | on runs: dt_used = float(0.033f/K) on every s1 frame; off runs: dt_used = 0.033 on n=1 and 0 on n=0 frames (Device.fTimeDelta: FrameMove det step, and sim_tick_run's render-only branch); every run: s1 frames >= floor(PROBE_S1_FRAMES x K/3/3) | exact to 1.5e-6 (HUDTarget.cpp sim_4d_xhair_dt); 3x. Dropped with the probe rule |
 Reported, not gated:
+- The item each part-S run took (Amendment 1).
 - s4 per on and off run: item frames, median |item - item(j=0)| per j, median |draw - item - body offset|, frames
   undrawn.
 - S4X cross-rate: s4 item on the tick frames of the same T, to cp1. Pairs: on2a vs on3 and off2a vs off3. Reported:
@@ -289,7 +366,7 @@ probes: s4d_probe, s4d_probe15 -> (GO, fill, self-test on real bytes, register) 
 s4d_s3 s4d_o3 -> L: s4d_l2a s4d_l3 s4d_l1 s4d_l2w s4d_l2b -> S: s4d_off2a s4d_on2a s4d_off3 s4d_on3 s4d_off2b s4d_on2b
 s4d_brk1 s4d_brk2 (brk2 only if S3 is registered). The arms of each pair are spread out, not back to back. The breaks
 go last; each boot starts fresh (det_run.sh restores user.ltx and loads the save).
-### 6.2 Command per boot (series script s4d1/s4d1_run.sh, sha256 33b1fd0a8f16aaf95f371ebb147bd11a4c77867da282d8a7e8d72afb8bf28b43; NOTES.md 4 R2, 9)
+### 6.2 Command per boot (series script s4d1/s4d1_run.sh, sha256 dea3ec4428650e851f88886923856d098569b2d6c7a913c8dff3a1f2257925cd; NOTES.md 4 R2, 9, 10)
 The driver also restores the options file before every boot (template safety rule, kept by the coordinator's
 decision 2026-11-28): run/appdata/axr_options_play.ltx (pinned 27d54b9f...) is copied over
 run/gamedata/configs/axr_options.ltx inside box_guarded, because each exe rewrites that file's version line when it
@@ -307,13 +384,14 @@ under -det_passes, PREREG-S2-simtick section 9).
 |---|---|---|
 | s4d_s1..3 | Stance14.exe | (none) |
 | s4d_o1..3 | SimTick18.exe | (none) |
-| s4d_probe / s4d_probe15 | SimTick18.exe | `-det_synth_k 3 -sim_4d_mask 7` / `15`, `-det_synth_tw -det_synth_walk -det_synth_tracer` |
+| s4d_probe / s4d_probe15 | SimTick18.exe | `-det_synth_k 3 -sim_4d_mask 7` / `15`, `-det_synth_tw -det_synth_walk -det_synth_tracer -det_synth_item` |
 | s4d_l2a, s4d_l2b | SimTick18.exe | `-det_synth_k 2 -sim_4d_mask 0` |
 | s4d_l3 / s4d_l1 | SimTick18.exe | `-det_synth_k 3 -sim_4d_mask 0` / `-det_synth_k 1 -sim_4d_mask 0` |
 | s4d_l2w | SimTick18.exe | `-det_synth_k 2 -sim_4d_mask 0 -det_synth_wallclock` |
-| s4d_off2a, s4d_off2b / s4d_off3 | SimTick18.exe | `-det_synth_k 2` / `3`, `-sim_4d_mask 0 -det_synth_tw -det_synth_walk -det_synth_tracer` |
-| s4d_on2a, s4d_on2b / s4d_on3 | SimTick18.exe | `-det_synth_k 2` / `3`, `-sim_4d_mask 7 -det_synth_tw -det_synth_walk -det_synth_tracer` |
-| s4d_brk1 / s4d_brk2 | SimTick18.exe | `-det_synth_k 2 -sim_4d_mask 7 -det_synth_tw -sim_4d_break 1` / `2`, `-det_synth_walk -det_synth_tracer` |
+| s4d_off2a, s4d_off2b / s4d_off3 | SimTick18.exe | `-det_synth_k 2` / `3`, `-sim_4d_mask 0 -det_synth_tw -det_synth_walk -det_synth_tracer -det_synth_item` |
+| s4d_on2a, s4d_on2b / s4d_on3 | SimTick18.exe | `-det_synth_k 2` / `3`, `-sim_4d_mask 7 -det_synth_tw -det_synth_walk -det_synth_tracer -det_synth_item` |
+| s4d_brk1 / s4d_brk2 | SimTick18.exe | `-det_synth_k 2 -sim_4d_mask 7 -det_synth_tw -sim_4d_break 1` / `2`, `-det_synth_walk -det_synth_tracer -det_synth_item` |
+`-det_synth_item` is on every stimulus boot and on no other (Amendment 1); the driver refuses either error by name.
 The mask is always passed explicitly. The scorer checks every switch on the engine's own command line and the engine's
 det_synth line (F0), so a wrong flag fails by name.
 ### 6.3 Time per boot (derivation)
@@ -379,14 +457,18 @@ series (fault). A boot is never re-run because of what its output shows. Scored 
 | TWB1 count | floor(PROBE_S2_MOVING/2/3) | >= PROBE_S2_MOVING/2 | >= 3x | |
 | TWB2 | every own-witness frame caught; >= 30 frames | several hundred frames [G] | per frame exact; floor ~10x [G] | no cross-run assumption |
 | probe drop / stop count | 300 | ~5440 x (K-1) [G] | ~36x | |
+| probe rule "item": ITEM_SHARE (Amendment 1) | >= 0.50 | >= 0.98 with an item (15,433 lines, <= ~273 of a draw animation [G]); 0.00 without (0 of 15,433 / 15,415 [M]) | 1.96x above (0.98 / 0.50); 0.50 above the no-item 0.00 | just under 2x on the upper side, flagged; a stop rule, not a verdict |
+| teardown lines dropped: TEARDOWN_MAX (Amendment 2) | <= 2 per run | 1 per boot on 2 of 2 real boots [M] | 2x | EXACTLY 2x, flagged |
 | BENCH_TIMEOUT | 1900 s | <= 375 s [G] | 5.1x | guess; reset from PROBE_BOOT_S |
 | s4 reader: item step threshold (descriptive) | 0.05 m | ~0.5 m [G] | 10x | not a verdict bound |
 | s4 reader: draw near/far (descriptive) | 0.25 m | 0 or ~0.5 m | 2x either side | at 2x, flagged; not a verdict bound |
 | driver: TERM -> KILL grace (operational) | 250 s | det_run cleanup <= 165 s worst | 1.5x of the worst case | UNDER 2x, flagged; a hit loses det_run's cleanup, never a verdict |
 | driver: per-boot watch cap (operational) | BENCH_TIMEOUT + 900 s | det_run outside LIMIT <= ~679 s worst, ~40 s measured | 1.3x of the worst case, ~22x measured | UNDER 2x, flagged; a hit is a fault stop |
 | driver: claim wait cap (operational) | 6 h | - | - | COPIED from s4d2 (S2-7) |
-No verdict margin is under 2x (the two driver bounds above are operational and flagged; NOTES.md 9.5). Four are at exactly 2x (calls to cp1, walk range, lerp ulps, and the descriptive draw
-threshold) and one at 2.1x (A3 against a real extra pass). All are flagged. The first two are COPIED or set by the
+No verdict margin is under 2x (the two driver bounds above are operational and flagged; NOTES.md 9.5). The probe
+rule ITEM_SHARE is 1.96x on its upper side (Amendment 1; a probe stop rule, not a verdict), flagged. Five are at
+exactly 2x (calls to cp1, walk range, lerp ulps, the descriptive draw threshold, and TEARDOWN_MAX) and one at 2.1x
+(A3 against a real extra pass). All are flagged. The first two are COPIED or set by the
 script's own geometry.
 **Claim class per run: shared, every run** (both probes, A, L, S). No verdict depends on frame or wall timing: under
 the lever every gated column is a function of the pattern. The one real-clock run (s4d_l2w) is a must-fail whose
@@ -415,11 +497,16 @@ run carries exactly its registered switches (the engine's own command line and d
   VERDICT consequences of a harness check. TWB2 has three: did not fail, a frame not caught, wrong slice;
 - CRLF variants, a missing witness, a malformed s4 column (fails by name), the `_r1` retry, a dropped check, and the
   refusals;
-- ten probe-mode cases over both probe boots: one fixture per registered s4 case, each named correctly; a garbage
-  fixture and a no-item fixture ("none of the registered cases"); CRLF; no stimulus (STOP); no crosshair (S1
-  dropped); a missing mask-15 probe (STOP).
+- fourteen probe-mode cases over both probe boots: one fixture per registered s4 case, each named correctly; a garbage
+  fixture and a no-item fixture ("none of the registered cases"; since Amendment 1 also a STOP by rule "item"); CRLF;
+  no stimulus (STOP); no crosshair (S1 dropped); a missing mask-15 probe (STOP); rule "item": item NONE, item line
+  missing, s4 share 0.40 (STOP) and 0.60 (GO);
+- Amendment 1 in score mode: a part-S run without -det_synth_item and a part-L run with it (F0 FAIL by name), item NONE
+  and item line missing in a part-S run (S0B FAIL by name), the item report line;
+- Amendment 2: the real tails of both probes (teardown line dropped and counted) and mutants of them.
 Result 2026-11-27: `S4D1 SELFTEST: PASS (41/41)`
-(s4d1/selftest-runs/20261127-192126-3224414/selftest_output.txt). **Must be re-run with a case built on the probes'
+(s4d1/selftest-runs/20261127-192126-3224414/selftest_output.txt). Result 2026-11-28 after Amendments 1 and 2:
+`S4D1 SELFTEST: PASS (61/61)` (s4d1/selftest-runs/20261128-042031-620954/selftest_output.txt). **Must be re-run with a case built on the probes'
 real folders before registration.** Hashes of scorer and self-test: to fill at registration.
 
 ## 9. Predictions (fixed before any run)
@@ -430,6 +517,8 @@ Probes:
 - s4 case: the table in 2.4 (weapon desk prediction 45 %, no item 30 %, no shadow pass 12 %, none of the cases 7 %,
   bolt 3 %, adds up 3 %).
 - **Probe GO (series may start): about 50 %.** This is now the stimulus and the body only. s4 no longer stops it.
+- Added 2026-11-28 with Amendment 1 (after the first probe, before the re-probe): an item is taken and rule "item"
+  holds on both probes: 85 %. The GO figure above did not include this rule; with it, about 50 % x 0.85 = about 43 %.
 Series, given GO:
 - Part A all PASS 75 % (as 4a/4c). L1 85 %, L1W fails as predicted 90 %, L2 80 %, L3 75 %.
 - L4 (reported) C = 0: 70 %. L5 (reported) C = 0: 55 % (section 10).

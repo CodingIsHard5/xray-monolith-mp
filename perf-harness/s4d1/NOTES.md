@@ -324,3 +324,33 @@ s4d1_run.sh is now sha256 33b1fd0a8f16aaf95f371ebb147bd11a4c77867da282d8a7e8d72a
   rc 3, a refusal rc 1, renew called with QR_CLAIM_ID=<ours>, and in every case only <ours> released. Every 9.8
   fixture result unchanged. Note: the probe preflight now passes against the real run/ (the stimulus is installed).
   Not tested: the real claim tool's renew and release, the lost-claim stop, any real mode.
+
+## 10. First probe result and Amendments 1-2 (2026-11-28, desk only after the probe; nothing booted here)
+- **Probe of 03:56-04:08** (out/det_s4d_probe, out/det_s4d_probe15; reading s4d1/probe_readings.txt): `PROBE STOP
+  (2 rules)`, both by rule "pattern": `F 16270 follows F 16249` (s4d_probe) and `F 16252 follows F 16231`
+  (s4d_probe15). Cause: one witness line written by the quit after `- Disconnect`, after the cp3 frame (16247 / 16229),
+  with no actor (s2 dashes). Fix (prereg Amendment 2): the scorer drops at most TEARDOWN_MAX = 2 trailing no-actor
+  lines after cp3 and counts them in a reported line (1 per boot seen: exactly 2x). Self-test cases on the real tails.
+- **Same probe, s4:** six dashes on every line (16,161 / 16,143 lines after the teardown line): the actor held
+  nothing, as R1 (section 4) foresaw. **R1 carried out by the existing switch** `-det_synth_item` of the installed
+  stimulus (same file, sha256 1777fb68..., not edited): prereg Amendment 1 adds it to both probes and every part-S boot
+  (breaks included); parts A and L unchanged. Driver: refuses a stimulus boot without it and a non-stimulus boot with
+  it, by name. Scorer: F0 registers it with the stimulus; S0B needs the item line taken; new probe rule "item" on both
+  boots (item line present and not NONE; s4 present on >= ITEM_SHARE 0.50 of the lines from the stimulus start frame,
+  the first line with hud >= the start line's `time`, F 815 on the real probes, to cp3). Not R1's proposed text
+  (active_item check, slots 2, 3, different log line): the script that exists takes slots 3, 2, 1, 5, 6 and logs
+  `item slot <n> section <name>` / `item NONE (no filled slot)`.
+- Re-check on the real 03:56 data with the new scorer (output in the scratch folder, not in s4d1/): s4 share 0.0000 on
+  0 of 15,433 (s4d_probe) and 0 of 15,415 (s4d_probe15) lines; the rule stops both, as it should for no item; also
+  `flags: missing switch -det_synth_item` (those boots did not carry it).
+- Self-test: `S4D1 SELFTEST: PASS (61/61)` (selftest-runs/20261128-042031-620954). One existing expectation changed:
+  probe_case_no_item now exits 1 (rule "item", share 0.00), reason written at the line.
+- **Open:**
+  - The re-probe cannot start as the driver stands: `probe` refuses while out/det_s4d_probe*, s4d1/probe_readings.txt
+    or out/s4d1_state/probe exist (prereg 2.1, "no re-probe mode"). Needs the supervisor's decision on where the first
+    probe's folders, reading and state go.
+  - Whether an item sits in slot 3, 2, 1, 5 or 6 (dump shows wpn_ppsh41, wpn_bm16, wpn_binoc_inv, bolts_pack, wpn_knife2,
+    wpn_sks_b_wpn_addon_scope_pu with parent 0): only the re-probe tells. No item: PROBE STOP, new plan.
+  - The 3-s draw-animation bound in ITEM_SHARE's derivation is a guess; the re-probe's share reading shows it.
+  - S1 had 0 crosshair frames on the first probe (dropped, Caden's eyes); with an item held this may change.
+  - SCORER_SHA / SELFTEST_SHA in the driver are still REG_ME_ placeholders (filled at registration).

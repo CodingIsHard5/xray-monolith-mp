@@ -9,8 +9,11 @@
 # (and ALIFE_MIN_CALLS 50 -> 3, because the synthetic runs are 120 ticks long, not 5450; the rule itself is unchanged),
 # builds one good set of 19 run folders, then one case per check and per must-fail (each mutant must change
 # exactly the verdicts listed for it, nothing else), CRLF variants, a missing file, the retry folder, a dropped check,
-# the refusals of the registered scorer (placeholders, out exists), and ten mode=probe cases over both probe boots
-# (one fixture per registered s4 case, a garbage and a no-item fixture, stop rules). Unchanged run folders of a case are symlinks to
+# the refusals of the registered scorer (placeholders, out exists), and fourteen mode=probe cases over both probe boots
+# (one fixture per registered s4 case, a garbage and a no-item fixture, stop rules, and since prereg Amendment 1 the
+# rule "item": item NONE, item line missing, s4 share 0.40 and 0.60). Prereg Amendment 1 (2026-11-28): every stimulus
+# run of the fixtures carries -det_synth_item, the script's item line (default "slot 3 section wpn_ppsh41") and, where
+# the s4 case models an item, s4 on every line (s4_model). Unchanged run folders of a case are symlinks to
 # the good set, unchanged witness files hard links: the output stays at a few MB. Nothing outside the stamp folder is
 # written; nothing is deleted.
 set -u
@@ -135,7 +138,8 @@ def write(path, lines, crlf):
 
 def make_run(root, tag, spec, rtag=None, tmax=TMAX, crlf_log=True, crlf_wit=False, rec_fn=None, link_wit=None,
              cmd_drop=None, counter_change=None, cp_shift=0, sched_extra=False, syn_line=False, no_stim=False,
-             bad_extra=(), no_bad=False, no_witness=False, s4case="weapon", raw_fn=None, drop_bad=None):
+             bad_extra=(), no_bad=False, no_witness=False, s4case="weapon", raw_fn=None, drop_bad=None,
+             item="slot 3 section wpn_ppsh41", cmd_add=None):
     rtag = rtag or tag
     d = os.path.join(root, "det_" + rtag); os.makedirs(d)
     K, lever = spec["k"], spec["k"] > 0
@@ -144,10 +148,12 @@ def make_run(root, tag, spec, rtag=None, tmax=TMAX, crlf_log=True, crlf_wit=Fals
         ext += " -det_synth_k %d -sim_4d_mask %d" % (K, spec["mask"])
         ext += " -det_synth_wallclock" * spec["wc"] + " -det_synth_tw" * spec["tw"]
         ext += (" -sim_4d_break %d" % spec["brk"]) if spec["brk"] else ""
-        ext += " -det_synth_walk -det_synth_tracer" * spec["stim"]
+        ext += " -det_synth_walk -det_synth_tracer -det_synth_item" * spec["stim"]   # prereg Amendment 1
     cmd = "command line z:\\home\\caden\\projects\\stalkergameengine\\run\\bin\\%s -nointro -dbg -start server(bench1/single/alife/load) client(localhost) -det_mode -det_tag %s -det_interval 60 -det_checkpoints 3 %s" % (spec["exe"], rtag, ext)
     if cmd_drop:
         cmd = cmd.replace(" " + cmd_drop, "")
+    if cmd_add:
+        cmd += " " + cmd_add
     L = ["* xray log (synthetic, s4d1 self-test)", cmd]
     cpf = lambda T: (F0 + (T - 1) * K) if lever else 32 + T
     suf = lambda T: (" tick=%d" % T) if lever else ""
@@ -160,9 +166,13 @@ def make_run(root, tag, spec, rtag=None, tmax=TMAX, crlf_log=True, crlf_wit=Fals
         L.append("* det_rng_state %s: Random=-1528111566 Random32=0 alife=302455169 crt_next=6334 frame=%d time_ms=%d%s" % (cp, cpf(T) + cp_shift, 99 + 33 * T, suf(T)))
         L.append("* det_lua_state %s: 815687002" % cp)
     if spec["stim"] and not no_stim:
-        L += ["* det_synth stimulus: installed (walk true, tracer true)",
-              "* det_synth stimulus: start at update 300 (10.000 2.000 5.000) time 9999 walk true tracer true ammo ammo_5.45x39_fmj",
-              "* det_synth stimulus: 1 bullets fired (update 300)", "* det_synth stimulus: 50 bullets fired (update 1770)",
+        # line texts of zz_eperf_synth.script:66, :78, :94, :102. `time` = the hud of the tick frame of T = 10, where X()
+        # starts the walk (H0 + 33 x 10), as on the real probes (time 9966 = hud of F 815, the first moving tick frame)
+        L += ["* det_synth stimulus: installed (walk true, tracer true, item %s)" % ("true" if spec["stim"] else "false"),
+              "* det_synth stimulus: start at update 300 (10.000 2.000 5.000) time %d walk true tracer true ammo ammo_5.45x39_fmj" % int(H0 + 33 * 10)]
+        if item is not None:
+            L.append("* det_synth stimulus: item " + ("NONE (no filled slot)" if item == "NONE" else item))
+        L += ["* det_synth stimulus: 1 bullets fired (update 300)", "* det_synth stimulus: 50 bullets fired (update 1770)",
               "* det_synth stimulus: 150 bullets fired (update 4770)"]
     if lever:
         recs, bad = records(spec, tmax, s4case)
@@ -306,6 +316,17 @@ CASES = [
 for name, ch, exp, code in CASES:
     run_score(name, case_root(name, ch), exp, code)
 
+# ---- prereg Amendment 1 in score mode: the item switch in F0 (by name, both ways), the item line in S0B, the report
+run_score("m_f0_item_switch_missing", case_root("m_f0_item_switch_missing", {"s4d_on2a": {"cmd_drop": "-det_synth_item"}}),
+          {"F0": "FAIL"}, 1, must=("s4d_on2a: missing switch -det_synth_item",))
+run_score("m_f0_item_switch_in_L", case_root("m_f0_item_switch_in_L", {"s4d_l3": {"cmd_add": "-det_synth_item"}}),
+          {"F0": "FAIL"}, 1, must=("s4d_l3: unregistered switch -det_synth_item",))
+run_score("m_s0b_item_none", case_root("m_s0b_item_none", {"s4d_off3": {"item": "NONE"}}),
+          {"S0B": "FAIL"}, 1, must=("s4d_off3: item NONE (no filled slot)", "reported: item taken s4d_off3: item NONE"))
+run_score("m_s0b_item_line_missing", case_root("m_s0b_item_line_missing", {"s4d_brk1": {"item": None}}),
+          {"S0B": "FAIL"}, 1, must=("s4d_brk1: no 'det_synth stimulus: item' line",))
+run_score("good_item_reported", GOOD, {}, 0, must=("reported: item taken s4d_on2a: item slot 3 section wpn_ppsh41",
+          "reported: item taken s4d_brk2: item slot 3 section wpn_ppsh41", "item taken, >= 50 bullets"))
 # missing witness of one run: every check that reads it FAILS by name
 run_score("m_missing_witness", case_root("m_missing_witness", {"s4d_on3": {"no_witness": True}}),
           {i: "FAIL" for i in ("S0B", "TW", "S2", "S3", "S1")}, 1, must=("missing file", "synth_s4d_on3.txt"))
@@ -345,7 +366,8 @@ def probe_case(name, want_code, must=(), s4case="weapon", skip15=False, **kw):
     ok = p.returncode == want_code and all(s in txt for s in must)
     results.append((name, ok))
     print("%-4s %-22s exit %d (want %d) %s" % ("ok" if ok else "BAD", name, p.returncode, want_code,
-          " | ".join(l for l in txt.split("\n") if "STOP" in l or "S4 CASE" in l or "PROBE: GO" in l)[:300]))
+          " | ".join(l for l in txt.split("\n") if "STOP" in l or "S4 CASE" in l or "PROBE: GO" in l
+                     or (l.startswith("item s4d_probe:") and "share" in l))[:400]))
     if not ok:
         print("     " + "\n     ".join(txt.split("\n")))
 def p_nos1(recs):
@@ -357,11 +379,232 @@ probe_case("probe_case_adds_up", 0, must=(CASE + "nudge adds up",), s4case="adds
 probe_case("probe_case_bolt", 0, must=(CASE + "bolt active",), s4case="bolt")
 probe_case("probe_case_no_shadow", 0, must=(CASE + "no shadow pass",), s4case="noshadow")
 probe_case("probe_case_garbage", 0, must=(CASE + "none of the registered cases",), s4case="garbage")
-probe_case("probe_case_no_item", 0, must=(CASE + "none of the registered cases", "item step no item"), s4case="noitem")
+# Amendment 1 changed this expectation (exit 0 -> 1, plus the "item" stop text): the no-item fixture has s4 dashes on
+# every line, so its s4 share from the stimulus start to cp3 is 0.00 < ITEM_SHARE 0.50 on both probes, which the
+# amended prereg (2.2 rule "item", part ii) makes a PROBE STOP. Its item log line is the default (taken), so only part
+# (ii) fires. The s4 description it checks is unchanged (descriptive, never gated).
+probe_case("probe_case_no_item", 1, must=(CASE + "none of the registered cases", "item step no item",
+           "PROBE STOP item: s4d_probe: s4 share 0.0000", "PROBE STOP item: s4d_probe15: s4 share 0.0000"), s4case="noitem")
 probe_case("probe_crlf", 0, must=(CASE + "weapon, desk prediction",), crlf_log=False, crlf_wit=True)
 probe_case("probe_no_stimulus", 1, must=("PROBE STOP stimulus",), no_stim=True)
 probe_case("probe_no_crosshair", 0, must=("S1 DROPPED: Caden's eyes only",), rec_fn=p_nos1)
 probe_case("probe_missing_probe15", 1, must=("PROBE STOP input: s4d_probe15", CASE + "none of the registered cases"), skip15=True)
+# ---- prereg Amendment 1, probe rule "item" (both boots): (i) item line present and not NONE, (ii) s4 share >= 0.50
+def p_share(keep):   # s4 kept on `keep` of every 10 window lines (stimulus start F 67 = hud 1330 to cp3 F 367: 301 lines)
+    def f(recs):
+        w = [r for r in recs if r["hud"] >= H0 + 33 * 10 - 1e-3 and r["F"] <= F0 + (CPT["cp3"] - 1) * 3]
+        for i, r in enumerate(w):
+            if i % 10 >= keep:
+                r["s4"] = r["s4d"] = None
+    return f
+probe_case("probe_item_none", 1, must=("PROBE STOP item: s4d_probe: item NONE (no filled slot)",
+           "PROBE STOP item: s4d_probe15: item NONE (no filled slot)", "share 1.0000"), item="NONE")
+probe_case("probe_item_line_missing", 1, must=("PROBE STOP item: s4d_probe: no 'det_synth stimulus: item' line",
+           "PROBE STOP item: s4d_probe15: no 'det_synth stimulus: item' line"), item=None)
+probe_case("probe_item_share_040", 1, must=("PROBE STOP item: s4d_probe: s4 share 0.4020 (121 of 301 lines F 67..367) < 0.50",
+           "PROBE STOP item: s4d_probe15: s4 share 0.4020"), rec_fn=p_share(4))
+probe_case("probe_item_share_060", 0, must=("item s4d_probe: item slot 3 section wpn_ppsh41 (installed line: item true); s4 on 181 of 301 witness lines F 67..367",
+           "share 0.6013 (rule >= 0.50)", "S4D1 PROBE: GO"), rec_fn=p_share(6))
+
+TD_SPEC = {"s4d_probe": S.PROBE_RUN, "s4d_probe15": S.PROBE15_RUN}
+# Prereg Amendment 1: these real tails were cut from boots WITHOUT -det_synth_item (and without its log line), so in
+# mode=probe they also STOP by "flags" and "item"; the td_* cases test only the teardown / pattern rule (td_case runs
+# pattern_errors alone; td_probe reads only the "PROBE STOP pattern" lines and the dropped count, exit 1 either way).
+# ---- teardown witness lines (the quit after cp3 writes one line with no actor; scorer teardown_split): REAL bytes
+import hashlib, json
+# ---- REAL bytes (cut 2026-11-28, read only): the last 30 witness lines of out/det_<tag>/synth_<tag>.txt (LF, as in
+# the file) and the matching xray.log lines (CRLF, as in the file): command line, det_synth lines, cp1-cp3, the lines
+# from cp3 to '- Disconnect' and the one after it. The teardown line is the last witness line (F after cp3, s2 dashes).
+REAL = {
+    's4d_probe': (
+        [
+            'F 16221 T 5378 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179432.000 | s2 206.05209 0.02860 88.48257 205.71548 0.02830 88.23655 206.05209 0.02860 88.48257 | s3 1 207.11699 110.21176 -99.26889 207.11700 122.35507 -120.36887 207.11700 104.14011 -88.71890 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16222 T 5378 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179443.000 | s2 205.88379 0.02845 88.35956 205.71548 0.02830 88.23655 205.88379 0.02845 88.35956 | s3 1 207.11700 116.28342 -109.81888 207.11700 122.35507 -120.36887 207.11700 104.14011 -88.71890 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16223 T 5379 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179454.000 | s2 205.71548 0.02830 88.23655 205.65300 0.06273 88.14102 205.71548 0.02830 88.23655 | s3 1 207.11700 122.35507 -120.36887 207.11700 139.83223 -150.75926 207.11700 122.35507 -120.36887 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16224 T 5379 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179465.000 | s2 205.69464 0.03978 88.20470 205.65300 0.06273 88.14102 205.69464 0.03978 88.20470 | s3 1 207.11699 128.18079 -130.49899 207.11700 139.83223 -150.75926 207.11700 122.35507 -120.36887 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16225 T 5379 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179476.000 | s2 205.67383 0.05125 88.17287 205.65300 0.06273 88.14102 205.67383 0.05125 88.17287 | s3 1 207.11700 134.00652 -140.62914 207.11700 139.83223 -150.75926 207.11700 122.35507 -120.36887 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16226 T 5380 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179487.000 | s2 205.65300 0.06273 88.14102 205.68001 0.25653 88.29777 205.65300 0.06273 88.14102 | s3 1 207.11700 139.83223 -150.75926 207.11700 151.76012 -171.51430 207.11700 139.83223 -150.75926 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16227 T 5380 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179498.000 | s2 205.66199 0.12733 88.19327 205.68001 0.25653 88.29777 205.66199 0.12733 88.19327 | s3 1 207.11699 143.80820 -157.67761 207.11700 151.76012 -171.51430 207.11700 139.83223 -150.75926 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16228 T 5380 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179509.000 | s2 205.67101 0.19193 88.24552 205.68001 0.25653 88.29777 205.67101 0.19193 88.24552 | s3 1 207.11700 147.78415 -164.59595 207.11700 151.76012 -171.51430 207.11700 139.83223 -150.75926 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16229 T 5381 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179520.000 | s2 205.68001 0.25653 88.29777 206.22160 0.02574 88.47267 205.68001 0.25653 88.29777 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16230 T 5381 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179531.000 | s2 205.86053 0.17960 88.35606 206.22160 0.02574 88.47267 205.86053 0.17960 88.35606 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16231 T 5381 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179542.000 | s2 206.04108 0.10267 88.41437 206.22160 0.02574 88.47267 206.04108 0.10267 88.41437 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16232 T 5382 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179553.000 | s2 206.22160 0.02574 88.47267 205.68605 0.03019 88.26493 206.22160 0.02574 88.47267 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16233 T 5382 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179564.000 | s2 206.04309 0.02722 88.40342 205.68605 0.03019 88.26493 206.04309 0.02722 88.40342 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16234 T 5382 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179575.000 | s2 205.86456 0.02870 88.33418 205.68605 0.03019 88.26493 205.86456 0.02870 88.33418 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16235 T 5383 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179586.000 | s2 205.68605 0.03019 88.26493 206.26761 0.02933 88.42514 205.68605 0.03019 88.26493 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16236 T 5383 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179597.000 | s2 205.87990 0.02990 88.31833 206.26761 0.02933 88.42514 205.87990 0.02990 88.31833 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16237 T 5383 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179608.000 | s2 206.07376 0.02962 88.37173 206.26761 0.02933 88.42514 206.07376 0.02962 88.37173 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16238 T 5384 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179619.000 | s2 206.26761 0.02933 88.42514 205.70790 0.02483 88.09684 206.26761 0.02933 88.42514 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16239 T 5384 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179630.000 | s2 206.08104 0.02783 88.31570 205.70790 0.02483 88.09684 206.08104 0.02783 88.31570 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16240 T 5384 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179641.000 | s2 205.89447 0.02633 88.20627 205.70790 0.02483 88.09684 205.89447 0.02633 88.20627 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16241 T 5385 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179652.000 | s2 205.70790 0.02483 88.09684 206.19948 0.03344 88.43396 205.70790 0.02483 88.09684 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16242 T 5385 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179663.000 | s2 205.87177 0.02770 88.20921 206.19948 0.03344 88.43396 205.87177 0.02770 88.20921 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16243 T 5385 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179674.000 | s2 206.03561 0.03057 88.32159 206.19948 0.03344 88.43396 206.03561 0.03057 88.32159 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16244 T 5386 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179685.000 | s2 206.19948 0.03344 88.43396 206.83578 0.02741 88.42514 206.19948 0.03344 88.43396 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16245 T 5386 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179696.000 | s2 206.41158 0.03143 88.43102 206.83578 0.02741 88.42514 206.41158 0.03143 88.43102 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16246 T 5386 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179707.000 | s2 206.62369 0.02942 88.42809 206.83578 0.02741 88.42514 206.62369 0.02942 88.42809 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16247 T 5387 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179718.000 | s2 206.83578 0.02741 88.42514 206.33240 0.02586 88.42514 206.83578 0.02741 88.42514 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16248 T 5387 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179729.000 | s2 206.66798 0.02690 88.42514 206.33240 0.02586 88.42514 206.66798 0.02690 88.42514 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16249 T 5387 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179740.000 | s2 206.50018 0.02638 88.42514 206.33240 0.02586 88.42514 206.50018 0.02638 88.42514 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16270 T 5388 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179751.000 | s2 - - - - - - - - - | s3 - - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+        ],
+        [
+            'command line z:\\home\\caden\\projects\\stalkergameengine\\run\\bin\\simtick18.exe -nointro -dbg -start server(bench1/single/alife/load) client(localhost) -det_mode -det_tag s4d_probe -det_interval 60 -det_checkpoints 3 -det_passes 100,200,320 -det_lua_streams -det_counters -det_synth_k 3 -sim_4d_mask 7 -det_synth_tw -det_synth_walk -det_synth_tracer',
+            '* det_synth: k 3 wallclock 0 tw 1 break 0 mask 7',
+            '* det_synth: K 3, witness z:/home/caden/projects/stalkergameengine/run\\appdata\\logs\\synth_s4d_probe.txt',
+            '* det_rng_state cp1: Random=852712388 Random32=0 alife=302455169 crt_next=6334 frame=4982 time_ms=55803 tick=1632',
+            '* det_rng_state cp2: Random=656316615 Random32=0 alife=302455169 crt_next=26500 frame=10112 time_ms=112233 tick=3342',
+            '* det_rng_state cp3: Random=1936983972 Random32=0 alife=302455169 crt_next=19169 frame=16247 time_ms=179718 tick=5387',
+            '* det_lua_state cp3: 937625969',
+            '* eperf dump: checkpoint 3 written, 30464 objects',
+            '* Log file has been saved successfully!',
+            '- Disconnect',
+            '[TutorialMonitor] Ended tutorial state tutorial_campfire_extinguish at 179751',
+        ],
+        '4c4d06c5a07c8c6a68671a40ecc4198a3462035a198eadd6c56ec8bdadfda469', 'be736f00f9db2b21ffc3c0134fbbeee70ddbecbb34580497e1d5b874e4081b96'),
+    's4d_probe15': (
+        [
+            'F 16203 T 5372 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179234.000 | s2 206.25909 0.03165 88.29730 205.88731 0.02466 88.04163 206.25909 0.03165 88.29730 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16204 T 5372 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179245.000 | s2 206.07321 0.02815 88.16946 205.88731 0.02466 88.04163 206.07321 0.02815 88.16946 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16205 T 5373 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179256.000 | s2 205.88731 0.02466 88.04163 206.31953 0.02795 88.48488 205.88731 0.02466 88.04163 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16206 T 5373 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179267.000 | s2 206.03137 0.02576 88.18938 206.31953 0.02795 88.48488 206.03137 0.02576 88.18938 | s3 1 207.11699 14.09166 67.47495 207.11700 23.90241 50.47675 207.11700 9.18629 75.97405 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16207 T 5373 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179278.000 | s2 206.17545 0.02685 88.33713 206.31953 0.02795 88.48488 206.17545 0.02685 88.33713 | s3 1 207.11700 18.99704 58.97585 207.11700 23.90241 50.47675 207.11700 9.18629 75.97405 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16208 T 5374 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179289.000 | s2 206.31953 0.02795 88.48488 205.76857 0.02665 88.14809 206.31953 0.02795 88.48488 | s3 1 207.11700 23.90241 50.47675 207.11700 45.06852 13.78848 207.11700 23.90241 50.47675 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16209 T 5374 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179300.000 | s2 206.13586 0.02752 88.37261 205.76857 0.02665 88.14809 206.13586 0.02752 88.37261 | s3 1 207.11699 30.95778 38.24732 207.11700 45.06852 13.78848 207.11700 23.90241 50.47675 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16210 T 5374 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179311.000 | s2 205.95221 0.02708 88.26035 205.76857 0.02665 88.14809 205.95221 0.02708 88.26035 | s3 1 207.11700 38.01315 26.01790 207.11700 45.06852 13.78848 207.11700 23.90241 50.47675 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16211 T 5375 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179322.000 | s2 205.76857 0.02665 88.14809 206.26228 0.02856 88.57005 205.76857 0.02665 88.14809 | s3 1 207.11700 45.06852 13.78848 207.11700 65.49683 -21.64022 207.11700 45.06852 13.78848 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16212 T 5375 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179333.000 | s2 205.93314 0.02729 88.28874 206.26228 0.02856 88.57005 205.93314 0.02729 88.28874 | s3 1 207.11699 51.87795 1.97891 207.11700 65.49683 -21.64022 207.11700 45.06852 13.78848 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16213 T 5375 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179344.000 | s2 206.09772 0.02792 88.42940 206.26228 0.02856 88.57005 206.09772 0.02792 88.42940 | s3 1 207.11700 58.68740 -9.83066 207.11700 65.49683 -21.64022 207.11700 45.06852 13.78848 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16214 T 5376 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179355.000 | s2 206.26228 0.02856 88.57005 205.70720 0.02859 88.20445 206.26228 0.02856 88.57005 | s3 1 207.11700 65.49683 -21.64022 207.11700 85.18738 -55.80936 207.11700 65.49683 -21.64022 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16215 T 5376 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179366.000 | s2 206.07724 0.02857 88.44818 205.70720 0.02859 88.20445 206.07724 0.02857 88.44818 | s3 1 207.11699 72.06035 -33.02994 207.11700 85.18738 -55.80936 207.11700 65.49683 -21.64022 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16216 T 5376 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179377.000 | s2 205.89223 0.02858 88.32632 205.70720 0.02859 88.20445 205.89223 0.02858 88.32632 | s3 1 207.11700 78.62386 -44.41965 207.11700 85.18738 -55.80936 207.11700 65.49683 -21.64022 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16217 T 5377 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179388.000 | s2 205.70720 0.02859 88.20445 206.27199 0.02952 88.62603 205.70720 0.02859 88.20445 | s3 1 207.11700 85.18738 -55.80936 207.11700 104.14011 -88.71890 207.11700 85.18738 -55.80936 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16218 T 5377 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179399.000 | s2 205.89545 0.02890 88.34497 206.27199 0.02952 88.62603 205.89545 0.02890 88.34497 | s3 1 207.11699 91.50495 -66.77921 207.11700 104.14011 -88.71890 207.11700 85.18738 -55.80936 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16219 T 5377 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179410.000 | s2 206.08372 0.02921 88.48550 206.27199 0.02952 88.62603 206.08372 0.02921 88.48550 | s3 1 207.11700 97.82253 -77.74905 207.11700 104.14011 -88.71890 207.11700 85.18738 -55.80936 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16220 T 5378 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179421.000 | s2 206.27199 0.02952 88.62603 205.75200 0.02659 88.24551 206.27199 0.02952 88.62603 | s3 1 207.11700 104.14011 -88.71890 207.11700 122.35507 -120.36887 207.11700 104.14011 -88.71890 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16221 T 5378 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179432.000 | s2 206.09865 0.02854 88.49919 205.75200 0.02659 88.24551 206.09865 0.02854 88.49919 | s3 1 207.11699 110.21176 -99.26889 207.11700 122.35507 -120.36887 207.11700 104.14011 -88.71890 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16222 T 5378 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179443.000 | s2 205.92532 0.02757 88.37235 205.75200 0.02659 88.24551 205.92532 0.02757 88.37235 | s3 1 207.11700 116.28342 -109.81888 207.11700 122.35507 -120.36887 207.11700 104.14011 -88.71890 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16223 T 5379 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179454.000 | s2 205.75200 0.02659 88.24551 205.65300 0.24626 88.13755 205.75200 0.02659 88.24551 | s3 1 207.11700 122.35507 -120.36887 207.11700 139.83223 -150.75926 207.11700 122.35507 -120.36887 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16224 T 5379 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179465.000 | s2 205.71899 0.09981 88.20952 205.65300 0.24626 88.13755 205.71899 0.09981 88.20952 | s3 1 207.11699 128.18079 -130.49899 207.11700 139.83223 -150.75926 207.11700 122.35507 -120.36887 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16225 T 5379 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179476.000 | s2 205.68600 0.17304 88.17354 205.65300 0.24626 88.13755 205.68600 0.17304 88.17354 | s3 1 207.11700 134.00652 -140.62914 207.11700 139.83223 -150.75926 207.11700 122.35507 -120.36887 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16226 T 5380 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179487.000 | s2 205.65300 0.24626 88.13755 205.68001 0.08178 88.28903 205.65300 0.24626 88.13755 | s3 1 207.11700 139.83223 -150.75926 207.11700 151.76012 -171.51430 207.11700 139.83223 -150.75926 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16227 T 5380 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179498.000 | s2 205.66199 0.19143 88.18804 205.68001 0.08178 88.28903 205.66199 0.19143 88.18804 | s3 1 207.11699 143.80820 -157.67761 207.11700 151.76012 -171.51430 207.11700 139.83223 -150.75926 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16228 T 5380 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179509.000 | s2 205.67101 0.13660 88.23854 205.68001 0.08178 88.28903 205.67101 0.13660 88.23854 | s3 1 207.11700 147.78415 -164.59595 207.11700 151.76012 -171.51430 207.11700 139.83223 -150.75926 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16229 T 5381 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179520.000 | s2 205.68001 0.08178 88.28903 206.07033 0.25164 88.50457 205.68001 0.08178 88.28903 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16230 T 5381 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179531.000 | s2 205.81010 0.13840 88.36088 206.07033 0.25164 88.50457 205.81010 0.13840 88.36088 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16231 T 5381 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179542.000 | s2 205.94022 0.19502 88.43272 206.07033 0.25164 88.50457 205.94022 0.19502 88.43272 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16252 T 5382 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179553.000 | s2 - - - - - - - - - | s3 - - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+        ],
+        [
+            'command line z:\\home\\caden\\projects\\stalkergameengine\\run\\bin\\simtick18.exe -nointro -dbg -start server(bench1/single/alife/load) client(localhost) -det_mode -det_tag s4d_probe15 -det_interval 60 -det_checkpoints 3 -det_passes 100,200,320 -det_lua_streams -det_counters -det_synth_k 3 -sim_4d_mask 15 -det_synth_tw -det_synth_walk -det_synth_tracer',
+            '* det_synth: k 3 wallclock 0 tw 1 break 0 mask 15',
+            '* det_synth: K 3, witness z:/home/caden/projects/stalkergameengine/run\\appdata\\logs\\synth_s4d_probe15.txt',
+            '* det_rng_state cp1: Random=-1195896386 Random32=0 alife=302455169 crt_next=6334 frame=4982 time_ms=55803 tick=1632',
+            '* det_rng_state cp2: Random=-1324912062 Random32=0 alife=302455169 crt_next=26500 frame=10091 time_ms=112002 tick=3335',
+            '* det_rng_state cp3: Random=-2079694359 Random32=0 alife=302455169 crt_next=19169 frame=16229 time_ms=179520 tick=5381',
+            '* det_lua_state cp3: 920508979',
+            '* eperf dump: checkpoint 3 written, 30462 objects',
+            '* Log file has been saved successfully!',
+            '- Disconnect',
+            '[TutorialMonitor] Ended tutorial state tutorial_campfire_extinguish at 179553',
+        ],
+        'b62958c7f9522dcc4c95b81a298c5df570cb305e0b1cf11974e449bdaa1c847d', '7ecacd8f7fc16e2bbca945a11ba5e6945dac6be4fa7321a0238d25266807f8c3'),
+}
+for tag_, (wl_, xl_, wsha_, xsha_) in REAL.items():   # the literal above is the real bytes, unedited
+    assert hashlib.sha256(("\n".join(wl_) + "\n").encode()).hexdigest() == wsha_, tag_
+    assert hashlib.sha256(("\r\n".join(xl_) + "\r\n").encode()).hexdigest() == xsha_, tag_
+TD = os.path.join(ST, "teardown"); os.makedirs(TD)
+s_ = filled({}); assert s_.count("TEARDOWN_MAX = 2 ") == 1
+SCN = os.path.join(ST, "scorer_filled_noteardown.py")   # mutation: the OLD rule (teardown drop disabled, max 2 -> 0)
+open(SCN, "w").write(s_.replace("TEARDOWN_MAX = 2 ", "TEARDOWN_MAX = 0 "))
+DRV = os.path.join(ST, "teardown_pattern.py")   # runs the scorer copy's pattern_errors on one fixture run folder
+open(DRV, "w").write('''import importlib.util, json, re, sys
+sc, root, tag, spec = sys.argv[1], sys.argv[2], sys.argv[3], json.loads(sys.argv[4])
+sp = importlib.util.spec_from_file_location("sc", sc); M = importlib.util.module_from_spec(sp); sp.loader.exec_module(M)
+r = M.Run(root, tag, spec)
+try:
+    r.wit()
+    print("dropped %d" % r.td)
+    errs = M.pattern_errors(r)
+except M.Missing as m:
+    if r._wit is None:
+        print("dropped %s" % r.td)
+    print("MISSING %s" % m); sys.exit(2)
+# the fixture holds only the last 30 lines: cp1 and cp2 are absent from it by construction (the cut, not the rule)
+cut = [e for e in errs if re.match(r"^cp[12] frame [0-9]+ tick [0-9]+: witness line absent$", e)]
+for e in errs:
+    print("%s %s" % ("CUT" if e in cut else "ERR", e))
+sys.exit(1 if len(errs) > len(cut) else 0)
+''')
+
+def td_folder(name, tag, wit_fn=None, log_fn=None):
+    wl, xl = list(REAL[tag][0]), list(REAL[tag][1])
+    if wit_fn:
+        wit_fn(wl)
+    if log_fn:
+        log_fn(xl)
+    d = os.path.join(TD, name, "det_" + tag); os.makedirs(d)
+    write(os.path.join(d, "synth_%s.txt" % tag), wl, False)     # LF, as the real witness
+    write(os.path.join(d, "xray.log"), xl, True)                # CRLF, as the real engine log
+    if not wit_fn and not log_fn:
+        assert hashlib.sha256(open(os.path.join(d, "synth_%s.txt" % tag), "rb").read()).hexdigest() == REAL[tag][2]
+        assert hashlib.sha256(open(os.path.join(d, "xray.log"), "rb").read()).hexdigest() == REAL[tag][3]
+    return os.path.join(TD, name)
+
+def td_case(name, tag, want_code, must=(), mustnot=(), wit_fn=None, log_fn=None, scorer=SCF):
+    td_folder(name, tag, wit_fn, log_fn)
+    p = subprocess.run([sys.executable, "-I", DRV, scorer, os.path.join(TD, name), tag, json.dumps(TD_SPEC[tag])],
+                       capture_output=True, text=True)
+    txt = p.stdout + p.stderr
+    open(os.path.join(TD, name, "pattern.txt"), "w").write(txt)
+    ok = p.returncode == want_code and all(s in txt for s in must) and not any(s in txt for s in mustnot)
+    results.append((name, ok))
+    print("%-4s %-22s exit %d (want %d) %s" % ("ok" if ok else "BAD", name, p.returncode, want_code,
+          " | ".join(l for l in txt.split("\n") if l.startswith(("dropped", "ERR", "MISSING")))[:300]))
+    if not ok:
+        print("     " + "\n     ".join(txt.split("\n")))
+
+TDL = "teardown witness lines dropped (trailing no-actor lines after cp3, at most 2): "
+def td_no_actor(l, F):    # the real teardown line's columns with frame F
+    t = l.split(); t[1] = str(F); return " ".join(t)
+def td_three(wl):         # (b) three trailing no-actor lines after cp3: one more than TEARDOWN_MAX
+    wl += [td_no_actor(wl[-1], 16271), td_no_actor(wl[-1], 16272)]
+def td_middle(wl):        # (c) the no-actor line in the middle, before the cp3 line: not trailing
+    wl.insert(10, wl.pop())
+def td_at_cp3(wl):        # (c') a trailing no-actor line whose frame is at cp3 (16247), not after it
+    wl[-1] = td_no_actor(wl[-1], 16247)
+def td_actor(wl):         # (d) the trailing line with a frame jump but WITH actor columns (those of F 16249)
+    t, a = wl[-1].split(), wl[-2].split(); t[18:27] = a[18:27]; wl[-1] = " ".join(t)
+def td_nocp3(xl):         # no cp3 line in the engine log: nothing dropped
+    xl[:] = [l for l in xl if not l.startswith("* det_rng_state cp3:")]
+td_case("td_real_probe", "s4d_probe", 0, must=("dropped 1",), mustnot=("ERR", "follows"))
+td_case("td_real_probe15", "s4d_probe15", 0, must=("dropped 1",), mustnot=("ERR", "follows"))
+td_case("td_mut_old_rule", "s4d_probe", 1, must=("dropped 0", "ERR F 16270 follows F 16249", "> TEARDOWN_MAX 0: none dropped"), scorer=SCN)
+td_case("td_mut_old_rule15", "s4d_probe15", 1, must=("dropped 0", "ERR F 16252 follows F 16231"), scorer=SCN)
+td_case("td_three_trailing", "s4d_probe", 1, wit_fn=td_three, must=("dropped 0", "ERR F 16270 follows F 16249",
+        "ERR 3 trailing no-actor lines after cp3 frame 16247 (F 16270..16272) > TEARDOWN_MAX 2: none dropped"))
+td_case("td_middle", "s4d_probe", 1, wit_fn=td_middle, must=("dropped 0", "ERR F 16270 follows F 16230", "ERR F 16231 follows F 16270"))
+td_case("td_trailing_at_cp3", "s4d_probe", 1, wit_fn=td_at_cp3, must=("dropped 0", "ERR F 16247 follows F 16249"))
+td_case("td_jump_with_actor", "s4d_probe", 1, wit_fn=td_actor, must=("dropped 0", "ERR F 16270 follows F 16249"))
+td_case("td_no_cp3", "s4d_probe", 2, log_fn=td_nocp3, must=("dropped 0", "MISSING no det_rng_state cp3 line"))
+# mode=probe on both real tails: the scorer prints the dropped count itself. A 30-line tail STOPs other probe rules
+# (walk, A-Life input, ...), so the exit is 1 either way; the PROBE STOP pattern lines are what is read here.
+def td_probe(name, scorer, must, mustnot=()):
+    root = td_folder(name, "s4d_probe"); td_folder(name, "s4d_probe15")
+    out = os.path.join(root, "probe.txt")
+    p = subprocess.run([sys.executable, "-I", scorer, "mode=probe", "root=" + root, "out=" + out], capture_output=True, text=True)
+    txt = open(out).read() if os.path.exists(out) else p.stdout
+    pat = [l for l in txt.split("\n") if l.startswith("PROBE STOP pattern")]
+    ok = p.returncode == 1 and all(s in txt for s in must) and not any(s in l for l in pat for s in mustnot)
+    results.append((name, ok))
+    print("%-4s %-22s exit %d (want 1) %s" % ("ok" if ok else "BAD", name, p.returncode,
+          " | ".join(l for l in txt.split("\n") if l.startswith(TDL) or l.startswith("PROBE STOP pattern"))[:400]))
+    if not ok:
+        print("     " + "\n     ".join(txt.split("\n")))
+td_probe("td_probe_mode_count", SCF, (TDL + "s4d_probe 1, s4d_probe15 1",), ("follows", "trailing"))
+td_probe("td_probe_mode_old_rule", SCN, (TDL.replace("at most 2", "at most 0") + "s4d_probe 0, s4d_probe15 0", "PROBE STOP pattern: s4d_probe: F 16270 follows F 16249",
+         "PROBE STOP pattern: s4d_probe15: F 16252 follows F 16231"))
 
 n_ok = sum(1 for _, ok in results if ok)
 print("S4D1 SELFTEST: %s (%d/%d)" % ("PASS" if n_ok == len(results) else "FAIL", n_ok, len(results)))

@@ -7,7 +7,8 @@
 # Score exit codes: 0 PASS, 1 FAIL, 3 NO VERDICT, 2 REFUSED (usage, out exists, a PROBE_ constant still a placeholder).
 # Probe exit codes: 0 GO, 1 STOP (each failed rule printed as "PROBE STOP <code>: ..."), 2 REFUSED. The probe mode also
 # prints the s4 (held item) description and names the registered case the data matches; that part is DESCRIPTIVE and
-# never changes the exit code (Overseer 2026-11-27: the nudge is measured, not gated).
+# never changes the exit code (Overseer 2026-11-27: the nudge is measured, not gated). Prereg Amendment 1 (2026-11-28):
+# the stop rule "item" on both probes reads only WHETHER an item was taken and s4 is present (ITEM_SHARE), never its values.
 # The output is written to out= in this same call; an existing out file is refused, never overwritten.
 # A missing or unreadable input file fails the checks that read it BY NAME (never a silent skip, never read as 0).
 # A run folder <root>/det_<tag>_r1 (the series' one retry) is read instead of det_<tag> and the substitution is named.
@@ -51,6 +52,17 @@ S4_DRAW_THETA = 0.25      # m: probe reader, draw "near" vs "far" (half the ~0.5
 S4_SHARE = 0.80           # probe reader: share of ticks that must carry the majority signature
 S4_ABSENT_SHARE = 0.90    # probe reader: draw "absent" when >= 90 % of item frames have no draw matrix
 LAG_SHARE = 0.99
+TEARDOWN_MAX = 2          # trailing no-actor witness lines after cp3 dropped per run (the quit's teardown frame, not a
+                          # simulated frame): observed 1 per boot on 2 of 2 real boots (det_s4d_probe, det_s4d_probe15,
+                          # 2026-11-28) -> 2x margin. More than this: nothing dropped, the existing rules read them.
+ITEM_SHARE = 0.50         # probe rule "item" (prereg Amendment 1): share of witness lines with s4 present, from the
+                          # stimulus start frame (first witness line with hud >= the start line's `time`, item_share)
+                          # to the cp3 frame inclusive. Real window of the 2026-11-28 probes: F 815..16247 = 15,433
+                          # lines (s4d_probe), F 815..16229 = 15,415 (s4d_probe15), K = 3, 11 ms of hud per line. The
+                          # item is taken at that very update; even if s4 were dashes for a whole draw animation (at
+                          # most ~3 s [G] = ~273 lines), share >= (15433 - 273) / 15433 = 0.98. No item held: 0.00 (both
+                          # 2026-11-28 probes: s4 on 0 lines). 0.50 = expected / 1.96 and 0.50 above the no-item value:
+                          # ~2x from each side.
 STOCK_EXE = "stance14.exe"
 NEW_EXE = "simtick18.exe"
 BASE = ["-det_mode", "-det_passes", "100,200,320", "-det_lua_streams", "-det_counters"]
@@ -171,12 +183,31 @@ def parse_w(line):
     return r
 
 
+def teardown_split(recs, f3):
+    """(kept, dropped, note): the trailing block of lines after the cp3 frame f3 with no actor (s2 all dashes) is the
+    quit's teardown, not a simulated frame; dropped when it has 1..TEARDOWN_MAX lines. f3 None: nothing dropped."""
+    if f3 is None:
+        return recs, 0, None
+    i = len(recs)
+    while i > 0 and recs[i - 1].F > f3 and recs[i - 1].s2d is None:
+        i -= 1
+    nb = len(recs) - i
+    if nb > TEARDOWN_MAX:
+        return recs, 0, "%d trailing no-actor lines after cp3 frame %d (F %d..%d) > TEARDOWN_MAX %d: none dropped" % (
+            nb, f3, recs[i].F, recs[-1].F, TEARDOWN_MAX)
+    return recs[:i], nb, None
+
+
 # ---------------------------------------------------------------- engine log
 RNG_RE = re.compile(r"det_rng_state (\w+): Random=(-?\d+) Random32=(\d+) alife=(\d+) crt_next=(-?\d+) frame=(\d+) "
                     r"time_ms=(\d+)(?: tick=(\d+))?\s*$")
 SYN_RE = re.compile(r"\* det_synth: k (\d+) wallclock (\d+) tw (\d+) break (\d+) mask (\d+)\s*$")
 TW_RE = re.compile(r"\* tw (s\d) BAD (\d+)\s*$")
 FIRED_RE = re.compile(r"det_synth stimulus: (\d+) bullets fired")
+START_RE = re.compile(r"det_synth stimulus: start at update \d+ \(.*?\) time (\d+) ")
+# zz_eperf_synth.script:78: "item slot <n> section <name>" or "item NONE (no filled slot)"; :102 installed "..., item <b>)"
+ITEM_RE = re.compile(r"det_synth stimulus: item (?:slot (\d+) section (\S+)|(NONE)\b)")
+INST_ITEM_RE = re.compile(r"det_synth stimulus: installed \(.*\bitem (true|false)\)")
 
 
 class Log:
@@ -187,6 +218,9 @@ class Log:
         self.rng_lines = []
         self.tw = []
         self.installed = self.started = False
+        self.inst_item = None      # "true" / "false" from the installed line, None if it has no item part
+        self.t0 = None             # time_global (ms) of the stimulus start line
+        self.item = None           # None: no item line; "NONE"; or "slot <n> section <name>" (the item taken)
         self.fired = 0
         self.luaerr = []
         for l in lines:
@@ -207,6 +241,15 @@ class Log:
                 self.installed = True
             if "det_synth stimulus: start at update" in l:
                 self.started = True
+                m = START_RE.search(l)
+                if m and self.t0 is None:
+                    self.t0 = int(m.group(1))
+            m = INST_ITEM_RE.search(l)
+            if m:
+                self.inst_item = m.group(1)
+            m = ITEM_RE.search(l)
+            if m and self.item is None:
+                self.item = "NONE" if m.group(3) else "slot %s section %s" % (m.group(1), m.group(2))
             m = FIRED_RE.search(l)
             if m:
                 self.fired = max(self.fired, int(m.group(1)))
@@ -224,6 +267,7 @@ class Run:
         else:
             self.dir, self.rtag = d, tag
         self._log = self._wit = None
+        self.td, self.td_note = None, None   # teardown lines dropped from the witness, and why none were (wit())
 
     def p(self, pattern):
         if not os.path.isdir(self.dir):
@@ -246,6 +290,11 @@ class Run:
                     out.append(parse_w(l))
                 except ValueError as e:
                     raise Missing("malformed witness %s line %d: %s" % (path, i + 1, e))
+            try:
+                c3 = self.log().rng.get("cp3")
+            except Missing:
+                c3 = None
+            out, self.td, self.td_note = teardown_split(out, c3[0] if c3 else None)
             if not out:
                 raise Missing("empty witness %s" % path)
             self._wit = out
@@ -362,8 +411,9 @@ def flag_errors(run):
         want.append(["-det_synth_tw"]); lever.add("-det_synth_tw")
     if s["brk"]:
         want.append(["-sim_4d_break", str(s["brk"])]); lever.add("-sim_4d_break")
-    if s["stim"]:
-        want += [["-det_synth_walk"], ["-det_synth_tracer"]]; lever |= {"-det_synth_walk", "-det_synth_tracer"}
+    if s["stim"]:   # prereg Amendment 1: -det_synth_item with the stimulus, and only there (else "unregistered")
+        want += [["-det_synth_walk"], ["-det_synth_tracer"], ["-det_synth_item"]]
+        lever |= {"-det_synth_walk", "-det_synth_tracer", "-det_synth_item"}
     for w in want:
         if not has(w):
             err.append("missing switch %s" % " ".join(w))
@@ -386,6 +436,8 @@ def pattern_errors(run, ad=True):
             err.append(msg)
         else:
             err[5] = "... more"
+    if run.td_note:
+        e(run.td_note)
     prev, hud_tick, de = None, None, dt_exp(K)
     for r in recs:
         if r.K != K:
@@ -450,6 +502,31 @@ def tick_frames(recs):
 
 def drawn_moving(r):
     return r.s2d is not None and cheb(r.s2d, r.s2x) > TOL_POS
+
+
+def item_txt(lg):
+    return "no 'det_synth stimulus: item' line" if lg.item is None else "item " + (
+        "NONE (no filled slot)" if lg.item == "NONE" else lg.item)
+
+
+def item_share(run):
+    """prereg Amendment 1: (share, lines with s4, lines, first F, cp3 F) over the witness lines from the stimulus start
+    frame to the cp3 frame inclusive. Start frame = the first witness line whose hud >= the start line's `time` (the
+    script's time_global at update START_UPD; under the lever hud = dwTimeGlobal of the newest tick + a x 33, NOTES.md section 2 item 14;
+    real probes: time 9966 = hud of tick frame F 815, the first frame whose xform moves)."""
+    lg = run.log()
+    if lg.t0 is None:
+        raise Missing("no 'det_synth stimulus: start at update ... time <ms>' line in %s" % run.p("xray.log"))
+    f3 = run.cp("cp3")[0]
+    recs = run.wit()
+    st = next((q for q in recs if q.hud >= lg.t0 - TOL_HUD), None)
+    if st is None:
+        raise Missing("no witness line with hud >= the stimulus start time %d" % lg.t0)
+    win = [q for q in recs if st.F <= q.F <= f3]
+    if not win:
+        raise Missing("no witness line from the stimulus start F %d to cp3 F %d" % (st.F, f3))
+    n4 = sum(1 for q in win if q.s4 is not None)
+    return n4 / float(len(win)), n4, len(win), st.F, f3
 
 
 def tw_consistency(run):
@@ -642,6 +719,8 @@ def score(root):
             lg = r.log()
             if not (lg.installed and lg.started):
                 bad.append("%s: stimulus installed %s start %s" % (t, lg.installed, lg.started))
+            if lg.item is None or lg.item == "NONE":   # prereg Amendment 1: the item must be taken
+                bad.append("%s: %s" % (t, item_txt(lg)))
             if lg.fired < FIRED_MIN:
                 bad.append("%s: highest 'bullets fired' %d < %d" % (t, lg.fired, FIRED_MIN))
             if lg.luaerr:
@@ -650,7 +729,7 @@ def score(root):
             rng = max(max(v[i] for v in xs) - min(v[i] for v in xs) for i in (0, 2)) if xs else 0.0
             if rng < WALK_MIN_RANGE:
                 bad.append("%s: actor x/z range %.3f m < %.1f" % (t, rng, WALK_MIN_RANGE))
-        return not bad, "; ".join(bad[:6]) or "stimulus installed, started, >= %d bullets, no script error, walk >= %.1f m in every part-S run" % (FIRED_MIN, WALK_MIN_RANGE)
+        return not bad, "; ".join(bad[:6]) or "stimulus installed, started, item taken, >= %d bullets, no script error, walk >= %.1f m in every part-S run" % (FIRED_MIN, WALK_MIN_RANGE)
     check("S0B", s0b, ("L3",))
 
     def sc():
@@ -790,6 +869,13 @@ def score(root):
         drop("S1", "probe: %d crosshair frames < %d" % (n("PROBE_S1_FRAMES"), DROP_MIN))
 
     # ---- reported
+    for t, r in runs.items():   # prereg Amendment 1: the item each part-S run took
+        if r.spec["part"] != "S" or (t == "s4d_brk2" and not B2_REG):
+            continue
+        try:
+            REP.append("item taken %s: %s" % (t, item_txt(r.log())))
+        except Missing as m:
+            REP.append("item taken %s: %s" % (t, m))
     for t in S_BODY + S_OFF:
         try:
             REP.append("s4 %s: %s" % (t, s4_summary(runs[t].wit())))
@@ -816,7 +902,13 @@ def score(root):
                 a, b, od, "IDENTICAL" if same else "DIFFER", C3(runs[a], runs[b])))
         except Missing as m:
             REP.append("online diff %s vs %s: %s" % (a, b, m))
+    REP.append(td_line(runs.values()))
     return V, REP
+
+
+def td_line(runs):
+    return "teardown witness lines dropped (trailing no-actor lines after cp3, at most %d): %s" % (TEARDOWN_MAX, ", ".join(
+        "%s %s" % (r.tag, "witness not read" if r._wit is None else r.td) for r in runs if r.spec["k"]))
 
 
 # ---------------------------------------------------------------- held item (s4): description only, never gated
@@ -973,6 +1065,18 @@ def probe_mode(root):
             out.append('    "%s": %r,' % (k_, v))
     except Missing as m:
         st("input", "%s: %s" % (r7.tag, m))
+    for r in (r7, r15):            # prereg Amendment 1, rule "item", both probe boots: (i) item taken, (ii) s4 share
+        try:
+            lg = r.log()
+            if lg.item is None or lg.item == "NONE":
+                st("item", "%s: %s (installed line: item %s)" % (r.tag, item_txt(lg), lg.inst_item))
+            sh, n4, nw, fa, fb = item_share(r)
+            out.append("item %s: %s (installed line: item %s); s4 on %d of %d witness lines F %d..%d (stimulus start to "
+                       "cp3): share %.4f (rule >= %.2f)" % (r.tag, item_txt(lg), lg.inst_item, n4, nw, fa, fb, sh, ITEM_SHARE))
+            if sh < ITEM_SHARE:
+                st("item", "%s: s4 share %.4f (%d of %d lines F %d..%d) < %.2f" % (r.tag, sh, n4, nw, fa, fb, ITEM_SHARE))
+        except Missing as m:
+            st("item", "%s: %s" % (r.tag, m))
     sigs = {}
     for r in (r7, r15):            # descriptive
         try:
@@ -998,6 +1102,7 @@ def probe_mode(root):
                 name = cname
                 break
     out.append("S4 CASE (descriptive, never gated): %s" % name)
+    out.append(td_line((r7, r15)))
     return out, stop
 
 

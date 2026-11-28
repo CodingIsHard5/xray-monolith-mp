@@ -1,0 +1,29 @@
+probe readings, s4d_probe (rules: prereg section 2.3):
+  lag fit (share of moving n=0 frames on the lerp of ticks T-L-1, T-L): L=0 1.0000, L=1 0.0000, L=2 0.0000
+  reported: tracer tick frames 1204, tracer life 8.00 ticks, drawn frames with stamp_ok 0: 0
+  highest 'bullets fired': 150; actor x/z range 4.082 m; witness lines 16162; A-Life calls 96
+  S1 DROPPED: Caden's eyes only (0 frames); S3 and TWB2 registered (2752 frames)
+CONST values to register:
+    "PROBE_S2_MOVING": 10290,
+    "PROBE_S2_LAG": 0,
+    "PROBE_S3_FRAMES": 2752,
+    "PROBE_S1_FRAMES": 0,
+    "PROBE_ALIFE_GAP16": 0,
+s4 s4d_probe (mask 7), descriptive:
+  j=0 |draw - item - body offset|: n 0; draw absent on 0 of 0 item frames
+  j=1 |item - item(j=0)|: n 0
+  j=1 |draw - item - body offset|: n 0; draw absent on 0 of 0 item frames
+  j=2 |item - item(j=0)|: n 0
+  j=2 |draw - item - body offset|: n 0; draw absent on 0 of 0 item frames
+  signature: item step no item (ticks per signature {}), draw no item
+s4 s4d_probe15 (mask 15), descriptive:
+  j=0 |draw - item - body offset|: n 0; draw absent on 0 of 0 item frames
+  j=1 |item - item(j=0)|: n 0
+  j=1 |draw - item - body offset|: n 0; draw absent on 0 of 0 item frames
+  j=2 |item - item(j=0)|: n 0
+  j=2 |draw - item - body offset|: n 0; draw absent on 0 of 0 item frames
+  signature: item step no item (ticks per signature {}), draw no item
+S4 CASE (descriptive, never gated): none of the registered cases
+PROBE STOP pattern: s4d_probe: F 16270 follows F 16249
+PROBE STOP pattern: s4d_probe15: F 16252 follows F 16231
+S4D1 PROBE: STOP (2 rules)
