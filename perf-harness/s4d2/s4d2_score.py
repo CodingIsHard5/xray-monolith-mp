@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # s4d2 scorer (PREREG-s4d2-npc-pose-DRAFT.md). Stdlib only; run with python3 -I. Imports nothing from tools/.
 # Build 2 = slices S4a (NPC/mutant poses drawn between ticks) + S4b (items on bones follow the drawn pose), one
-# player-facing step under sim_4d_mask bit 16. Code: wt-simtick perf/tick-4d HEAD c216081fd.
+# player-facing step under sim_4d_mask bit 16. Code: wt-simtick perf/tick-4d, c216081fd + the witness commit W1/W2
+# (HEAD_AFTER_W1, to be filled at registration; prereg header).
 #
 #   python3 -I s4d2_score.py root=<folder holding det_<tag> run folders> out=<new output file>     (score, ONCE)
 #   python3 -I s4d2_score.py mode=probe root=<folder holding det_s4p_probe> out=<new output file>
@@ -19,7 +20,10 @@
 # Witness line (device.cpp sim_synth_witness_write + sim_pose.cpp sim_pose_witness_print at c216081fd):
 #   58 tokens without -det_synth_pose (build 1 exe, or build 2 without the switch);
 #   126 tokens with it at c216081fd: base 56 | p 6 | pw 19 | up 2 | pn 5 | pa 26 | then "tw N";
-#   132 tokens with the required witness addition W1 (prereg 1.3): "... pa .. | uu <nu> <nud> <nus> <nposed> | tw N".
+#   132 tokens with W1 alone (prereg 1.3): "... pa .. | uu <nu> <nud> <nus> <nposed> | tw N";
+#   138 tokens as the W1 commit prints it (W1 + W2): "... pa .. | uu <nu> <nud> <nus> <nposed> | pj <bone> <jw xyz> | tw N".
+# pa form letters (sim_pose.h SimPoseAttachWit::form): C, R (bone corrections), I (C = identity: bones drawn as read,
+# only the parent moved since the placement; c216081fd S1, review F1), O, P, S.
 # Counter reading mirrors tools/counters_diff.py (read_lines 23-25, load_alife 28-38, load_counters 41-50,
 # compare_ids 53-63, the EXACT part of compare_k 86-90). Online object diff (reported only) mirrors tools/det_diff.py.
 # A-Life call frames mirror tools/s2_partA2_score.py line 22. All three copied from s4d1_score.py unchanged.
@@ -40,6 +44,8 @@ CONST = {
     "PROBE_JOINT_LERP": "PROBE_JOINT_LERP",    # probe: 1 = jd on the lerp on every form-L line, 0 = fallbacks seen
     "PROBE_U_POSED": "PROBE_U_POSED",          # probe: n=0 frames with uu nposed > 0 (needs W1)
     "PROBE_NPC": "PROBE_NPC",                  # probe: the witness NPC name used (-det_synth_pose_npc)
+    "PROBE_TOL_LD": "PROBE_TOL_LD",            # probe: PA2's ld cluster radius by the TOL_LD rule (prereg 7.1); 0 = the
+                                               # cluster part of PA2 is reported only (noise and signal within 4x)
 }
 # ---- registered constants (derivations in the prereg, margin table section 7) ----
 KP = 3                    # the probe's K
@@ -48,7 +54,9 @@ TOL_POS = 1e-4            # positions printed with 5 decimals: "equal" = every c
 ULP_K = 4                 # lerp checks add 4 float32 ulps of the largest coordinate
 TOL_A = 1.5e-6            # alpha, dt and u are printed with 6 decimals
 TOL_HUD = 2e-3            # hud is printed with 3 decimals
-TOL_LD = 1e-3             # m: ld (the drawn item in its drawn placement frame) leader-cluster radius [G, prereg 7]
+TOL_LD0 = 1e-3            # m: the probe's ld leader-cluster radius; PA2 uses CONST PROBE_TOL_LD (prereg 7.1 rule)
+LD_NOISE_FLOOR = 1e-5     # m: two print roundings of 5 decimals: the smallest noise the witness can show
+LD_STEP_PCT = 10          # PROBE_HAND_STEP = this percentile of the per-tick hand step (prereg 7.1)
 CP1_DIFF = 8              # cp1 frame (part A) or tick (part S) difference; one A-Life pass = 17 (COPIED, 4b R3)
 ALIFE_MIN_CALLS = 50      # part A: A-Life calls traced up to cp1 (stock: 100) -> 2x (COPIED)
 WALK_MIN_RANGE = 1.5      # m: the walk spans 3.0 m -> 2x (COPIED; script geometry)
@@ -65,10 +73,10 @@ BASE = ["-det_mode", "-det_passes", "100,200,320", "-det_lua_streams", "-det_cou
 HARNESS = ("A1", "S0")         # a FAIL here = harness not usable: dependents NO VERDICT, result NO VERDICT
 SLICES = ("s2", "s3", "pose", "attach")
 HINT_SC = ("named risk 'heap layout' (prereg 10.1): on and off differ in the offline counters with every tripwire "
-           "clean; look first at the SimPoseState allocation in sim_pose_capture_body (sim_pose.cpp:292, xr_new, "
+           "clean; look first at the SimPoseState allocation in sim_pose_capture_body (sim_pose.cpp:316, xr_new, "
            "~21 KB per captured skeleton, on arm only), then for a pointer-ordered simulation container")
 HINT_LB = ("named risk 'heap layout' (prereg 10.1), static part: build 2 with bit 16 off differs from build 1; look "
-           "first at CGameObject::m_sim_attach (GameObject.h:257, ~280 B in every CGameObject) and "
+           "first at CGameObject::m_sim_attach (GameObject.h:258, ~280 B in every CGameObject) and "
            "IKinematics::m_sim_pose (Kinematics.h:130), then at the bit-off code paths of c216081fd")
 
 
@@ -140,7 +148,7 @@ def rd(path):
 # ---------------------------------------------------------------- witness
 class W:
     __slots__ = ("F", "T", "j", "K", "n", "a", "dt", "hud", "lever", "s2d", "s2x", "s2c", "s3n", "s3h", "s3p", "s3s",
-                 "s3ok", "s1", "s4", "s4d", "tw", "pose", "p", "pw", "up", "pn", "pa", "uu")
+                 "s3ok", "s1", "s4", "s4d", "tw", "pose", "p", "pw", "up", "pn", "pa", "uu", "pj", "ntok")
 
 
 class O:   # a plain record for the pose columns
@@ -151,9 +159,12 @@ class O:   # a plain record for the pose columns
 BASE_LIT = {0: "F", 2: "T", 4: "j", 6: "K", 8: "n", 10: "a", 12: "dt", 14: "hud", 16: "|", 17: "s2", 27: "|",
             28: "s3", 40: "|", 41: "s1", 47: "|", 48: "s4", 55: "|"}
 POSE_LIT = {56: "p", 63: "|", 64: "pw", 84: "|", 85: "up", 88: "|", 89: "pn", 95: "|", 96: "pa", 123: "|"}
-NTOK_B1, NTOK_POSE, NTOK_UU = 58, 126, 132
+NTOK_B1, NTOK_POSE, NTOK_UU, NTOK_PJ = 58, 126, 132, 138
 HEX = re.compile(r"^[0-9a-f]{16}$")
 PW_FORMS = ("L", "Sn", "Sb", "Sg", "Ss")
+PA_FORMS = ("C", "R", "I", "O", "P", "S")
+PA_CORR = ("C", "R", "I")        # corrected forms (ld, ls present; the break 32 fires on them)
+PA_BONE = ("C", "R")             # bone corrections: only these count as the S4b correction (review F1)
 
 
 def vec(t):
@@ -234,7 +245,7 @@ def parse_pa(t):   # 26 values (sim_pose.cpp sim_pose_print_pa, GameObject.cpp s
     if dash(t):
         return None
     kind, form, cls = t[0], t[1], t[2]
-    if kind not in ("-", "B", "T", "W", "N", "X", "?") or form not in ("C", "R", "O", "P", "S") or \
+    if kind not in ("-", "B", "T", "W", "N", "X", "?") or form not in PA_FORMS or \
             cls not in ("c", "p", "o", "-"):
         raise ValueError("pa kind/form/cls %r %r %r" % (kind, form, cls))
     ba = None if t[3] == "-" else uint(t[3])
@@ -247,11 +258,17 @@ def parse_pa(t):   # 26 values (sim_pose.cpp sim_pose_print_pa, GameObject.cpp s
         raise ValueError("pa hd/hr presence differs from u")
     r.ld, r.ls = vec_or_none(t[18:21]), vec_or_none(t[21:24])
     have_l = r.ld is not None
-    if have_l != (r.ls is not None) or have_l != (form in ("C", "R")):
+    if have_l != (r.ls is not None) or have_l != (form in PA_CORR):
         raise ValueError("pa ld/ls presence %s on form %s" % (have_l, form))
     r.hx = hx(t[24])
     r.hxe = hx(t[25], opt=True)
     return r
+
+
+def parse_pj(t):   # 4 values (W2, sim_pose.cpp sim_pose_print_pj): bone, the joint as drawn in world
+    if dash(t):
+        return None
+    return O(bone=uint(t[0]), jw=vec(t[1:4]))
 
 
 def parse_w(line, layout):
@@ -262,18 +279,21 @@ def parse_w(line, layout):
         lit = dict(BASE_LIT)
         lit[56] = "tw"
     else:
-        if len(t) not in (NTOK_POSE, NTOK_UU):
-            raise ValueError("%d tokens, expected %d or %d (pose columns)" % (len(t), NTOK_POSE, NTOK_UU))
+        if len(t) not in (NTOK_POSE, NTOK_UU, NTOK_PJ):
+            raise ValueError("%d tokens, expected %d, %d or %d (pose columns)" % (len(t), NTOK_POSE, NTOK_UU, NTOK_PJ))
         lit = dict(BASE_LIT)
         lit.update(POSE_LIT)
         if len(t) == NTOK_POSE:
             lit[124] = "tw"
-        else:
+        elif len(t) == NTOK_UU:
             lit.update({124: "uu", 129: "|", 130: "tw"})
+        else:
+            lit.update({124: "uu", 129: "|", 130: "pj", 135: "|", 136: "tw"})
     for i, s in lit.items():
         if t[i] != s:
             raise ValueError("token %d is %r, expected %r" % (i, t[i], s))
     r = W()
+    r.ntok = len(t)
     r.F, r.T, r.j, r.K, r.n = int(t[1]), int(t[3]), int(t[5]), int(t[7]), int(t[9])
     r.a, r.dt, r.hud = float(t[11]), float(t[13]), float(t[15])
     r.lever = " ".join(t[0:16])
@@ -304,7 +324,7 @@ def parse_w(line, layout):
     else:
         r.s4, r.s4d = vec(s4[0:3]), vec(s4[3:6])
     r.pose = layout != "b1"
-    r.p = r.pw = r.up = r.pn = r.pa = r.uu = None
+    r.p = r.pw = r.up = r.pn = r.pa = r.uu = r.pj = None
     if r.pose:
         r.p = tuple(uint(x) for x in t[57:63])
         if r.p[1] + r.p[2] + r.p[3] > r.p[0]:
@@ -316,10 +336,14 @@ def parse_w(line, layout):
         r.up = None if dash(up) else (hx(up[0]), hx(up[1]))
         r.pn = parse_pn(t[90:95])
         r.pa = parse_pa(t[97:123])
-        if len(t) == NTOK_UU:
+        if len(t) in (NTOK_UU, NTOK_PJ):
             r.uu = tuple(uint(x) for x in t[125:129])
             if r.uu[1] > r.uu[0] or r.uu[2] > r.uu[0] or r.uu[3] > r.uu[0]:
                 raise ValueError("uu counts %s exceed nu" % (r.uu,))
+        if len(t) == NTOK_PJ:
+            r.pj = parse_pj(t[131:135])
+            if r.pj is not None and (r.pn is None or r.pn.form != "L"):
+                raise ValueError("pj present without pn form L")
     r.tw = int(t[-1])
     return r
 
@@ -406,8 +430,8 @@ class Run:
                     raise Missing("malformed witness %s line %d: %s" % (path, i + 1, e))
             if not out:
                 raise Missing("empty witness %s" % path)
-            if layout == "pose" and len({q.uu is None for q in out}) != 1:
-                raise Missing("malformed witness %s: uu column on some lines only" % path)
+            if layout == "pose" and len({q.ntok for q in out}) != 1:
+                raise Missing("malformed witness %s: lines of different lengths (uu / pj column on some lines only)" % path)
             self._wit = out
         return self._wit
 
@@ -626,7 +650,55 @@ def tick_moving(q):
 
 
 def pa_moved(q):
-    return q.pa is not None and q.pa.form in ("C", "R") and cheb(q.pa.wd, q.pa.ws) > TOL_POS
+    """the S4b bone correction moved the item (forms C, R only: form I is the parent-only S1 path, review F1)"""
+    return q.pa is not None and q.pa.form in PA_BONE and cheb(q.pa.wd, q.pa.ws) > TOL_POS
+
+
+def pa_identity_moved(q):
+    return q.pa is not None and q.pa.form == "I" and cheb(q.pa.wd, q.pa.ws) > TOL_POS
+
+
+def pj_link(recs):
+    """W2 (reported): lines where the item's drawn bone (pa hd, world) and the mesh's drawn hand (pj, world) are the same
+    bone of the same NPC in the same frame: pa has u, cls c or p, ba == pj bone. Returns (count, max Chebyshev)."""
+    d = [cheb(q.pa.hd, q.pj.jw) for q in recs if q.pj is not None and q.pa is not None and q.pa.hd is not None
+         and q.pa.cls in ("c", "p") and q.pa.ba == q.pj.bone]
+    return len(d), (max(d) if d else None)
+
+
+def hand_steps(recs):
+    """per-tick hand step of the witness NPC's item bone on form-C lines: |hd - hr| / (1 - u) for cls c (hr = the newest
+    capture), / u for cls p (hr = the previous one); n=0 frames, 0 < u < 1"""
+    out = []
+    for q in recs:
+        a = q.pa
+        if q.n != 0 or a is None or a.form != "C" or a.u is None or a.hd is None or not (0.0 < a.u < 1.0):
+            continue
+        if a.cls == "c":
+            out.append(cheb(a.hd, a.hr) / (1.0 - a.u))
+        elif a.cls == "p":
+            out.append(cheb(a.hd, a.hr) / a.u)
+    return out
+
+
+def pct(v, p):
+    if not v:
+        return None
+    v = sorted(v)
+    return v[min(len(v) - 1, int(math.floor(p / 100.0 * (len(v) - 1))))]
+
+
+def tol_ld_rule(noise, step):
+    """prereg 7.1: (a) 2N <= 1e-3 <= S/2: 1e-3; (b) else 4N <= S: sqrt(N S) (both sides >= 2x); (c) else 0 (the cluster
+    part of PA2 reported only). N is floored at two print roundings."""
+    if step is None:
+        return 0.0, "c (no hand step measured)"
+    n_ = max(noise, LD_NOISE_FLOOR)
+    if 2 * n_ <= TOL_LD0 <= step / 2.0:
+        return TOL_LD0, "a"
+    if 4 * n_ <= step:
+        return math.sqrt(n_ * step), "b"   # unrounded: >= 2x over N and under S exactly
+    return 0.0, "c"
 
 
 def joint_ok(pw, allow_fallback):
@@ -636,20 +708,41 @@ def joint_ok(pw, allow_fallback):
     return allow_fallback and cheb(pw.jd, pw.jc) <= TOL_POS
 
 
-def ld_clusters(recs):
-    """form-C lines grouped by (kind, ba, bb); leader clusters of ld with radius TOL_LD (Chebyshev); per group count"""
+def ld_groups(recs):
     groups = {}
     for q in recs:
         if q.pa is not None and q.pa.form == "C":
             groups.setdefault((q.pa.kind, q.pa.ba, q.pa.bb), []).append(q.pa.ld)
-    out = {}
-    for g, lds in groups.items():
-        leaders = []
-        for v in lds:
-            if not any(cheb(v, l) <= TOL_LD for l in leaders):
-                leaders.append(v)
-        out[g] = len(leaders)
-    return out
+    return groups
+
+
+def ld_leaders(lds, tol):
+    leaders, members = [], []
+    for v in lds:
+        for i, l in enumerate(leaders):
+            if cheb(v, l) <= tol:
+                members[i].append(v)
+                break
+        else:
+            leaders.append(v)
+            members.append([v])
+    return leaders, members
+
+
+def ld_clusters(recs, tol):
+    """form-C lines grouped by (kind, ba, bb); leader clusters of ld with radius tol (Chebyshev); per group count"""
+    return {g: len(ld_leaders(lds, tol)[0]) for g, lds in ld_groups(recs).items()}
+
+
+def ld_noise(recs):
+    """PROBE_LD_NOISE: per group, the largest leader cluster at radius TOL_LD0; its per-coordinate spread (max - min);
+    the max over groups (0.0 with no form-C line)"""
+    best = 0.0
+    for lds in ld_groups(recs).values():
+        _, members = ld_leaders(lds, TOL_LD0)
+        m = max(members, key=len)
+        best = max(best, max(max(v[i] for v in m) - min(v[i] for v in m) for i in range(3)))
+    return best
 
 
 # ---------------------------------------------------------------- scoring
@@ -658,6 +751,7 @@ def score(root):
     runs = {t: Run(root, t, s) for t, s in RUNS.items()}
     n = lambda k: int(CONST[k])
     NPC = str(CONST["PROBE_NPC"]).lower()
+    TOL_LD = float(CONST["PROBE_TOL_LD"])   # 0 = PA2's cluster part reported only (prereg 7.1 branch c)
     JALLOW = n("PROBE_JOINT_LERP") == 0
 
     def mins(key, K, kind):
@@ -851,16 +945,16 @@ def score(root):
     check("TWB16", twb("s4p_brk16", "pose", lerp_moving, mins("PROBE_P_TICK", 2, "tick"),
                        "with pw form L and hd != hl"))
 
-    def brk32_need(q):
-        return q.pa is not None and q.pa.form in ("C", "R") and q.pa.hxe is not None and q.pa.hx != q.pa.hxe
+    def brk32_need(q):   # the break fires on every corrected placement, form I included (GameObject.cpp, `corrected`)
+        return q.pa is not None and q.pa.form in PA_CORR and q.pa.hxe is not None and q.pa.hx != q.pa.hxe
     f32chk = twb("s4p_brk32", "attach", brk32_need, mins("PROBE_PA_CR", 2, "n0"),
-                 "with pa form C/R and hx != hxe")
+                 "with pa form C/R/I and hx != hxe")
 
     def twb32():
         ok, txt = f32chk()
         r = runs["s4p_brk32"]
-        same = sum(1 for q in r.to_cp3() if q.pa is not None and q.pa.form in ("C", "R") and q.pa.hx == q.pa.hxe)
-        return ok, txt + "; reported: form C/R frames with hx == hxe %d" % same
+        same = sum(1 for q in r.to_cp3() if q.pa is not None and q.pa.form in PA_CORR and q.pa.hx == q.pa.hxe)
+        return ok, txt + "; reported: form C/R/I frames with hx == hxe %d" % same
     check("TWB32", twb32)
 
     def p1():
@@ -984,11 +1078,15 @@ def score(root):
                 if a.form in ("P", "O", "S") and cheb(a.wd, a.ws) > TOL_POS:
                     e.append("form %s with wd != ws" % a.form)
                 if on:
-                    if a.form in ("C", "R"):
+                    if a.form in PA_CORR:
                         if a.cls not in ("c", "p"):
                             e.append("form %s with cls %s" % (a.form, a.cls))
                         if a.u is None or abs(a.u - q.a) > TOL_A:
                             e.append("form %s with u %s != a %.6f" % (a.form, a.u, q.a))
+                    if a.form == "I" and a.hd is not None and cheb(a.hd, a.hr) > TOL_POS:
+                        # I needs A_d == A_c bitwise; every frame's origin is bone_a's (GameObject.cpp sim_attach_hands
+                        # F.c = mR.c, or da / ta, or translate(da.c)), so the drawn and the read bone_a coincide
+                        e.append("form I with hd != hr (not the bones-as-read path)")
                     if a.form == "O" and a.cls != "o":
                         e.append("form O with cls %s" % a.cls)
                 else:
@@ -998,7 +1096,7 @@ def score(root):
                     errs.append("F %d: %s" % (q.F, ", ".join(e)))
             if errs:
                 bad.append("%s: %d pa lines off the rules (first %s)" % (t, len(errs), errs[0]))
-        return not bad, "; ".join(bad[:6]) or "pa lines in their registered forms; XFORM unchanged by the render; uncorrected forms at the 4b position"
+        return not bad, "; ".join(bad[:6]) or "pa lines in their registered forms (I with hd = hr); XFORM unchanged by the render; uncorrected forms at the 4b position"
     check("PA1", pa1)
 
     def pa2():
@@ -1011,12 +1109,18 @@ def score(root):
             mn = mins("PROBE_PA_CR", r.spec["k"], "n0")
             if m < mn:
                 bad.append("%s: %d n=0 frames with the item moved onto the drawn hand < %d" % (t, m, mn))
-            cl = ld_clusters(recs)
-            over = {g: c for g, c in cl.items() if c > mxc}
-            if over:
-                bad.append("%s: ld leader-clusters per (kind, ba, bb) %s > %d" % (t, over, mxc))
-            info.append("%s %d frames, clusters %s" % (t[4:], m, sorted(cl.values())))
-        return not bad, "; ".join(bad) or "the item is drawn at a fixed offset in the drawn placement frame: %s" % "; ".join(info)
+            if TOL_LD > 0:
+                cl = ld_clusters(recs, TOL_LD)
+                over = {g: c for g, c in cl.items() if c > mxc}
+                if over:
+                    bad.append("%s: ld leader-clusters (radius %g) per (kind, ba, bb) %s > %d" % (t, TOL_LD, over, mxc))
+                info.append("%s %d frames, clusters %s" % (t[4:], m, sorted(cl.values())))
+            else:
+                cl = ld_clusters(recs, TOL_LD0)
+                info.append("%s %d frames, clusters at %g %s (cluster part reported only)" % (t[4:], m, TOL_LD0, sorted(cl.values())))
+        return not bad, "; ".join(bad) or "the item is moved by a bone correction (C/R) and %s: %s" % (
+            "drawn at a fixed offset in the drawn placement frame" if TOL_LD > 0 else
+            "PA2 cluster part reported only (PROBE_TOL_LD 0, prereg 7.1 branch c)", "; ".join(info))
     check("PA2", pa2)
 
     # ---- reported
@@ -1040,6 +1144,14 @@ def score(root):
             rig = [abs(eucl(q.pa.wd, q.pa.hd) - norm(q.pa.ld)) for q in recs
                    if q.pa and q.pa.form == "C" and q.pa.kind in ("B", "T", "N")]
             pn = sum(1 for q in recs if q.pn is not None)
+            nI = sum(1 for q in recs if q.pa and q.pa.form == "I")
+            nIm = sum(1 for q in recs if q.n == 0 and pa_identity_moved(q))
+            if any(q.ntok == NTOK_PJ for q in recs):
+                ln, lmax = pj_link(recs)
+                w2 = "W2 hand link: %d comparable lines, max |pa hd - pj| %s" % (ln, "%.5f" % lmax if lmax is not None else "-")
+            else:
+                w2 = "W2 hand link: pj column absent"
+            REP.append("%s: form I (parent moved, bones as read; not a bone correction) %d lines, %d n=0 moved; %s" % (t, nI, nIm, w2))
             REP.append("%s: skeletons evaluated %d (guard %d, snap %d); render-only recalcs byte-different %d, byte-equal %d (F5); "
                        "pw forms %s; pa kind+form %s; cls %s; max |ld - ls| %.5f (tautology, rounding only); "
                        "B/T/N | |wd-hd| - |ld| | max %s; pn present on %d of %d lines" % (
@@ -1136,12 +1248,22 @@ def probe_mode(root):
         st("npc", "pn present on %d of %d lines: the witness NPC %s is not found (re-probe once with the fallback NPC, prereg 2.2)" % (pn, len(recs), npc))
     pa_cr = sum(1 for q in n0 if pa_moved(q))
     if pa_cr < DROP_MIN:
-        st("attach", "%d n=0 frames with pa form C/R and wd != ws < %d: the S4b correction is not shown on the witness "
+        st("attach", "%d n=0 frames with pa form C/R (bone corrections; form I not counted) and wd != ws < %d: the S4b correction is not shown on the witness "
            "NPC's item (re-probe once with the fallback NPC; then the Overseer)" % (pa_cr, DROP_MIN))
-    cl = ld_clusters(recs)
+    cl = ld_clusters(recs, TOL_LD0)
     mxc = max(cl.values()) if cl else 0
-    if mxc > CLUSTERS_MAX:
-        st("ld", "ld leader-clusters per group %s > %d: the recorded bones are not the ones the placement used (back to the code)" % (cl, CLUSTERS_MAX))
+    noise = ld_noise(recs)
+    steps = hand_steps(recs)
+    step = pct(steps, LD_STEP_PCT)
+    tol, branch = tol_ld_rule(noise, step)
+    cl_t = ld_clusters(recs, tol) if tol > 0 else cl
+    mxc_t = max(cl_t.values()) if cl_t else 0
+    nI = sum(1 for q in pa if q.pa.form == "I")
+    nIm = sum(1 for q in n0 if pa_identity_moved(q))
+    w2n, w2max = pj_link(recs)
+    if mxc > CLUSTERS_MAX or mxc_t > CLUSTERS_MAX:
+        st("ld", "ld leader-clusters per group %s (radius %g), %s (radius %g) > %d: the recorded bones are not the ones the "
+           "placement used (back to the code)" % (cl, TOL_LD0, cl_t, tol, CLUSTERS_MAX))
     hxd = [q.F for q in pa if q.pa.hxe is not None and q.pa.hx != q.pa.hxe]
     if hxd:
         st("hx", "hx != hxe on %d pa lines without a break (first F %d): the item's XFORM changes after the child rule in stock; PA1's hx rule is unusable" % (len(hxd), hxd[0]))
@@ -1153,13 +1275,21 @@ def probe_mode(root):
            "on screen (stimulus R1: an active item for the HUD hands, prereg 2.2)" % (uposed, DROP_MIN))
     ud = sum(1 for q in recs if q.uu is not None and (q.uu[1] or q.uu[2]))
     vals = {"PROBE_P_LERP": p_lerp, "PROBE_P_TICK": p_tick, "PROBE_UPLOADS": uploads, "PROBE_PA_CR": pa_cr,
-            "PROBE_PA_CLUSTERS": mxc, "PROBE_JOINT_LERP": 0 if jfall else 1, "PROBE_U_POSED": uposed, "PROBE_NPC": npc}
+            "PROBE_PA_CLUSTERS": mxc_t, "PROBE_JOINT_LERP": 0 if jfall else 1, "PROBE_U_POSED": uposed, "PROBE_NPC": npc,
+            "PROBE_TOL_LD": tol}
     out.append("probe readings, %s (rules: prereg section 2.3):" % PROBE_TAG)
     out.append("  (a) skeletons evaluated %d (on n=0 frames %d, of them L %d); pw forms L %d; n=0 drawn between ticks %d; moving tick frames %d; upload frames %d" % (
         ev, ev0, nl0, len(L), p_lerp, p_tick, uploads))
     out.append("  (b) F5: render-only recalcs byte-different %d, byte-equal %d (share different %.3f)" % (rod, roe, f5))
     out.append("  (c) witness NPC %s: pn on %d of %d lines; pa on %d lines; pa kinds %s; forms %s; cls %s; n=0 C/R moved %d; ld clusters %s" % (
         npc, pn, len(recs), len(pa), kinds, paf, cls, pa_cr, cl))
+    out.append("  form I (parent moved, bones as read; NOT counted as a correction): %d pa lines, %d n=0 moved" % (nI, nIm))
+    out.append("  TOL_LD rule (prereg 7.1): PROBE_LD_NOISE %.6f (floor %g), PROBE_HAND_STEP (p%d of %d steps) %s -> branch %s, "
+               "PROBE_TOL_LD %g%s; clusters at it %s" % (noise, LD_NOISE_FLOOR, LD_STEP_PCT, len(steps),
+               "%.6f" % step if step is not None else "-", branch, tol,
+               " (cluster part of PA2 REPORTED only)" if tol == 0 else "", cl_t))
+    out.append("  W2 hand link: %s" % ("%d comparable lines, max |pa hd - pj| %s" % (w2n, "%.5f" % w2max if w2max is not None else "-")
+               if any(q.ntok == NTOK_PJ for q in recs) else "pj column absent"))
     out.append("  opt-in (W1): %s; unmarked posed between ticks on %d n=0 frames; frames with an unmarked skeleton off live or stored %d" % (
         "uu present" if all(q.uu is not None for q in recs) else "uu ABSENT", uposed, ud))
     out.append("  joint: form-L lines with jd off the lerp %d of %d; hx != hxe lines %d" % (jfall, len(L), len(hxd)))

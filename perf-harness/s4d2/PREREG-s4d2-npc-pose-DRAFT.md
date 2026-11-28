@@ -4,16 +4,23 @@ DRAFT. Nothing here has been run. It is not registered until every item of secti
 with the witness addition W1 and pinned, the probe (section 2) has said GO, every `PROBE_` value is filled in by the
 rules in 2.3, and the self-test has passed on the probe's real bytes (section 8). No box run without the Overseer's GO.
 
-**Code:** wt-simtick perf/tick-4d HEAD `c216081fd`, on top of build 1 (8527808c9..6acb77044):
+**Code:** wt-simtick perf/tick-4d HEAD **HEAD_AFTER_W1 (to be filled at registration)**, on top of build 1
+(8527808c9..6acb77044). The chain:
 - S4a: 0dfdff031 (capture, draw, mark, witness p/pw/up/pn, tripwire `pose`, break 16) and 0a8e94094 (review fixes:
   players' bodies unmarked, unchanged pose drawn as cur).
 - S4b: f2d97ac4f (record, correction, witness `pa`, tripwire `attach`, break 32), f5b23fd7e (the record holds the bones
   the placement read) and c216081fd (re-review S1 and S2 fixes).
+- **The W1 commit** (not yet made; the edits are uncommitted in wt-simtick, 2026-11-27): the witness columns `uu` (W1)
+  and `pj` (W2), the pa form letter `I` for c216081fd's S1 path (review F1), the exact `parent_draw * L` on that path
+  (review N5), and the N6 comment. Code note: plan-facts/stage4d2-w1-code-notes-2026-11-27.md.
+
+So the chain is 0dfdff031, 0a8e94094, f2d97ac4f, f5b23fd7e, c216081fd + the W1 commit.
 
 Never compiled; the first CI build is pending. S4a and S4b are registered as ONE player-facing step: both sit under
 mask bit 16, and the S4a design says S4a must not reach players without S4b (design D3).
-**c216081fd is getting its own independent review before this registration is final.** A code change from that review
-means a new exe, a new pin and a new probe.
+**c216081fd's independent review is done** (plan-facts/stage4d2-c216081fd-review-2026-11-27.md: nothing blocking; F1,
+N5, N6 applied in the W1 commit). **The W1 commit gets its own independent review before this registration is final.**
+A code change from that review means a new exe, a new pin and a new probe.
 
 Design documents (plan-facts/):
 - stage4d2-npc-animation-design-2026-11-27.md ("the design"); its section 12 overrides its body.
@@ -25,7 +32,10 @@ Model copied for form, flags and method: s4d1/PREREG-s4d1-leftovers-build1-DRAFT
 scorer.
 
 Labels:
-- **[D]** desk (file:line read at c216081fd);
+- **[D]** desk (file:line read at c216081fd, except where the W1 commit moved them: the two named-risk sites are given
+  at the W1 tree, `sim_pose.cpp:316` (the xr_new, c216081fd :292) and `GameObject.h:258` (m_sim_attach, c216081fd :257).
+  Other c216081fd line numbers map to the W1 tree as: sim_pose.cpp +5 after line 16, +24 after 103, +84 after 530 and
+  more in the witness print code after 622; GameObject.cpp +3 after 962, +5 after 1106);
 - **[M]** measured (a number in a file);
 - **[G]** guess;
 - **COPIED** (a bound taken from an earlier registration without re-deriving it; listed in the margin table).
@@ -59,7 +69,7 @@ Labels:
 - **Positions are printed with 5 decimals** (scored to 1e-4 m per coordinate); `u` and alpha with 6 (scored to
   1.5e-6); hashes are FNV-1a 64 as 16 hex digits (scored by string equality).
 - **No real fixtures yet.** The scorer and self-test are built on synthetic run folders made from the format in the
-  code at c216081fd, plus the required addition W1 (1.3).
+  code at c216081fd plus the uncommitted W1 edits (W1 `uu`, W2 `pj`, pa form I; 1.1, 1.3).
 - **Build 1's open question (the held item's nudge, its s4 column) is not re-tested.** s4 is parsed for format only.
 
 ## 1. What the build changes, the witness, the exes
@@ -78,11 +88,12 @@ Labels:
   - Script attachments get the same correction.
 - **Simulation-read fields written:** none by design. That includes `mTransform`, `mTransformHidden`,
   `mRenderTransform`, `UCalc_Time` and the item's XFORM(). The only writes are SimPoseState, the record, and
-  `mRenderTransform_temp` (render-only by grep).
+  `mRenderTransform_temp` (render-only by grep). The W1 commit adds only test-only witness statics (a 32-slot static
+  table, no heap) and, on the S1 path, `parent_draw * L` without the multiply by identity (render-only `s.draw`).
 - **Layout changes in every arm of the same exe** (S4b notes 11.1; re-review N3). They are present with sim_tick 0 too:
   - IKinematics +1 pointer (Kinematics.h:130), CKinematics +1 bool;
-  - CGameObject +~280 B (the record, GameObject.h:257).
-- **Heap use in the ON arm only:** ~21 KB per captured skeleton (`xr_new<SimPoseState>`, sim_pose.cpp:292), section
+  - CGameObject +~280 B (the record, GameObject.h:258).
+- **Heap use in the ON arm only:** ~21 KB per captured skeleton (`xr_new<SimPoseState>`, sim_pose.cpp:316), section
   10.1.
 - **Test-only, inert without `-det_mode`:**
 
@@ -97,17 +108,22 @@ Labels:
   The ranges are mask 0..31 (device.cpp:629) and break 0..63 (device.cpp:645). With them come build 1's
   `-det_synth_k`, `-det_synth_wallclock`, `-det_synth_walk` and `-det_synth_tracer`.
 
-### 1.1 The witness line, as the code prints it (c216081fd)
-With `-det_synth_pose`, sim_pose_witness_print (sim_pose.cpp:630-740) appends five columns to build 1's 58-token line
-(device.cpp:546-576), before ` tw N`. The line becomes:
+### 1.1 The witness line, as the code prints it (c216081fd + the W1 commit)
+With `-det_synth_pose`, sim_pose_witness_print (sim_pose.cpp, witness section) appends seven columns to build 1's
+58-token line (device.cpp:546-576), before ` tw N`. The line becomes:
 
 `F .. T .. j .. K .. n .. a .. dt .. hud .. | s2 (9) | s3 (11) | s1 (5) | s4 (6) | p <neval> <nlerp> <nguard>
 <nsnap> <nro_diff> <nro_equal> | pw <form> <u> <ptick> <ctick> <hd> <hl> <hp> <hc> <hu> <hdu> <jd xyz> <jp xyz>
 <jc xyz> | up <hu> <hl> | pn <form> <u> <hd> <hl> <hsim> | pa <kind> <form> <cls> <ba> <bb> <u> <wd xyz> <ws xyz>
-<hd xyz> <hr xyz> <ld xyz> <ls xyz> <hx> <hxe> | tw <n>`
+<hd xyz> <hr xyz> <ld xyz> <ls xyz> <hx> <hxe> | uu <nu> <nud> <nus> <nposed> | pj <bone> <jw xyz> | tw <n>`
 
-That is **126 tokens**: p 6, pw 19, up 2, pn 5, pa 26 values. The absent forms were counted mechanically from the
-print strings. With W1 (1.3) it is **132 tokens**: `| uu <nu> <nud> <nus> <nposed> |` sits before `tw`.
+That is **138 tokens**: p 6, pw 19, up 2, pn 5, pa 26, uu 4, pj 4 values. The column order before `uu` is unchanged
+from c216081fd. The absent forms were counted mechanically from the print strings:
+- `uu` is always 4 unsigned counts (`0 0 0 0` when no unmarked leaf was uploaded); it has no dash form;
+- `pj` is `<bone> <x y z>` or 4 dashes.
+
+The scorer also parses 126 tokens (c216081fd without W1: U1 then FAILS by name) and 132 (W1 without W2: the W2 link
+is reported as absent). Every line of one witness must have the same length.
 
 **`p`** holds per-frame counts, reset each frame:
 - skeletons evaluated;
@@ -142,15 +158,27 @@ filled with bit 16 off too: the child rule runs on every gated frame.
 | field | values |
 |---|---|
 | kind | `-` (no record), B, T, W, N, X (record stale) |
-| form | C, R (corrected), O, P, S |
+| form | C, R (bone corrections), **I** (corrected with C = identity: the bones are drawn bitwise as the placement read them and only the parent's XFORM moved since the placement; c216081fd's S1 path, review F1; NOT a bone correction), O, P, S |
 | cls | c, p, o, `-` |
 | ba, bb | the record's bones; `-` = none |
 | u, hd, hr | `-` unless the parent's pose is drawn L this frame and ba is a captured bone |
-| ld, ls | only on C or R |
+| ld, ls | only on C, R or I |
 | wd, ws, hx | always present |
 | hxe | `-` if the child is not found after the join |
 
 All 26 values are dashes when no placement of that item reached the child rule this frame.
+
+**`uu`** (W1, 1.3) is the unmarked skeletons' skinned-leaf uploads of this frame:
+- `nu`: leaves of unmarked skeletons uploaded (every pass and leaf counts);
+- `nud`: of them, leaves where any matrix handed to `set_ca` was not the live bone itself (address compare);
+- `nus`: of them, leaves whose skeleton holds S4a storage;
+- `nposed`: unmarked SKELETONS whose live pose (hash of all bones' mRenderTransform at their first upload of the frame)
+  differs from the one stored at their upload in the immediately previous frame.
+
+**`pj`** (W2, 10.3) is the witness NPC's `bip01_r_hand` joint (else its last bone, as pw), as its mesh is drawn in
+this frame, in world: the NPC's drawn matrix of this frame (`sim_render.ptr`, the same matrix its item's child rule
+used as parent_draw) times `draw[b]` applied to the bone's joint. Present only when pn is form L and that matrix was
+set in this frame. `<bone>` is the bone index, to be matched with pa's `ba`.
 
 **Any other shape of any column makes that run's witness malformed.** Every check that reads it then FAILS by name.
 
@@ -176,43 +204,61 @@ All 26 values are dashes when no placement of that item reached the child rule t
 - **Stimulus:** `harness/zz_eperf_synth.script`, pinned as in the s4d1 draft (its R3: installed before the probe;
   inert without its flags).
 
-### 1.3 Witness gap W1: an unmarked skeleton cannot be isolated (REQUIRED code change before registration)
+### 1.3 Witness gap W1: an unmarked skeleton cannot be isolated (REQUIRED; now coded, uncommitted)
 The opt-in check U1 needs to know whether a skeleton NOT marked (the stand-in for gammavr's self-posed VR models) is
 drawn byte-stock with bit 16 on, while it is posed between ticks. The witness at c216081fd cannot show this:
 - `pw`, `pn`, `pa` and the `p` counts see only skeletons with storage, and storage exists only for marked ones;
 - `up` is "the first skinned leaf uploaded, any skeleton". It names neither the skeleton nor its mark, and it is
   `hu == hl` by construction whenever the upload used the live bones.
 
-So no column can tell an unmarked skeleton drawn stock from a marked one, and no column shows that an unmarked one was
-posed between ticks. **Required addition, test-only, under `g_sim_synth_pose`, no engine behaviour change; not made
-here:**
-- **sim_pose.cpp `sim_pose_wit_upload`.** For every skinned-leaf upload of a skeleton with
-  `!K->LL_GetSimObjectVisual()`:
-  - hash the `count` matrices handed over and the live `mRenderTransform` over the same bones, as `up` does;
-  - at the leaf's last matrix: `nu++`; `nud++` if the two hashes differ; `nus++` if `K->has_sim_pose()`;
-  - at the first leaf of that skeleton in this frame: look up its live hash at its previous upload frame in a
-    test-only map keyed by K and its bone count, `nposed++` if it differs, then store this one. The map lives on the
-    main thread only.
-- **Reset** per frame with the other counts (sim_pose_witness_reset).
-- **Print** ` uu %u %u %u %u |` after `pa`, before ` tw` (sim_pose_witness_print).
+**W1 as coded** (sim_pose.cpp only; no file under src/Layers or src/Include changed; details and the Rule One and thread
+arguments in plan-facts/stage4d2-w1-code-notes-2026-11-27.md):
+- In `sim_pose_wit_upload` (already called for every skinned-leaf matrix by SkeletonX.cpp:142, with the skeleton), at
+  each leaf's mid 0 the skeleton is classed unmarked if `!K->LL_GetSimObjectVisual()`.
+- For an unmarked leaf, every matrix handed over is compared BY ADDRESS with the live bone
+  (`&M != &K->LL_GetBoneInstance(mid).mRenderTransform`). Stock passes `LL_GetTransform_R(mid)`, which is that
+  address (SkeletonCustom.h:309). This is stronger than the hash compare first proposed: a draw array with equal bytes
+  also counts. At the leaf's last matrix: `nu++`, `nud++` if any address differed, `nus++` if `K->has_sim_pose()`.
+- At the first leaf of an unmarked skeleton in a frame: its live pose is hashed and looked up in a test-only table
+  keyed by (K, bone count). `nposed++` only if the stored hash is from the IMMEDIATELY previous frame and differs;
+  then this frame's hash is stored.
+  - "Consecutive frames only" is a change from the first spec. On a render-only frame no tick ran since the previous
+    frame's upload (in det serial mode the tick, CalculateBonesThread and the game thread all run before the render,
+    device.cpp:942, 1039-1053, before seqRender), so a difference there is posing between ticks. A comparison across skipped frames could
+    include a tick and would inflate the count.
+  - The table is 32 static slots, not a map: no heap (an allocation in the off arm only would be a layout difference
+    against build 1, LB). A full table evicts the oldest slot, so a miss can only LOWER nposed.
+  - A freed skeleton whose address is reused with the same bone count can raise nposed once. nposed is only a count
+    floor (U1's subject), never a pass condition by itself.
+- Reset per frame with the other counts; the table is not reset. Printed ` uu %u %u %u %u |` after `pa`, before `pj`.
 
-The cost is det-only hashing. A reused K address after a free can only inflate `nposed`, which is a count floor, not
-a pass condition (named in NOTES.md).
+**What it can see headless** [D for the path, G for the frames]: the first-person HUD hands and the HUD item model
+(player_hud m_model, m_model_2, the attached item's HUD model) are unmarked. Under the lever they are re-posed on every
+gated frame in `sim_view_present` (ActorCameras.cpp:765-770, `g_player_hud->update` with the 4c HUD clock, then
+CalculateBones_Invalidate + CalculateBones, player_hud.cpp:1622-1627). They are drawn through `render_hud`
+(player_hud.cpp:1336-1366) → `add_Dynamic` → `CSkeletonX::_Render` → the upload loop, **but only when an attached item
+needs rendering or a script animation runs** (player_hud.cpp:1338-1341). The det profile uses renderer_r4
+(out/user_det.ltx.orig:591), so the hands are hardware-skinned (RM_SKINNING_xB) and pass the hook; an RM_SINGLE or
+RM_SKINNING_SOFT leaf never reaches it. The actor's own body and legs are unmarked too, but they are calculated in
+ticks only [G], so they add to `nu`, not to `nposed`. **Expectation: nposed > 0 on most n=0 frames only if the actor
+holds an active item (s4d1 R1); otherwise about 0** [G]. The probe's `optin` rule settles it.
 
-Without W1:
+Without W1 in the exe:
 - the scorer reads 126-token lines and U1 FAILS by name ("required witness addition W1");
 - the probe STOPs (`w1`).
 
 ### 1.4 Required before registration
-1. W1 (1.3) in the code and reviewed. It is test-only, but it adds to sim_pose.cpp.
+1. W1 (1.3) in the code (done, uncommitted), committed as "the W1 commit", and reviewed. It is test-only, but it adds
+   to sim_pose.cpp, and it changes two lines of the S4b draw (review N5) in GameObject.cpp.
 2. **c216081fd's independent review**, and the W1 review, done, and any finding fixed. Any code change means a new CI
    build, a new pin and a new probe.
 3. A CI perf-build of the result, installed as SimTick19.exe and pinned (PIN_ME_EXE).
 4. s4d1's build-1 exe built and pinned (PIN_ME_EXE_B1). LB cannot run without it.
 5. The stimulus script installed with its pinned hash (s4d1 R3).
-6. **The series script `s4d2_run.sh` (not written, R2 of 6.2).** It must move `run/appdata/logs/synth_<tag>.txt` into
-   `out/det_<tag>/` after every boot. tools/det_run.sh does not: its lines 44-47 move dumps, traces, counters and
-   saves only (s4d1 NOTES 2.13, re-read today).
+6. **The series script `s4d2_run.sh` (written 2026-11-27, `bash -n` only, never run; R2 of 6.2).** It moves
+   `run/appdata/logs/synth_<tag>.txt` into `out/det_<tag>/` after every boot. tools/det_run.sh does not: its lines 44-47
+   move dumps, traces, counters and saves only (s4d1 NOTES 2.13, re-read today). Its PIN_ME_ and REG_ME_ values are
+   filled at registration; it refuses to boot while any remains.
 7. The probe GO (2.2), the `PROBE_` constants filled into the scorer's CONST, and BENCH_TIMEOUT set from PROBE_BOOT_S.
 8. The self-test re-run with a case built on the probe's real folder (CRLF, real hashes, real `pa` forms), PASS. The
    hashes of the scorer and the self-test recorded in section 8.
@@ -233,10 +279,11 @@ The NPC is the walking Duty squad member, 60/32/6 m from the player at cp1/2/3 (
 Reader: `python3 -I s4d2_score.py mode=probe root=out out=s4d2/probe_readings.txt`. It is written once and exits
 0 GO, 1 STOP.
 
-**One re-probe is allowed, only on the stop rules `npc` or `attach`.** The re-probe is `s4p_probe_b`, with
-`-det_synth_pose_npc esc_2_12_stalker_fanat`: the nearest NPC, 4 m away at cp1 [M]; whether it is armed is [G]. Its
-folder is read as `det_s4p_probe` by renaming the first probe to `det_s4p_probe_a`. A re-probe after a code or
-stimulus fix that a stop rule asks for is allowed as in s4d1.
+**One re-probe is allowed, only on the stop rules `npc` or `attach`.** The re-probe (`s4d2_run.sh probe_b`) uses
+`-det_synth_pose_npc esc_2_12_stalker_fanat`: the nearest NPC, 4 m away at cp1 [M]; whether it is armed is [G]. The
+script first renames the first probe's folder to `out/det_s4p_probe_a`, then boots the re-probe with the SAME tag
+`s4p_probe`, so its folder, det_tag and file names are what the reader expects. A re-probe after a code or stimulus fix
+that a stop rule asks for is allowed as in s4d1 (a new tag folder each time; the first ones are kept).
 
 ### 2.2 Probe stop rules (any one = the series does not start) and the plan for each outcome
 | code | rule | why | plan if it stops |
@@ -251,12 +298,37 @@ stimulus fix that a stop rule asks for is allowed as in s4d1.
 | uploads | PROBE_UPLOADS >= 300 | P4 has a subject | same as pose |
 | f5 | byte-different render-only recalcs <= 50 % of all render-only recalcs (p columns 5, 6 on n=0 frames) | (b) F5: an armed NPC whose render-only recalc is not byte-equal loses its history every frame, so it is drawn stock and its item never corrected | design D6: fix F5 in xrGame (no `CalculateBones_Invalidate` from a render-time UpdateXForm), rebuild, re-probe. 0 < share <= 50 % is reported, not a stop |
 | npc | `pn` present on >= 50 % of lines | (c) the witness NPC exists and is online | the one re-probe with the fallback NPC; then the Overseer |
-| attach | PROBE_PA_CR >= 300 (n=0 frames with pa form C or R and wd != ws) | (c) the NPC holds an item and the S4b correction moves it | the same re-probe; if it still fails, S4b would be unverified while being half of the step, so the Overseer decides (recommendation: a stimulus that arms a named NPC, not dropping S4b) |
+| attach | PROBE_PA_CR >= 300 (n=0 frames with pa form C or R and wd != ws; **form I is not counted**, review F1: on a moving parent it has wd != ws with no bone correction) | (c) the NPC holds an item and the S4b correction moves it | the same re-probe; if it still fails, S4b would be unverified while being half of the step, so the Overseer decides (recommendation: a stimulus that arms a named NPC, not dropping S4b) |
 | ld | <= 2 ld clusters per (kind, ba, bb) group | the record's bones are those the placement used (the outcome PA2 gates) | back to the code (re-review S2 class); not a harness issue |
 | hx | hx == hxe on every pa line | the item's XFORM is not changed after the child rule in a stock frame; otherwise PA1's hx rule cannot be used | the Overseer: drop that rule or find the writer |
 | optin | PROBE_U_POSED >= 300 (n=0 frames with an unmarked skeleton posed between ticks) | U1 has a subject: a stand-in for a self-posed model on screen | land s4d1 R1 (active item, so the HUD hands are drawn), re-probe; else the Overseer |
 
 **(d) Build 1's s4 question is not asked here.**
+
+#### 2.2.1 What each stop changes (written before the probe)
+"CI build" = a code change, so a new perf-build, a new pin, a new probe and a new self-test on real bytes. "Series plan"
+= the checks or boots of sections 3-4.
+
+| stop | change that follows | CI build? | series plan changes? |
+|---|---|---|---|
+| flags | fix the DET_EXTRA in s4d2_run.sh (a harness file), re-probe | no | no |
+| pattern | none: the lever does not work on this exe; the series does not start; back to build 1's lever code | yes, if a code fix follows | no checks change; nothing runs until a new probe passes |
+| input | fix s4d2_run.sh (witness move, R2) or the reader, re-probe | no | no |
+| w1 | W1 is not in the exe: rebuild from the W1 commit, re-pin, re-probe | yes | no |
+| stimulus | as s4d1: fix or re-install the stimulus script (pinned hash changes) and re-probe | no (script only) | no |
+| walk | as s4d1: fix the walk part of the stimulus, re-probe | no | no |
+| tripwire | a Rule One finding: back to the code (the BAD slice names where), fix, rebuild | yes | no; the series waits for the fix |
+| pose | design D9: a camera-heading stimulus (`set_actor_direction` toward the Duty squad), or "Caden's eyes only" (Overseer) | no for D9 (script); none for eyes-only | D9: none, the probe is re-run with it. Eyes-only: P1-P4 have no subject and the series is NOT run (Overseer decision) |
+| uploads | same as pose | as pose | as pose |
+| f5 | design D6: F5 fixed in xrGame (no `CalculateBones_Invalidate` from a render-time UpdateXForm), rebuild, re-probe | yes | no |
+| npc | the one re-probe with the fallback NPC (`probe_b`); its name becomes PROBE_NPC | no | the NPC switch of every pose boot becomes the fallback name |
+| attach | the same re-probe; if it still stops: the Overseer (recommendation: a stimulus that arms a named NPC; S4b not dropped) | no for a stimulus | with a stimulus: one more stimulus switch in every part-S boot, the same on all arms; dropping S4b would remove PA1/PA2/TWB32 and is not recommended |
+| ld | back to the code (the record is not what the placement read: re-review S2 class), rebuild | yes | no |
+| hx | the Overseer: find the XFORM writer after the render (code, CI build) or drop PA1's hx part | yes if the writer is fixed; no if dropped | dropped: PA1 loses its hx part and TWB32 its hx-based frame set (both registered as reduced) |
+| optin | land s4d1 R1 (the stimulus gives the actor an active item, so the HUD hands are drawn), re-probe; still stopping: the Overseer | no (script) | R1 adds no switch; U1 stays. Without a subject, U1 would have only its nud/nus part, which needs the Overseer's word |
+
+The TOL_LD rule of 7.1 is not a stop: its branch is a registration value (PROBE_TOL_LD), with no CI build and no change
+of boots. Its branch c makes PA2's cluster part reported only.
 
 ### 2.3 Placeholders the probe supplies (rule from reading to registered bound). Kp = 3
 | placeholder | probe reading | registered bound |
@@ -264,8 +336,9 @@ stimulus fix that a stop rule asks for is allowed as in s4d1.
 | `PROBE_P_LERP` | n=0 frames with pw form L and hd != hl | P1 minimum at K = floor(P x (K-1)/(Kp-1)/3) |
 | `PROBE_P_TICK` | n=1 frames with pw form L and hp != hc | P3 minimum = floor(P/3) at every K (one tick frame per tick, ~5440 ticks at every K); TWB16 minimum = floor(P/3) |
 | `PROBE_UPLOADS` | frames with an `up` column | P4 minimum = floor(P x K/Kp/3) |
-| `PROBE_PA_CR` | n=0 frames with pa form C/R and wd != ws | PA2 minimum = floor(P x (K-1)/(Kp-1)/3); TWB32 minimum at K = 2 = floor(P/2/3) |
-| `PROBE_PA_CLUSTERS` | max ld leader-clusters (radius TOL_LD) per (kind, ba, bb) group | PA2: no group may show more |
+| `PROBE_PA_CR` | n=0 frames with pa form C/R (bone corrections only, not I) and wd != ws | PA2 minimum = floor(P x (K-1)/(Kp-1)/3); TWB32 minimum at K = 2 = floor(P/2/3) |
+| `PROBE_PA_CLUSTERS` | max ld leader-clusters per (kind, ba, bb) group of form-C lines, at the radius PROBE_TOL_LD (at 1e-3 when that is 0) | PA2: no group may show more |
+| `PROBE_TOL_LD` | the TOL_LD rule of 7.1 applied to the probe's PROBE_LD_NOISE and PROBE_HAND_STEP (both printed) | PA2's cluster radius; 0 = PA2's cluster part reported only |
 | `PROBE_JOINT_LERP` | 1 if every form-L line has jd on lerp(jp, jc, u), else 0 | 1: P2's joint rule is strict. 0: a joint drawn as cur also passes (a bone the blend left at cur: hidden, mirrored, skewed; sim_pose.cpp:252-257), so a known per-bone fallback cannot fail P2 predictably |
 | `PROBE_U_POSED` | n=0 frames with uu nposed > 0 | U1 minimum = floor(P x (K-1)/(Kp-1)/3) |
 | `PROBE_NPC` | the NPC named in the probe's pose line | F0: every pose run must name it |
@@ -280,7 +353,8 @@ stimulus fix that a stop rule asks for is allowed as in s4d1.
 - **Reported by the reader, not bounds:**
   - for (a): skeletons evaluated per frame, and L, guard and snap counts;
   - for (b): the F5 counts;
-  - for (c): the pa kind, form and cls histograms;
+  - for (c): the pa kind, form and cls histograms, and the form-I count (not a correction);
+  - the W2 hand link: lines where pa's drawn bone and pj are the same bone, and the max |pa hd - pj|;
   - the joint fallback count, and the hx == hxe count.
 
 ### 2.4 Predictions for the probe (fixed before it runs)
@@ -352,14 +426,14 @@ Every part-S run carries the s4d1 part-S flags plus build 2's two switches:
 | **LB bit-off = build 1** (requirement 2) | b1off2 (build 1 exe) vs off2a (build 2 exe, bit 16 off), same flags: C = 0 at 1, 2, 3; cp1 ticks within 8 | **exact, gated**, section 5. The build-1 side is SimTick18 (1.2) |
 | TW tripwires | every part-S run except the breaks: 0 `* tw` lines of any slice (s2, s3, pose, attach); every part-S run: per frame to cp3 the number of `* tw` lines = the witness tw column, every line on a witnessed frame | exact (sim_4d_tw_bad counts and logs in one call, device.cpp:509-513) |
 | TWB16 must-fail | brk16's OWN witness: every frame to cp3 whose pw is form L with hd != hl carries a `pose` BAD line; >= floor(PROBE_P_TICK/3) such frames; 0 BAD lines of attach, s2, s3 | per frame exact. The break writes draw into `mRenderTransform` inside the pose bracket and after the witness took hl (sim_pose.cpp:422-430), so hd != hl means a hashed field changed in that frame. On tick frames (u = 0) draw = prev != cur = live whenever the pose changed, so at least the probe's moving tick frames qualify (3x). The attach bracket hashes the bones only after the parent's evaluation (GameObject.cpp:1088-1095), so break 16 cannot trip `attach` [D] |
-| TWB32 must-fail | brk32's OWN witness: every frame to cp3 with pa form C/R and hx != hxe carries an `attach` BAD line; >= floor(PROBE_PA_CR/2/3) such frames; 0 BAD lines of pose, s2, s3 | per frame exact: hx is hashed before the break (GameObject.cpp:1080), hxe after the join, so hx != hxe means the break changed XFORM() inside the attach bracket (:1119-1125). Frames with C/R and hx == hxe (draw bitwise equal to XFORM) are reported. The count floor assumes the break does not reduce form-C frames: a weapon is re-placed every rendered frame (HudItem.cpp:128), so its record is fresh again [D]; B-kind items stay stale until the next CalculateBones [G] |
+| TWB32 must-fail | brk32's OWN witness: every frame to cp3 with pa form C/R/I and hx != hxe carries an `attach` BAD line; >= floor(PROBE_PA_CR/2/3) such frames; 0 BAD lines of pose, s2, s3 (form I is included: the break fires on every corrected placement, GameObject.cpp `corrected`) | per frame exact: hx is hashed before the break (GameObject.cpp:1080), hxe after the join, so hx != hxe means the break changed XFORM() inside the attach bracket (:1119-1125). Frames with C/R and hx == hxe (draw bitwise equal to XFORM) are reported. The count floor assumes the break does not reduce form-C frames: a weapon is re-placed every rendered frame (HudItem.cpp:128), so its record is fresh again [D]; B-kind items stay stale until the next CalculateBones [G] |
 | P1 drawn between ticks | on runs: n=0 frames with pw form L and hd != hl >= floor(PROBE_P_LERP x (K-1)/2/3) | 3x by construction |
 | P2 pure function (S4a) | on runs, every form-L pw line: ctick = ptick + 1 and ctick = T; u = a (1.5e-6); hl = hc (the guard); if hu is present then hdu is present and hu = hdu (**the uploaded matrices are the draw array**); jd on lerp(jp, jc, u) within 1e-4 + 4 ulp (or jd = jc if PROBE_JOINT_LERP = 0) | the pair and guard parts are the code's own L conditions (sim_pose.cpp:408-418) and are named for the reader. The OUTCOME parts are u = a (the pose is drawn at the frame's alpha) and hu = hdu (the GPU gets the blend). The joint part checks the pivot: p = lerp(R_prev(j), R_cur(j), u) (sim_pose.cpp:220-224); its rounding is ~2 ulp of <= 2 m, so >= 20x under 1e-4 |
 | P3 one tick behind | on runs: every tick frame (n = 1, a = 0) with form L has hd = hp; >= floor(PROBE_P_TICK/3) such frames with hp != hc | exact: u = 0 draws prev bitwise (sim_pose.cpp:242-251; an unchanged pose is cur = prev). Root and pose are one tick behind together (design 3.2) |
 | P4 off = stock upload | off runs: p column all zero and pw absent on every line; up hu = hl on every frame with up; frames with up >= floor(PROBE_UPLOADS x K/3/3) | exact: with bit 16 off g_sim_pose_active is FALSE, so there is no capture, no storage and simR = nullptr (S4a notes 3) |
-| **U1 opt-in** | on and off runs: the uu column present (W1) and nud = 0, nus = 0 on every line; on runs: n=0 frames with nposed > 0 >= floor(PROBE_U_POSED x (K-1)/2/3) | exact: an unmarked skeleton has no capture (SkeletonRigid.cpp:135 tests the mark) and no draw (sim_pose.cpp:437), so it is uploaded live. nposed shows it changed between ticks, which is what made gammavr's VR models a risk (design 12 C1). 3x on the count |
-| PA1 attach forms (S4b) | on and off runs, every pa line: hx = hxe when both are present (the render leaves the item's XFORM unchanged); forms P, O, S have wd = ws; on runs: C and R have cls c or p and u = a; O has cls o; off runs: only forms S or P, cls `-`, u `-` | exact: P/O/S draw the 4b rule, and the witness's ws is that rule's matrix (GameObject.cpp:1099-1116, 1129-1130). The hx part is stock behaviour under det serial mode (no XFORM writer after the render [D, with the CInventoryItem no-guard caveat of s4d1 NOTES]); the probe's `hx` rule settles it first |
-| **PA2 item rides the drawn hand** (S4b outcome) | on runs: n=0 frames with pa form C/R and wd != ws >= floor(PROBE_PA_CR x (K-1)/2/3); form-C lines grouped by (kind, ba, bb): ld leader-clusters (radius TOL_LD = 1e-3 m) per group <= PROBE_PA_CLUSTERS | ld = the drawn item's origin in its DRAWN placement frame (inverse(parent_draw x A_d) x wd, GameObject.cpp:1021-1027). When the recorded bones are those the placement read, ld = inverse(A_c) x L = the item's offset O, a constant per item (re-review N2's proposal, "compare against its offset"). A wrong or torn record (re-review S2) makes it wander by the hand's motion. **ld = ls is a tautology** (re-review N2): only reported. Form R is excluded (right hand alone: ld varies with the two-hand geometry) |
+| **U1 opt-in** | on and off runs: the uu column present (W1) and nud = 0, nus = 0 on every line; on runs: n=0 frames with nposed > 0 >= floor(PROBE_U_POSED x (K-1)/2/3) | exact: an unmarked skeleton has no capture (SkeletonRigid.cpp:135 tests the mark) and no draw (sim_pose.cpp:437), so it is uploaded live: nud = 0 means every matrix handed to set_ca was the live bone ITSELF (address compare, 1.3), nus = 0 that no unmarked skeleton holds storage. nposed counts unmarked skeletons whose pose changed since the previous frame's upload, on consecutive frames only, so on n=0 frames it is posing between ticks, which is what made gammavr's VR models a risk (design 12 C1). 3x on the count |
+| PA1 attach forms (S4b) | on and off runs, every pa line: hx = hxe when both are present (the render leaves the item's XFORM unchanged); forms P, O, S have wd = ws; on runs: C, R and I have cls c or p and u = a; **I has hd = hr** (1e-4); O has cls o; off runs: only forms S or P, cls `-`, u `-` | exact: P/O/S draw the 4b rule, and the witness's ws is that rule's matrix (GameObject.cpp:1099-1116, 1129-1130). Form I needs A_d == A_c bitwise, and every placement frame's origin is bone_a's (sim_attach_hands F.c = mR.c; A = da / ta; translate(da.c)), so the drawn and the read bone_a coincide: hd = hr exactly [D]. The hx part is stock behaviour under det serial mode (no XFORM writer after the render [D, with the CInventoryItem no-guard caveat of s4d1 NOTES]); the probe's `hx` rule settles it first |
+| **PA2 item rides the drawn hand** (S4b outcome) | on runs: n=0 frames with pa form C/R (not I) and wd != ws >= floor(PROBE_PA_CR x (K-1)/2/3); form-C lines grouped by (kind, ba, bb): ld leader-clusters (radius PROBE_TOL_LD, 7.1) per group <= PROBE_PA_CLUSTERS; with PROBE_TOL_LD = 0 the cluster part is reported only | ld = the drawn item's origin in its DRAWN placement frame (inverse(parent_draw x A_d) x wd, GameObject.cpp:1021-1027). When the recorded bones are those the placement read, ld = inverse(A_c) x L = the item's offset O, a constant per item (re-review N2's proposal, "compare against its offset"). A wrong or torn record (re-review S2) makes it wander by the hand's motion. **ld = ls is a tautology** (re-review N2): only reported. Form R is excluded (right hand alone: ld varies with the two-hand geometry) |
 
 Reported, not gated:
 - per on, break and wallclock run:
@@ -370,6 +444,13 @@ Reported, not gated:
   - max |ld - ls| (rounding only);
   - for kinds B, T and N, the max of | |wd - hd| - |ld| |. That rigidity check is exact only for orthonormal frames,
     and W's first axis is not unit (S4b notes 2.1);
+  - form I lines and their n=0 moved count (the S1 path; never counted as a correction);
+  - **the W2 hand link:** on lines where pa has u, cls c or p, and `ba` equals pj's bone, the max Chebyshev distance
+    |pa hd - pj jw|. Both are the same bone of the same mesh in the same frame through the same drawn root matrix, one
+    via `sim_pose_bone_drawn` (draw x inverse(m2b), or the captured mTransform bitwise at an endpoint), one via
+    `draw[b]` applied to the joint. Expected: rounding only, ~1e-6 m in model space plus 1e-5 of print rounding;
+    anything near 1e-3 or more means the item's frame A_d is NOT built on the mesh's drawn hand (10.3). Reported, not
+    gated: no probe count floor exists for it yet (registration may promote it if the probe shows >= 300 lines);
   - pn presence;
 - pn hsim on tick frames, on vs off at the same K (online state);
 - C of K=2 vs K=3 (on and off), b1off2 vs off2b, and wc2 vs on2a;
@@ -406,8 +487,8 @@ Reported, not gated:
   | SC | LB | A2 | tripwires | reading |
   |---|---|---|---|---|
   | PASS | PASS | PASS | clean | no Rule One effect seen |
-  | FAIL | PASS | PASS | clean | an ON-arm-only effect that no tripwire hashes: the heap allocation of SimPoseState (layout through addresses) or a bit-16 write outside the hashed fields (logic). Look first at sim_pose.cpp:292 |
-  | PASS or FAIL | FAIL | PASS | clean | a gated-mode bit-off effect of build 2: the static layout (record GameObject.h:257, IKinematics pointer Kinematics.h:130) seen under the lever, or a bit-off code path |
+  | FAIL | PASS | PASS | clean | an ON-arm-only effect that no tripwire hashes: the heap allocation of SimPoseState (layout through addresses) or a bit-16 write outside the hashed fields (logic). Look first at sim_pose.cpp:316 |
+  | PASS or FAIL | FAIL | PASS | clean | a gated-mode bit-off effect of build 2: the static layout (record GameObject.h:258, IKinematics pointer Kinematics.h:130) seen under the lever, or a bit-off code path |
   | any | any | FAIL | | build 2's layout or sim_tick-0 code (the mark writes) already differs without the lever |
   | FAIL | | | BAD lines present | a logic leak the tripwires caught (TW fails too) |
 
@@ -421,21 +502,36 @@ Reported, not gated:
 
 The arms of each pair are spread out. The breaks go last; each boot starts fresh (det_run.sh restores user.ltx and
 loads the save).
-### 6.2 Command per boot (series script s4d2_run.sh: TO BE WRITTEN, requirement R2)
-`DET_NOCLAIM=1 BENCH_TIMEOUT=<2000 or from PROBE_BOOT_S> DET_EXTRA="<base> <lever>" tools/det_run.sh <exe> <tag> 60 3`,
-then `mv run/appdata/logs/synth_<tag>.txt out/det_<tag>/`. "60 3" is ignored under -det_passes. `<lever>` is per
-section 4's table, with the NPC = PROBE_NPC.
+### 6.2 Command per boot (series script s4d2_run.sh: written 2026-11-27, `bash -n` only, requirement R2)
+`DET_NOCLAIM=1 BENCH_DISPLAY=:141 BENCH_TIMEOUT=<2000 for the probe; REG_ME_BENCH_TIMEOUT from PROBE_BOOT_S>
+DET_EXTRA="<base> <lever>" tools/det_run.sh <exe> <tag> 60 3`, then `mv run/appdata/logs/synth_<tag>.txt
+out/det_<tag>/`. "60 3" is ignored under -det_passes. `<lever>` is per section 4's table, with the NPC = PROBE_NPC.
+Three modes: `probe`, `probe_b` (2.1) and `series` (16 boots in the order of 6.1); each keeps its own new state folder
+`out/s4d2_state/<mode>/` (series.log, plan.txt, done.txt, run_<tag>.log, stop.txt with `class=done|box|fault`).
 
-The script must:
-- refuse to start if any `run/appdata/logs/synth_s4p_*.txt` or `out/det_s4p_*` exists, except the probe folders;
-- pin SimTick19 (PIN_ME_EXE), SimTick18 (PIN_ME_EXE_B1), Stance14 b4ce9c77, out/user_det.ltx.orig 3e0e0a6f1fe8010c
-  (prefix) and the stimulus script;
-- check cfg0 (sim_tick 0, r__framelimit 0 in run/appdata/user.ltx; tools/s4c_partA.sh:23);
-- run the flag preflight of tools/s4c_partA.sh:10-16 for the base flags;
-- run the in-run preflight on s4p_off2a at cp1: counter file present, witness file present and non-empty with
-  126/132-token lines, and the engine command line, det_synth line and pose line as registered. Otherwise stop at once;
-- keep one shared claim (WANT shared) for the whole series. det_pair.sh cannot be used: it passes one DET_EXTRA to all
-  its runs.
+What the script does (each item is a refusal or a stop BY NAME):
+- refuses to start if `grep -q EXCLUSIVE ~/.claude/overseer/QUIET-REQUIRED` matches, and stops (box) if it matches
+  before a later boot;
+- refuses while any `PIN_ME_` value remains (exe names and hashes of build 2 and build 1, the installed stimulus hash),
+  and in series mode while any `REG_ME_` value remains (PROBE_NPC, BENCH_TIMEOUT, the scorer and self-test hashes);
+- pins, by name, before the first boot and again before every boot: build 2 (PIN_ME_EXE), build 1 (PIN_ME_EXE_B1,
+  series), Stance14 b4ce9c77 (series), out/user_det.ltx.orig 3e0e0a6f1fe8010c (prefix), the stimulus, tools/det_run.sh,
+  lib_engine_pids.sh and run_noguard.sh (full hashes read 2026-11-27), and in series mode the registered scorer and
+  self-test;
+- checks cfg0 (sim_tick 0, r__framelimit 0 in run/appdata/user.ltx; tools/s4c_partA.sh:23) before every boot;
+- runs the flag preflight of tools/s4c_partA.sh:10-16 for the base flags;
+- display :141 only: BENCH_DISPLAY must be unset or :141, and the display must be free (no socket, no lock) before every
+  boot; no other display is named;
+- refuses if any out/det_<tag>, out/det_<tag>_r1 or run/appdata/logs/synth_<tag>[_r1].txt of its plan exists (the probe
+  folders are a separate mode); series mode also needs s4d2/probe_readings.txt ending in `S4D2 PROBE: GO`;
+- after every boot: moves the witness, then needs xray.log and the cp1/cp3 counter files in the folder, and for a lever
+  boot a non-empty witness;
+- **the in-run preflight**, after the boot of s4p_off2a (and of the probe) ends: every witness line has the registered
+  138 tokens (58 for build 1), the engine's command line carries the base flags and the lever switches, the det_synth
+  line has the boot's mask, and the pose line names the NPC. Any miss stops the series. (Checked when the boot ends,
+  not at cp1: one boot later than the first plan, and with no process watching a live boot.)
+- keeps one SHARED claim (`want` without EXCLUSIVE, then `claim`, renewed before every boot; exit codes only).
+  det_pair.sh cannot be used: it passes one DET_EXTRA to all its runs.
 ### 6.3 Time per boot (derivation)
 These figures are from the s4d1 draft 6.3; they are not measured for build 2:
 - stock to cp3: 180-211 s [M];
@@ -461,44 +557,78 @@ would be only 4.9x here, because of the added hashing: flagged, and not COPIED.
 ### 6.4 Stop rules (no check is scored before the end; these look only at each run's own completion)
 - **Before the series:** the pins, cfg0 and the user_det hash of 6.2; no leftover witness files or out folders.
 - **During the series:**
-  - a protected title or a lost claim: stop (box);
-  - a crash dump: stop (fault);
-  - the in-run preflight of 6.2: stop.
+  - `EXCLUSIVE` in QUIET-REQUIRED, a protected title, or a refused claim renewal: stop (box);
+  - a crash dump (det_run.sh's "CRASH DUMP present" or a .mdmp in the folder): stop (fault);
+  - a timeout (det_run.sh rc 5): stop (fault);
+  - any pre-boot check of 6.2 failing, or det_run.sh's own refusals (rc 2, 7): stop (fault);
+  - a missing file after a boot, or the in-run preflight of 6.2: stop (fault).
 ### 6.5 One-retry rule
-- A boot that ends rc != 0 (timeout, early exit) is run once more right away as `<tag>_r1`, with the same switches.
+- **At most one retry in the whole series**, and only for a boot that exited early (det_run.sh rc 4, "engine exited
+  early") with no crash dump. It is run once more right away as `<tag>_r1`, with the same switches (det_tag
+  `<tag>_r1`). A timeout or a crash dump is never retried: it stops the series (6.4).
 - The scorer reads `det_<tag>_r1` when it exists and names the substitution.
-- A second failure of the same slot stops the series (fault).
-- A boot is never re-run because of what its output shows.
+- A failure of the retry, or a second early exit anywhere in the series, stops the series (fault).
+- A boot is never re-run because of what its output shows. The probe is never retried (only re-probed by 2.1).
 
 **Scored ONCE, at the end:** `python3 -I s4d2/s4d2_score.py root=out out=s4d2/s4d2_score_result.txt`. The scorer
 refuses an existing out file and has no override, so there is no re-score after a checker fix.
 
 ## 7. Margin table
-| bound | value | expected | margin | note |
+| bound | value | expected | margin | derivation, or COPIED and why it still applies to build 2 |
 |---|---|---|---|---|
 | C = 0 (A1, A2, S0, SC, LB) | 0 | 0 | exact | section 5 |
-| cp1 frame / tick difference (A3, S0, SC, LB) | <= 8 | 0.75-2.7 [M]; an extra pass = 17 | 3.0x over the noise, **2.1x** under the signal | **COPIED** |
-| A-Life calls to cp1 (A4) | >= 50 | 100 [M] | **2.0x** | **COPIED**, flagged |
+| cp1 frame difference (A3, part A) | <= 8 frames | noise 0.75-2.7 [M, 4b pairs]; an extra A-Life pass = 17 frames (gaps 16-18 [M]) | 3.0x over the noise, **2.1x** under the signal | **COPIED** (4b R3). Applies because what decides the cp1 frame is identical in build 2's part-A boots: sim_tick 0 and no lever (cfg0, A5), the same save, det profile, det_run.sh and Stance14, and no change to the scheduler, A-Life, det harness or stimulus code (`git diff --stat 6acb77044 c216081fd`: 20 files, none of them there [D]) |
+| cp1 tick difference (S0, SC, LB, part S) | <= 8 ticks | signal re-derived: an extra pass = one A-Life gap = 16-18 TICKS, because under the lever each tick runs one update and the A-Life call cadence is counted in updates (s4d1 L3, the same scheduler) [D]; noise in ticks: **not measured for any lever boot** [G: <= 2.7 as in frames] | **2.1x** under the signal; noise side unknown | re-derived on the signal side, flagged on the noise side. S0 (off2a vs off2b) is the first measure and is a harness check: a noisy harness gives NO VERDICT for SC and LB, not a false FAIL |
+| A-Life calls to cp1 (A4) | >= 50 | 100 [M in every earlier part A; cp1 is set at pass 100 by -det_passes] | **2.0x** | **COPIED** (4b R4), flagged. Applies because it counts lines of the det_trace .sched file, whose writer build 2 does not touch [D, diff list], in part-A boots identical to the earlier ones except the exe. It only separates "the trace covers the run" from "the trace started late" |
 | PAT a, dt / hud | 1.5e-6 / 2e-3 | print rounding 5e-7 / 5e-4 | 3x / 4x | re-derived: same printf formats |
-| walk range (S0B, probe) | >= 1.5 m | 3.0 m | **2.0x** | **COPIED** (script geometry), flagged |
-| bullets fired (S0B, probe) | >= 50 | ~171 [G] | 3.4x | **COPIED** |
-| position equal (PA1 wd = ws) | 1e-4 m | 0: the same matrix printed twice | exact in practice; 20x over print rounding | |
+| walk range (S0B, probe) | >= 1.5 m | 3.0 m (2 x WALK_HALF 1.5, script) | **2.0x** | **COPIED** (s4d1 S0B), flagged. Applies because the walk is the pinned stimulus script's geometry, the actor is unmarked (S4a/S4b never touch it) and its movement code is not in build 2's diff [D]; the s2 column that measures it is build 1's code, unchanged. It separates "walk ran" (3.0 m) from "walk did not" (0 m) |
+| bullets fired (S0B, probe) | >= 50 | ~171 | 3.4x | **re-derived for build 2**: one bullet per 30 updates from update 300 (script cadence [G, as s4d1]); build 2's boots run the same ~5440 updates to cp3 at every K and in every arm (one update per tick) [M, s4d1], so (5440 - 300) / 30 = 171. The probe shows it |
+| part-A method (A1-A5) | 6 boots alternating Stance14 / build 2, C exact, A3, A4 | | | **COPIED** (4b section 2 via the s4d1 draft 3). Applies because the question is the same (off = stock with sim_tick 0) and the boots are the same: alternation, Stance14 b4ce9c77, `-det_passes 100,200,320 -det_lua_streams -det_counters` (flag preflight), cfg0, save, det profile. What build 2 adds that part A judges: the unconditional mark writes (OnChangeVisual) and the layout; A2's exactness across layout changes held before [M] |
+| position equal (PA1 wd = ws; I hd = hr) | 1e-4 m | 0: the same matrix printed twice / the same bone bitwise | exact in practice; 20x over print rounding | |
 | u = a (P2, PA1, PWC) | 1.5e-6 | 0: the same float printed twice | 3x over print rounding | |
 | joint lerp (P2) | 1e-4 + 4 ulp | ~2 ulp of <= 2 m = 5e-7 + print 5e-6 | >= 18x | |
-| P1, P3, P4, U1, PA2 counts; TWB16, TWB32 floors | floor(probe scaled / 3) | probe scaled | 3x | by construction. TWB32 also assumes [G] the break does not reduce form-C frames |
+| P1, P3, P4, U1, PA2 counts; TWB16, TWB32 floors | floor(probe scaled / 3) | probe scaled | 3x | by construction. TWB32 also assumes [G] the break does not reduce form-C frames; its frame set now includes form I, which only adds frames |
 | PWC shares | >= 0.90 | ~1.0 [D] | 10 % allowed vs ~1e-6 expected | |
 | PWC form-L floor | >= 30 | thousands [G] | > 30x | evidence floor |
-| TOL_LD (PA2) | 1e-3 m | float32 rounding of world coords up to ~270 m: ~3e-5 per op, ~3e-4 worst [G]; a wrong-tick record shifts ld by the hand's motion per tick, 1-30 mm [G] | **~3x over the noise, 1-30x under the signal** | **flagged: for idle hand motion of ~1 mm the signal side is < 2x** [G]. The probe's cluster count shows the noise side on real bytes |
-| PROBE_PA_CLUSTERS (PA2) | probe value, stop > 2 | 1 per item; 2 if an offset changes (strap) [G] | exact against the probe | |
+| TOL_LD (PA2) | PROBE_TOL_LD by the rule of 7.1 (1e-3 if the probe allows) | see 7.1 | >= 2x on both sides by the rule, or the cluster part reported | 7.1 |
+| PROBE_PA_CLUSTERS (PA2) | probe value at PROBE_TOL_LD, stop > 2 | 1 per item; 2 if an offset changes (strap) [G] | exact against the probe | |
+| W2 hand link (reported) | none (reported) | ~1e-6 m + 1e-5 print [D] | | not gated: no probe floor yet |
 | probe stops: counts | 300 | ~5440 x (K-1) for pose [G]; the NPC's frames unknown | ~36x for pose; unknown for attach and optin | these are decision rules, not verdict bounds |
 | probe stops: npc share / f5 share | 0.5 / 0.5 | ~1.0 / ~0 [G] | **2x** / n.a. | decision rules, flagged |
 | BENCH_TIMEOUT | 2000 s | <= 390 s [G] | 5.1x | reset from PROBE_BOOT_S |
 
+### 7.1 TOL_LD, its own line (PA2's ld cluster radius)
+- **Expected noise.** ld = inverse(parent_draw x A_d) x wd, in float32 from world coordinates up to ~270 m [G]. The
+  float32 spacing at 256-512 m is 3.05e-5 m; an inverse, two products and a transform are each about half an ulp to
+  one ulp, so ~1e-4 m typical and ~3e-4 m worst [G]. Print rounding adds 5e-6 per value.
+- **Expected smallest signal, derived.** A record from the wrong capture (the re-review S2 class) builds A_c from bones
+  one tick away from those the placement used, so ld moves by the hand's per-tick motion in its own frame: the hand's
+  translation per tick plus |O| x its rotation per tick. Walking or turning: ~1 m/s x 33 ms = ~3 cm. Aiming or idle:
+  ~1 mm per tick [G]. The smallest signal is therefore the idle hand, **~1e-3 m**.
+- **Bound and headroom at 1e-3 m:** 3x over the worst noise (10x over typical), **about 1x against the idle signal**
+  (no headroom) and 30x against walking.
+- **What the probe measures** (printed by the reader, rule applied mechanically):
+  - `PROBE_LD_NOISE`: per (kind, ba, bb) group of form-C lines, the per-coordinate spread (max - min) of ld inside the
+    group's largest leader cluster at 1e-3 m; the max over groups. Floored at 1e-5 (two print roundings).
+  - `PROBE_HAND_STEP`: the 10th percentile, over n=0 form-C lines with 0 < u < 1, of the per-tick hand step
+    |hd - hr| / (1 - u) for cls c (hr is the newest capture) or |hd - hr| / u for cls p. So 90 % of frames carry at
+    least this much signal.
+  - `PROBE_TOL_LD` from N = PROBE_LD_NOISE and S = PROBE_HAND_STEP:
+    - (a) if 2N <= 1e-3 <= S/2: **1e-3** (unchanged);
+    - (b) else if 4N <= S: **sqrt(N x S)**, which is >= 2x over N and >= 2x under S; PROBE_PA_CLUSTERS is read at it;
+    - (c) else: **0**, and PA2's cluster part is reported only.
+- **What changes if the probe shows < 2x** (branch c): PA2 stays gated on its C/R count; its cluster part (the record
+  is what the placement read) is reported only. That outcome then rests on the probe's `ld` stop (clusters <= 2 at
+  1e-3, which catches only errors above ~1e-3) and on the desk reviews, and section 10.3 says so. No code change, no CI
+  build, no change of boots or switches; the Overseer is told at registration.
+
 Flags:
 - **At 2x:** A-Life calls (COPIED), walk range (COPIED) and the probe's npc share.
-- **At 2.1x:** cp1 against a real extra pass (COPIED).
-- **Possibly under 2x:** TOL_LD on the signal side for idle-only hand motion.
-- **COPIED bounds:** cp1 difference, A-Life calls and gaps, walk range, bullets fired, and the part-A method.
+- **At 2.1x:** cp1 against a real extra pass (COPIED for frames, re-derived for ticks).
+- **Noise side unknown:** cp1 in ticks (no lever boot measured yet).
+- **TOL_LD:** set by the probe (7.1); at its old fixed 1e-3 it would have had no headroom against an idle hand.
+- **COPIED bounds, each with its reason above:** cp1 difference (frames), A-Life calls and gaps, walk range, and the
+  part-A method. Bullets fired is re-derived.
 
 **Claim class per run: SHARED, every run** (probe, A, S).
 - No verdict depends on frame or wall timing: under the lever every gated column is a function of the pattern or of
@@ -513,7 +643,8 @@ Flags:
   (placeholders, out exists, usage). It refuses a second run onto an existing out file, with no override.
 - **Probe mode:** `mode=probe root=<dir> out=<file>`. Exit 0 GO, 1 STOP, 2 REFUSED.
 - **It reads per run:**
-  - the witness `synth_<tag>.txt`: 58 tokens for b1off2; 126 or 132 for build-2 part-S runs; every column validated;
+  - the witness `synth_<tag>.txt`: 58 tokens for b1off2; 138 for build-2 part-S runs (126 and 132 are parsed so that
+    a missing W1 or W2 fails or reports by name); one length per file; every column validated;
   - `xray.log`;
   - `det_alife_counts`, `det_counters` (C, as counters_diff.py);
   - `det_trace_<tag>.txt.sched` (part A);
@@ -526,17 +657,30 @@ Flags:
 - the good set, plus a CRLF variant and an absent-value-dash variant (pa, pn, up absent on some frames);
 - one mutant per gated check, each of which must change exactly its verdicts. This includes:
   - the heap-layout fixture (on vs off counters differ, every tripwire clean: SC FAIL naming "heap layout" and
-    sim_pose.cpp:292);
-  - the build-1 fixture (LB FAIL naming GameObject.h:257);
+    sim_pose.cpp:316);
+  - the build-1 fixture (LB FAIL naming GameObject.h:258);
 - the three must-fails (PWC, TWB16, TWB32) "did not fail", and for each break also "a frame not caught" and "wrong
   slice";
 - a missing witness and a malformed pw column, each failing by name in every check that reads it;
 - a witness without the W1 column (U1 fails by name);
+- the W1/W2/F1 cases added 2026-11-27 (second revision):
+  - the good set carries form-I lines (every tenth tick's render-only frames) and pj columns;
+  - U1: an unmarked skeleton with storage, and one never posed (count part);
+  - PA1: an I line with hd != hr, and form I in an off run;
+  - PA2: every correction turned into form I (F1: the count must FAIL);
+  - TWB32: an I frame of the break without its BAD line;
+  - W2: a pj mismatch (reported value shown, no verdict change), a witness without pj (132 tokens, reported absent),
+    and pj on a line whose pn is not L (malformed by name);
+  - PROBE_TOL_LD 0: PA2's cluster part reported only;
 - the `_r1` retry, both joint rules, and the refusals (placeholders; a second scoring onto the same out file);
-- 13 probe-mode cases: GO with the expected CONST lines, CRLF, and one per stop rule (w1, pose, f5, npc + attach, ld,
-  hx, optin, tripwire, stimulus, malformed input, missing input).
+- 16 probe-mode cases: GO with the expected CONST lines (PROBE_PA_CR counts C/R only; the I count, the TOL_LD branch
+  and the W2 link printed), CRLF, one per stop rule (w1, pose, f5, npc + attach, ld, hx, optin, tripwire, stimulus,
+  malformed input, missing input), attach stopped when every correction is form I, and the TOL_LD rule's branches b
+  and c.
 
-**Result 2026-11-27:** `S4D2 SELFTEST: PASS (57/57)`, folder s4d2/selftest-runs/20261127-214140-1115043 (see NOTES.md 7).
+**Result 2026-11-27 (second revision):** `S4D2 SELFTEST: PASS (70/70)`, folder
+s4d2/selftest-runs/20261127-221049-2137883 (NOTES.md 7). Hashes at that run (not registered): s4d2_score.py
+5421e5de14fa8214..., s4d2_selftest.sh 8081f843f7f501ef....
 **It must be re-run with a case built on the probe's real folder before registration.** The hashes of the scorer and
 the self-test are to be filled at registration.
 
@@ -568,10 +712,10 @@ the self-test are to be filled at registration.
 ## 10. Named risks
 ### 10.1 Heap layout
 - **What it is.** Build 2 changes memory layout in two ways:
-  - **in both arms of the same exe:** every CGameObject grows by ~280 B (`m_sim_attach`, GameObject.h:257) and
+  - **in both arms of the same exe:** every CGameObject grows by ~280 B (`m_sim_attach`, GameObject.h:258) and
     IKinematics by a pointer (`m_sim_pose`, Kinematics.h:130);
   - **in the bit-16 ON arm only:** ~21 KB is allocated per captured skeleton from the engine heap
-    (`xr_new<SimPoseState>` in sim_pose_capture_body, sim_pose.cpp:292), freed at Spawn or destruction.
+    (`xr_new<SimPoseState>` in sim_pose_capture_body, sim_pose.cpp:316), freed at Spawn or destruction.
 
   So heap addresses differ between the on and off arms, and between build 1 and build 2. Any simulation container
   ordered or hashed by pointer (an address-keyed map, a sort by pointer, iteration of an unordered set of objects)
@@ -584,9 +728,9 @@ the self-test are to be filled at registration.
 
   LB and A2 tell them apart (section 5 table).
 - **Where to look first:**
-  - **SC:** the storage allocation in `sim_pose_capture_body` (sim_pose.cpp:292). Then search xrGame/xrAICore for
+  - **SC:** the storage allocation in `sim_pose_capture_body` (sim_pose.cpp:316). Then search xrGame/xrAICore for
     pointer-keyed containers walked during the offline A-Life update.
-  - **LB or A2:** the record member `CGameObject::m_sim_attach` (GameObject.h:257), then `IKinematics::m_sim_pose`.
+  - **LB or A2:** the record member `CGameObject::m_sim_attach` (GameObject.h:258), then `IKinematics::m_sim_pose`.
 - **Fixes, if it shows** (not in this series):
   - allocate SimPoseState from a private heap or a fixed slab, so the xrMemory arena is untouched (S4a review NOTE);
   - or allocate it in both arms.
@@ -607,18 +751,26 @@ leak of gated mode since 4a, and it is not measured here (det serial).
   - sim_pose_bone_drawn taking t_draw from the same `draw[]` the upload uses (sim_pose.cpp:472-481, [D]);
   - P2's hu = hdu, which is shown only for the pw skeleton.
 
-  An optional witness addition W2 would close it: pn printing the `bip01_r_hand` joint triple jd/jp/jc, so that on
-  cls-c frames |hd - hr| could be compared with |jd - jc| for the witness NPC. W2 is not required. Without it, this
-  link is desk-only.
+  **W2 (coded, uncommitted) closes it on the witness NPC:** the `pj` column prints that NPC's `bip01_r_hand` joint
+  as its mesh is drawn, in world, through the same drawn root matrix the item's child rule used. On lines where pa's
+  `ba` is that bone and pa has u (cls c or p), |pa hd - pj| compares the bone the item's frame is built on with the
+  mesh's drawn hand directly (not only distances, as first proposed). It is reported, not gated (no probe floor yet);
+  a value near 1e-3 m or more would mean A_d is not the mesh's drawn hand. It covers only the witness NPC and only
+  when its item hangs on bip01_r_hand.
+- **If PROBE_TOL_LD is 0** (7.1 branch c), PA2 shows the correction's count but not, at fine scale, that the record is
+  what the placement read.
 - **ld = ls is a tautology** (re-review N2): only reported.
 - pa has no child id, so a weapon switch shows as a new ld cluster (covered by PROBE_PA_CLUSTERS).
 ### 10.4 pw comparability (S4b review O2)
 pw is the first skeleton evaluated in the frame, and the child rule (and the tw bracket) can move that evaluation
 earlier. So pw is compared only line by line, never across runs, exes or switch sets.
-### 10.5 The review of c216081fd
-c216081fd is under independent review. If the review changes the code, the pin, the probe and the self-test's
-real-bytes case are all redone. If it changes a witness format, the scorer is changed BEFORE the probe, and section 1.1
-is updated.
+### 10.5 The review of c216081fd, and the W1 commit
+c216081fd's review (plan-facts/stage4d2-c216081fd-review-2026-11-27.md) found nothing blocking. Its SHOULD FIX F1 (the
+S1 path reported as a bone correction) is fixed by the new form letter I, which the probe's attach count, PA2's count
+and the PROBE_PA_CR reading exclude, and which TWB32 and PA1 include. N5 (the exact `parent_draw * L`) and N6 (the
+comment) are applied. The witness format changed (uu, pj, form I) and the scorer was changed BEFORE the probe; 1.1 is
+updated. The W1 commit itself still needs its independent review; any change from it means a new CI build, pin, probe
+and real-bytes self-test case.
 
 ## 11. What these runs cannot show
 - Whether a blended NPC, its weapon, a torch or a corpse LOOKS right (Caden's eyes).

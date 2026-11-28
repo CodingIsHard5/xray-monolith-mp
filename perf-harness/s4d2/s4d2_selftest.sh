@@ -2,8 +2,9 @@
 # s4d2 self-test (PREREG-s4d2-npc-pose-DRAFT.md section 8): the scorer s4d2_score.py on SYNTHETIC run folders.
 #   nice -n 19 bash s4d2_selftest.sh [<parent folder>]     (default parent: s4d2/selftest-runs) -> <parent>/<stamp>-<pid>/
 # LIMIT: no real s4d2 run folder exists (the exe is not built). Every fixture is made here from the witness format in
-# the code (wt-simtick c216081fd: device.cpp sim_synth_witness_write, sim_pose.cpp sim_pose_witness_print and
-# sim_pose_print_pa, GameObject.cpp sim_attach_wit_fill), plus the required addition W1 ("uu", prereg 1.3), and the log
+# the code (wt-simtick c216081fd + the uncommitted W1/W2/F1 edits: device.cpp sim_synth_witness_write, sim_pose.cpp
+# sim_pose_witness_print, sim_pose_print_pa, the W1 "uu" and W2 "pj" columns, GameObject.cpp sim_attach_wit_fill with
+# the pa form I), and the log
 # line formats of earlier real runs (out/det_s4c_s1). It MUST be re-run with a case built on the probe's real bytes
 # before registration (prereg 8).
 # What it does: copies the scorer into the stamp folder with the PROBE_ constants filled for the synthetic world
@@ -26,7 +27,7 @@ import hashlib, importlib.util, os, re, subprocess, sys
 ST, SC = sys.argv[1], sys.argv[2]
 NPC = "sim_default_duty_428175"
 FILL = {"PROBE_P_LERP": 300, "PROBE_P_TICK": 150, "PROBE_UPLOADS": 600, "PROBE_PA_CR": 300, "PROBE_PA_CLUSTERS": 1,
-        "PROBE_JOINT_LERP": 1, "PROBE_U_POSED": 300, "PROBE_NPC": NPC}
+        "PROBE_JOINT_LERP": 1, "PROBE_U_POSED": 300, "PROBE_NPC": NPC, "PROBE_TOL_LD": 0.001}
 src = open(SC).read()
 
 def filled(over):
@@ -42,12 +43,16 @@ def filled(over):
 
 SCF = os.path.join(ST, "scorer_filled.py"); open(SCF, "w").write(filled({}))
 SCJ = os.path.join(ST, "scorer_filled_jointfallback.py"); open(SCJ, "w").write(filled({"PROBE_JOINT_LERP": 0}))
+SCT = os.path.join(ST, "scorer_filled_tolld0.py"); open(SCT, "w").write(filled({"PROBE_TOL_LD": 0.0}))
 spec_ = importlib.util.spec_from_file_location("s4d2f", SCF); S = importlib.util.module_from_spec(spec_)
 spec_.loader.exec_module(S)
 
 F0, H0, TMAX, CPT = 40, 1000.0, 90, {"cp1": 45, "cp2": 65, "cp3": 85}
 CALLS = [3, 19, 36, 53]          # A-Life call ticks (part A reads them as frames): gaps 16,17,17 (one 16)
 OFS = (0.1, -0.05, 0.2)          # the item's offset in its placement frame (ld = ls)
+PMOVE = (0.02, 0.0, 0.0)         # form I: the parent's move since the placement (wd - ws)
+def is_I(T, n):                  # on runs: form I (c216081fd S1 path) on the render-only frames of every tenth tick
+    return n == 0 and T % 10 == 3
 
 def H(*a):
     return hashlib.blake2b(repr(a).encode(), digest_size=8).hexdigest()
@@ -85,7 +90,11 @@ def pose_cols(r, spec, T, j, n, a):
                            jd=lerp(J(T - 1), J(T), u), jp=J(T - 1), jc=J(T))
             r["p"] = [3, 2, 0, 0, 0, 1 if n == 0 else 0]
             r["pn"] = ["L", u, H("pn", T, j), H("pnl", T), H("pns", T)]
-            if n == 0:
+            if is_I(T, n):
+                h = hand(T)
+                r["pa"] = dict(kind="W", form="I", cls="c", ba=12, bb=30, u=u, wd=add(h, OFS), ws=add(add(h, OFS), PMOVE),
+                               hd=h, hr=h, ld=OFS, ls=OFS, hx=H("x", T, j), hxe=H("x", T, j))
+            elif n == 0:
                 hd_, hr = lerp(hand(T - 1), hand(T), u), hand(T)
                 r["pa"] = dict(kind="W", form="C", cls="c", ba=12, bb=30, u=u, wd=add(hd_, OFS), ws=add(hr, OFS),
                                hd=hd_, hr=hr, ld=OFS, ls=OFS, hx=H("x", T, j), hxe=H("x", T, j))
@@ -93,6 +102,7 @@ def pose_cols(r, spec, T, j, n, a):
                 h = hand(T - 1)
                 r["pa"] = dict(kind="W", form="P", cls="p", ba=12, bb=30, u=u, wd=add(h, OFS), ws=add(h, OFS),
                                hd=h, hr=h, ld=None, ls=None, hx=H("x", T, j), hxe=H("x", T, j))
+            r["pj"] = [12, r["pa"]["hd"]]   # W2: the mesh's drawn hand = the item's drawn bone
             r["up"] = [r["pw"]["hu"], hc]
         else:
             r["pw"] = dict(form="Sn", u=None, pt=1, ct=1, hd=None, hl=H("pose", 1), hp=H("pose", 1), hc=H("pose", 1),
@@ -102,6 +112,7 @@ def pose_cols(r, spec, T, j, n, a):
             r["pa"] = dict(kind="-", form="S", cls="-", ba=None, bb=None, u=None, wd=add(hand(T), OFS),
                            ws=add(hand(T), OFS), hd=None, hr=None, ld=None, ls=None, hx=H("x", T, j), hxe=H("x", T, j))
             r["up"] = [H("live", T, j), H("live", T, j)]
+            r["pj"] = None
     else:
         r["p"] = [0, 0, 0, 0, 0, 0]
         r["pw"] = None
@@ -109,6 +120,7 @@ def pose_cols(r, spec, T, j, n, a):
         r["pn"] = ["X", None, None, H("pnl", T), H("pns", T)]
         r["pa"] = dict(kind="-", form="P", cls="-", ba=None, bb=None, u=None, wd=add(hand(T), OFS), ws=add(hand(T), OFS),
                        hd=None, hr=None, ld=None, ls=None, hx=H("x", T, j), hxe=H("x", T, j))
+        r["pj"] = None
     r["uu"] = [2, 0, 0, 1]
 
 def records(spec, tmax):
@@ -135,7 +147,7 @@ def records(spec, tmax):
                 pose_cols(r, spec, T, j, r["n"], a)
                 if brk == 16 and r["pw"] and r["pw"]["form"] == "L" and r["pw"]["hd"] != r["pw"]["hl"]:
                     bad.append(("pose", r["F"])); r["tw"] += 1
-                if brk == 32 and r["pa"]["form"] in ("C", "R"):
+                if brk == 32 and r["pa"]["form"] in ("C", "R", "I"):   # the break fires on every corrected placement
                     r["pa"]["hxe"] = H("broken", T, j)
                     bad.append(("attach", r["F"])); r["tw"] += 1
             recs.append(r)
@@ -147,7 +159,7 @@ def v3(v):
 def opt(v, f):
     return "-" if v is None else (f % v if isinstance(f, str) else f(v))
 
-def fmt_pose(r, no_uu):
+def fmt_pose(r, no_uu, no_pj):
     s = " p %d %d %d %d %d %d |" % tuple(r["p"])
     w = r["pw"]
     if w is None:
@@ -173,9 +185,11 @@ def fmt_pose(r, no_uu):
             v3(a["ws"]), vv(a["hd"]), vv(a["hr"]), vv(a["ld"]), vv(a["ls"]), a["hx"], opt(a["hxe"], "%s"))
     if not no_uu:
         s += " uu %d %d %d %d |" % tuple(r["uu"])
+        if not no_pj:
+            s += " pj - - - - |" if r.get("pj") is None else " pj %d %s |" % (r["pj"][0], v3(r["pj"][1]))
     return s
 
-def fmt(r, pose, no_uu=False):
+def fmt(r, pose, no_uu=False, no_pj=False):
     s = "F %d T %d j %d K %d n %d a %.6f dt %.6f hud %.3f |" % (r["F"], r["T"], r["j"], r["K"], r["n"], r["a"], r["dt"], r["hud"])
     s += " s2 %s %s %s |" % tuple(v3(v) for v in r["s2"]) if r["s2"] else " s2" + " -" * 9 + " |"
     if r["s3"] is None:
@@ -187,7 +201,7 @@ def fmt(r, pose, no_uu=False):
     s += " s1 %.6f %s %.6f |" % (r["s1"][0], v3(r["s1"][1]), r["s1"][2]) if r["s1"] else " s1" + " -" * 5 + " |"
     s += " s4 - - - - - - |"
     if pose:
-        s += fmt_pose(r, no_uu)
+        s += fmt_pose(r, no_uu, no_pj)
     return s + " tw %d" % r["tw"]
 
 def write(path, lines, crlf):
@@ -196,7 +210,8 @@ def write(path, lines, crlf):
 
 def make_run(root, tag, spec, rtag=None, tmax=TMAX, crlf_log=True, crlf_wit=False, rec_fn=None, link_wit=None,
              cmd_drop=None, counter_change=None, cp_shift=0, sched_extra=False, syn_line=False, no_stim=False,
-             bad_extra=(), no_bad=False, no_witness=False, raw_fn=None, drop_bad=None, no_uu=False, no_pose_line=False):
+             bad_extra=(), no_bad=False, no_witness=False, raw_fn=None, drop_bad=None, no_uu=False, no_pose_line=False,
+             no_pj=False):
     rtag = rtag or tag
     d = os.path.join(root, "det_" + rtag); os.makedirs(d)
     K, lever = spec["k"], spec["k"] > 0
@@ -243,7 +258,7 @@ def make_run(root, tag, spec, rtag=None, tmax=TMAX, crlf_log=True, crlf_wit=Fals
             if link_wit:
                 os.link(link_wit, p)
             else:
-                lines = [fmt(r, spec["pose"] and not spec["b1"], no_uu) for r in recs]
+                lines = [fmt(r, spec["pose"] and not spec["b1"], no_uu, no_pj) for r in recs]
                 if raw_fn:
                     raw_fn(lines)
                 write(p, lines, crlf_wit)
@@ -267,7 +282,7 @@ os.makedirs(GOOD)
 for t, sp in S.RUNS.items():
     make_run(GOOD, t, sp)
 
-WIT_KEYS = {"rec_fn", "crlf_wit", "no_witness", "no_bad", "bad_extra", "raw_fn", "drop_bad", "no_uu"}
+WIT_KEYS = {"rec_fn", "crlf_wit", "no_witness", "no_bad", "bad_extra", "raw_fn", "drop_bad", "no_uu", "no_pj"}
 
 def case_root(name, changes):
     """changes: {tag: kwargs for make_run}; every other run folder is a symlink to the good set."""
@@ -318,7 +333,7 @@ run_score("good_crlf", case_root("good_crlf", {t: {"crlf_log": False, "crlf_wit"
 def m_absent(recs):   # absent-value dashes: no pa, no pn, no upload on some frames of an on run
     for r in recs:
         if 30 <= r["T"] <= 40:
-            r["pa"] = r["pn"] = r["up"] = None
+            r["pa"] = r["pn"] = r["up"] = r["pj"] = None
 run_score("good_absent_dashes", case_root("good_absent_dashes", {"s4p_on2a": {"rec_fn": m_absent}}), {}, 0)
 
 # ---- mutants
@@ -371,6 +386,27 @@ def m_pa2(recs):   # the recorded bones are not those the placement used: the it
         a = r["pa"]
         if a and a["form"] == "C":
             a["ld"] = a["ls"] = r5((OFS[0] + 0.01 * (r["T"] % 4), OFS[1], OFS[2]))
+def m_pa1_I_hd(recs):   # an I line whose drawn bone is not the read one: not the bones-as-read path
+    a = first(recs, lambda r: is_I(r["T"], r["n"]) and r["T"] == 53)["pa"]; a["hd"] = (a["hd"][0] + 0.01, a["hd"][1], a["hd"][2])
+    first(recs, lambda r: is_I(r["T"], r["n"]) and r["T"] == 53)["pj"][1] = a["hd"]
+def m_pa1_I_off(recs):  # form I in an off run (bit 16 off: nothing is corrected)
+    r = first(recs, lambda r: r["T"] == 53 and r["n"] == 0)
+    r["pa"].update(form="I", cls="c", u=r["a"], hd=hand(53), hr=hand(53), ld=OFS, ls=OFS)
+def m_pa2_identity_only(recs):   # every correction is the parent-only I path: no bone correction shown
+    for r in recs:
+        a = r["pa"]
+        if a and a["form"] == "C":
+            a["form"] = "I"; a["hd"] = a["hr"]; a["ws"] = add(a["wd"], PMOVE)
+            r["pj"][1] = a["hd"]
+def m_u1_storage(recs):
+    first(recs, lambda r: r["T"] == 45 and r["n"] == 0)["uu"] = [2, 0, 1, 1]
+def m_u1_never_posed(recs):
+    for r in recs:
+        r["uu"][3] = 0
+def m_pj_shift(recs):   # W2 is reported only: a mismatch shows in the reported max, no verdict changes
+    r = first(recs, lambda r: r["T"] == 55 and r["n"] == 0); r["pj"][1] = (r["pj"][1][0] + 0.01, r["pj"][1][1], r["pj"][1][2])
+def m_pj_without_pn(recs):   # pj printed while pn is not form L: not a shape the code prints
+    first(recs, lambda r: r["T"] == 55 and r["n"] == 0)["pn"] = None
 def m_pose_bad(lines):   # an unknown pw form: not a shape the code prints
     i = 37; t = lines[i].split(); t[65] = "Q"; lines[i] = " ".join(t)
 
@@ -387,8 +423,8 @@ CASES = [
     ("m_s0", {"s4p_off2b": {"counter_change": 2}}, {"S0": "FAIL", "SC": "NO VERDICT", "LB": "NO VERDICT"}, 3, ()),
     ("m_s0b", {"s4p_on2a": {"no_stim": True}}, {"S0B": "FAIL"}, 1, ()),
     ("m_sc_heap_layout_tripwires_clean", {"s4p_on2a": {"counter_change": 1}}, {"SC": "FAIL"}, 1,
-     ("heap layout", "sim_pose.cpp:292")),
-    ("m_lb_layout", {"s4p_b1off2": {"counter_change": 2}}, {"LB": "FAIL"}, 1, ("m_sim_attach", "GameObject.h:257")),
+     ("heap layout", "sim_pose.cpp:316")),
+    ("m_lb_layout", {"s4p_b1off2": {"counter_change": 2}}, {"LB": "FAIL"}, 1, ("m_sim_attach", "GameObject.h:258")),
     ("m_tw_bad_line", {"s4p_on2b": {"rec_fn": m_tw, "bad_extra": [("pose", K2F(50, 1))]}}, {"TW": "FAIL"}, 1, ()),
     ("m_tw_consistency", {"s4p_off3": {"rec_fn": m_twc}}, {"TW": "FAIL"}, 1, ()),
     ("m_twb16_mustfail_did_not_fail", {"s4p_brk16": {"no_bad": True}}, {"TWB16": "FAIL"}, 1, ()),
@@ -411,6 +447,14 @@ CASES = [
     ("m_pa1_ws", {"s4p_on2a": {"rec_fn": m_pa1_ws}}, {"PA1": "FAIL"}, 1, ()),
     ("m_pa1_hx", {"s4p_off2b": {"rec_fn": m_pa1_hx}}, {"PA1": "FAIL"}, 1, ()),
     ("m_pa2_ld_wanders", {"s4p_on3": {"rec_fn": m_pa2}}, {"PA2": "FAIL"}, 1, ()),
+    ("m_pa1_I_hd_ne_hr", {"s4p_on2a": {"rec_fn": m_pa1_I_hd}}, {"PA1": "FAIL"}, 1, ("form I with hd != hr",)),
+    ("m_pa1_I_in_off_run", {"s4p_off2a": {"rec_fn": m_pa1_I_off}}, {"PA1": "FAIL"}, 1, ("bit 16 off: form I",)),
+    ("m_pa2_identity_only_F1", {"s4p_on2b": {"rec_fn": m_pa2_identity_only}}, {"PA2": "FAIL"}, 1, ("moved onto the drawn hand",)),
+    ("m_twb32_I_not_caught", {"s4p_brk32": {"rec_fn": m_tw_minus(K2F(63, 1)), "drop_bad": ("attach", K2F(63, 1))}}, {"TWB32": "FAIL"}, 1, ()),
+    ("m_u1_unmarked_with_storage", {"s4p_off2b": {"rec_fn": m_u1_storage}}, {"U1": "FAIL"}, 1, ()),
+    ("m_u1_never_posed", {"s4p_on2b": {"rec_fn": m_u1_never_posed}}, {"U1": "FAIL"}, 1, ("posed between ticks <",)),
+    ("w2_pj_mismatch_reported", {"s4p_on2a": {"rec_fn": m_pj_shift}}, {}, 0, ("max |pa hd - pj| 0.01000",)),
+    ("w1_only_no_pj_column", {"s4p_on3": {"no_pj": True}}, {}, 0, ("W2 hand link: pj column absent",)),
 ]
 for name, ch, exp, code, must in CASES:
     run_score(name, case_root(name, ch), exp, code, must=must)
@@ -427,6 +471,12 @@ os.unlink(os.path.join(root, "det_s4p_on2a")); os.makedirs(os.path.join(root, "d
 make_run(root, "s4p_on2a", S.RUNS["s4p_on2a"], rtag="s4p_on2a_r1")
 run_score("retry_r1", root, {}, 0, must=("substitution: s4p_on2a read from",))
 # the joint rule the probe chose: with fallbacks seen in the probe (PROBE_JOINT_LERP 0), a bone drawn as cur passes
+# a pj column on a line whose pn is not form L: malformed, every check reading that witness FAILS by name
+run_score("m_pj_without_pn", case_root("m_pj_without_pn", {"s4p_on2b": {"rec_fn": m_pj_without_pn}}),
+          {i: "FAIL" for i in WREAD}, 1, must=("pj present without pn form L",))
+# PROBE_TOL_LD 0 (prereg 7.1 branch c): PA2's cluster part is reported only, so a wandering ld does not fail PA2
+run_score("pa2_clusters_reported_tolld0", case_root("pa2_clusters_reported_tolld0", {"s4p_on3": {"rec_fn": m_pa2}}), {}, 0,
+          scorer=SCT, must=("cluster part reported only",))
 run_score("joint_fallback_allowed", case_root("joint_fallback_allowed", {"s4p_on2a": {"rec_fn": m_joint_fallback}}), {}, 0,
           scorer=SCJ, must=("joint fallbacks 1",))
 
@@ -465,7 +515,7 @@ def p_f5(recs):
             r["p"][4], r["p"][5] = 1, 0
 def p_nonpc(recs):
     for r in recs:
-        r["pn"] = r["pa"] = None
+        r["pn"] = r["pa"] = r["pj"] = None
 def p_hx(recs):
     first(recs, lambda r: r["T"] == 50 and r["n"] == 0)["pa"]["hxe"] = H("moved")
 def p_noposed(recs):
@@ -473,9 +523,24 @@ def p_noposed(recs):
         r["uu"][3] = 0
 def p_tw(recs):
     first(recs, lambda r: r["F"] == K3F(50, 1))["tw"] = 1
-CONSTS = ('"PROBE_P_LERP": 198,', '"PROBE_P_TICK": 99,', '"PROBE_UPLOADS": 300,', '"PROBE_PA_CR": 198,',
-          '"PROBE_PA_CLUSTERS": 1,', '"PROBE_JOINT_LERP": 1,', '"PROBE_U_POSED": 200,', '"PROBE_NPC": \'%s\',' % NPC)
-probe_case("probe_go", 0, must=CONSTS + ("S4D2 PROBE: GO", "(b) F5: render-only recalcs byte-different 0, byte-equal 198"))
+def p_idle(step, jitter):   # the witness NPC's hand moves `step` m per tick; ld jitters by up to `jitter` m
+    def f(recs):
+        hi = lambda T: r5((200.0 + step * T, 1.2, 90.0))
+        for r in recs:
+            a = r["pa"]
+            if a and a["form"] == "C":
+                T, u = r["T"], a["u"]
+                hd_, hr = lerp(hi(T - 1), hi(T), u), hi(T)
+                ld = r5((OFS[0] + jitter * (T % 3) / 2.0, OFS[1], OFS[2]))
+                a.update(hd=hd_, hr=hr, wd=add(hd_, ld), ws=add(hr, ld), ld=ld, ls=ld)
+                r["pj"][1] = hd_
+    return f
+CONSTS = ('"PROBE_P_LERP": 198,', '"PROBE_P_TICK": 99,', '"PROBE_UPLOADS": 300,', '"PROBE_PA_CR": 178,',
+          '"PROBE_PA_CLUSTERS": 1,', '"PROBE_JOINT_LERP": 1,', '"PROBE_U_POSED": 200,', '"PROBE_NPC": \'%s\',' % NPC,
+          '"PROBE_TOL_LD": 0.001,')
+probe_case("probe_go", 0, must=CONSTS + ("S4D2 PROBE: GO", "(b) F5: render-only recalcs byte-different 0, byte-equal 198",
+           "form I (parent moved, bones as read; NOT counted as a correction): 20 pa lines, 20 n=0 moved",
+           "-> branch a", "W2 hand link: 297 comparable lines, max |pa hd - pj| 0.00000"))
 probe_case("probe_go_crlf", 0, must=CONSTS[:3] + ("S4D2 PROBE: GO",), crlf_log=False, crlf_wit=True)
 probe_case("probe_no_w1_column", 1, must=("PROBE STOP w1",), no_uu=True)
 probe_case("probe_no_skeleton_blended", 1, must=("PROBE STOP pose",), rec_fn=p_noblend)
@@ -485,6 +550,10 @@ probe_case("probe_ld_spread", 1, must=("PROBE STOP ld",), rec_fn=m_pa2)
 probe_case("probe_hx_changes", 1, must=("PROBE STOP hx",), rec_fn=p_hx)
 probe_case("probe_no_unmarked_posed", 1, must=("PROBE STOP optin",), rec_fn=p_noposed)
 probe_case("probe_tripwire", 1, must=("PROBE STOP tripwire",), rec_fn=p_tw, bad_extra=[("pose", K3F(50, 1))])
+probe_case("probe_attach_identity_only_F1", 1, must=("PROBE STOP attach", "form I not counted"), rec_fn=m_pa2_identity_only)
+probe_case("probe_tol_ld_branch_b", 0, must=('"PROBE_TOL_LD": 0.0001224', "-> branch b", "S4D2 PROBE: GO"), rec_fn=p_idle(0.0015, 0.0))
+probe_case("probe_tol_ld_idle_hand_c", 0, must=('"PROBE_TOL_LD": 0.0,', "-> branch c", "REPORTED only", "S4D2 PROBE: GO"),
+           rec_fn=p_idle(0.001, 0.0006))
 probe_case("probe_no_stimulus", 1, must=("PROBE STOP stimulus",), no_stim=True)
 probe_case("probe_malformed", 1, must=("PROBE STOP input", "malformed witness"), raw_fn=m_pose_bad)
 probe_case("probe_missing", 1, must=("PROBE STOP input", "missing run folder"), skip=True)
