@@ -4518,6 +4518,7 @@ bool vr_bpt_shape(int id, LPSTR vis, Fvector& bc, Fvector& ext);
 static const float VR_SET_SURF = 0.10f;  // a surface this far below the item's lowest point, or nearer
 static const float VR_SET_SPEED = 0.3f;  // the hand slower than this (m/s, B2c's window)
 int vr_bpt_near(CActor* A, const Fvector& p, float reach, LPSTR sect, Fmatrix& xf, bool& eatable); // ActorInput.cpp (B3b)
+void vr_bpt_near_diag(CActor* A, const Fvector& p, float reach, u32 frame); // ActorInput.cpp (B3c build check)
 bool vr_bpt_take(CActor* A, int id);
 int vr_bpt_ruck_count(CActor* A, LPCSTR sect);                                       // ActorInput.cpp (B2b)
 int vr_bpt_pick(CActor* A, LPCSTR sect, bool& eatable, float& weight);
@@ -4818,7 +4819,10 @@ static bool vr_bph_pick_world(vr_bph_state& H, vr_bpi_state& B, const vr_input_i
 	bool weat = false;
 	const int wid = vr_bpt_near(A, hand.c, H.reach, ws, wx, weat);
 	if (wid < 0)
+	{
+		vr_bpt_near_diag(A, hand.c, H.reach, I.frame);
 		return false;
+	}
 	const u16 wslot = (A && A->m_inventory) ? A->inventory().GetActiveSlot() : NO_ACTIVE_SLOT;
 	if (wslot != NO_ACTIVE_SLOT)
 	{

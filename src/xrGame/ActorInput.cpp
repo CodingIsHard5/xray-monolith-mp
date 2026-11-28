@@ -1254,6 +1254,41 @@ int vr_bpt_near(CActor* A, const Fvector& p, float reach, LPSTR sect, Fmatrix& x
 	}
 	return best;
 }
+// B3c build check: a grip that found nothing says what lay near the hand and why it was not taken (a report, no behaviour)
+void vr_bpt_near_diag(CActor* A, const Fvector& p, float reach, u32 frame)
+{
+	if (!A)
+		return;
+	int shown = 0;
+	const u32 cnt = Level().Objects.o_count();
+	for (u32 k = 0; k < cnt && shown < 6; ++k)
+	{
+		CObject* O = Level().Objects.o_get_by_iterator(k);
+		CInventoryItem* it = O ? smart_cast<CInventoryItem*>(O) : nullptr;
+		if (!it || O->H_Parent() || O->getDestroy() || O->Position().distance_to(p) > 1.0f)
+			continue;
+		bool touch = false;
+		for (CObject* T : A->feel_touch)
+			if (T == O)
+				touch = true;
+		float out = -1.f;
+		if (O->Visual())
+		{
+			const Fbox& bb = O->Visual()->getVisData().box;
+			Fmatrix ix;
+			ix.invert(O->XFORM());
+			Fvector q;
+			ix.transform_tiny(q, p);
+			out = _max(_max(_max(bb.min.x - q.x, q.x - bb.max.x), _max(bb.min.y - q.y, q.y - bb.max.y)), _max(bb.min.z - q.z, q.z - bb.max.z));
+		}
+		Msg("* [vr19n] frame %u nothing taken; near: '%s' id %u at %.4f %.4f %.4f dist %.4f outside_box %.4f (reach %.2f) touch %d useful %d can_take %d visible %d visual %d",
+			frame, O->cNameSect().c_str(), u32(O->ID()), O->Position().x, O->Position().y, O->Position().z, O->Position().distance_to(p), out, reach,
+			touch ? 1 : 0, it->Useful() ? 1 : 0, it->CanTake() ? 1 : 0, O->getVisible() ? 1 : 0, O->Visual() ? 1 : 0);
+		++shown;
+	}
+	if (!shown)
+		Msg("* [vr19n] frame %u nothing taken; no free item within 1 m of the hand", frame);
+}
 // B3b2: where is the item? 0 gone, 1 the actor's, 2 not the actor's (free in the world, or someone else's)
 int vr_bpt_where(CActor* A, int id)
 {
