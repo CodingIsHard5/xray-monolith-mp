@@ -138,7 +138,7 @@ failed first v2 run 20261128-001450-1457920 (140/141, a test-side false positive
   while any REG_ME_ remains. The stimulus pin is filled: 1777fb68... (with `-det_synth_item`).
 - `-det_synth_item` is on every boot (ITEM in the script, after BASE). After every boot the item line must be one
   `slot N section S` line, the same as the run's first boot.
-- det_run.sh (0b7a6edb..., retrofitted 2026-11-27, revised 2026-11-28) gets DET_BOX_TOKEN / DET_BOX_CLASS=shared /
+- det_run.sh (e2980094..., retrofitted 2026-11-27, revised 2026-11-28 twice) gets DET_BOX_TOKEN / DET_BOX_CLASS=shared / BENCH_SAVE=bench1 /
   DET_BOX_WORKER / BENCH_DISPLAY=:141 and runs the shared box checks itself before it touches anything, again on the
   line before each of its writes under run/, and touches nothing under run/ after a stop; its rc 3 is a box stop here.
 - Display :141 only, free before every boot. Shared claim with a per-run token, renewed by the same claim before every
@@ -159,7 +159,7 @@ Review findings (plan-facts/stage4d2-w1-and-runscript-review-2026-11-27.md), wha
 | B2-1 play lock, own claim, Roblox before each boot | shared file checks, before start / claim / every boot / during a boot |
 | S2-1 title fails open | shared box_ok_title: any exit but 1 refuses |
 | S2-2 claim granted with CLAIMED=0 on a signal | TERM/INT/HUP held over every claim call (`held`); release decided from the claim's receipt (claim-id), not CLAIMED |
-| S2-3 det_run in the foreground | background + `wait`; finish TERMs it, KILL after 60 s, reaps; HUP trapped |
+| S2-3 det_run in the foreground | background + `wait`; finish TERMs it, KILL after 180 s (third review S3-7), reaps; HUP trapped |
 | S2-4 plan on stdin | `read -u 3 ... 3< plan.txt`; every child `</dev/null` |
 | S2-5 probe_b renames before the gates | rename inside the loop after every gate passed |
 | S2-6 probe_b not gated | needs the first reading ending in STOP with only npc / attach codes |
@@ -194,7 +194,7 @@ this run's det_run.sh (BP) and its sleep (SP); nothing else is signalled.
 | `--preflight-only` / `<mode> --preflight-only` (exit 0) | all checks clear | none | none | none | none | no |
 | claim wait capped (6 h) | box never clear or claim refused | class=box | withdrawn only if this run made the entry and it is the only one under engineperf | none unless a claim call committed one: then own claim | none | yes |
 | gate stop before a boot | box check, claim renewal, display, cfg0, pins, dump, options restore, folders | class=box or fault | none (left the queue at the claim) | own claim | none running | yes |
-| box condition during a boot | play lock, title, Sober, another claim of ours, EXCLUSIVE (every ~5 s) | class=box, the reason names the check and the boot | none | own claim, only once no engine is left in run/prefix (else NOT released, pids logged) | TERM det_run.sh (on a signal its cleanup touches nothing under run/: wineserver -k in run/prefix, its own Xvfb/openbox, the files left listed by name; user.ltx is NOT restored), KILL after 60 s (from date), reaped; then wineserver -k in run/prefix if an engine is left | yes |
+| box condition during a boot | play lock, title, Sober, another claim of ours, EXCLUSIVE (every ~5 s) | class=box, the reason names the check and the boot | none | own claim, only once no engine is left in run/prefix (else NOT released, pids logged) | TERM det_run.sh (on a signal its cleanup touches nothing under run/: wineserver -k in run/prefix, its own Xvfb/openbox, the files left listed by name; user.ltx is NOT restored), KILL after 180 s (from date), reaped; then wineserver -k in run/prefix if an engine is left | yes |
 | boot result stop | rc 3, 4 (second), 5, other, crash dump (9) | class=box (rc 3) or fault | none | own claim | already ended | yes |
 | after-boot stop | missing file, item NONE / different, a box refusal before a move (nothing moved), in-run preflight | class=fault (box for a box refusal) | none | own claim | already ended | yes |
 | TERM / INT / HUP at any point after the state folder | the trap | class=box, `interrupted=<tag>` if a boot ran | as "claim wait capped" | own claim (a signal during a claim call is held until the call returns, so its receipt is on disk) | as "during a boot" | yes |

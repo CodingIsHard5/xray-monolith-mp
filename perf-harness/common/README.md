@@ -1,6 +1,6 @@
 # common/: shared box-safety checks for EnginePerf's engine drivers (2026-11-27, v2 2026-11-28)
 
-- `box_preflight.sh` (v2, sha256 f3ad9351c517393c8e8f6b3e947a9b5a2435074bd62508932a9410d4c6d6e4fa): the checks, as functions with exit codes (0 clear, 1 refused,
+- `box_preflight.sh` (v2, third-review revision 2026-11-28, sha256 f8026040f2f9b3f6cd5c7c33b11062f7efc1ed726af03651ce16bbb0fccd53ef; was f3ad9351...): the checks, as functions with exit codes (0 clear, 1 refused,
   2 cannot tell = refused), and the guarded-write helpers. Source it; it defines `BOX_PREFLIGHT_VERSION=2` and
   `BOX_PREFLIGHT_MARKER=engineperf-box-preflight-v2`. Its header lists the functions, the inputs (overridable only for
   fixtures), the environment the checks trust, and where it is stricter than the drivers it was taken from.
@@ -10,6 +10,11 @@
   (`.protected-seen`) and refuses PTC_* variables; Sober is found by its flatpak; `box_fresh` / `box_guarded` re-check
   the box on the line before every write under run/ and make a stop sticky; `box_rm_name`, `box_dumps_newer`,
   `box_wine_kill`, `box_kill_own`, `box_engines_in_prefix`, `box_queue_count`; a host-pid-namespace check.
+  Third-review revision (plan-facts/box-preflight-third-review-2026-11-28.md; marker and version unchanged, the callers
+  pin the sha256): the caller's own title sightings (`BOX_SEEN_AT`, S3-5, below); `flatpak ps` under
+  XDG_RUNTIME_DIR=/run/user/$UID (N3-1); `10#` on slot-line minutes and sighting times (N3-7); the title checker bounded
+  by `timeout 10` (N3-9: it samples ~2 s; 5x that; a timeout = cannot tell); `box_preflight_all` also leaves its lines
+  in `BOX_OUT`; `box_is_own` (N3-8); `box_wine_kill <prefix> nowait` (-k only, 10 s, for S3-1's repeated kill).
 - `box_preflight_selftest.sh`: mutant self-test, fixtures only (no claim, no game, no real lock, no signal). One output
   folder is kept under `selftest-runs/`.
 - Users today: `s4d2/s4d2_run.sh` and `tools/det_run.sh` (both pin this file's sha256 and refuse without it).
@@ -50,7 +55,7 @@ registered and run with a result file; editing a closed driver breaks a recorded
 | perf-harness/kj4/kj4p_run.sh (c24279e6) | yes | FC (tri-state) | yes, FC | yes | no | yes | yes (claim-id, token) | kj4p PREREG; kj4p_run_log_r1.txt | closed: RESULT-kj4p FAIL, but "the registered retry is unused" | no. **RETIRED: do not run; use the shared-preflight driver instead.** Its unused registered retry (r2) is **ABANDONED** (supervisor 2026-11-27; reason: em1 superseded it) |
 | perf-harness/em1/t2_xray_em1.sh = tools/ copy (b444d8e4) | no | FO (in its watch loop) | no | no claim; refuses unless a joint EXCLUSIVE claim is HELD | no | no | n/a | em1/PREREG-em1-...-DRAFT.md (registered 15:27) | closed: ran 17:01 under ITRZone's run (plan-facts/surge-body-posthoc-em1-2026-11-27.md) | no. **RETIRED: do not run; use the shared-preflight driver instead.** |
 | perf-harness/kw1/t3_kw1.sh = tools/ copy (cecc098f) | no | FO | yes, FO | no (HELD test decides `want` only) | no | only via "display exists" | no (withdraw + release by name) | PREREG-killchannel-xwitness; kj3p_run.sh and kj4p_run.sh pin it | closed (kw1_xscore.txt) | no. **RETIRED: do not run; use the shared-preflight driver instead.** Its unused registered retry (r2) is **ABANDONED** (supervisor 2026-11-27; reason: em1 superseded it) |
-| tools/det_run.sh (was 01fb40dc, then da66e107, now 0b7a6edb) = perf-harness/det_run.sh (identical copy, the git record) | via common | FC (start, after the claim, before every write, every 5 s) | FC | yes (caller's token with DET_NOCLAIM=1) | yes (class shared) | :141 only | yes (claim-id) | PREREG-S2-simtick-2026-11-25 (01fb40dc, registered and closed: the old bytes are in common/retired/); s4d2_run.sh and both drafts (updated to 0b7a6edb) | **RETROFITTED 2026-11-27, revised 2026-11-28** (second review): box_preflight.sh v2, guarded writes, nothing under run/ touched after a stop | yes: s4d2 (and s4d1 when written) boot through it; callers must pass DET_BOX_TOKEN with DET_NOCLAIM=1, and BENCH_DISPLAY=:141 |
+| tools/det_run.sh (was 01fb40dc, then da66e107, then 0b7a6edb, now e2980094) = perf-harness/det_run.sh (identical copy, the git record) | via common | FC (start, after the claim, before every write, every 5 s) | FC | yes (caller's token with DET_NOCLAIM=1) | yes (class shared) | :141 only | yes (claim-id) | PREREG-S2-simtick-2026-11-25 (01fb40dc, registered and closed: the old bytes are in common/retired/); s4d2_run.sh and both drafts (updated to e2980094) | **RETROFITTED 2026-11-27, revised 2026-11-28** (second review): box_preflight.sh v2, guarded writes, nothing under run/ touched after a stop | yes: s4d2 (and s4d1 when written) boot through it; callers must pass DET_BOX_TOKEN with DET_NOCLAIM=1, and BENCH_DISPLAY=:141 |
 | tools/det_pair.sh (d4c38a79) = perf-harness/det_pair.sh | no | FO | no | no | no | no | no (name) | PREREG-S2-simtick | **UNSUPPORTED since det_run.sh's retrofit**: it calls det_run.sh with DET_NOCLAIM=1 and no DET_BOX_TOKEN, which det_run.sh now refuses by name. Its callers (tools/s2_partA*.sh, s4a/s4b/s4c_partA.sh) are closed. RETIRED: do not run; use the shared-preflight driver instead | no |
 | tools/s4c_series.sh (6539d1ce) | yes | FO | yes, FO | no | no | no | no | PREREG-S2-4c; s4c_run.sh, s4c_input_run.sh | closed (s4c scored) | no. **RETIRED: do not run; use the shared-preflight driver instead.** |
 | tools/s4c_partA.sh (af4f021c) | no | FO | yes, FO | no | no | no | no | PREREG-S2-4c | closed | no. **RETIRED: do not run; use the shared-preflight driver instead.** |
@@ -170,12 +175,31 @@ engine is stopped by `wineserver -k` in run/prefix only (box_wine_kill), its own
 parent and name match (box_kill_own), and the files left (this tag's logs and saves, the det user.ltx, new dumps) are
 printed by name for a later manual step. If an engine is still in run/prefix 60 s after `wineserver -k`, the claim is
 not released. Older crash dumps are never moved. `--preflight-only <exe> <tag>` runs the checks only.
+Third review (2026-11-28): the project root is taken with `pwd -P` and must be the tree the engine checks look at
+($HOME/Projects/StalkerGameEngine/run); a DET_BOX_TOKEN must be `<name>-<stamp of >= 9 digits>-<pid>`, >= 20 characters
+(s4d2's `s4d2-<mode>-<14 digits>-<pid>` passes); DET_BOX_CLASS=exclusive only with DET_NOCLAIM=1; numbers without
+leading zeros; NOGUARD_GAMES, WINESERVER, WINELOADER, ENGINE_MIN_RSS_KB, BASH_ENV refused when set (both modes);
+DET_EXTRA split without globbing; after Xvfb's socket appears the server must be its own live Xvfb; wmctrl bounded 5 s;
+user.ltx is swapped only while it is byte-identical to out/user.ltx.orig or out/user_det.ltx.orig; `wineserver -k` is
+repeated every ~5 s inside the 60-s stop wait (an engine that was still starting at the first -k).
 
-**The window that is left** (both drivers): a check is a moment, not a lock. Between box_fresh reading "no play lock"
-and the write on the next line there are microseconds to milliseconds in which Caden's launcher could write its lock.
-The title answer can be up to 2 s old (the checker's own result cache) plus its 2-s sample; Sober and the engine are
-read a second or two before the lock. In det_run.sh's self-claim case the launcher could also have passed its own claim
-test just before det_run.sh's claim landed. Only a lock shared with the launcher would close this; there is none.
+**The window that is left** (both drivers; corrected after the third review, S3-6): a check is a moment, not a lock.
+Between box_fresh reading "no play lock" and the write on the next line there are microseconds to milliseconds. The
+larger window is SECONDS long and on the launcher's side: play/caden_simtick_play.sh tests for an engine (:21) and the
+lock (:22), runs run_noguard.sh (a `find` over the whole run tree) and its path guards (:28-33), and writes its lock only
+at :34. A box_fresh in that stretch reads "no lock, no engine" while his start is under way. Reaching it needs his claim
+test (:20) to pass just before our claim is visible (in s4d2 it always is first) AND his :21-:34 to outlast our claim ->
+engine-start stretch (at least ~8 s). The title answer can also be up to 2 s old (the checker's cache) plus its 2-s
+sample. Not closable from these scripts: the launcher writing its lock BEFORE its :21 test would close it from his side
+(the launcher is not ours; left to its owner).
+
+**The caller's own title sightings (S3-5).** `box_ok_title` records a checker exit 0 in `BOX_SEEN_AT` (`date +%s`) and
+refuses for 180 s after it in the SAME shell, as the claim tool does after its own sightings, so a game read as playing
+and then idle on the next 2-s sample (a menu) still refuses. Both drivers run `box_preflight_all` outside `$(...)` for
+this (it leaves its lines in `BOX_OUT`). Limits: it does not carry to a parent shell or another process, so a
+det_run.sh that s4d2_run.sh starts begins with no sighting of s4d2's (each process keeps its own); and it is not written
+to the fleet's `~/.claude/overseer/.protected-seen`, which the shared file still READS: that file is the claim tool's
+(quiet-required.sh writes it), and writing it from here would change what every other worker's claim tool decides.
 
 **Sober (Roblox).** `pgrep -x sober` alone never matched: the Sober game process is named "Main" (exe /app/bin/sober,
 protected-title-check.sh:84-85; ops report ~/Projects/Ops/reports/sober-check-20261127.md). The fleet's title checker
@@ -201,6 +225,22 @@ not sourced: outside our tree and unpinned), and keeps `pgrep -x sober` as one m
   (engine_running still refuses a second engine).
 - N-5 residue: `wineserver -k` in run/prefix would also stop any OTHER job in run/prefix; det_run.sh runs it only for
   an engine it started, after refusing to start beside an engine of the run tree.
+
+**Known limits, not fixed (third review, plan-facts/box-preflight-third-review-2026-11-28.md):**
+- N3-2: from a context with no session bus (cron, a bare `systemd-run`, ssh without the user bus) box_ok_roblox reads
+  `systemctl --user` exit 1 as cannot tell and refuses every time (s4d2 then waits its 6 h). Kept: the false refusal is
+  the safe direction, and from tmux on this machine all three commands answer.
+- N3-3: box_ok_roblox does not read CADEN-TITLE-OVERRIDE: with Caden's "start them now" override set while Roblox is
+  open, the title check clears but roblox still refuses. Kept: the safe direction; honouring the override here is
+  Caden's or the supervisor's call, not a fix.
+- N3-11: the claim tool writes the slot line before it rebinds the records file; for those milliseconds a nested
+  second record reads as one legacy claim. Kept: it is inside the claim tool (not ours), and engine_running still
+  refuses a second engine.
+- N3-12: a future Proton launcher may write no lock and run in a pressure-vessel container, where the engine test
+  (run/bin in argv, "wine" in /proc/<pid>/exe) may not see it. Kept: no Proton launcher exists yet; re-check both
+  tests when one does.
+- N3-13: s4d2_run.sh was not executable; it is now `chmod +x` (run it as `wt-render-split/perf-harness/s4d2/s4d2_run.sh`
+  or `bash .../s4d2_run.sh`, both work). tools/det_run.sh was already +x.
 
 Summary for the supervisor: of 15 existing drivers/helpers (the survey before the retrofit), only kj3p_run.sh and
 kj4p_run.sh had every check except EXCLUSIVE-in-QUIET-REQUIRED; sf1 lacked fail-closed Sober and release-by-id;

@@ -15,6 +15,17 @@ Labels: **[D]** desk (file:line), **[M]** measured (a number in a file), **[G]**
 earlier registration without re-deriving it).
 
 **Change log.**
+- 2026-11-28 (fix list after plan-facts/box-preflight-third-review-2026-11-28.md): **tools/det_run.sh changed again**
+  (was 0b7a6edb..., now sha256 e29800949b503a7f61a5f9b3a9a2289cdd01424fa87f3a55dacac464fa578f48) and **common/box_preflight.sh revised** (was f3ad9351..., now sha256
+  f8026040f2f9b3f6cd5c7c33b11062f7efc1ed726af03651ce16bbb0fccd53ef). **New caller rules for the s4d1 series script:** with DET_NOCLAIM=1 the DET_BOX_TOKEN must be
+  `<name>-<stamp of >= 9 digits>-<pid>` and >= 20 characters (s4d2's `s4d2-<mode>-<YYYYmmddHHMMSS>-<pid>` form
+  passes); DET_BOX_CLASS=exclusive only with DET_NOCLAIM=1; numbers without leading zeros; NOGUARD_GAMES, WINESERVER,
+  WINELOADER, ENGINE_MIN_RSS_KB and BASH_ENV must be unset; pass BENCH_SAVE=bench1 explicitly; the tree must be reached
+  by its physical path; run/appdata/user.ltx must be byte-identical to out/user.ltx.orig or out/user_det.ltx.orig
+  before a boot (else det_run.sh refuses the swap, rc 2); give det_run.sh >= 180 s after a TERM before a KILL. Also
+  (s4d2's U-1): this draft's cfg0 (6.4, run/appdata/user.ltx has sim_tick 0) would refuse as written, since neither
+  user.ltx file has a sim_tick line; the script should read out/user_det.ltx.orig and take a missing line as the
+  engine default 0 (device.cpp:465), as s4d2_run.sh now does. Not yet decided for s4d1 (its script is not written).
 - 2026-11-28 (coordinator's fix list after plan-facts/box-preflight-second-review-2026-11-27.md): **tools/det_run.sh
   changed again** (was da66e107..., now sha256 0b7a6edb5f575dea379fb8a4185b4a39605849bab5809e5ddafe45fe313035e0) and **common/box_preflight.sh is v2** (was 420c5f2a...,
   now sha256 f3ad9351c517393c8e8f6b3e947a9b5a2435074bd62508932a9410d4c6d6e4fa). Why: the box is checked again right after the claim and on the line before every write under run/;
@@ -227,7 +238,7 @@ s4d_brk1 s4d_brk2 (brk2 only if S3 is registered). The arms of each pair are spr
 go last; each boot starts fresh (det_run.sh restores user.ltx and loads the save).
 ### 6.2 Command per boot (series script s4d1_run.sh: TO BE WRITTEN, NOTES.md 4, R2)
 `DET_NOCLAIM=1 DET_BOX_TOKEN=<the series claim's token> DET_BOX_CLASS=shared BENCH_DISPLAY=:141 BENCH_TIMEOUT=1900
-DET_EXTRA="<base> <lever>" tools/det_run.sh <exe> <tag> 60 3` (det_run.sh pinned at 0b7a6edb5f575dea..., change log), then
+DET_EXTRA="<base> <lever>" tools/det_run.sh <exe> <tag> 60 3` (det_run.sh pinned at e29800949b503a7f..., change log; add BENCH_SAVE=bench1), then
 `mv run/appdata/logs/synth_<tag>.txt out/det_<tag>/` (det_run.sh does not move the witness: det_run.sh:44-45).
 `<base>` = `-det_passes 100,200,320 -det_lua_streams -det_counters` (tools/s4c_partA.sh:11, COPIED; "60 3" is ignored
 under -det_passes, PREREG-S2-simtick section 9).

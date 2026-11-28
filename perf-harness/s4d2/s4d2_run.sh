@@ -44,7 +44,7 @@
 # refuses; it never deletes anything (no rm in this file); it releases only the claim it made (by its claim-id; by
 # name only when the claim carrying this run's token is the only one under our name); every exit path (normal, stop,
 # error, TERM, INT, HUP) goes through finish(), which kills and reaps only its own child (det_run.sh, then KILL after
-# 60 s) and its own sleep. Exit-path table: s4d2/NOTES.md section 9.
+# 180 s, CHILD_GRACE_S) and its own sleep. Exit-path table: s4d2/NOTES.md section 9.
 # 2026-11-28 (plan-facts/box-preflight-second-review-2026-11-27.md): box_preflight.sh v2 (claims read from the claim
 # tool's files, no `check` call; Sober by its flatpak; the title's 180-s linger; PTC_* refused). Each of this driver's
 # own writes under run/ (the options copy, the witness moves) runs inside box_guarded: the box is checked again on the
@@ -53,6 +53,11 @@
 # run/prefix: wineserver -k there (box_wine_kill), a 60-s wait from date, and if one is still left the claim is NOT
 # released and the pids are logged (S-2). The queue entry: see want_call (S-3; a known limit, common/README.md).
 # done.txt lists completed boots only; boots.txt lists every boot with its rc (N-13).
+# 2026-11-28 (plan-facts/box-preflight-third-review-2026-11-28.md): U-1 cfg0 reads out/user_det.ltx.orig (the bytes the
+# engine runs with; a missing sim_tick = the engine default 0); S3-2 the physical project root must be
+# $HOME/Projects/StalkerGameEngine; S3-7 CHILD_GRACE_S 180; N3-4 axr_restore returns a code (no subshell); N3-6
+# BENCH_SAVE=bench1 passed to det_run.sh; box_preflight_all is run in this shell (BOX_OUT), so a title sighting is kept
+# for 180 s (S3-5).
 #
 # Other rules (the brief of 2026-11-27 and prereg 6):
 #   - display :141 only (BENCH_DISPLAY must be unset or :141); the display must be free before every boot;
@@ -82,13 +87,15 @@
 #   python3 -I wt-render-split/perf-harness/s4d2/s4d2_score.py root=out out=wt-render-split/perf-harness/s4d2/s4d2_score_result.txt
 set -u
 cd "$(dirname "$0")/../../.." || { echo "REFUSED: cannot enter the project root"; exit 2; }   # project root
+# S3-2 (third review): the engine checks and PFX below use the physical tree; it must be the one tree they look at
+[ "$(pwd -P)" = "$HOME/Projects/StalkerGameEngine" ] || { echo "REFUSED: the project root $(pwd -P) (physical) is not $HOME/Projects/StalkerGameEngine"; exit 2; }
 T="$HOME/.claude/overseer/tools"; W=engineperf
 S4=wt-render-split/perf-harness/s4d2; ST=out/s4d2_state; LOGS=run/appdata/logs; CFG=run/appdata/user.ltx
 
 # ---- the shared box checks (pinned; S4D2_BOX_LIB / S4D2_BOX_LIB_SHA are honoured ONLY by the two preflight-only
 # ---- forms, for common/box_preflight_selftest.sh; a real run refuses while either, or any BOX_* input, is set)
 BOXLIB_DEF=wt-render-split/perf-harness/common/box_preflight.sh
-BOXLIB_SHA=f3ad9351c517393c8e8f6b3e947a9b5a2435074bd62508932a9410d4c6d6e4fa   # common/box_preflight.sh v2, 2026-11-28 (v1 was 420c5f2a...)
+BOXLIB_SHA=f8026040f2f9b3f6cd5c7c33b11062f7efc1ed726af03651ce16bbb0fccd53ef   # common/box_preflight.sh v2, third-review revision 2026-11-28 (was f3ad9351..., v1 420c5f2a...)
 BOXLIB_MARKER=engineperf-box-preflight-v2; BOXLIB_VERSION=2
 
 # ---- pins (PIN_ME_: before ANY boot, the probe included; prereg 1.2, 1.4 items 3-5) ----
@@ -102,7 +109,7 @@ STIM=run/gamedata/scripts/zz_eperf_synth.script     # installed stimulus = harne
 STIM_SHA=1777fb6865cc5b56c80f197f3f95a250104d6c90ce0b8b2a35422e3bed39ff95
 USERDET=out/user_det.ltx.orig; USERDET_SHA=PIN_ME_USERDET_SHA   # full sha256 (N2-5). Read 2026-11-27 22:40:
                                                     # 3e0e0a6f1fe8010cd727a8f4e718b0486711fbcf8e4f7bfc8eb769d047411b81
-DETRUN=tools/det_run.sh; DETRUN_SHA=0b7a6edb5f575dea379fb8a4185b4a39605849bab5809e5ddafe45fe313035e0   # 2026-11-28: box_preflight.sh v2, guarded writes (was da66e107..., before that 01fb40dc...)
+DETRUN=tools/det_run.sh; DETRUN_SHA=e29800949b503a7f61a5f9b3a9a2289cdd01424fa87f3a55dacac464fa578f48   # 2026-11-28 third review (was 0b7a6edb..., da66e107..., 01fb40dc...)
 PIDLIB=tools/lib_engine_pids.sh; PIDLIB_SHA=cb183b7b894eab3edb200e2c03a3a96f2e935cd2d1e1f402f48be7aad238ed6e
 NOGUARD=tools/run_noguard.sh; NOGUARD_SHA=92729abc420784053cee4b1b1832f5d112f74979a4760e2173d45578358455d5
 SAVE_P=run/appdata/savedgames/bench1.scop; SAVE_P_SHA=891693c5e318ad1e97e8437476654200eb39d3bab89de79a778fa9b90ff89ffa  # S2-8 (sf1:192)
@@ -123,7 +130,11 @@ ALLOWED="-:50,600,1650 -:-det_save +:100,200,320"
 NTOK_B2=138; NTOK_B1=58          # witness tokens per line: build 2 with W1+W2, build 1 (prereg 1.1)
 DISP=:141
 WAIT_MAX_S=21600; POLL_S=60      # claim wait cap 6 h (S2-7), poll as sf1
-CHILD_GRACE_S=60                 # det_run.sh gets this long after TERM (its cleanup: wineserver -k, Xvfb) before KILL
+CHILD_GRACE_S=180                # det_run.sh gets this long after TERM before KILL (S3-7). Its cleanup, worst case: wineserver
+                                 # -k 30 s + -w 30 s (box_wine_kill's timeouts), then the 60-s wait for no engine in
+                                 # run/prefix (its repeated -k is bounded inside the 60 s), its own Xvfb/openbox, the
+                                 # claim-tool release (not bounded; normally < 1 s): 30 + 30 + 60 + release + margin. After
+                                 # a TERM the user.ltx restore is skipped (a signal is a stop), so no box_fresh is in it.
 
 usage() { echo "usage: $0 --preflight-only | probe|probe_b|series [--preflight-only] | probe_fix <1-9> [--preflight-only]"; exit 2; }
 MODE=${1:-}; FIXN=""; PRE=""
@@ -160,7 +171,7 @@ for _f in box_preflight_all box_ok_play_lock box_ok_title box_ok_roblox box_ok_e
 done
 declare -p BOX_QR_UNSET >/dev/null 2>&1 || libfail "$BOXLIB does not define BOX_QR_UNSET"
 if [ "$MODE" = --preflight-only ]; then
-  _o=$(box_preflight_all shared "$DISP" "$W"); _r=$?
+  box_preflight_all shared "$DISP" "$W" >/dev/null; _r=$?; _o=$BOX_OUT
   [ -n "$_o" ] && echo "$_o"
   [ $_r = 0 ] && echo "box preflight ok (box_preflight.sh v$BOX_PREFLIGHT_VERSION)"
   exit $_r
@@ -172,7 +183,7 @@ fi
 bad=0
 refuse() { echo "REFUSED: $*"; bad=1; }
 # the box checks first, by name (they are also re-run before the claim and before every boot)
-r=$(box_preflight_all shared "$DISP" "$W"); rr=$?
+box_preflight_all shared "$DISP" "$W" >/dev/null; rr=$?; r=$BOX_OUT   # not in $(...): a title sighting stays (S3-5)
 [ $rr = 0 ] || { echo "$r" | grep -v '^BOX OVERRIDES' | sed 's/^/REFUSED (box): /'; bad=1; }
 [ -n "$BOX_OVERRIDES" ] && echo "note: box_preflight inputs overridden ($BOX_OVERRIDES): preflight-only"
 for v in EXE2 EXE2_SHA EXE1 EXE1_SHA STIM_SHA STOCK_SHA USERDET_SHA; do
@@ -193,11 +204,20 @@ pin() {   # <file> <full sha256>: by name
   got=$(sha256sum < "$f" 2>/dev/null | cut -d' ' -f1)
   [ "$got" = "$want" ] || { echo "REFUSED: $f is not ${want:0:16} (it is ${got:0:16})"; return 1; }
 }
-cfgval() { awk -v k="$1" '{gsub("\r","")} $1==k{v=$2} END{print v}' "$CFG" 2>/dev/null; }
-cfg0() {   # tools/s4c_partA.sh:23: the settings file has both switches at 0
-  [ -s "$CFG" ] || { echo "REFUSED: missing file $CFG"; return 1; }
-  [ "$(cfgval sim_tick)" = 0 ] || { echo "REFUSED: sim_tick is '$(cfgval sim_tick)' in $CFG, not 0"; return 1; }
-  [ "$(cfgval r__framelimit)" = 0 ] || { echo "REFUSED: r__framelimit is '$(cfgval r__framelimit)' in $CFG, not 0"; return 1; }
+cfgval() { awk -v k="$1" '{gsub("\r","")} $1==k{v=$2; f=1} END{if (f) print v; else print "<absent>"}' "$2" 2>/dev/null; }   # <key> <file>
+cfg0() {   # tools/s4c_partA.sh:23, review U-1: the settings the engine RUNS with have both switches at 0. That is
+  # out/user_det.ltx.orig (pinned: USERDET_SHA), which det_run.sh copies over run/appdata/user.ltx right before the
+  # engine start; run/appdata/user.ltx itself is not what the engine reads during the boot. A missing sim_tick line
+  # reads as 0: the engine's default is 0, wt-simtick/src/xrEngine/device.cpp:465 (`int g_sim_tick_hz = 0;`), console
+  # command registered at wt-simtick/src/xrEngine/xr_ioc_cmd.cpp:1362 (`CMD4(CCC_Integer, "sim_tick", &g_sim_tick_hz,
+  # 0, 240)`); the only other setter is the `-sim_tick <hz>` start switch (device.cpp:618-622), which no boot of this
+  # driver passes (BASE, ITEM, lever). r__framelimit must be present and 0 (it is, line 553).
+  local v
+  [ -s "$USERDET" ] || { echo "REFUSED: missing file $USERDET"; return 1; }
+  v=$(cfgval sim_tick "$USERDET"); [ "$v" = "<absent>" ] && v=0
+  [ "$v" = 0 ] || { echo "REFUSED: sim_tick is '$v' in $USERDET, not 0"; return 1; }
+  v=$(cfgval r__framelimit "$USERDET")
+  [ "$v" = 0 ] || { echo "REFUSED: r__framelimit is '$v' in $USERDET, not 0"; return 1; }
 }
 flags_ok() {   # s4c_partA.sh:10-16: BASE differs from the 11-19 method exactly by ALLOWED
   local d
@@ -424,7 +444,7 @@ acquire() {
   local t0 out r said=""
   t0=$(date +%s)
   while :; do
-    out=$(box_preflight_all shared "$DISP" "$W" "$TOKEN"); r=$?
+    box_preflight_all shared "$DISP" "$W" "$TOKEN" >/dev/null; r=$?; out=$BOX_OUT   # this shell: sightings kept (S3-5)
     if [ $r = 0 ]; then
       held claim_call; r=$?
       [ $r = 0 ] && { CLAIMED=1; break; }
@@ -445,19 +465,23 @@ log "claim granted ($MODE$FIXN, $TOKEN), load $(cut -d' ' -f1-3 /proc/loadavg), 
 # ---- per boot ----
 box_gate() {   # <when>: box_preflight_all; 1 = stop (halt set)
   local out r
-  out=$(box_preflight_all shared "$DISP" "$W" "$TOKEN"); r=$?
+  box_preflight_all shared "$DISP" "$W" "$TOKEN" >/dev/null; r=$?; out=$BOX_OUT   # this shell (S3-5)
   [ $r = 0 ] && return 0
   halt box "$1: $(echo "$out" | tr '\n' ' ')"; return 1
 }
-axr_restore() {   # the options file before THIS boot (header OPTIONS FILE); only with the claim held and the box clear
+axr_restore() {   # the options file before THIS boot (header OPTIONS FILE); only with the claim held and the box clear.
+  # Called in THIS shell (N3-4: never inside `$(...)`, where the sticky BOX_STOPPED of box_guarded would be lost):
+  # 0 copied and checked | 1 fault | 2 box refusal (BOX_STOPPED set); the reason is left in AXR_MSG.
   local r
-  r=$(pin "$AXR_SRC" "$AXR_SHA") || { echo "$r"; return 1; }
+  AXR_MSG=""
+  r=$(pin "$AXR_SRC" "$AXR_SHA") || { AXR_MSG=$r; return 1; }
   { [ -L "$AXR_DST" ] || ! [ -f "$AXR_DST" ] || [ "$(realpath -- "$AXR_DST")" != "$(realpath -- .)/$AXR_DST" ]; } && {
-    echo "REFUSED: $AXR_DST is a link or not a plain file inside run/ (not written)"; return 1; }
+    AXR_MSG="REFUSED: $AXR_DST is a link or not a plain file inside run/ (not written)"; return 1; }
   box_guarded "copy $AXR_SRC over $AXR_DST" cp -f -- "$AXR_SRC" "$AXR_DST" || {
-    [ -n "$BOX_STOPPED" ] && { echo "REFUSED (box): $BOX_STOPPED: $AXR_DST not written"; return 1; }
-    echo "REFUSED: cannot copy $AXR_SRC over $AXR_DST"; return 1; }
-  r=$(pin "$AXR_DST" "$AXR_SHA") || { echo "$r (after the copy)"; return 1; }
+    [ -n "$BOX_STOPPED" ] && { AXR_MSG="REFUSED (box): $BOX_STOPPED: $AXR_DST not written"; return 2; }
+    AXR_MSG="REFUSED: cannot copy $AXR_SRC over $AXR_DST"; return 1; }
+  r=$(pin "$AXR_DST" "$AXR_SHA") || { AXR_MSG="$r (after the copy)"; return 1; }
+  return 0
 }
 gates() {   # <tag> <exe>: every pre-boot check; 1 = stop (halt set)
   local t=$1 e=$2 r
@@ -470,7 +494,11 @@ gates() {   # <tag> <exe>: every pre-boot check; 1 = stop (halt set)
   [ -e "run/bin/$e" ] || { halt fault "missing file run/bin/$e (before $t)"; return 1; }
   dumps_left && { halt fault "a crash dump is already in $LOGS before $t ($(ls "$LOGS"/*.mdmp 2>/dev/null | head -3 | tr '\n' ' ')): not moved"; return 1; }
   box_gate "before the options restore of $t" || return 1
-  r=$(axr_restore) || { case "$r" in *"REFUSED (box)"*) halt box "options restore before $t: $r" ;; *) halt fault "options restore before $t: $r" ;; esac; return 1; }
+  axr_restore; case $? in
+    0) ;;
+    2) halt box "options restore before $t: $AXR_MSG"; return 1 ;;
+    *) halt fault "options restore before $t: $AXR_MSG"; return 1 ;;
+  esac
   box_gate "last check before $t" || return 1
   if [ -n "$MOVE_TO" ] && [ -d out/det_s4p_probe ]; then   # S2-5: the re-probe's rename, only once the gates passed
     [ -e "$MOVE_TO" ] && { halt fault "$MOVE_TO exists before the re-probe"; return 1; }
@@ -548,7 +576,7 @@ boot() {   # <tag> <exe> <lever>: one det_run.sh boot in the background (S2-3); 
   t0=$(date +%s)
   log "boot $t exe=$e extra=[$BASE $ITEM${lv:+ $lv}] display=$DISP timeout=${TIMEOUT_RUN}s load $(cut -d' ' -f1-3 /proc/loadavg)"
   LIVE=$t; BOOTED=1
-  DET_NOCLAIM=1 DET_BOX_TOKEN=$TOKEN DET_BOX_CLASS=shared DET_BOX_WORKER=$W \
+  DET_NOCLAIM=1 DET_BOX_TOKEN=$TOKEN DET_BOX_CLASS=shared DET_BOX_WORKER=$W BENCH_SAVE=bench1 \
   BENCH_DISPLAY=$DISP BENCH_TIMEOUT=$TIMEOUT_RUN DET_EXTRA="$BASE $ITEM${lv:+ $lv}" \
     "$DETRUN" "$e" "$t" 60 3 > "$SD/run_$t.log" 2>&1 </dev/null & BP=$!
   if ! watch_boot; then

@@ -76,6 +76,17 @@ Labels:
   run/prefix, else the claim is not released; (S-3) the queue entry is withdrawn only if this run made it (a known
   limit remains, 6.2); (S-4) det_run.sh requires display :141; (N-7) only crash dumps newer than the boot's start are
   moved; (N-13) done.txt lists completed boots only.
+- 2026-11-28, sixth revision (fix list after plan-facts/box-preflight-third-review-2026-11-28.md):
+  **common/box_preflight.sh revised** (was f3ad9351..., now sha256 f8026040f2f9b3f6cd5c7c33b11062f7efc1ed726af03651ce16bbb0fccd53ef), **tools/det_run.sh changed again** (was
+  0b7a6edb..., now sha256 e29800949b503a7f61a5f9b3a9a2289cdd01424fa87f3a55dacac464fa578f48); s4d2_run.sh pins both. **cfg0 (6.2, 6.4) now reads out/user_det.ltx.orig**, the
+  settings the engine actually runs with (det_run.sh copies it over run/appdata/user.ltx right before the start), not
+  run/appdata/user.ltx, and a missing `sim_tick` line reads as 0, the engine's default (wt-simtick/src/xrEngine/
+  device.cpp:465 `int g_sim_tick_hz = 0;`, registered at xr_ioc_cmd.cpp:1362; no boot passes `-sim_tick`). Why (U-1):
+  neither file has a sim_tick line, so the old cfg0 refused every mode on first use. Also: det_run.sh's TERM grace is 180 s
+  (S3-7: its cleanup can take 30 + 30 + 60 s), the physical project root must be $HOME/Projects/StalkerGameEngine
+  (S3-2), BENCH_SAVE=bench1 is passed to det_run.sh (N3-6), a title seen by this driver refuses for 180 s after (S3-5),
+  and det_run.sh repeats `wineserver -k` in its stop wait, refuses a generic DET_BOX_TOKEN and a user.ltx that is not
+  one of the two known files (S3-1, S3-3, N3-10).
 
 ## 0. Limits, first
 - **The det harness is not exact for online state or for `::Random`**, even stock against stock (the s4d1 draft,
@@ -571,7 +582,7 @@ loads the save).
 ### 6.2 Command per boot (series script s4d2_run.sh: written and revised 2026-11-27, `bash -n` only, requirement R2)
 `DET_NOCLAIM=1 DET_BOX_TOKEN=<this run's claim token> DET_BOX_CLASS=shared DET_BOX_WORKER=engineperf BENCH_DISPLAY=:141
 BENCH_TIMEOUT=<2000 for the probe; REG_ME_BENCH_TIMEOUT from PROBE_BOOT_S> DET_EXTRA="<base> -det_synth_item <lever>"
-tools/det_run.sh <exe> <tag> 60 3` (det_run.sh 0b7a6edb5f575dea..., which runs the shared box checks again itself), started
+BENCH_SAVE=bench1 tools/det_run.sh <exe> <tag> 60 3` (det_run.sh e29800949b503a7f..., which runs the shared box checks again itself), started
 in the background, then
 `mv run/appdata/logs/synth_<tag>.txt out/det_<tag>/`. "60 3" is ignored under -det_passes. `<lever>` is per section
 4's table, with the NPC = PROBE_NPC (empty in part A).
@@ -594,9 +605,10 @@ What the script does (each item is a refusal or a stop BY NAME):
   scorer and self-test hashes);
 - pins, by full sha256, by name, before the first boot and again before every boot: the shared box file, build 2,
   build 1 (series), Stance14 (series), out/user_det.ltx.orig, the installed stimulus (1777fb68...), the bench saves
-  bench1.scop / .scoc, run/appdata/axr_options_play.ltx, tools/det_run.sh (0b7a6edb5f575dea...), lib_engine_pids.sh, run_noguard.sh, and in
+  bench1.scop / .scoc, run/appdata/axr_options_play.ltx, tools/det_run.sh (e29800949b503a7f...), lib_engine_pids.sh, run_noguard.sh, and in
   series mode the registered scorer and self-test;
-- checks cfg0 (sim_tick 0, r__framelimit 0 in run/appdata/user.ltx; tools/s4c_partA.sh:23) before every boot;
+- checks cfg0 (sim_tick 0, r__framelimit 0 in out/user_det.ltx.orig, the settings det_run.sh boots with; a missing
+  sim_tick line = the engine default 0, device.cpp:465; tools/s4c_partA.sh:23) before every boot;
 - runs the flag preflight of tools/s4c_partA.sh:10-16 for the base flags;
 - display :141 only: BENCH_DISPLAY must be unset or :141, and the display must be free (no socket, no lock) before every
   boot; no other display is named;
@@ -623,7 +635,7 @@ What the script does (each item is a refusal or a stop BY NAME):
   the only one under `engineperf`), withdraws the queue entry only if this run made it (no entry under `engineperf`
   before its `want`) and exactly one is there (KNOWN LIMIT: the queue is keyed by name only, so another engineperf
   job's `want` that landed on the same entry is withdrawn with it), kills and reaps its own det_run.sh on every exit
-  (TERM, KILL after 60 s, from `date`), then makes sure no engine is left in run/prefix (`wineserver -k` there, 60 s;
+  (TERM, KILL after 180 s, from `date`), then makes sure no engine is left in run/prefix (`wineserver -k` there, 60 s;
   if one is left the claim is NOT released and the pids are logged), and sends the Overseer one notify line at the end
   (as sf1).
   det_pair.sh cannot be used: it passes one DET_EXTRA to all its runs.
@@ -650,7 +662,7 @@ That is under 3 h: one slice. The probe's elapsed time replaces the guesses befo
 BENCH_TIMEOUT is 2000 s: 5.1x the K=3 guess and 9.5x the stock maximum. A shared claim needs >= 5x. 1900 s (s4d1)
 would be only 4.9x here, because of the added hashing: flagged, and not COPIED.
 ### 6.4 Stop rules (no check is scored before the end; these look only at each run's own completion)
-- **Before the series:** the pins, cfg0 and the user_det hash of 6.2; no leftover witness files or out folders.
+- **Before the series:** the pins, cfg0 (on out/user_det.ltx.orig, 6.2) and the user_det hash of 6.2; no leftover witness files or out folders.
 - **During the series:**
   - any box check of 6.2 refusing before a boot or during one (the boot is stopped), or a refused claim renewal: stop
     (box);

@@ -2,6 +2,10 @@
 # Written 2026-11-27 (supervisor's order via the coordinator: one shared file instead of private copies). Version 2,
 # 2026-11-28, after plan-facts/box-preflight-second-review-2026-11-27.md (B-1, B-2, S-1, S-6, S-7, N-1, N-4, N-7, N-10,
 # N-11). Desk only: its own self-test (box_preflight_selftest.sh, fixtures only) is the only thing that has run it.
+# Revised 2026-11-28 after plan-facts/box-preflight-third-review-2026-11-28.md (marker and version unchanged; the
+# callers pin the sha256): S3-5 the caller's own sightings (BOX_SEEN_AT), N3-1 flatpak with XDG_RUNTIME_DIR, N3-7 `10#`,
+# N3-9 a timeout on the title checker, box_preflight_all keeps its lines in BOX_OUT (so a caller can run it outside
+# `$(...)` and keep BOX_SEEN_AT), box_is_own (N3-8), box_wine_kill's `nowait` mode (S3-1).
 #
 # What sourcing does: sets the variables below and defines functions. It never exits, writes, signals, claims, wants
 # or releases. It NEVER calls quiet-required.sh (no verb at all; v1 called `check`, which is NOT read-only: it moves
@@ -23,9 +27,11 @@
 #
 # Checks (name used in refusals | exit codes):
 #   box_ok_play_lock                      play_lock        0 no live lock | 1 the lock names a live pid | 2 lock unreadable/not a pid
-#   box_ok_title                          protected_title  0 checker exit 1 AND no sighting in .protected-seen < 180 s
-#                                                          | 1 checker exit 0, or a sighting < 180 s old | 2 any other exit,
-#                                                          no checker, a PTC_* variable set by the caller, .protected-seen unreadable/malformed
+#   box_ok_title                          protected_title  0 checker exit 1 AND no sighting < 180 s (this shell's own
+#                                                          BOX_SEEN_AT, or the claim tool's .protected-seen)
+#                                                          | 1 checker exit 0 (sets BOX_SEEN_AT), or a sighting < 180 s old
+#                                                          | 2 any other exit, no answer within 10 s, no checker, a PTC_*
+#                                                          variable set by the caller, .protected-seen unreadable/malformed
 #   box_ok_roblox                         roblox           0 no Sober | 1 Sober seen by any method | 2 a method could not tell
 #   box_ok_engine                         engine_running   0 no Wine engine of the run tree | 1 one runs | 2 pgrep failed
 #   box_ok_hostns                         host_pid_ns      0 $BOX_PROC/1/comm is systemd | 2 otherwise (a pid-namespaced
@@ -44,6 +50,13 @@
 #       (class shared only), display. Prints one line "BOX REFUSED: <name>: <why>" per refusing check (stdout), and
 #       "BOX OVERRIDES: <names>" first when an input below was overridden. Returns 0 all clear | 1 refused, every
 #       refusal determinable | 2 refused and at least one check could not tell. <class> must be `shared` or `exclusive`.
+#       The same lines are left in BOX_OUT: call it as `box_preflight_all ... >/dev/null; r=$?; out=$BOX_OUT`, NOT
+#       inside `$(...)`, or a title sighting it makes (BOX_SEEN_AT) is lost with the subshell (review S3-5).
+#   BOX_SEEN_AT   (state, not an input; emptied when this file is sourced) the `date +%s` of this shell's last checker
+#       exit 0. box_ok_title refuses for BOX_LINGER_S (180 s) after it, as the claim tool does after its own sightings.
+#       It lives in the calling shell only: a sighting does not carry to a subshell's parent or to another process (a
+#       det_run.sh started by s4d2_run.sh starts with none). The fleet's .protected-seen is NOT written: it belongs to
+#       the claim tool's owner (common/README.md).
 # Action helpers:
 #   box_guarded <what> <command...>  if a stop was already recorded (BOX_STOPPED non-empty): skip, add <what> to
 #       BOX_SKIPPED, return 1. Else box_fresh; on a refusal record BOX_STOPPED (sticky: every later guarded step is
@@ -52,11 +65,14 @@
 #       anywhere in it) and <name> is one file name of [A-Za-z0-9_.-] (not . or ..): the target cannot leave <dir>.
 #   box_dumps_newer <dir> <marker>   prints the *.mdmp file names in <dir> (no subfolders) NEWER than <marker>; 2 if
 #       the marker is missing (then nothing may be moved).
-#   box_wine_kill <prefix>     WINEPREFIX=<prefix> wineserver -k, then wineserver -w (each bounded 30 s), only if <prefix>
-#       is absolute, ends in /run/prefix, names no prefix_play, is a real folder and its own realpath. WINEPREFIX is set
-#       on that command line itself (exported to it), so it can never be empty or the play prefix.
-#   box_kill_own <pid> <name> <parent pid>   kill <pid> only if $BOX_PROC/<pid>/stat shows it is not a zombie, its
-#       parent is <parent pid> and its name (comm) is <name> (review N-4: a reused pid is never signalled).
+#   box_wine_kill <prefix> [nowait]   WINEPREFIX=<prefix> wineserver -k, then wineserver -w (each bounded 30 s), only if
+#       <prefix> is absolute, ends in /run/prefix, names no prefix_play, is a real folder and its own realpath. WINEPREFIX
+#       is set on that command line itself (exported to it), so it can never be empty or the play prefix. `nowait`: the
+#       same checks, then only `wineserver -k` bounded 10 s (no -w): for a repeated kill inside a caller's own timed wait.
+#   box_is_own <pid> <name> <parent pid>   0 only if $BOX_PROC/<pid>/stat shows it is not a zombie, its parent is
+#       <parent pid> and its name (comm) is <name>; 1 otherwise (reads only).
+#   box_kill_own <pid> <name> <parent pid>   kill <pid> only if box_is_own holds (review N-4: a reused pid is never
+#       signalled).
 #   BOX_QR_UNSET   `env` arguments that drop the claim tool's tuning variables (FORCE, MAXSLOTS, PROTECTED_LINGER,
 #       QR_CLAIM_ID, ...) from a caller's environment; drivers prefix their own claim / want / release calls with it.
 #
@@ -80,7 +96,8 @@
 # ENVIRONMENT THE CHECKS TRUST (review S-6): HOME (every default path above), PATH (pgrep, flatpak, systemctl, date,
 # grep, awk, sed, realpath, find, timeout, wineserver), UID. Refused: any PTC_* variable (it changes the title checker's
 # answer; box_ok_title). Removed for the checker call: INTERVAL, MIN_PCT; XDG_RUNTIME_DIR is set to /run/user/$UID for
-# it (its result cache lives there). Not refused: a doctored PATH or HOME (a caller that controls those controls the
+# it (its result cache lives there) and for `flatpak ps` (review N3-1: without it flatpak exits 0 and lists NOTHING,
+# which would read as "no Sober"). Not refused: a doctored PATH or HOME (a caller that controls those controls the
 # driver anyway; no PATH/HOME sanity check, by the coordinator's word).
 #
 # Where the logic comes from, and where this file is STRICTER than the drivers it was taken from (common/README.md
@@ -115,7 +132,9 @@ BOX_LINGER_S=180   # quiet-required.sh PROTECTED_LINGER default; fixed here (the
 BOX_QR_UNSET=(-u FORCE -u MAXSLOTS -u PROTECTED_LINGER -u QR_CLAIM_ID -u QR_LOCK_WAIT -u QR_ADMIT_TTL -u RENEW_GRACE
               -u WOKEN_HOLD -u QUEUE_TTL -u SLOT2_VRAM_PCT -u SLOT2_MIN_AVAIL_GB -u SLOT2_LOAD_MAX -u VRAM_BUSY_PCT
               -u SLOT2_WHAT -u PANE -u INTERVAL -u MIN_PCT)
-BOX_WHY=""; BOX_STOPPED=""; BOX_SKIPPED=""; BOX_QN=0; BOX_LEFT_PIDS=""; BOX_RECS=""; BOX_LIVE_LINES=""
+BOX_TITLE_TIMEOUT_S=10   # N3-9: the checker samples for ~2 s (its own 2-s cache aside); 5x that, then "cannot tell"
+BOX_WHY=""; BOX_STOPPED=""; BOX_SKIPPED=""; BOX_QN=0; BOX_LEFT_PIDS=""; BOX_RECS=""; BOX_LIVE_LINES=""; BOX_OUT=""
+BOX_SEEN_AT=""   # S3-5: this shell's own last sighting (never inherited: emptied here)
 
 box_ok_play_lock() {
   local p
@@ -138,21 +157,29 @@ box_ok_title() {   # the fleet checker (exit 0 playing / 1 none), then the claim
   for v in $(compgen -v PTC_); do bad="$bad $v"; done
   [ -n "$bad" ] && { BOX_WHY="the caller's environment sets$bad (these change the title checker's answer): refused"; return 2; }
   if ! [ -x "$BOX_TITLE_CHECK" ]; then BOX_WHY="the title checker $BOX_TITLE_CHECK is missing or not executable: cannot tell"; return 2; fi
-  env -u INTERVAL -u MIN_PCT XDG_RUNTIME_DIR="/run/user/$UID" "$BOX_TITLE_CHECK" >/dev/null 2>&1 </dev/null; r=$?
+  env -u INTERVAL -u MIN_PCT XDG_RUNTIME_DIR="/run/user/$UID" timeout "$BOX_TITLE_TIMEOUT_S" "$BOX_TITLE_CHECK" >/dev/null 2>&1 </dev/null; r=$?
   case $r in
     1) ;;
-    0) BOX_WHY="a protected title is playing (protected-title-check exit 0)"; return 1 ;;
+    0) BOX_SEEN_AT=$(date +%s)
+       BOX_WHY="a protected title is playing (protected-title-check exit 0)"; return 1 ;;
+    124) BOX_WHY="the title checker gave no answer within ${BOX_TITLE_TIMEOUT_S}s: cannot tell"; return 2 ;;
     *) BOX_WHY="the title checker exited $r (only 0 and 1 are answers): cannot tell"; return 2 ;;
   esac
+  # S3-5: this shell's own sighting (a game in a menu can read idle on the next 2-s sample), 180 s as the claim tool
+  now=$(date +%s)
+  if [ -n "$BOX_SEEN_AT" ]; then
+    case "$BOX_SEEN_AT" in *[!0-9]*) BOX_WHY="BOX_SEEN_AT '${BOX_SEEN_AT:0:20}' is not a time: cannot tell"; return 2 ;; esac
+    if [ $(( now - 10#$BOX_SEEN_AT )) -lt "$BOX_LINGER_S" ]; then
+      BOX_WHY="a protected title was seen by this run $(( now - 10#$BOX_SEEN_AT ))s ago; counted as playing for ${BOX_LINGER_S}s"; return 1; fi
+  fi
   # quiet-required.sh:238-266: every positive is written to .protected-seen as "<epoch> <hit>", and the claim tool
   # treats the title as still playing for 180 s after it (one 2-s sample of a game in a menu can read idle).
   if [ -e "$BOX_PSEEN" ] || [ -L "$BOX_PSEEN" ]; then
     { [ -f "$BOX_PSEEN" ] && [ -r "$BOX_PSEEN" ]; } || { BOX_WHY="$BOX_PSEEN exists but is not a readable file: cannot tell"; return 2; }
     t=""; w=""; read -r t w < "$BOX_PSEEN" 2>/dev/null
     case "$t" in ''|*[!0-9]*) BOX_WHY="$BOX_PSEEN holds no time ('${t:0:20}'): cannot tell"; return 2 ;; esac
-    now=$(date +%s)
-    if [ $(( now - t )) -lt "$BOX_LINGER_S" ]; then
-      BOX_WHY="a protected title was seen $(( now - t ))s ago (${w:0:80}); the claim tool counts it as playing for ${BOX_LINGER_S}s"; return 1; fi
+    if [ $(( now - 10#$t )) -lt "$BOX_LINGER_S" ]; then
+      BOX_WHY="a protected title was seen $(( now - 10#$t ))s ago (${w:0:80}); the claim tool counts it as playing for ${BOX_LINGER_S}s"; return 1; fi
   fi
   BOX_WHY="no protected title playing (none seen in the last ${BOX_LINGER_S}s)"; return 0
 }
@@ -177,7 +204,9 @@ box_ok_roblox() {   # Roblox runs under the Sober flatpak (org.vinegarhq.Sober);
       [ -n "$f" ] && hit="a process of the Sober flatpak (${f%/root/.flatpak-info})"
     fi
   fi
-  out=$(timeout 10 "$BOX_FLATPAK" ps --columns=application 2>/dev/null </dev/null); r=$?
+  # N3-1: XDG_RUNTIME_DIR set for flatpak (as for the title checker): without it `flatpak ps` exits 0 and lists
+  # nothing. Empty output with exit 0 is NOT read as "cannot tell": with no flatpak app running it is the true answer.
+  out=$(XDG_RUNTIME_DIR="/run/user/$UID" timeout 10 "$BOX_FLATPAK" ps --columns=application 2>/dev/null </dev/null); r=$?
   if [ $r = 0 ]; then
     [ -z "$hit" ] && printf '%s\n' "$out" | grep -qx 'org\.vinegarhq\.Sober' && hit="flatpak ps lists org.vinegarhq.Sober"
   else unk="${unk:+$unk; }flatpak ps exited $r"; fi
@@ -238,9 +267,9 @@ _box_line_live() {   # <slot line> <now>: 0 live | 1 expired | 2 unparsable (the
   read -r d1 d2 wk m rest <<< "$1"
   t=$(date -d "$d1 $d2" +%s 2>/dev/null) || return 2
   [ -n "$wk" ] || return 2
-  case "$m" in ''|*[!0-9]*) m=60 ;; esac
+  case "$m" in ''|*[!0-9]*) m=60 ;; esac   # digits only from here, so 10# below is safe (N3-7: '090' is not octal)
   _BOX_LW=$wk; _BOX_LWHAT=$rest
-  [ $(( $2 - t )) -gt $(( m * 60 )) ] && return 1
+  [ $(( $2 - t )) -gt $(( 10#$m * 60 )) ] && return 1
   return 0
 }
 
@@ -378,32 +407,46 @@ box_dumps_newer() {   # <dir> <marker>
   find "$1" -maxdepth 1 -type f -name '*.mdmp' -newer "$2" -printf '%f\n' 2>/dev/null
 }
 
-box_wine_kill() {   # <prefix>
-  local pf=${1:-} r
+box_wine_kill() {   # <prefix> [nowait]
+  local pf=${1:-} mode=${2:-} r
+  case "$mode" in ''|nowait) ;; *) BOX_WHY="wineserver -k NOT run: unknown mode '$mode'"; return 2 ;; esac
   case "$pf" in /?*/run/prefix) ;; *) BOX_WHY="wineserver -k NOT run: '$pf' is not an absolute <...>/run/prefix"; return 2 ;; esac
   case "$pf" in *prefix_play*) BOX_WHY="wineserver -k NOT run: '$pf' names prefix_play"; return 2 ;; esac
   { [ -d "$pf" ] && ! [ -L "$pf" ] && [ "$(realpath -e -- "$pf" 2>/dev/null)" = "$pf" ]; } || {
     BOX_WHY="wineserver -k NOT run: '$pf' is not a real folder that is its own realpath"; return 2; }
+  if [ "$mode" = nowait ]; then
+    WINEPREFIX="$pf" timeout 10 "$BOX_WINESERVER" -k >/dev/null 2>&1 </dev/null; r=$?
+    BOX_WHY="wineserver -k in $pf (rc $r, no -w)"; return 0; fi
   WINEPREFIX="$pf" timeout 30 "$BOX_WINESERVER" -k >/dev/null 2>&1 </dev/null; r=$?
   WINEPREFIX="$pf" timeout 30 "$BOX_WINESERVER" -w >/dev/null 2>&1 </dev/null
   BOX_WHY="wineserver -k in $pf (rc $r)"; return 0
 }
 
-box_kill_own() {   # <pid> <name> <parent pid>
-  local p=${1:-} c=${2:-} par=${3:-} st cm
-  case "$p" in ''|*[!0-9]*) BOX_WHY="no pid to kill"; return 1 ;; esac
-  st=$(cat "$BOX_PROC/$p/stat" 2>/dev/null) || { BOX_WHY="pid $p is gone: nothing killed"; return 1; }
+box_is_own() {   # <pid> <name> <parent pid>: 0 = a live (not zombie) process named <name> whose parent is <parent pid>
+  local p=${1:-} c=${2:-} par=${3:-} st cm f=()
+  case "$p" in ''|*[!0-9]*) BOX_WHY="no pid"; return 1 ;; esac
+  st=$(cat "$BOX_PROC/$p/stat" 2>/dev/null) || { BOX_WHY="pid $p is gone"; return 1; }
   cm=${st#*(}; cm=${cm%)*}
-  st=${st##*) }; set -- $st
-  if [ "${1:-}" = Z ] || [ "${2:-}" != "$par" ] || [ "$cm" != "$c" ]; then
-    BOX_WHY="pid $p is not our $c (state ${1:-?}, parent ${2:-?}, name '$cm'): NOT killed"; return 1; fi
+  st=${st##*) }; read -r -a f <<< "$st"   # state, parent, ... (split without globbing)
+  if [ "${f[0]:-}" = Z ] || [ "${f[1]:-}" != "$par" ] || [ "$cm" != "$c" ]; then
+    BOX_WHY="pid $p is not our $c (state ${f[0]:-?}, parent ${f[1]:-?}, name '$cm')"; return 1; fi
+  BOX_WHY="pid $p is our live $c"; return 0
+}
+
+box_kill_own() {   # <pid> <name> <parent pid>
+  local p=${1:-} c=${2:-}
+  case "$p" in ''|*[!0-9]*) BOX_WHY="no pid to kill"; return 1 ;; esac
+  [ -e "$BOX_PROC/$p/stat" ] || { BOX_WHY="pid $p is gone: nothing killed"; return 1; }
+  box_is_own "$@" || { BOX_WHY="$BOX_WHY: NOT killed"; return 1; }
   "$BOX_KILL" "$p" 2>/dev/null; BOX_WHY="killed our $c (pid $p)"; return 0
 }
 
-box_preflight_all() {   # <class shared|exclusive> <display> <worker> [<own token>]
+_box_say() { BOX_OUT="$BOX_OUT${BOX_OUT:+$'\n'}$1"; }
+box_preflight_all() {   # <class shared|exclusive> <display> <worker> [<own token>]; lines printed AND left in BOX_OUT
   local cls=${1:-} disp=${2:-} w=${3:-} tok=${4:-} worst=0 r name
-  [ -n "$BOX_OVERRIDES" ] && echo "BOX OVERRIDES: $BOX_OVERRIDES"
-  case "$cls" in shared|exclusive) ;; *) echo "BOX REFUSED: claim_class: '$cls' is not shared or exclusive"; return 2 ;; esac
+  BOX_OUT=""
+  [ -n "$BOX_OVERRIDES" ] && _box_say "BOX OVERRIDES: $BOX_OVERRIDES"
+  case "$cls" in shared|exclusive) ;; *) _box_say "BOX REFUSED: claim_class: '$cls' is not shared or exclusive"; printf '%s\n' "$BOX_OUT"; return 2 ;; esac
   for name in host_pid_ns play_lock protected_title roblox engine_running own_claim exclusive display; do
     case $name in
       host_pid_ns)     box_ok_hostns ;;
@@ -417,10 +460,11 @@ box_preflight_all() {   # <class shared|exclusive> <display> <worker> [<own toke
     esac
     r=$?
     if [ $r != 0 ]; then
-      echo "BOX REFUSED: $name: $BOX_WHY"
+      _box_say "BOX REFUSED: $name: $BOX_WHY"
       [ $r = 1 ] && [ $worst = 0 ] && worst=1
       [ $r != 1 ] && worst=2
     fi
   done
+  [ -n "$BOX_OUT" ] && printf '%s\n' "$BOX_OUT"
   return $worst
 }

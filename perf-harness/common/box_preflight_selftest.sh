@@ -12,6 +12,9 @@
 # the shared helpers they call (box_guarded, box_rm_name, box_dumps_newer, box_wine_kill, box_kill_own,
 # box_engines_in_prefix) and by a structural check that every write under run/ in both drivers goes through
 # box_guarded. NOT tested (would need a real run): the refusal of a real (non-preflight) run while BOX_* overrides are set.
+# Third review (2026-11-28): some of det_run.sh's and s4d2_run.sh's own functions (stop_wine, ltx_swap, mine + collect,
+# cfgval + cfg0) are taken out of the driver files by text (fnsrc, below) and run on fixture folders, with `date` and
+# `sleep` replaced by shell functions where a wait is timed (no real wait, no wineserver: the stand-in only logs).
 # Prints one line per case and "BOX SELFTEST: PASS|FAIL (n/N)".
 set -u
 C=$(cd "$(dirname "$0")" && pwd)
@@ -22,6 +25,8 @@ FX=$OUT/fx; mkdir -p "$FX/bin" "$FX/xroot/.X11-unix" "$FX/xbusy/.X11-unix" "$FX/
 : > "$FX/xbusy/.X11-unix/X141"
 LIBSHA=$(sha256sum < "$LIB" | cut -d' ' -f1)
 NOW=$(date +%s); H=$(date -d "@$NOW" '+%F %H:%M:%S'); HOLD=$(date -d "@$((NOW - 4 * 3600))" '+%F %H:%M:%S')
+TOK=s4d2-probe-20261128000000-7   # a claim token of s4d2_run.sh's form (its shortest: mode probe, a 1-digit pid; S3-3)
+S4TOK="s4d2-probe_fix1-$(date +%Y%m%d%H%M%S)-$$"   # built exactly as s4d2_run.sh builds TOKEN (mode probe_fix, n 1)
 
 # ---- /proc stand-ins ----
 mkproc() {   # <dir>: pid 1 = systemd, 4242 live (the lock fixture), 5151 our engine, 5252 a watcher, 5353 Caden's engine
@@ -70,14 +75,27 @@ mk sysctl_sober  'echo "app-flatpak-org.vinegarhq.Sober-123456.scope loaded acti
 mk sysctl_fail   'exit 1'
 mk ws_rec  'echo "WS WINEPREFIX=$WINEPREFIX $*" >> "'"$FX"'/ws.log"; exit 0'
 mk kill_rec 'echo "KILL $*" >> "'"$FX"'/kill.log"; exit 0'
+mk ws_rec2 'echo "WS WINEPREFIX=$WINEPREFIX $*" >> "'"$FX"'/ws2.log"; exit 0'
+mk ws_rec3 'echo "WS WINEPREFIX=$WINEPREFIX $*" >> "'"$FX"'/ws3.log"; exit 0'
+mk title_slow 'exec sleep 30'                                       # N3-9: never answers within the 10-s bound
+mk title_once 'f=$TITLE_ONCE_FILE; [ -e "$f" ] && exit 1; : > "$f"; exit 0'   # S3-5: playing once, then idle (a menu)
+mk flatpak_xdg 'if [ "$XDG_RUNTIME_DIR" = "/run/user/$(id -u)" ]; then echo org.vinegarhq.Sober; fi; exit 0'   # N3-1: real flatpak lists nothing without it
+: > "$FX/empty_bash_env.sh"
+mkdir -p "$FX/fakehome/Projects/StalkerGameEngine"
+fnsrc() {   # <function name> <file>: the function's text from a driver file, by brace depth from its 'name() {' line
+  awk -v f="$1" 'index($0, f "() {") == 1 { p = 1; d = 0 } p { print; o = gsub(/\{/, "{"); c = gsub(/\}/, "}"); d += o - c; if (d <= 0) exit }' "$2"; }
 echo "$((NOW - 30)) PROTECTED: Helldivers 2 pid=1 basename=helldivers2 cpu=50%" > "$FX/pseen_recent"
 echo "$((NOW - 1000)) PROTECTED: Helldivers 2 pid=1 basename=helldivers2 cpu=50%" > "$FX/pseen_old"
 echo "garbage" > "$FX/pseen_garbage"
+echo "0$((NOW - 30)) PROTECTED: Helldivers 2 pid=1 basename=helldivers2 cpu=50%" > "$FX/pseen_lead0"   # N3-7
 
 # ---- claim files (the claim tool's own formats: slot lines, quiet-claims/<slot> records, QUIET-QUEUE) ----
 q() { mkdir -p "$FX/$1"; }
 for d in q_clean q_excl q_slot_excl q_expired q_unread q_none q_other_job q_mine q_handoff q_slot_ours q_mine_and_other \
-         q_nested q_slot1_expired q_badline q_queue1 q_queue2; do q "$d"; done
+         q_nested q_slot1_expired q_badline q_queue1 q_queue2 q_octal q_mine_excl; do q "$d"; done
+echo "$H other 090 EXCLUSIVE timing" > "$FX/q_octal/QUIET-REQUIRED"   # N3-7: minutes with a leading zero (not octal)
+echo "$H engineperf 45 headless series s4d2 (probe) ${TOK} EXCLUSIVE" > "$FX/q_mine_excl/QUIET-REQUIRED"
+q q_any_tok; echo "$H engineperf 45 headless series s4d2 (probe_fix1) $S4TOK" > "$FX/q_any_tok/QUIET-REQUIRED"
 echo "$H rootsim 90 headless: rootsim full game" > "$FX/q_clean/QUIET-REQUIRED"
 echo "$H rootsim 90 headless: rootsim full game (Ollama GPU) EXCLUSIVE" > "$FX/q_excl/QUIET-REQUIRED"
 echo "$H rootsim 90 headless: rootsim full game" > "$FX/q_slot_excl/QUIET-REQUIRED"
@@ -86,17 +104,17 @@ echo "$H rootsim 90 headless: rootsim full game" > "$FX/q_expired/QUIET-REQUIRED
 echo "$H old 30 EXCLUSIVE timing" > "$FX/q_expired/QUIET-REQUIRED-3.expired"
 mkdir -p "$FX/q_unread/QUIET-REQUIRED"          # a folder where the claim file should be: not a readable file
 echo "$H engineperf 45 headless Xvfb GAMMA A-Life equivalence series s4d2 (series) s4d2-series-1-1" > "$FX/q_other_job/QUIET-REQUIRED"
-echo "$H engineperf 45 headless series s4d2 (probe) TOKMINE" > "$FX/q_mine/QUIET-REQUIRED"
+echo "$H engineperf 45 headless series s4d2 (probe) ${TOK}" > "$FX/q_mine/QUIET-REQUIRED"
 echo "$H engineperf 5 EXCLUSIVE handoff pre-claim (claim within 5 min)" > "$FX/q_handoff/QUIET-REQUIRED"
 echo "$H rootsim 90 headless rootsim game" > "$FX/q_slot_ours/QUIET-REQUIRED"
 echo "$H engineperf 45 headless other engineperf job" > "$FX/q_slot_ours/QUIET-REQUIRED-2"
-echo "$H engineperf 45 headless series s4d2 (probe) TOKMINE" > "$FX/q_mine_and_other/QUIET-REQUIRED"
+echo "$H engineperf 45 headless series s4d2 (probe) ${TOK}" > "$FX/q_mine_and_other/QUIET-REQUIRED"
 echo "$H engineperf 30 headless another engineperf job" > "$FX/q_mine_and_other/QUIET-REQUIRED-2"
 # S-7: two engineperf claims NESTED on slot 1; the slot line shows only ours (the newest record's <what>)
-L1="$H engineperf 45 headless series s4d2 (probe) TOKMINE"
+L1="$H engineperf 45 headless series s4d2 (probe) ${TOK}"
 echo "$L1" > "$FX/q_nested/QUIET-REQUIRED"; mkdir -p "$FX/q_nested/quiet-claims"
-printf '#slot %s\nc1.1.1 engineperf %s 60 111:222 0 headless det_run other job det_run-x-1\nc2.2.2 engineperf %s 45 333:444 0 headless series s4d2 (probe) TOKMINE\n' \
-  "$L1" "$((NOW - 600))" "$((NOW - 60))" > "$FX/q_nested/quiet-claims/1"
+printf '#slot %s\nc1.1.1 engineperf %s 60 111:222 0 headless det_run other job det_run-x-1\nc2.2.2 engineperf %s 45 333:444 0 headless series s4d2 (probe) %s\n' \
+  "$L1" "$((NOW - 600))" "$((NOW - 60))" "$TOK" > "$FX/q_nested/quiet-claims/1"
 echo "$HOLD engineperf 30 headless old engineperf job EXCLUSIVE" > "$FX/q_slot1_expired/QUIET-REQUIRED"   # N-11: expired
 echo "not a claim line" > "$FX/q_badline/QUIET-REQUIRED"
 printf 'rootsim %s EXCLUSIVE\nengineperf %s\n' "$NOW" "$NOW" > "$FX/q_queue1/QUIET-QUEUE"
@@ -146,12 +164,30 @@ case_ lock_stale_accepted  0 "" "BOX REFUSED" BOX_PLAY_LOCK="$FX/lock_dead" -- "
 case_ title_playing        1 "BOX REFUSED: protected_title: a protected title is playing" "" BOX_TITLE_CHECK="$FX/bin/title_play" -- "${ALL[@]}" shared :141 engineperf
 case_ title_check_fails    2 "BOX REFUSED: protected_title: the title checker exited 3" "" BOX_TITLE_CHECK="$FX/bin/title_fail" -- "${ALL[@]}" shared :141 engineperf
 case_ title_check_missing  2 "BOX REFUSED: protected_title: the title checker" "" BOX_TITLE_CHECK="$FX/bin/no_such_tool" -- "${ALL[@]}" shared :141 engineperf
-case_ title_seen_30s_ago   1 "BOX REFUSED: protected_title: a protected title was seen 30s ago" "" BOX_PSEEN="$FX/pseen_recent" -- "${ALL[@]}" shared :141 engineperf
+case_ title_seen_30s_ago   1 "BOX REFUSED: protected_title: a protected title was seen 3" "" BOX_PSEEN="$FX/pseen_recent" -- "${ALL[@]}" shared :141 engineperf
 case_ title_seen_long_ago  0 "" "BOX REFUSED" BOX_PSEEN="$FX/pseen_old" -- "${ALL[@]}" shared :141 engineperf
 case_ title_seen_garbage   2 "holds no time" "" BOX_PSEEN="$FX/pseen_garbage" -- "${ALL[@]}" shared :141 engineperf
 case_ title_ptc_env_refused 2 "BOX REFUSED: protected_title: the caller's environment sets PTC_MIN_PCT" "" PTC_MIN_PCT=99 -- "${ALL[@]}" shared :141 engineperf
 case_ title_env_scrubbed   0 "WHY: no protected title playing" "" BOX_TITLE_CHECK="$FX/bin/title_envdump" INTERVAL=0 MIN_PCT=99 -- "${ONE[@]}" box_ok_title
 case_ title_env_scrubbed_chk 0 "SCRUBBED" "" -- bash -c '! grep -q "^INTERVAL=\|^MIN_PCT=" "$0" && grep -q "^XDG_RUNTIME_DIR=/run/user/$UID$" "$0" && echo SCRUBBED' "$FX/title_env.txt"
+case_ title_check_timeout  2 "BOX REFUSED: protected_title: the title checker gave no answer within 10s" "" BOX_TITLE_CHECK="$FX/bin/title_slow" -- "${ALL[@]}" shared :141 engineperf
+case_ title_seen_lead0     1 "BOX REFUSED: protected_title: a protected title was seen " "" BOX_PSEEN="$FX/pseen_lead0" -- "${ALL[@]}" shared :141 engineperf
+# S3-5: this shell's own sighting (BOX_SEEN_AT): playing once, idle on the next sample, still refused for 180 s
+cat > "$FX/seq_seen.sh" <<'EOF2'
+box_ok_title; a=$?; box_ok_title; b=$?; echo "SEEN $a $b: $BOX_WHY"
+EOF2
+cat > "$FX/seq_seen_all.sh" <<'EOF2'
+box_preflight_all shared :141 engineperf >/dev/null; a=$?; box_preflight_all shared :141 engineperf >/dev/null; b=$?
+echo "ALL $a $b: $BOX_OUT" | tr '\n' ' '
+EOF2
+cat > "$FX/seq_seen_old.sh" <<'EOF2'
+BOX_SEEN_AT=$(( $(date +%s) - 200 )); box_ok_title; echo "OLD $?: $BOX_WHY"
+EOF2
+case_ title_seen_by_us     0 "SEEN 1 1: a protected title was seen by this run" "" BOX_TITLE_CHECK="$FX/bin/title_once" TITLE_ONCE_FILE="$FX/once1" -- "${SEQ[@]}" "$FX/seq_seen.sh"
+case_ title_seen_by_us_all 0 "ALL 1 1: BOX OVERRIDES" "" BOX_TITLE_CHECK="$FX/bin/title_once" TITLE_ONCE_FILE="$FX/once2" -- "${SEQ[@]}" "$FX/seq_seen_all.sh"
+case_ title_seen_by_us_all_why 0 "BOX REFUSED: protected_title: a protected title was seen by this run" "" BOX_TITLE_CHECK="$FX/bin/title_once" TITLE_ONCE_FILE="$FX/once3" -- "${SEQ[@]}" "$FX/seq_seen_all.sh"
+case_ title_seen_by_us_old 0 "OLD 0: no protected title playing" "" -- "${SEQ[@]}" "$FX/seq_seen_old.sh"
+case_ title_seen_not_inherited 0 "WHY: no protected title playing" "" BOX_SEEN_AT="$NOW" -- "${ONE[@]}" box_ok_title
 case_ roblox_pgrep_name    1 "BOX REFUSED: roblox: Sober (Roblox) is running: a process named sober" "engine_running" BOX_PGREP="$FX/bin/pgrep_sober" -- "${ALL[@]}" shared :141 engineperf
 case_ roblox_cgroup_Main   1 "BOX REFUSED: roblox: Sober (Roblox) is running: a process in a Sober flatpak scope" "" BOX_PROC="$FX/proc_sober_cg" -- "${ALL[@]}" shared :141 engineperf
 case_ roblox_flatpak_info  1 "a process of the Sober flatpak" "" BOX_PROC="$FX/proc_sober_info" -- "${ALL[@]}" shared :141 engineperf
@@ -161,6 +197,7 @@ case_ roblox_lookalike_ok  0 "" "BOX REFUSED" BOX_PROC="$FX/proc_lookalike" BOX_
 case_ roblox_flatpak_fails 2 "BOX REFUSED: roblox: cannot tell whether Sober (Roblox) runs: flatpak ps exited 1" "" BOX_FLATPAK="$FX/bin/flatpak_fail" -- "${ALL[@]}" shared :141 engineperf
 case_ roblox_systemctl_fails 2 "systemctl --user list-units exited 1" "" BOX_SYSTEMCTL="$FX/bin/sysctl_fail" -- "${ALL[@]}" shared :141 engineperf
 case_ roblox_fail_but_seen 1 "BOX REFUSED: roblox: Sober (Roblox) is running" "" BOX_FLATPAK="$FX/bin/flatpak_fail" BOX_SYSTEMCTL="$FX/bin/sysctl_sober" -- "${ALL[@]}" shared :141 engineperf
+case_ roblox_flatpak_xdg   1 "BOX REFUSED: roblox: Sober (Roblox) is running: flatpak ps lists org.vinegarhq.Sober" "" BOX_FLATPAK="$FX/bin/flatpak_xdg" XDG_RUNTIME_DIR="$FX/no_runtime_dir" -- "${ALL[@]}" shared :141 engineperf
 case_ roblox_proc_unreadable 2 "cgroup is unreadable" "" BOX_PROC="$FX/proc_nocg" -- "${ALL[@]}" shared :141 engineperf
 case_ pgrep_fails          2 "BOX REFUSED: engine_running: pgrep -f" "" BOX_PGREP="$FX/bin/pgrep_err" -- "${ALL[@]}" shared :141 engineperf
 case_ engine_real_pattern  1 "BOX REFUSED: engine_running: an engine from" "roblox" BOX_PGREP="$FX/bin/pgrep_engine" -- "${ALL[@]}" shared :141 engineperf
@@ -168,15 +205,16 @@ case_ engine_pattern_nomatch 0 "" "BOX REFUSED" BOX_PGREP="$FX/bin/pgrep_nomatch
 case_ engine_watcher_ignored 0 "" "BOX REFUSED" BOX_PGREP="$FX/bin/pgrep_watcher" -- "${ALL[@]}" shared :141 engineperf
 case_ engine_pgrep_garbage 2 "BOX REFUSED: engine_running: pgrep printed 'abc'" "" BOX_PGREP="$FX/bin/pgrep_garbage" -- "${ALL[@]}" shared :141 engineperf
 case_ claim_other_job      1 "BOX REFUSED: own_claim: a live claim under 'engineperf'" "" BOX_QUIET_DIR="$FX/q_other_job" -- "${ALL[@]}" shared :141 engineperf
-case_ claim_other_job_tok  1 "BOX REFUSED: own_claim:" "" BOX_QUIET_DIR="$FX/q_other_job" -- "${ALL[@]}" shared :141 engineperf TOKMINE
-case_ claim_mine_by_token  0 "" "BOX REFUSED" BOX_QUIET_DIR="$FX/q_mine" -- "${ALL[@]}" shared :141 engineperf TOKMINE
+case_ claim_other_job_tok  1 "BOX REFUSED: own_claim:" "" BOX_QUIET_DIR="$FX/q_other_job" -- "${ALL[@]}" shared :141 engineperf ${TOK}
+case_ claim_mine_by_token  0 "" "BOX REFUSED" BOX_QUIET_DIR="$FX/q_mine" -- "${ALL[@]}" shared :141 engineperf ${TOK}
 case_ claim_mine_no_token  1 "BOX REFUSED: own_claim:" "" BOX_QUIET_DIR="$FX/q_mine" -- "${ALL[@]}" shared :141 engineperf
 case_ claim_handoff_pre    0 "" "BOX REFUSED" BOX_QUIET_DIR="$FX/q_handoff" -- "${ALL[@]}" exclusive :141 engineperf
 case_ claim_ours_in_slot   1 "BOX REFUSED: own_claim:" "" BOX_QUIET_DIR="$FX/q_slot_ours" -- "${ALL[@]}" shared :141 engineperf
 case_ claim_other_worker   0 "" "BOX REFUSED" BOX_QUIET_DIR="$FX/q_clean" -- "${ALL[@]}" shared :141 engineperf
-case_ claim_nested_hidden  1 "2 record(s) under 'engineperf', 1 carry" "" BOX_QUIET_DIR="$FX/q_nested" -- "${ALL[@]}" shared :141 engineperf TOKMINE
+case_ claim_nested_hidden  1 "2 record(s) under 'engineperf', 1 carry" "" BOX_QUIET_DIR="$FX/q_nested" -- "${ALL[@]}" shared :141 engineperf ${TOK}
 case_ claim_slot1_expired  0 "" "BOX REFUSED" BOX_QUIET_DIR="$FX/q_slot1_expired" -- "${ALL[@]}" shared :141 engineperf
 case_ claim_line_garbage   2 "BOX REFUSED: own_claim:" "" BOX_QUIET_DIR="$FX/q_badline" -- "${ALL[@]}" shared :141 engineperf
+case_ claim_minutes_lead0  1 "BOX REFUSED: exclusive: claim slot 1 names EXCLUSIVE" "" BOX_QUIET_DIR="$FX/q_octal" -- "${ALL[@]}" shared :141 engineperf
 case_ exclusive_named      1 "BOX REFUSED: exclusive:" "" BOX_QUIET_DIR="$FX/q_excl" -- "${ALL[@]}" shared :141 engineperf
 case_ exclusive_in_slot    1 "claim slot 2 names EXCLUSIVE" "" BOX_QUIET_DIR="$FX/q_slot_excl" -- "${ALL[@]}" shared :141 engineperf
 case_ exclusive_expired_ok 0 "" "BOX REFUSED" BOX_QUIET_DIR="$FX/q_expired" -- "${ALL[@]}" shared :141 engineperf
@@ -193,10 +231,10 @@ case_ two_refusals_lock    1 "BOX REFUSED: play_lock:" "" BOX_PLAY_LOCK="$FX/loc
 # ---- the helpers outside box_preflight_all ----
 case_ display_free_ok      0 "WHY: display :141 free" "" -- "${ONE[@]}" box_ok_display_free :141
 case_ display_socket       1 "WHY: display :141 exists" "" BOX_XROOT="$FX/xbusy" -- "${ONE[@]}" box_ok_display_free :141
-case_ token_held           0 "WHY: a claim under 'engineperf' carries TOKMINE" "" BOX_QUIET_DIR="$FX/q_mine" -- "${ONE[@]}" box_claim_has_token engineperf TOKMINE
-case_ token_nested_held    0 "carries TOKMINE (2 record(s)" "" BOX_QUIET_DIR="$FX/q_nested" -- "${ONE[@]}" box_claim_has_token engineperf TOKMINE
-case_ token_not_held       1 "WHY: no claim under 'engineperf' carries TOKMINE" "" BOX_QUIET_DIR="$FX/q_other_job" -- "${ONE[@]}" box_claim_has_token engineperf TOKMINE
-case_ token_files_bad      2 "cannot tell" "" BOX_QUIET_DIR="$FX/q_unread" -- "${ONE[@]}" box_claim_has_token engineperf TOKMINE
+case_ token_held           0 "WHY: a claim under 'engineperf' carries ${TOK}" "" BOX_QUIET_DIR="$FX/q_mine" -- "${ONE[@]}" box_claim_has_token engineperf ${TOK}
+case_ token_nested_held    0 "carries ${TOK} (2 record(s)" "" BOX_QUIET_DIR="$FX/q_nested" -- "${ONE[@]}" box_claim_has_token engineperf ${TOK}
+case_ token_not_held       1 "WHY: no claim under 'engineperf' carries ${TOK}" "" BOX_QUIET_DIR="$FX/q_other_job" -- "${ONE[@]}" box_claim_has_token engineperf ${TOK}
+case_ token_files_bad      2 "cannot tell" "" BOX_QUIET_DIR="$FX/q_unread" -- "${ONE[@]}" box_claim_has_token engineperf ${TOK}
 case_ queue_count_1        0 "WHY: 1 queue entr" "" BOX_QUIET_DIR="$FX/q_queue1" -- "${ONE[@]}" box_queue_count engineperf
 case_ queue_count_2        0 "WHY: 2 queue entr" "" BOX_QUIET_DIR="$FX/q_queue2" -- "${ONE[@]}" box_queue_count engineperf
 case_ queue_count_none     0 "WHY: no queue file" "" -- "${ONE[@]}" box_queue_count engineperf
@@ -266,6 +304,15 @@ case_ kill_wrong_name      1 "NOT killed" "" -- "${ONE[@]}" box_kill_own 8080 op
 case_ kill_zombie          1 "NOT killed" "" -- "${ONE[@]}" box_kill_own 8081 Xvfb 7777
 case_ kill_gone            1 "is gone" "" -- "${ONE[@]}" box_kill_own 9999 Xvfb 7777
 case_ kill_log_only_8080   0 "KILL 8080" "8081" -- cat "$FX/kill.log"
+case_ is_own_live          0 "WHY: pid 8080 is our live Xvfb" "" -- "${ONE[@]}" box_is_own 8080 Xvfb 7777
+case_ is_own_zombie        1 "is not our Xvfb (state Z" "" -- "${ONE[@]}" box_is_own 8081 Xvfb 7777
+case_ is_own_wrong_parent  1 "is not our Xvfb" "" -- "${ONE[@]}" box_is_own 8080 Xvfb 1234
+case_ is_own_gone          1 "is gone" "" -- "${ONE[@]}" box_is_own 9999 Xvfb 7777
+# box_wine_kill nowait (S3-1's repeated kill): the same path checks, then -k only
+case_ wine_kill_nowait     0 "rc 0, no -w" "" BOX_WINESERVER="$FX/bin/ws_rec2" -- "${ONE[@]}" box_wine_kill "$FX/run/prefix" nowait
+case_ wine_kill_nowait_log 0 "WS WINEPREFIX=$FX/run/prefix -k" " -w" -- cat "$FX/ws2.log"
+case_ wine_kill_nowait_play 2 "is not an absolute" "" BOX_WINESERVER="$FX/bin/ws_rec2" -- "${ONE[@]}" box_wine_kill "$FX/run/prefix_play" nowait
+case_ wine_kill_bad_mode   2 "unknown mode" "" -- "${ONE[@]}" box_wine_kill "$FX/run/prefix" now
 
 # ---- structure: every write under run/ in both drivers goes through box_guarded ----
 cat > "$FX/struct.awk" <<'EOF'
@@ -302,6 +349,72 @@ case_ struct_catches_mutant 0 "3" "" -- bash -c 'awk -v A="ltx_swap clear_logs s
 { cat "$DETRUN"; echo 'clear_logs'; } > "$FX/det_mutant2.sh"
 case_ struct_catches_unguarded_call 1 "clear_logs called without guard" "" -- bash -c 'sed "s#$1#$0#g" "$2" | bash' "$FX/det_mutant2.sh" "$DETRUN" "$FX/struct.sh"
 
+# ---- third review: the drivers' own functions, taken out by text and run on fixtures ----
+for fn in stop_wine ltx_swap mine collect; do fnsrc "$fn" "$DETRUN" > "$FX/fn_$fn.sh"; done
+for fn in cfgval cfg0; do fnsrc "$fn" "$RUNNER" > "$FX/fn_$fn.sh"; done
+case_ fnsrc_found          0 "FNSRC OK" "" -- bash -c 'for f in "$@"; do [ -s "$f" ] || exit 1; bash -n "$f" || exit 1; done; echo "FNSRC OK"' "$FX"/fn_stop_wine.sh "$FX"/fn_ltx_swap.sh "$FX"/fn_mine.sh "$FX"/fn_collect.sh "$FX"/fn_cfgval.sh "$FX"/fn_cfg0.sh
+# S3-1: an engine that is still there after the first -k: -k is repeated every ~5 s within the 60 s (fake clock:
+# every `date` is one second later; `sleep` does nothing), never after 50 s, and -w only on the first call
+cat > "$FX/seq_stopwine.sh" <<EOF2
+echo 0 > "$FX/clock"
+date() { local n; n=\$(cat "$FX/clock"); n=\$((n + 1)); echo "\$n" > "$FX/clock"; echo "\$n"; }
+sleep() { :; }
+. "$FX/fn_stop_wine.sh"
+PF="$FX/run/prefix"; ENGINE_STARTED=1; WINE_LEFT=0
+stop_wine; r=\$?
+echo "rc \$r WINE_LEFT=\$WINE_LEFT KILLS \$(grep -c -- ' -k\$' "$FX/ws3.log") WAITS \$(grep -c -- ' -w\$' "$FX/ws3.log")"
+EOF2
+case_ stopwine_repeats_kill 0 "rc 1 WINE_LEFT=1 KILLS 11 WAITS 1" "" BOX_PGREP="$FX/bin/pgrep_both" BOX_WINESERVER="$FX/bin/ws_rec3" -- "${SEQ[@]}" "$FX/seq_stopwine.sh"
+case_ stopwine_own_prefix  0 "ALL IN PREFIX" "" -- bash -c '[ -s "$0" ] && ! grep -v "^WS WINEPREFIX=$1 -[kw]$" "$0" && echo "ALL IN PREFIX"' "$FX/ws3.log" "$FX/run/prefix"
+# N3-10: user.ltx is overwritten only while it holds the bytes of out/user.ltx.orig or out/user_det.ltx.orig
+cat > "$FX/seq_ltx.sh" <<EOF2
+. "$FX/fn_ltx_swap.sh"
+P="$FX/ltxp"; RUN="$FX/ltxp/run"; mkdir -p "\$RUN/appdata" "\$P/out"
+printf 'orig\r\n' > "\$P/out/user.ltx.orig"; printf 'det\r\n' > "\$P/out/user_det.ltx.orig"
+printf 'caden\r\n' > "\$RUN/appdata/user.ltx"; LTX_SWAPPED=0
+ltx_swap; echo "A rc \$? swapped \$LTX_SWAPPED now \$(tr -d '\r' < "\$RUN/appdata/user.ltx")"
+cp -- "\$P/out/user.ltx.orig" "\$RUN/appdata/user.ltx"; LTX_SWAPPED=0
+ltx_swap; echo "B rc \$? swapped \$LTX_SWAPPED now \$(tr -d '\r' < "\$RUN/appdata/user.ltx")"
+ltx_swap; echo "C rc \$? swapped \$LTX_SWAPPED now \$(tr -d '\r' < "\$RUN/appdata/user.ltx")"
+EOF2
+case_ ltx_swap_refuses_other 0 "A rc 1 swapped 0 now caden" "" -- "${SEQ[@]}" "$FX/seq_ltx.sh"
+case_ ltx_swap_from_orig   0 "B rc 0 swapped 1 now det" "" -- "${SEQ[@]}" "$FX/seq_ltx.sh"
+case_ ltx_swap_from_det    0 "C rc 0 swapped 1 now det" "" -- "${SEQ[@]}" "$FX/seq_ltx.sh"
+# N3-5: crash-dump names are read one per line: 'a b.mdmp' (new) is NOT split into 'b.mdmp', an OLDER dump of Caden's
+cat > "$FX/seq_collect.sh" <<EOF2
+. "$FX/fn_mine.sh"; . "$FX/fn_collect.sh"
+D="$FX/coll_\$\$"; LOGDIR="\$D/logs"; SAVES="\$D/saves"; OUT="\$D/out"; ME=nobody; TAG=t1
+mkdir -p "\$LOGDIR" "\$SAVES" "\$OUT"
+echo old > "\$LOGDIR/b.mdmp"; touch -d '-1 hour' "\$LOGDIR/b.mdmp"; touch -d '-1 minute' "\$OUT/boot.start"
+echo new > "\$LOGDIR/a b.mdmp"; echo new > "\$LOGDIR/c.mdmp"; echo d > "\$LOGDIR/alife_dump_t1_1.txt"
+collect
+[ -e "\$LOGDIR/b.mdmp" ] && [ ! -e "\$OUT/b.mdmp" ] && echo "OLD DUMP KEPT"
+[ -e "\$LOGDIR/a b.mdmp" ] && echo "ODD NAME KEPT"
+[ -e "\$OUT/c.mdmp" ] && [ -e "\$OUT/alife_dump_t1_1.txt" ] && echo "OURS MOVED"
+EOF2
+case_ collect_old_dump_kept 0 "OLD DUMP KEPT" "" -- "${SEQ[@]}" "$FX/seq_collect.sh"
+case_ collect_odd_name     0 "CRASH DUMP a b.mdmp not moved (odd name)" "" -- "${SEQ[@]}" "$FX/seq_collect.sh"
+case_ collect_moves_ours   0 "OURS MOVED" "" -- "${SEQ[@]}" "$FX/seq_collect.sh"
+# U-1: cfg0 reads the det settings file; a missing sim_tick line = the engine default 0 (device.cpp:465)
+printf 'r__framelimit 0\r\nfoo 1\r\n' > "$FX/ltx_nosim"; printf 'sim_tick 60\r\nr__framelimit 0\r\n' > "$FX/ltx_sim60"
+printf 'foo 1\r\n' > "$FX/ltx_noframe"; printf 'sim_tick 0\r\nr__framelimit 0\r\n' > "$FX/ltx_crlf0"; printf 'sim_tick\r\nr__framelimit 0\r\n' > "$FX/ltx_simempty"
+cat > "$FX/seq_cfg0.sh" <<EOF2
+. "$FX/fn_cfgval.sh"; . "$FX/fn_cfg0.sh"
+r=""; for f in nosim sim60 noframe crlf0 simempty missing; do USERDET="$FX/ltx_\$f"; cfg0 >/dev/null; r="\$r \$f=\$?"; done
+USERDET="$(cd "$C/../../.." && pwd)/out/user_det.ltx.orig"; cfg0 >/dev/null; r="\$r real=\$?"
+echo "CFG0:\$r"
+EOF2
+case_ cfg0_det_file        0 "CFG0: nosim=0 sim60=1 noframe=1 crlf0=0 simempty=1 missing=1 real=0" "" -- "${SEQ[@]}" "$FX/seq_cfg0.sh"
+# structure (third review): no box_preflight_all or axr_restore inside $(...) (S3-5, N3-4); DET_EXTRA never unquoted
+# (N3-6); our own Xvfb checked after the socket (N3-8); wmctrl bounded (N3-9); BENCH_SAVE passed (N3-6)
+case_ struct_no_subshell   0 "NO SUBSHELL" "" -- bash -c '! grep -nE "\\\$\((box_preflight_all|axr_restore)" "$0" "$1" && echo "NO SUBSHELL"' "$DETRUN" "$RUNNER"
+case_ struct_extra_quoted  0 "EXTRA OK" "" -- bash -c 'grep -q "\"\${DX\[@\]}\"" "$0" && ! grep -vE "^[[:space:]]*#" "$0" | grep -E "[^\"]\\\$\{DET_EXTRA:-\}([^\"]|$)" && echo "EXTRA OK"' "$DETRUN"
+mkdir -p "$FX/globdir"; : > "$FX/globdir/zz.txt"
+case_ extra_not_globbed    0 "DX1=[*.txt] DX2=[b]" "" -- bash -c 'cd "$0" && DET_EXTRA="-a *.txt b" && eval "$(grep "^DX=()" "$1")" && echo "DX1=[${DX[1]}] DX2=[${DX[2]}]"' "$FX/globdir" "$DETRUN"
+case_ struct_xvfb_ours     0 "XVFB CHECKED" "" -- bash -c 'a=$(grep -nF "until [ -e \"/tmp/.X11-unix/X" "$0" | cut -d: -f1); b=$(grep -nF "box_is_own \"\$XVFB_PID\" Xvfb \$\$ ||" "$0" | cut -d: -f1); c=$(grep -nF "openbox >/dev/null" "$0" | cut -d: -f1); [ -n "$a" ] && [ -n "$b" ] && [ -n "$c" ] && [ "$a" -lt "$b" ] && [ "$b" -lt "$c" ] && echo "XVFB CHECKED"' "$DETRUN"
+case_ struct_wmctrl_bounded 0 "WMCTRL OK" "" -- bash -c '! grep -vE "^[[:space:]]*#" "$0" | grep -E "(^|[^0-9] )wmctrl -m" && echo "WMCTRL OK"' "$DETRUN"
+case_ struct_bench_save    0 "BENCH_SAVE=bench1" "" -- grep -o "BENCH_SAVE=bench1" "$RUNNER"
+
 # ---- s4d2_run.sh: refuses to start without the real shared file; box-only mode answers by name ----
 case_ driver_lib_missing   3 "REFUSED: box_preflight: missing file $FX/moved_aside.sh" "" S4D2_BOX_LIB="$FX/moved_aside.sh" -- bash "$RUNNER" --preflight-only
 case_ driver_lib_unpinned  3 "is not the pinned file" "" S4D2_BOX_LIB="$FX/lib_nomarker.sh" -- bash "$RUNNER" --preflight-only
@@ -318,6 +431,7 @@ case_ driver_sober_cgroup  1 "BOX REFUSED: roblox:" "" BOX_PROC="$FX/proc_sober_
 case_ driver_other_claim   1 "BOX REFUSED: own_claim:" "" BOX_QUIET_DIR="$FX/q_other_job" -- bash "$RUNNER" --preflight-only
 case_ driver_exclusive     1 "BOX REFUSED: exclusive:" "" BOX_QUIET_DIR="$FX/q_excl" -- bash "$RUNNER" --preflight-only
 case_ driver_display0      2 "REFUSED: BENCH_DISPLAY ':0' is not :141" "" BENCH_DISPLAY=:0 -- bash "$RUNNER" --preflight-only
+case_ driver_root_not_home  2 "REFUSED: the project root" "" HOME="$FX/fakehome" -- bash "$RUNNER" --preflight-only
 case_ driver_full_preflight_box 2 "REFUSED (box): BOX REFUSED: play_lock:" "" BOX_PLAY_LOCK="$FX/lock_live" -- bash "$RUNNER" probe --preflight-only
 
 # ---- tools/det_run.sh --preflight-only (source + checks + exit: no out folder, claim, Xvfb, Wine or engine) ----
@@ -339,10 +453,10 @@ case_ detrun_tag_upper_ok    0 "det_run preflight ok" "" -- bash "$DETRUN" --pre
 case_ detrun_exe_path        2 "REFUSED: exe" "" -- bash "$DETRUN" --preflight-only '../x.exe' st_fixture
 case_ detrun_save_bad        2 "REFUSED: BENCH_SAVE" "" BENCH_SAVE='bench1/../x' -- "${DR[@]}"
 case_ detrun_noclaim_no_token 2 "DET_NOCLAIM=1 needs DET_BOX_TOKEN" "" DET_NOCLAIM=1 -- "${DR[@]}"
-case_ detrun_noclaim_not_held 2 "no live claim under 'engineperf' carries 'TOKMINE'" "" DET_NOCLAIM=1 DET_BOX_TOKEN=TOKMINE -- "${DR[@]}"
-case_ detrun_noclaim_mine    0 "det_run preflight ok" "REFUSED" DET_NOCLAIM=1 DET_BOX_TOKEN=TOKMINE BOX_QUIET_DIR="$FX/q_mine" -- "${DR[@]}"
-case_ detrun_noclaim_other   1 "REFUSED: BOX REFUSED: own_claim:" "" DET_NOCLAIM=1 DET_BOX_TOKEN=TOKMINE BOX_QUIET_DIR="$FX/q_mine_and_other" -- "${DR[@]}"
-case_ detrun_noclaim_nested  1 "REFUSED: BOX REFUSED: own_claim:" "" DET_NOCLAIM=1 DET_BOX_TOKEN=TOKMINE BOX_QUIET_DIR="$FX/q_nested" -- "${DR[@]}"
+case_ detrun_noclaim_not_held 2 "no live claim under 'engineperf' carries '${TOK}'" "" DET_NOCLAIM=1 DET_BOX_TOKEN=${TOK} -- "${DR[@]}"
+case_ detrun_noclaim_mine    0 "det_run preflight ok" "REFUSED" DET_NOCLAIM=1 DET_BOX_TOKEN=${TOK} BOX_QUIET_DIR="$FX/q_mine" -- "${DR[@]}"
+case_ detrun_noclaim_other   1 "REFUSED: BOX REFUSED: own_claim:" "" DET_NOCLAIM=1 DET_BOX_TOKEN=${TOK} BOX_QUIET_DIR="$FX/q_mine_and_other" -- "${DR[@]}"
+case_ detrun_noclaim_nested  1 "REFUSED: BOX REFUSED: own_claim:" "" DET_NOCLAIM=1 DET_BOX_TOKEN=${TOK} BOX_QUIET_DIR="$FX/q_nested" -- "${DR[@]}"
 case_ detrun_selfclaim_other 1 "REFUSED: BOX REFUSED: own_claim:" "" BOX_QUIET_DIR="$FX/q_mine" -- "${DR[@]}"
 case_ detrun_lock            1 "REFUSED: BOX REFUSED: play_lock:" "" BOX_PLAY_LOCK="$FX/lock_live" -- "${DR[@]}"
 case_ detrun_title_fails     2 "REFUSED: BOX REFUSED: protected_title:" "" BOX_TITLE_CHECK="$FX/bin/title_fail" -- "${DR[@]}"
@@ -351,8 +465,26 @@ case_ detrun_ptc_env         2 "PTC_INTERVAL" "" PTC_INTERVAL=0 -- "${DR[@]}"
 case_ detrun_roblox_cgroup   1 "REFUSED: BOX REFUSED: roblox:" "" BOX_PROC="$FX/proc_sober_cg" -- "${DR[@]}"
 case_ detrun_engine_before   1 "REFUSED: BOX REFUSED: engine_running:" "" BOX_PGREP="$FX/bin/pgrep_engine" -- "${DR[@]}"
 case_ detrun_exclusive       1 "REFUSED: BOX REFUSED: exclusive:" "" BOX_QUIET_DIR="$FX/q_excl" -- "${DR[@]}"
-case_ detrun_exclusive_class 0 "det_run preflight ok (exclusive" "" DET_BOX_CLASS=exclusive BOX_QUIET_DIR="$FX/q_excl" -- "${DR[@]}"
+case_ detrun_exclusive_selfclaim 2 "REFUSED: DET_BOX_CLASS=exclusive without DET_NOCLAIM=1" "" DET_BOX_CLASS=exclusive BOX_QUIET_DIR="$FX/q_excl" -- "${DR[@]}"
+case_ detrun_exclusive_noclaim 0 "det_run preflight ok (exclusive" "" DET_BOX_CLASS=exclusive DET_NOCLAIM=1 DET_BOX_TOKEN=${TOK} BOX_QUIET_DIR="$FX/q_mine_excl" -- "${DR[@]}"
 case_ detrun_class_bogus     2 "REFUSED: DET_BOX_CLASS 'EXCL'" "" DET_BOX_CLASS=EXCL -- "${DR[@]}"
+# third review: token form (S3-3), leading zeros (N3-7), caller variables (N3-6), the physical tree (S3-2)
+case_ detrun_token_generic   2 "REFUSED: DET_BOX_TOKEN 'headless' is not" "" DET_NOCLAIM=1 DET_BOX_TOKEN=headless BOX_QUIET_DIR="$FX/q_mine" -- "${DR[@]}"
+case_ detrun_token_word_in_claim 2 "REFUSED: DET_BOX_TOKEN 'GAMMA' is not" "" DET_NOCLAIM=1 DET_BOX_TOKEN=GAMMA BOX_QUIET_DIR="$FX/q_other_job" -- "${DR[@]}"
+case_ detrun_token_short     2 "REFUSED: DET_BOX_TOKEN 'ab1-123456789-1' is not" "" DET_NOCLAIM=1 DET_BOX_TOKEN=ab1-123456789-1 -- "${DR[@]}"
+case_ detrun_token_no_pid    2 "REFUSED: DET_BOX_TOKEN" "" DET_NOCLAIM=1 DET_BOX_TOKEN=s4d2-probe-20261128000000 -- "${DR[@]}"
+case_ detrun_token_s4d2_live 0 "det_run preflight ok" "REFUSED" DET_NOCLAIM=1 DET_BOX_TOKEN="$S4TOK" BOX_QUIET_DIR="$FX/q_any_tok" -- "${DR[@]}"
+case_ detrun_lead0_checkpoints 2 "must have no leading zero" "" -- bash "$DETRUN" --preflight-only Fixture.exe st_fixture 60 03
+case_ detrun_lead0_interval  2 "must have no leading zero" "" -- bash "$DETRUN" --preflight-only Fixture.exe st_fixture 060 3
+case_ detrun_lead0_timeout   2 "must have no leading zero" "" BENCH_TIMEOUT=0900 -- "${DR[@]}"
+case_ detrun_env_noguard     2 "REFUSED: NOGUARD_GAMES is set" "" NOGUARD_GAMES="$FX/fakehome" -- "${DR[@]}"
+case_ detrun_env_wineserver  2 "REFUSED: WINESERVER is set" "" WINESERVER="$FX/bin/ws_rec" -- "${DR[@]}"
+case_ detrun_env_wineloader  2 "REFUSED: WINELOADER is set" "" WINELOADER=/nonexistent/wine -- "${DR[@]}"
+case_ detrun_env_minrss      2 "REFUSED: ENGINE_MIN_RSS_KB is set" "" ENGINE_MIN_RSS_KB=1 -- "${DR[@]}"
+case_ detrun_env_empty_set   2 "REFUSED: ENGINE_MIN_RSS_KB is set" "" ENGINE_MIN_RSS_KB= -- "${DR[@]}"
+case_ detrun_env_bash_env    2 "REFUSED: BASH_ENV is set" "" BASH_ENV="$FX/empty_bash_env.sh" -- "${DR[@]}"
+case_ detrun_extra_newline   2 "REFUSED: DET_EXTRA holds a line break" "" DET_EXTRA="$(printf -- '-a\n-b')" -- "${DR[@]}"
+case_ detrun_root_not_home   2 "REFUSED: the run tree" "" HOME="$FX/fakehome" -- "${DR[@]}"
 case_ detrun_wrote_nothing   0 "" "" -- bash -c '! ls -d "$0"/out/det_st_fixture "$0"/out/det_st_fixture2 2>/dev/null' "$(cd "$C/../../.." && pwd)"
 
 echo "shared file sha256 $LIBSHA"
