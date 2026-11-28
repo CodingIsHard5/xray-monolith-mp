@@ -40,6 +40,30 @@ Labels:
 - **[G]** guess;
 - **COPIED** (a bound taken from an earlier registration without re-deriving it; listed in the margin table).
 
+## Change log (draft revisions; newest last)
+- 2026-11-27, third revision (coordinator's follow-up after plan-facts/stage4d2-w1-and-runscript-review-2026-11-27.md):
+  - **Stimulus switch `-det_synth_item` on EVERY boot** (probe, part A, part S; both arms of every pair; build 1's
+    b1off2 too, the stimulus script is exe-independent). Stimulus harness/zz_eperf_synth.script is now sha256
+    1777fb6865cc5b56c80f197f3f95a250104d6c90ce0b8b2a35422e3bed39ff95 (was d7dbc6c5...). At update START_UPD (300)
+    the actor activates the first filled slot of 3, 2, 1, 5, 6; nothing is spawned; the log says
+    `* det_synth stimulus: item slot N section S` or `item NONE (no filled slot)`. **Reason:** U1 has no subject
+    headless unless the first-person hands are drawn, and they are drawn only with an active item (1.3). That was the
+    probe's known likely stop (`optin`), so it goes into the stimulus now rather than costing a probe. New probe stop
+    `item`, F0 item rule, 2.2.1 row, 2.4 probabilities, part-A note (3, 7).
+  - The series script revised for the review (6.2): box checks from the shared file
+    perf-harness/common/box_preflight.sh (fail-closed: Caden's play lock, a protected title or Sober, an engine of
+    the run tree, another claim of ours, EXCLUSIVE, display :0), before the start, the claim, every boot and every ~5 s
+    of a boot; the boot in the background and killed on any exit; release by claim-id; the options file restored
+    before every boot; probe_b gated on the first reading's stop codes; `probe_fix <n>`; the reading-file chain.
+  - Section 11: the reviewer's two U1 limits. 1.3: the sim_pose.cpp:118 comment note.
+- 2026-11-27, fourth revision (supervisor's decisions): **tools/det_run.sh changed** (was 01fb40dc..., now sha256
+  da66e107b79fb76481c04f7de4d4b079f486941aa00941c8a7f806ff321c6222). Why: it now sources common/box_preflight.sh (refused if
+  missing, unreadable, wrong marker or version) and uses the shared fail-closed checks instead of its fail-open title
+  check, all before it creates, deletes or moves anything (the xray-log `rm -f` and the crash-dump move included); a
+  crash dump is not moved while the play lock is live. s4d2_run.sh passes it `DET_BOX_TOKEN` (its claim token),
+  `DET_BOX_CLASS=shared` and the worker, and pins the new hash. The shared file's engine test now counts only Wine
+  binaries (tools/lib_engine_pids.sh rule), so the shared file's hash changed too (420c5f2a...).
+
 ## 0. Limits, first
 - **The det harness is not exact for online state or for `::Random`**, even stock against stock (the s4d1 draft,
   section 0, [M]). So the exact gates here are only these three:
@@ -200,19 +224,24 @@ set in this frame. `<bone>` is the bone index, to be matched with pa's `ba`.
     only `-det_synth_k`, `-det_synth_wallclock` and `-det_synth_tw`, and the stimulus script matches only
     `-det_synth_walk` and `-det_synth_tracer` (zz_eperf_synth.script:13-14).
   - So it gets the identical command line and prints 58-token lines and no pose log line.
+  - The stimulus script is not part of the exe: `-det_synth_item` (like walk and tracer) acts identically on build 1,
+    so b1off2 takes the same item as the build-2 off runs it is compared with (LB). F0 checks that every run took the
+    same item.
 - **Stock reference for part A:** `run/bin/Stance14.exe` b4ce9c77 (COPIED).
-- **Stimulus:** `harness/zz_eperf_synth.script`, pinned as in the s4d1 draft (its R3: installed before the probe;
-  inert without its flags).
+- **Stimulus:** `harness/zz_eperf_synth.script` sha256 **1777fb6865cc5b56c80f197f3f95a250104d6c90ce0b8b2a35422e3bed39ff95**
+  (with `-det_synth_item`, 2026-11-27), installed byte-identical as run/gamedata/scripts/zz_eperf_synth.script before
+  the probe (s4d1 R3); inert without its flags. s4d2_run.sh pins the installed copy to that hash.
 
-### 1.3 Witness gap W1: an unmarked skeleton cannot be isolated (REQUIRED; now coded, uncommitted)
+### 1.3 Witness gap W1: an unmarked skeleton cannot be isolated (REQUIRED; committed as f19819c78)
 The opt-in check U1 needs to know whether a skeleton NOT marked (the stand-in for gammavr's self-posed VR models) is
 drawn byte-stock with bit 16 on, while it is posed between ticks. The witness at c216081fd cannot show this:
 - `pw`, `pn`, `pa` and the `p` counts see only skeletons with storage, and storage exists only for marked ones;
 - `up` is "the first skinned leaf uploaded, any skeleton". It names neither the skeleton nor its mark, and it is
   `hu == hl` by construction whenever the upload used the live bones.
 
-**W1 as coded** (sim_pose.cpp only; no file under src/Layers or src/Include changed; details and the Rule One and thread
-arguments in plan-facts/stage4d2-w1-code-notes-2026-11-27.md):
+**W1 as coded** (committed f19819c78: the uu and pj columns in sim_pose.cpp; the commit also touches sim_pose.h and
+GameObject.cpp/.h for form I and N5; no file under src/Layers or src/Include changed; details and the Rule One and
+thread arguments in plan-facts/stage4d2-w1-code-notes-2026-11-27.md):
 - In `sim_pose_wit_upload` (already called for every skinned-leaf matrix by SkeletonX.cpp:142, with the skeleton), at
   each leaf's mid 0 the skeleton is classed unmarked if `!K->LL_GetSimObjectVisual()`.
 - For an unmarked leaf, every matrix handed over is compared BY ADDRESS with the live bone
@@ -230,6 +259,9 @@ arguments in plan-facts/stage4d2-w1-code-notes-2026-11-27.md):
     against build 1, LB). A full table evicts the oldest slot, so a miss can only LOWER nposed.
   - A freed skeleton whose address is reused with the same bone count can raise nposed once. nposed is only a count
     floor (U1's subject), never a pass condition by itself.
+  - **Code fact to fix (review S1-1):** the comment at sim_pose.cpp:118 says a full table "can only lower nposed, never
+    raise it". It needs "an address reused one frame later can raise nposed once" (with the same bone count). The
+    coordinator changes the comment himself; it is a comment only, but any edit means a new exe and pin (1.4 item 2).
 - Reset per frame with the other counts; the table is not reset. Printed ` uu %u %u %u %u |` after `pa`, before `pj`.
 
 **What it can see headless** [D for the path, G for the frames]: the first-person HUD hands and the HUD item model
@@ -241,7 +273,8 @@ needs rendering or a script animation runs** (player_hud.cpp:1338-1341). The det
 (out/user_det.ltx.orig:591), so the hands are hardware-skinned (RM_SKINNING_xB) and pass the hook; an RM_SINGLE or
 RM_SKINNING_SOFT leaf never reaches it. The actor's own body and legs are unmarked too, but they are calculated in
 ticks only [G], so they add to `nu`, not to `nposed`. **Expectation: nposed > 0 on most n=0 frames only if the actor
-holds an active item (s4d1 R1); otherwise about 0** [G]. The probe's `optin` rule settles it.
+holds an active item; otherwise about 0** [G]. `-det_synth_item` (every boot) gives it one at update 300 if the bench
+save's actor carries anything in slots 3, 2, 1, 5 or 6; the probe's `item` and `optin` rules settle it.
 
 Without W1 in the exe:
 - the scorer reads 126-token lines and U1 FAILS by name ("required witness addition W1");
@@ -254,36 +287,49 @@ Without W1 in the exe:
    build, a new pin and a new probe.
 3. A CI perf-build of the result, installed as SimTick19.exe and pinned (PIN_ME_EXE).
 4. s4d1's build-1 exe built and pinned (PIN_ME_EXE_B1). LB cannot run without it.
-5. The stimulus script installed with its pinned hash (s4d1 R3).
-6. **The series script `s4d2_run.sh` (written 2026-11-27, `bash -n` only, never run; R2 of 6.2).** It moves
+5. The stimulus script installed with its pinned hash 1777fb68... (s4d1 R3; with `-det_synth_item`).
+6. **The series script `s4d2_run.sh` (written and revised 2026-11-27, `bash -n` only, never run; R2 of 6.2).** It moves
    `run/appdata/logs/synth_<tag>.txt` into `out/det_<tag>/` after every boot. tools/det_run.sh does not: its lines 44-47
    move dumps, traces, counters and saves only (s4d1 NOTES 2.13, re-read today). Its PIN_ME_ and REG_ME_ values are
    filled at registration; it refuses to boot while any remains.
 7. The probe GO (2.2), the `PROBE_` constants filled into the scorer's CONST, and BENCH_TIMEOUT set from PROBE_BOOT_S.
 8. The self-test re-run with a case built on the probe's real folder (CRLF, real hashes, real `pa` forms), PASS. The
    hashes of the scorer and the self-test recorded in section 8.
-9. Recommended before the probe: s4d1's R1 (the actor holds an active item headless, s4d1 NOTES 4). The first-person
-   HUD hands are the only unmarked skeleton the desk expects to be posed between ticks (4c's HUD clock). Without an
-   item they are not drawn, and the probe would STOP on `optin` [G, 2.4].
+9. Done 2026-11-27 in the stimulus: s4d1's R1 (the actor holds an active item headless, s4d1 NOTES 4) is the switch
+   `-det_synth_item` on every boot. The first-person HUD hands are the only unmarked skeleton the desk expects to be
+   posed between ticks (4c's HUD clock); without an item they are not drawn. If the bench actor has no filled slot,
+   the probe STOPs on `item` (2.2).
 10. The Overseer's GO.
 
 ## 2. Probe (one boot, unscored, FIRST, before registration)
 ### 2.1 The run
 `s4p_probe` runs SimTick19.exe with K = 3, mask 23 (7 | 16), the walk and tracer stimulus, tripwires on and no break:
 
-`DET_EXTRA="-det_passes 100,200,320 -det_lua_streams -det_counters -det_synth_k 3 -sim_4d_mask 23 -det_synth_tw
--det_synth_walk -det_synth_tracer -det_synth_pose -det_synth_pose_npc sim_default_duty_428175"`
+`DET_EXTRA="-det_passes 100,200,320 -det_lua_streams -det_counters -det_synth_item -det_synth_k 3 -sim_4d_mask 23
+-det_synth_tw -det_synth_walk -det_synth_tracer -det_synth_pose -det_synth_pose_npc sim_default_duty_428175"`
 
 The NPC is the walking Duty squad member, 60/32/6 m from the player at cp1/2/3 (design 7.1 [M]).
 
 Reader: `python3 -I s4d2_score.py mode=probe root=out out=s4d2/probe_readings.txt`. It is written once and exits
-0 GO, 1 STOP.
+0 GO, 1 STOP. Its last line is `S4D2 PROBE: GO` or `S4D2 PROBE: STOP (<n> rules)`, each failed rule above it as
+`PROBE STOP <code>: ...`.
 
 **One re-probe is allowed, only on the stop rules `npc` or `attach`.** The re-probe (`s4d2_run.sh probe_b`) uses
 `-det_synth_pose_npc esc_2_12_stalker_fanat`: the nearest NPC, 4 m away at cp1 [M]; whether it is armed is [G]. The
-script first renames the first probe's folder to `out/det_s4p_probe_a`, then boots the re-probe with the SAME tag
-`s4p_probe`, so its folder, det_tag and file names are what the reader expects. A re-probe after a code or stimulus fix
-that a stop rule asks for is allowed as in s4d1 (a new tag folder each time; the first ones are kept).
+script refuses unless `probe_readings.txt` (CR stripped) ends in `S4D2 PROBE: STOP (<n> rules)` and its PROBE STOP codes
+are only `npc` and/or `attach`, and no other reading exists. After the boot's gates have passed (so a box stop does not
+use it up), it renames the first probe's folder to `out/det_s4p_probe_a`, then boots the re-probe with the SAME tag
+`s4p_probe`, so its folder, det_tag and file names are what the reader expects. Its reading goes to
+`s4d2/probe_readings_b.txt`.
+
+A re-probe after a code or stimulus fix that a stop rule asks for is allowed as in s4d1 (the earlier folders are kept):
+`s4d2_run.sh probe_fix <n>` (n = 1, 2, ...). The documented manual step comes first: write `s4d2/probe_fix<n>.txt`
+(which stop, what changed, the new hashes) and edit the script's pin lines by hand for any changed file. The script
+needs the latest reading to end in STOP, renames `out/det_s4p_probe` to `out/det_s4p_probe_before_f<n>` after the
+gates, boots `s4p_probe` with the NPC of the previous attempt, and the reading goes to `s4d2/probe_readings_f<n>.txt`.
+
+**Which reading the series uses:** the latest of the chain probe_readings.txt, probe_readings_b.txt,
+probe_readings_f1.txt, f2, ... Its last line must be exactly `S4D2 PROBE: GO`, and every earlier one must end in STOP.
 
 ### 2.2 Probe stop rules (any one = the series does not start) and the plan for each outcome
 | code | rule | why | plan if it stops |
@@ -301,7 +347,8 @@ that a stop rule asks for is allowed as in s4d1 (a new tag folder each time; the
 | attach | PROBE_PA_CR >= 300 (n=0 frames with pa form C or R and wd != ws; **form I is not counted**, review F1: on a moving parent it has wd != ws with no bone correction) | (c) the NPC holds an item and the S4b correction moves it | the same re-probe; if it still fails, S4b would be unverified while being half of the step, so the Overseer decides (recommendation: a stimulus that arms a named NPC, not dropping S4b) |
 | ld | <= 2 ld clusters per (kind, ba, bb) group | the record's bones are those the placement used (the outcome PA2 gates) | back to the code (re-review S2 class); not a harness issue |
 | hx | hx == hxe on every pa line | the item's XFORM is not changed after the child rule in a stock frame; otherwise PA1's hx rule cannot be used | the Overseer: drop that rule or find the writer |
-| optin | PROBE_U_POSED >= 300 (n=0 frames with an unmarked skeleton posed between ticks) | U1 has a subject: a stand-in for a self-posed model on screen | land s4d1 R1 (active item, so the HUD hands are drawn), re-probe; else the Overseer |
+| item | exactly one `* det_synth stimulus: item slot N section S` line, not `item NONE`, no script error | the HUD hands are drawn only with an active item (1.3); without one, `optin` cannot pass | 2.2.1: a different slot list, or spawn an item; re-probe (probe_fix) |
+| optin | PROBE_U_POSED >= 300 (n=0 frames with an unmarked skeleton posed between ticks) | U1 has a subject: a stand-in for a self-posed model on screen | with `item` passed: the Overseer (the hands are drawn but not posed between ticks: the 4c HUD clock claim is wrong); with `item` stopped: as `item` |
 
 **(d) Build 1's s4 question is not asked here.**
 
@@ -325,7 +372,8 @@ that a stop rule asks for is allowed as in s4d1 (a new tag folder each time; the
 | attach | the same re-probe; if it still stops: the Overseer (recommendation: a stimulus that arms a named NPC; S4b not dropped) | no for a stimulus | with a stimulus: one more stimulus switch in every part-S boot, the same on all arms; dropping S4b would remove PA1/PA2/TWB32 and is not recommended |
 | ld | back to the code (the record is not what the placement read: re-review S2 class), rebuild | yes | no |
 | hx | the Overseer: find the XFORM writer after the render (code, CI build) or drop PA1's hx part | yes if the writer is fixed; no if dropped | dropped: PA1 loses its hx part and TWB32 its hx-based frame set (both registered as reduced) |
-| optin | land s4d1 R1 (the stimulus gives the actor an active item, so the HUD hands are drawn), re-probe; still stopping: the Overseer | no (script) | R1 adds no switch; U1 stays. Without a subject, U1 would have only its nud/nus part, which needs the Overseer's word |
+| item | (a) **a different slot list** in the stimulus (e.g. add 4, 7, 8, 9 or a device slot): a script edit, new stimulus hash, `probe_fix`, one probe boot (~7 min); works only if the bench actor carries something in a slot at all, which the NONE line does not tell. (b) **spawn an item** into the actor's hands (`alife_create_item` of a pinned section, then activate it): a script edit and one probe boot as (a), and it always gives an item, but it adds one server object to every boot, so the C counters and part A's copied bounds then rest on a spawn the earlier part A runs never had (identical in both arms, but new) | no (script) | (a) none: same switch, same boots. (b) no new switch either (it lives behind `-det_synth_item`), but 7's part-A rows must say the spawn is in both arms and A1 re-checks it. Recommended order: (a) first if a slot list can be read from the save desk-side, else (b) |
+| optin | with `item` passed: the Overseer (the hands are drawn but not posed between ticks); with `item` stopped, the `item` row | no | without a subject, U1 would have only its nud/nus part, which needs the Overseer's word |
 
 The TOL_LD rule of 7.1 is not a stop: its branch is a registration value (PROBE_TOL_LD), with no CI build and no change
 of boots. Its branch c makes PA2's cluster part reported only.
@@ -366,10 +414,11 @@ of boots. Its branch c makes PA2's cluster part reported only.
 | (c) NPC armed and corrected on >= 300 n=0 frames (`attach`) | 50 % on the first probe; 65 % with the re-probe [G: it must be in view or in a shadow pass for its item's renderable_Render to run] |
 | ld one cluster per group | 75 %; <= 2 clusters 85 % |
 | hx stable | 85 % |
-| `optin`, without s4d1 R1 | 30 % |
-| `optin`, with R1 | 70 % |
-| **GO on the first probe** | **about 10 %**. The likely stops are `optin` and `attach`, both with registered plans |
-| GO after the allowed re-probe and R1 | about 30 % |
+| `item` (the bench actor has a filled slot of 3, 2, 1, 5, 6) | 85 % [G: a GAMMA bench save normally carries a rifle or a pistol and always a knife and bolts; not read from the save] |
+| `optin`, given `item` passed | 70 % [G: the hands are re-posed every gated frame by the 4c HUD clock, design reading only] |
+| `optin` overall (with the item in the stimulus) | about 60 % (was 30 % without an item) |
+| **GO on the first probe** | **about 15 %** (was 10 %: `optin` is now likelier). The likely stops are `attach` and `optin`, both with registered plans |
+| GO after the allowed re-probe | about 25 % (was 30 % "after the re-probe and R1"; R1 is now in the first probe, so only `attach` gains) |
 
 ### 2.5 After the probe
 1. Fill CONST and the placeholders here.
@@ -379,8 +428,11 @@ of boots. Its branch c makes PA2's cluster part reported only.
 4. Run the series.
 
 ## 3. Part A: off = stock with sim_tick 0 (6 boots; method of the s4d1 draft section 3, COPIED)
-Tags alternate: s4p_s1 (Stance14), s4p_o1 (SimTick19), s4p_s2, s4p_o2, s4p_s3, s4p_o3. No lever, mask or stimulus
-switch: `DET_EXTRA="-det_passes 100,200,320 -det_lua_streams -det_counters"`. Build 2's code that runs with sim_tick 0
+Tags alternate: s4p_s1 (Stance14), s4p_o1 (SimTick19), s4p_s2, s4p_o2, s4p_s3, s4p_o3. No lever, mask, walk, tracer
+or pose switch; **one stimulus switch, `-det_synth_item`, on all six boots, both arms**:
+`DET_EXTRA="-det_passes 100,200,320 -det_lua_streams -det_counters -det_synth_item"`. So part A's boots are identical
+to part S's in what the actor holds, and the stimulus script is installed (an actor_on_update callback) in every
+boot. This is a change from every earlier part A (no stimulus at all): see 7 for what it does to the COPIED bounds. Build 2's code that runs with sim_tick 0
 (the unconditional mark writes, GameObject.cpp OnChangeVisual; the layout) is judged here.
 
 | check | PASS when | bound and derivation |
@@ -399,8 +451,9 @@ There is no part L: build 1's part L validated the lever. Here the pattern is re
 
 Every part-S run carries the s4d1 part-S flags plus build 2's two switches:
 
-`<base> -det_synth_k K -sim_4d_mask M -det_synth_tw -det_synth_walk -det_synth_tracer -det_synth_pose
+`<base> -det_synth_item -det_synth_k K -sim_4d_mask M -det_synth_tw -det_synth_walk -det_synth_tracer -det_synth_pose
 -det_synth_pose_npc PROBE_NPC`, with `<base>` = `-det_passes 100,200,320 -det_lua_streams -det_counters`.
+`-det_synth_item` is in both arms of every pair (off/on, b1off2/off2, the must-fails against their on runs).
 
 | tag | exe | K | mask | extra |
 |---|---|---|---|---|
@@ -417,7 +470,7 @@ Every part-S run carries the s4d1 part-S flags plus build 2's two switches:
 ### 4.1 Gated checks
 | check | PASS when | bound and derivation |
 |---|---|---|
-| F0 flags | every run (A and S): the engine's own command line carries exactly its registered switches; its det_synth line is `(K, wc, tw, brk, mask)`; build-2 part-S runs log `pose witness on, npc PROBE_NPC`; b1off2 and part A log none | exact |
+| F0 flags | every run (A and S): the engine's own command line carries exactly its registered switches (`-det_synth_item` in every run); its det_synth line is `(K, wc, tw, brk, mask)`; build-2 part-S runs log `pose witness on, npc PROBE_NPC`; b1off2 and part A log none; every run logs exactly one `item slot N section S` line (not NONE, no script error), and all 16 the same item | exact |
 | PAT lever pattern | every part-S run except wc2: s4d1's L1 rules (K, n iff j = 0, F +1, j cycles, T +1 on tick frames, a = j/K, dt = float(0.033f/K), hud) on every line; cp1-3 on witnessed tick frames with T = `tick=` | exact by construction (device.cpp sim_tick_plan, sim_view_present); print tolerances x3 / x4 (same printf formats, device.cpp:546: re-derived, not only copied) |
 | PWC must-fail (wallclock) | wc2: the pattern part holds and its F T j K n columns equal on2a's to the lower cp3 frame; a != j/K on >= 90 % of lines; on >= 30 form-L pw lines, u = a on EVERY one and u != j/K on >= 90 % | u = clamp(g_sim_render_alpha) (sim_pose.cpp:416-417) and the witness a is the same alpha (device.cpp:799-804). With the real clock alpha equals j/K to 6 decimals with chance ~1e-6 per frame [D, s4d1 L1W], so a pose that does not follow the lever's alpha, or a P2 u-rule that cannot see it, makes this fail. Expected ~100 % |
 | S0 harness (harness) | off2a vs off2b: C = 0 at 1, 2, 3; cp1 ticks within 8 | exact / COPIED. FAIL -> SC and LB NO VERDICT |
@@ -502,35 +555,59 @@ Reported, not gated:
 
 The arms of each pair are spread out. The breaks go last; each boot starts fresh (det_run.sh restores user.ltx and
 loads the save).
-### 6.2 Command per boot (series script s4d2_run.sh: written 2026-11-27, `bash -n` only, requirement R2)
-`DET_NOCLAIM=1 BENCH_DISPLAY=:141 BENCH_TIMEOUT=<2000 for the probe; REG_ME_BENCH_TIMEOUT from PROBE_BOOT_S>
-DET_EXTRA="<base> <lever>" tools/det_run.sh <exe> <tag> 60 3`, then `mv run/appdata/logs/synth_<tag>.txt
-out/det_<tag>/`. "60 3" is ignored under -det_passes. `<lever>` is per section 4's table, with the NPC = PROBE_NPC.
-Three modes: `probe`, `probe_b` (2.1) and `series` (16 boots in the order of 6.1); each keeps its own new state folder
-`out/s4d2_state/<mode>/` (series.log, plan.txt, done.txt, run_<tag>.log, stop.txt with `class=done|box|fault`).
+### 6.2 Command per boot (series script s4d2_run.sh: written and revised 2026-11-27, `bash -n` only, requirement R2)
+`DET_NOCLAIM=1 DET_BOX_TOKEN=<this run's claim token> DET_BOX_CLASS=shared DET_BOX_WORKER=engineperf BENCH_DISPLAY=:141
+BENCH_TIMEOUT=<2000 for the probe; REG_ME_BENCH_TIMEOUT from PROBE_BOOT_S> DET_EXTRA="<base> -det_synth_item <lever>"
+tools/det_run.sh <exe> <tag> 60 3` (det_run.sh da66e107b79fb764..., which runs the shared box checks again itself), started
+in the background, then
+`mv run/appdata/logs/synth_<tag>.txt out/det_<tag>/`. "60 3" is ignored under -det_passes. `<lever>` is per section
+4's table, with the NPC = PROBE_NPC (empty in part A).
+Modes: `probe`, `probe_b`, `probe_fix <n>` (2.1) and `series` (16 boots in the order of 6.1); each keeps its own new
+state folder `out/s4d2_state/<mode>/` (series.log, plan.txt, done.txt, claim_calls.txt, run_<tag>.log, stop.txt with
+`class=done|box|fault`). `--preflight-only` alone runs only the shared box checks; `<mode> --preflight-only` runs
+every start check of the mode; both exit before any state folder, queue entry or claim.
 
 What the script does (each item is a refusal or a stop BY NAME):
-- refuses to start if `grep -q EXCLUSIVE ~/.claude/overseer/QUIET-REQUIRED` matches, and stops (box) if it matches
-  before a later boot;
-- refuses while any `PIN_ME_` value remains (exe names and hashes of build 2 and build 1, the installed stimulus hash),
-  and in series mode while any `REG_ME_` value remains (PROBE_NPC, BENCH_TIMEOUT, the scorer and self-test hashes);
-- pins, by name, before the first boot and again before every boot: build 2 (PIN_ME_EXE), build 1 (PIN_ME_EXE_B1,
-  series), Stance14 b4ce9c77 (series), out/user_det.ltx.orig 3e0e0a6f1fe8010c (prefix), the stimulus, tools/det_run.sh,
-  lib_engine_pids.sh and run_noguard.sh (full hashes read 2026-11-27), and in series mode the registered scorer and
-  self-test;
+- **box checks from one shared file**, perf-harness/common/box_preflight.sh (pinned by full sha256; the script
+  refuses to start if it is missing, unreadable, not the pinned file, or lacks its marker, version or functions), all
+  fail-closed (a check that cannot tell refuses): Caden's play lock (run/.caden-play.lock naming a live pid), a
+  protected title, Sober (Roblox), an engine of the run tree, another live claim under `engineperf` (not the queue's
+  handoff pre-claim, not this run's own token), `EXCLUSIVE` in ~/.claude/overseer/QUIET-REQUIRED or a QUIET-REQUIRED-<n>
+  slot file, and display :0. Run at the start (refuse), before every claim attempt (wait), before every boot (twice,
+  stop), and every ~5 s while a boot runs (all but the engine test; a hit stops this run's own det_run.sh). A real run
+  refuses while any of the file's inputs is overridden (they exist only for its fixture self-test);
+- refuses while any `PIN_ME_` value remains (exe names and hashes of build 2 and build 1, Stance14's and
+  user_det.ltx.orig's full hashes), and in series mode while any `REG_ME_` value remains (PROBE_NPC, BENCH_TIMEOUT, the
+  scorer and self-test hashes);
+- pins, by full sha256, by name, before the first boot and again before every boot: the shared box file, build 2,
+  build 1 (series), Stance14 (series), out/user_det.ltx.orig, the installed stimulus (1777fb68...), the bench saves
+  bench1.scop / .scoc, run/appdata/axr_options_play.ltx, tools/det_run.sh (da66e107b79fb764...), lib_engine_pids.sh, run_noguard.sh, and in
+  series mode the registered scorer and self-test;
 - checks cfg0 (sim_tick 0, r__framelimit 0 in run/appdata/user.ltx; tools/s4c_partA.sh:23) before every boot;
 - runs the flag preflight of tools/s4c_partA.sh:10-16 for the base flags;
 - display :141 only: BENCH_DISPLAY must be unset or :141, and the display must be free (no socket, no lock) before every
   boot; no other display is named;
-- refuses if any out/det_<tag>, out/det_<tag>_r1 or run/appdata/logs/synth_<tag>[_r1].txt of its plan exists (the probe
-  folders are a separate mode); series mode also needs s4d2/probe_readings.txt ending in `S4D2 PROBE: GO`;
-- after every boot: moves the witness, then needs xray.log and the cp1/cp3 counter files in the folder, and for a lever
-  boot a non-empty witness;
+- refuses a crash dump already in run/appdata/logs before the start and before every boot (it would be blamed on the
+  next boot; it is not moved: not this run's);
+- **options file before every boot** (as sf1): with the claim held and the box clear, run/appdata/axr_options_play.ltx
+  is checked against 27d54b9f..., copied over run/gamedata/configs/axr_options.ltx (refused if that is a link or not
+  a plain file in run/), and the copy checked. Each exe rewrites that file's version line when it boots (wu3, kj4p
+  RESULTs), and s4d2 alternates three exes, so without it the arms of a pair would not start from the same bytes;
+- refuses if any out/det_<tag>, out/det_<tag>_r1 or run/appdata/logs/synth_<tag>[_r1].txt of its plan exists; the
+  reading chain of 2.1 (probe_b, probe_fix, series);
+- after every boot: moves the witness (only while no play lock is live), then needs xray.log, det_alife_counts and
+  det_counters at cp1, cp2 and cp3 (the scorer's C reads all six), exactly one item line that is not NONE and the same
+  item as the first boot of the run, and for a lever boot a non-empty witness;
 - **the in-run preflight**, after the boot of s4p_off2a (and of the probe) ends: every witness line has the registered
-  138 tokens (58 for build 1), the engine's command line carries the base flags and the lever switches, the det_synth
-  line has the boot's mask, and the pose line names the NPC. Any miss stops the series. (Checked when the boot ends,
-  not at cp1: one boot later than the first plan, and with no process watching a live boot.)
-- keeps one SHARED claim (`want` without EXCLUSIVE, then `claim`, renewed before every boot; exit codes only).
+  138 tokens (58 for build 1); the engine's command line carries the base flags, `-det_synth_item` and the lever
+  switches as whole tokens; exactly one det_synth line `k K wallclock W tw 1 break B mask M` with the boot's own values
+  (full line, CR stripped); exactly one pose line naming the NPC (full line). Any miss stops the series. (Checked when
+  the boot ends, not at cp1.)
+- keeps one SHARED claim (`want` without EXCLUSIVE, re-sent every 60 s; `claim` with a per-run token in its text, signals
+  held over the call; renewed by the same claim before every boot; exit codes only; the wait is capped at 6 h, then
+  class=box). It releases only its own claim (by the claim-id the claim printed; by name only if its token claim is
+  the only one under `engineperf`), withdraws its own queue entry only if it queued, kills and reaps its own
+  det_run.sh on every exit (TERM, KILL after 60 s), and sends the Overseer one notify line at the end (as sf1).
   det_pair.sh cannot be used: it passes one DET_EXTRA to all its runs.
 ### 6.3 Time per boot (derivation)
 These figures are from the s4d1 draft 6.3; they are not measured for build 2:
@@ -557,11 +634,17 @@ would be only 4.9x here, because of the added hashing: flagged, and not COPIED.
 ### 6.4 Stop rules (no check is scored before the end; these look only at each run's own completion)
 - **Before the series:** the pins, cfg0 and the user_det hash of 6.2; no leftover witness files or out folders.
 - **During the series:**
-  - `EXCLUSIVE` in QUIET-REQUIRED, a protected title, or a refused claim renewal: stop (box);
+  - any box check of 6.2 refusing before a boot or during one (the boot is stopped), or a refused claim renewal: stop
+    (box);
+  - a boot whose stimulus took no item, or another item than the run's first boot: stop (fault);
+  - a crash dump already in run/appdata/logs before a boot: stop (fault);
   - a crash dump (det_run.sh's "CRASH DUMP present" or a .mdmp in the folder): stop (fault);
   - a timeout (det_run.sh rc 5): stop (fault);
   - any pre-boot check of 6.2 failing, or det_run.sh's own refusals (rc 2, 7): stop (fault);
   - a missing file after a boot, or the in-run preflight of 6.2: stop (fault).
+- **After a stop mid-series (box or fault) the series is not resumed.** The state folder and every out/det_<tag> of the
+  plan must be new, so a second attempt needs the Overseer's word, the stopped series' folders moved aside by hand
+  (kept, named in the result), and a new start of all 16 boots. A box stop is not a retry and uses no part of 6.5.
 ### 6.5 One-retry rule
 - **At most one retry in the whole series**, and only for a boot that exited early (det_run.sh rc 4, "engine exited
   early") with no crash dump. It is run once more right away as `<tag>_r1`, with the same switches (det_tag
@@ -577,13 +660,13 @@ refuses an existing out file and has no override, so there is no re-score after 
 | bound | value | expected | margin | derivation, or COPIED and why it still applies to build 2 |
 |---|---|---|---|---|
 | C = 0 (A1, A2, S0, SC, LB) | 0 | 0 | exact | section 5 |
-| cp1 frame difference (A3, part A) | <= 8 frames | noise 0.75-2.7 [M, 4b pairs]; an extra A-Life pass = 17 frames (gaps 16-18 [M]) | 3.0x over the noise, **2.1x** under the signal | **COPIED** (4b R3). Applies because what decides the cp1 frame is identical in build 2's part-A boots: sim_tick 0 and no lever (cfg0, A5), the same save, det profile, det_run.sh and Stance14, and no change to the scheduler, A-Life, det harness or stimulus code (`git diff --stat 6acb77044 c216081fd`: 20 files, none of them there [D]) |
+| cp1 frame difference (A3, part A) | <= 8 frames | noise 0.75-2.7 [M, 4b pairs]; an extra A-Life pass = 17 frames (gaps 16-18 [M]) | 3.0x over the noise, **2.1x** under the signal | **COPIED** (4b R3). Applies because what decides the cp1 frame is identical in build 2's part-A boots: sim_tick 0 and no lever (cfg0, A5), the same save, det profile, det_run.sh and Stance14, and no change to the scheduler, A-Life, det harness or stimulus code (`git diff --stat 6acb77044 c216081fd`: 20 files, none of them there [D]). **Item switch (2026-11-27):** s4d2's part A adds `-det_synth_item` to BOTH arms; the 4b noise (0.75-2.7) was measured without it. The item is taken at actor update 300, before cp1 (pass 100 is ~1700 frames at 16-18 frames per A-Life call) [G], by the same script in both arms, so it moves the cp1 frame of both arms alike unless the exes react to it differently, which is what A3 is there to see. The noise side with the item is not measured: flagged [G]. A1 (stock against stock, both with the item) still proves the harness exact with it |
 | cp1 tick difference (S0, SC, LB, part S) | <= 8 ticks | signal re-derived: an extra pass = one A-Life gap = 16-18 TICKS, because under the lever each tick runs one update and the A-Life call cadence is counted in updates (s4d1 L3, the same scheduler) [D]; noise in ticks: **not measured for any lever boot** [G: <= 2.7 as in frames] | **2.1x** under the signal; noise side unknown | re-derived on the signal side, flagged on the noise side. S0 (off2a vs off2b) is the first measure and is a harness check: a noisy harness gives NO VERDICT for SC and LB, not a false FAIL |
-| A-Life calls to cp1 (A4) | >= 50 | 100 [M in every earlier part A; cp1 is set at pass 100 by -det_passes] | **2.0x** | **COPIED** (4b R4), flagged. Applies because it counts lines of the det_trace .sched file, whose writer build 2 does not touch [D, diff list], in part-A boots identical to the earlier ones except the exe. It only separates "the trace covers the run" from "the trace started late" |
+| A-Life calls to cp1 (A4) | >= 50 | 100 [M in every earlier part A; cp1 is set at pass 100 by -det_passes] | **2.0x** | **COPIED** (4b R4), flagged. Applies because it counts lines of the det_trace .sched file, whose writer build 2 does not touch [D, diff list], in part-A boots identical to the earlier ones except the exe and `-det_synth_item` (both arms; one actor_on_update callback and one slot activation, no A-Life call added [D: zz_eperf_synth.script]). It only separates "the trace covers the run" from "the trace started late" |
 | PAT a, dt / hud | 1.5e-6 / 2e-3 | print rounding 5e-7 / 5e-4 | 3x / 4x | re-derived: same printf formats |
 | walk range (S0B, probe) | >= 1.5 m | 3.0 m (2 x WALK_HALF 1.5, script) | **2.0x** | **COPIED** (s4d1 S0B), flagged. Applies because the walk is the pinned stimulus script's geometry, the actor is unmarked (S4a/S4b never touch it) and its movement code is not in build 2's diff [D]; the s2 column that measures it is build 1's code, unchanged. It separates "walk ran" (3.0 m) from "walk did not" (0 m) |
 | bullets fired (S0B, probe) | >= 50 | ~171 | 3.4x | **re-derived for build 2**: one bullet per 30 updates from update 300 (script cadence [G, as s4d1]); build 2's boots run the same ~5440 updates to cp3 at every K and in every arm (one update per tick) [M, s4d1], so (5440 - 300) / 30 = 171. The probe shows it |
-| part-A method (A1-A5) | 6 boots alternating Stance14 / build 2, C exact, A3, A4 | | | **COPIED** (4b section 2 via the s4d1 draft 3). Applies because the question is the same (off = stock with sim_tick 0) and the boots are the same: alternation, Stance14 b4ce9c77, `-det_passes 100,200,320 -det_lua_streams -det_counters` (flag preflight), cfg0, save, det profile. What build 2 adds that part A judges: the unconditional mark writes (OnChangeVisual) and the layout; A2's exactness across layout changes held before [M] |
+| part-A method (A1-A5) | 6 boots alternating Stance14 / build 2, C exact, A3, A4 | | | **COPIED** (4b section 2 via the s4d1 draft 3). Applies because the question is the same (off = stock with sim_tick 0) and the boots are the same: alternation, Stance14 b4ce9c77, `-det_passes 100,200,320 -det_lua_streams -det_counters` (flag preflight) **plus `-det_synth_item` in both arms (new, 2026-11-27: the earlier part A runs had no stimulus at all; the exact checks A1, A2, A5 are unaffected in kind because both arms carry it, and A1 re-proves the harness with it; A3 and A4 are flagged above)**, cfg0, save, det profile. What build 2 adds that part A judges: the unconditional mark writes (OnChangeVisual) and the layout; A2's exactness across layout changes held before [M] |
 | position equal (PA1 wd = ws; I hd = hr) | 1e-4 m | 0: the same matrix printed twice / the same bone bitwise | exact in practice; 20x over print rounding | |
 | u = a (P2, PA1, PWC) | 1.5e-6 | 0: the same float printed twice | 3x over print rounding | |
 | joint lerp (P2) | 1e-4 + 4 ulp | ~2 ulp of <= 2 m = 5e-7 + print 5e-6 | >= 18x | |
@@ -672,20 +755,25 @@ Flags:
   - W2: a pj mismatch (reported value shown, no verdict change), a witness without pj (132 tokens, reported absent),
     and pj on a line whose pn is not L (malformed by name);
   - PROBE_TOL_LD 0: PA2's cluster part reported only;
+- the item switch (third revision): every fixture boot carries `-det_synth_item` and logs `item slot 3 section
+  wpn_ak74`; F0 mutants for the switch missing in a part-A run, `item NONE`, no item line (b1off2), and one run taking
+  another item;
 - the `_r1` retry, both joint rules, and the refusals (placeholders; a second scoring onto the same out file);
-- 16 probe-mode cases: GO with the expected CONST lines (PROBE_PA_CR counts C/R only; the I count, the TOL_LD branch
+- 18 probe-mode cases (two added: `item NONE` stops on `item`, the switch missing stops on `flags`): GO with the expected CONST lines (PROBE_PA_CR counts C/R only; the I count, the TOL_LD branch
   and the W2 link printed), CRLF, one per stop rule (w1, pose, f5, npc + attach, ld, hx, optin, tripwire, stimulus,
   malformed input, missing input), attach stopped when every correction is form I, and the TOL_LD rule's branches b
   and c.
 
-**Result 2026-11-27 (second revision):** `S4D2 SELFTEST: PASS (70/70)`, folder
-s4d2/selftest-runs/20261127-221049-2137883 (NOTES.md 7). Hashes at that run (not registered): s4d2_score.py
-5421e5de14fa8214..., s4d2_selftest.sh 8081f843f7f501ef....
+**Result 2026-11-27 23:37 (third revision, with the item switch):** `S4D2 SELFTEST: PASS (76/76)`, folder
+s4d2/selftest-runs/20261127-233722-880626 (NOTES.md 7). Hashes at that run (not registered): s4d2_score.py
+76a1ab794ce98047..., s4d2_selftest.sh 4a53bd2d97016fb5.... (Second revision: 70/70.) The shared box checks have their
+own self-test: common/box_preflight_selftest.sh `BOX SELFTEST: PASS (75/75)` (23:41, after the det_run.sh retrofit), folder
+common/selftest-runs/20261127-234139-942947.
 **It must be re-run with a case built on the probe's real folder before registration.** The hashes of the scorer and
 the self-test are to be filled at registration.
 
 ## 9. Predictions (fixed before any run)
-- **Probe:** see 2.4 (GO on the first boot about 10 %; after the re-probe and R1 about 30 %).
+- **Probe:** see 2.4 (GO on the first boot about 15 %; after the re-probe about 25 %).
 - **Series, given GO:**
 
   | check | prediction |
@@ -779,4 +867,10 @@ and real-bytes self-test case.
 - Real gated mode: races between the capture and the first evaluation, real alpha, multi-tick frames.
 - R1 soft skinning, skeleton LOD switches, mutants specifically (unless one is pw), ragdolls.
 - The VR path itself: U1 uses the HUD hands as a stand-in for a self-posed unmarked model; gammavr's models are not run.
+- **U1 is blind to two kinds of break** (review N1-1, item 1 section 3 a/b):
+  - a blend that reaches an unmarked skeleton through an RM_SINGLE or soft-skinned (RM_SKINNING_SOFT) mesh: the
+    witness hooks only the hardware-skinned upload loop (SkeletonX.cpp:107-121), so such a mesh is never counted;
+  - a skeleton marked by mistake (a HUD or actor model given the mark): uu classes it as marked and never looks at it.
+    Only a drop of nposed below its floor would show it, and only for the HUD hands.
+- U1's nposed can be raised once by a freed skeleton's address reused one frame later (1.3); it is only a floor.
 - Anything after A-Life pass 320, any other save, native Windows.

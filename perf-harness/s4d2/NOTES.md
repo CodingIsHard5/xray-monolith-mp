@@ -58,7 +58,8 @@ Every reader strips `\r`, because engine files under Wine may be CRLF.
 - **Still possible, decided by the probe:**
   - the F5 fix in xrGame (design D6) if share > 50 %;
   - the camera-heading lever (design D9) if `pose` stops;
-  - s4d1 R1 (active item) if `optin` stops.
+  - a different slot list or an item spawn in the stimulus if `item` stops (prereg 2.2.1); s4d1 R1 itself is now
+    the switch `-det_synth_item` on every boot.
 - **TOL_LD** is now set by the probe (prereg 7.1): CONST `PROBE_TOL_LD` (0 = PA2's cluster part reported only).
 
 ## 4. Verified vs assumed
@@ -116,21 +117,78 @@ cases include:
 Fixtures are synthetic. The self-test must be re-run with a case built on the probe's real bytes before registration.
 
 ## 7. Self-test result
-`S4D2 SELFTEST: PASS (70/70)` (second revision, run 2026-11-27 22:10 with nice -n 19, right after
-`grep -q EXCLUSIVE ~/.claude/overseer/QUIET-REQUIRED` found no match (the file does not exist); output read: 70 `ok`
+`S4D2 SELFTEST: PASS (76/76)` (third revision, with `-det_synth_item`; run 2026-11-27 23:37:22 with nice -n 19, right
+after a check that neither QUIET-REQUIRED nor a QUIET-REQUIRED-<n> slot file named EXCLUSIVE; output read: 76 `ok`
 lines, no failed case).
-Folder: /home/caden/Projects/StalkerGameEngine/wt-render-split/perf-harness/s4d2/selftest-runs/20261127-221049-2137883
-(selftest_output.txt; 21 MB on disk with hard links and symlinks). Its `__pycache__` and the previous folder
-(20261127-214140-1115043, 57/57, first revision) were removed by their literal paths.
+Folder: /home/caden/Projects/StalkerGameEngine/wt-render-split/perf-harness/s4d2/selftest-runs/20261127-233722-880626
+(22 MB). Its `__pycache__` and the previous folder (20261127-221049-2137883, 70/70, second revision) were removed by
+their literal paths.
+Shared box checks: `BOX SELFTEST: PASS (75/75)`, 23:41:39 (after the det_run.sh retrofit; the first run, 54/54 at 23:37:16, was
+removed by its literal path), folder
+/home/caden/Projects/StalkerGameEngine/wt-render-split/perf-harness/common/selftest-runs/20261127-234139-942947.
 
-## 8. The series script s4d2_run.sh
-- Modes `probe`, `probe_b`, `series`; state in `out/s4d2_state/<mode>/` (new each time).
-- Refuses while `grep -q EXCLUSIVE ~/.claude/overseer/QUIET-REQUIRED` matches, while any PIN_ME_ remains (exe names and
-  hashes, the stimulus hash), and in series mode while any REG_ME_ remains (NPC, timeout, scorer and self-test hashes).
-- Display :141 only, free before every boot. Shared claim, renewed before every boot.
-- Moves `run/appdata/logs/synth_<tag>.txt` into `out/det_<tag>/` after every boot; a lever boot without it stops by name.
-- Stops on the first crash dump, timeout, protected title, failed pre-check, missing file, or failed in-run preflight
-  (after s4p_off2a and after the probe). One retry `<tag>_r1` in the whole series, only for an early exit (rc 4).
-- No `rm`. Times from `date`. Not run: `bash -n` only.
+## 8. The series script s4d2_run.sh (revised 2026-11-27 after the review and the shared-checks order)
+- Modes `probe`, `probe_b`, `probe_fix <n>`, `series`; state in `out/s4d2_state/<mode>[<n>]/` (new each time).
+  `--preflight-only` alone: only the shared box checks; `<mode> --preflight-only`: every start check of the mode.
+- Box checks come from perf-harness/common/box_preflight.sh (pinned sha256, marker and version checked; see
+  common/README.md). No private copy of them is left in the script. Real modes refuse while any BOX_* input or
+  S4D2_BOX_LIB(_SHA) is set.
+- Refuses while any PIN_ME_ remains (exe names and hashes, Stance14 and user_det full hashes), and in series mode
+  while any REG_ME_ remains. The stimulus pin is filled: 1777fb68... (with `-det_synth_item`).
+- `-det_synth_item` is on every boot (ITEM in the script, after BASE). After every boot the item line must be one
+  `slot N section S` line, the same as the run's first boot.
+- det_run.sh (da66e107..., retrofitted 2026-11-27) gets DET_BOX_TOKEN / DET_BOX_CLASS=shared / DET_BOX_WORKER and runs
+  the shared box checks itself before it touches anything; its rc 3 is a box stop here.
+- Display :141 only, free before every boot. Shared claim with a per-run token, renewed by the same claim before every
+  boot, wait capped at 6 h, `want` re-sent each poll.
+- Options file restored before every boot (sf1's reason: each exe rewrites its version line).
+- Moves `run/appdata/logs/synth_<tag>.txt` into `out/det_<tag>/` after every boot (not while the play lock is live);
+  a lever boot without it stops by name. Needs det_alife_counts and det_counters at cp1, cp2, cp3.
+- Stops on the first crash dump, timeout, box condition (before or during a boot), failed pre-check, missing file,
+  item NONE, or failed in-run preflight (after s4p_off2a and after the probe). One retry `<tag>_r1` in the whole
+  series, only for an early exit (rc 4).
+- No `rm`. Times from `date`. Not run: `bash -n`, plus its `--preflight-only` box mode inside the common self-test
+  (fixtures).
+
+Review findings (plan-facts/stage4d2-w1-and-runscript-review-2026-11-27.md), what was done:
+| finding | done |
+|---|---|
+| B2-1 play lock, own claim, Roblox before each boot | shared file checks, before start / claim / every boot / during a boot |
+| S2-1 title fails open | shared box_ok_title: any exit but 1 refuses |
+| S2-2 claim granted with CLAIMED=0 on a signal | TERM/INT/HUP held over every claim call (`held`); release decided from the claim's receipt (claim-id), not CLAIMED |
+| S2-3 det_run in the foreground | background + `wait`; finish TERMs it, KILL after 60 s, reaps; HUP trapped |
+| S2-4 plan on stdin | `read -u 3 ... 3< plan.txt`; every child `</dev/null` |
+| S2-5 probe_b renames before the gates | rename inside the loop after every gate passed |
+| S2-6 probe_b not gated | needs the first reading ending in STOP with only npc / attach codes |
+| S2-7 unbounded wait, `want` once | 6 h cap (class=box), `want` every poll |
+| S2-8 saves not pinned | bench1.scop / .scoc pinned (sf1 values, matched 2026-11-27) |
+| N2-1 GO anywhere | last non-empty line, CR stripped, exact |
+| N2-2 unanchored greps | whole-token command-line match; full-line det_synth and pose lines with the boot's own k, wallclock, break, mask |
+| N2-3 retry-path mv unchecked | checked and logged (a failure is logged, not a stop: the retry's file name cannot clash) |
+| N2-4 leftover dump | refused at start and before every boot |
+| N2-5 prefix pins | full-hash PIN_ME_ placeholders, today's values in the comments |
+| N2-6 mismatches 2-4 | `probe_fix <n>`, the reading chain, all six counter files |
+| N2-7 options restore, notify | both done, reasons in the header |
+| N2-8 resume | prereg 6.4: not resumed; a new full series after the Overseer's word |
+| mismatch 5 (in-run regex) | exact k, wallclock, break, mask |
+
+## 9. Exit paths of s4d2_run.sh (what each one releases and stops)
+"Own claim" = released by its claim-id from claim_calls.txt; with no id, by name only if the claim carrying this run's
+token is the only claim under engineperf; else left to expire (<= one boot timeout + 10 min). "Own child" =
+this run's det_run.sh (BP) and its sleep (SP); nothing else is signalled.
+
+| exit path | when | stop record | queue entry | claim | child | notify |
+|---|---|---|---|---|---|---|
+| refusal before the state folder (exit 2; box-only mode 1/2/3) | usage, BENCH_DISPLAY, shared file bad, overrides in a real run, placeholders, box check, pins, cfg0, display, dump, folders, reading chain | none (no folder yet) | none made | none made | none started | no |
+| `--preflight-only` / `<mode> --preflight-only` (exit 0) | all checks clear | none | none | none | none | no |
+| claim wait capped (6 h) | box never clear or claim refused | class=box | withdrawn (it queued) | none unless a claim call committed one: then own claim | none | yes |
+| gate stop before a boot | box check, claim renewal, display, cfg0, pins, dump, options restore, folders | class=box or fault | none (left the queue at the claim) | own claim | none running | yes |
+| box condition during a boot | play lock, title, Sober, another claim of ours, EXCLUSIVE (every ~5 s) | class=box, the reason names the check and the boot | none | own claim | TERM det_run.sh (its cleanup: wineserver -k for run/prefix, user.ltx restored, its Xvfb), KILL after 60 s, reaped | yes |
+| boot result stop | rc 3, 4 (second), 5, other, crash dump (9) | class=box (rc 3) or fault | none | own claim | already ended | yes |
+| after-boot stop | missing file, item NONE / different, play lock before a move, in-run preflight | class=fault (box for the lock) | none | own claim | already ended | yes |
+| TERM / INT / HUP at any point after the state folder | the trap | class=box, `interrupted=<tag>` if a boot ran | withdrawn if it queued | own claim (a signal during a claim call is held until the call returns, so its receipt is on disk) | as "during a boot" | yes |
+| a signal during finish | ignored (`trap '' TERM INT HUP` at its start) | finish completes | | | | |
+| normal end | plan finished | class=done | none | own claim | none | yes |
+| bash dies another way (KILL of the driver) | cannot be trapped | not written | left (the queue's TTL) | left to expire | det_run.sh keeps running to its own end or timeout: NOT covered | no |
 
 No memory file was written under ~/Documents: the brief forbids writing there.

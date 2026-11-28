@@ -211,7 +211,7 @@ def write(path, lines, crlf):
 def make_run(root, tag, spec, rtag=None, tmax=TMAX, crlf_log=True, crlf_wit=False, rec_fn=None, link_wit=None,
              cmd_drop=None, counter_change=None, cp_shift=0, sched_extra=False, syn_line=False, no_stim=False,
              bad_extra=(), no_bad=False, no_witness=False, raw_fn=None, drop_bad=None, no_uu=False, no_pose_line=False,
-             no_pj=False):
+             no_pj=False, item="slot 3 section wpn_ak74"):
     rtag = rtag or tag
     d = os.path.join(root, "det_" + rtag); os.makedirs(d)
     K, lever = spec["k"], spec["k"] > 0
@@ -222,6 +222,7 @@ def make_run(root, tag, spec, rtag=None, tmax=TMAX, crlf_log=True, crlf_wit=Fals
         ext += (" -sim_4d_break %d" % spec["brk"]) if spec["brk"] else ""
         ext += " -det_synth_walk -det_synth_tracer" * spec["stim"]
         ext += (" -det_synth_pose -det_synth_pose_npc %s" % NPC) * spec["pose"]
+    ext += " -det_synth_item"   # every s4d2 boot, part A included (prereg 2.1, 3, 4)
     cmd = "command line z:\\home\\caden\\projects\\stalkergameengine\\run\\bin\\%s -nointro -dbg -start server(bench1/single/alife/load) client(localhost) -det_mode -det_tag %s -det_interval 60 -det_checkpoints 3 %s" % (spec["exe"], rtag, ext)
     if cmd_drop:
         cmd = cmd.replace(" " + cmd_drop, "")
@@ -238,10 +239,14 @@ def make_run(root, tag, spec, rtag=None, tmax=TMAX, crlf_log=True, crlf_wit=Fals
     for cp, T in CPT.items():
         L.append("* det_rng_state %s: Random=-1528111566 Random32=0 alife=302455169 crt_next=6334 frame=%d time_ms=%d%s" % (cp, cpf(T) + cp_shift, 99 + 33 * T, suf(T)))
         L.append("* det_lua_state %s: 815687002" % cp)
+    st = "true" if spec["stim"] else "false"
+    L.append("* det_synth stimulus: installed (walk %s, tracer %s, item true)" % (st, st))
+    if not (spec["stim"] and no_stim):   # no_stim: the walk/tracer part never started (installed and item lines kept)
+        L.append("* det_synth stimulus: start at update 300 (10.000 2.000 5.000) time 9999 walk %s tracer %s ammo ammo_5.45x39_fmj" % (st, st))
+    if item is not None:
+        L.append("* det_synth stimulus: item " + ("NONE (no filled slot)" if item == "NONE" else item))
     if spec["stim"] and not no_stim:
-        L += ["* det_synth stimulus: installed (walk true, tracer true)",
-              "* det_synth stimulus: start at update 300 (10.000 2.000 5.000) time 9999 walk true tracer true ammo ammo_5.45x39_fmj",
-              "* det_synth stimulus: 1 bullets fired (update 300)", "* det_synth stimulus: 50 bullets fired (update 1770)",
+        L += ["* det_synth stimulus: 1 bullets fired (update 300)", "* det_synth stimulus: 50 bullets fired (update 1770)",
               "* det_synth stimulus: 150 bullets fired (update 4770)"]
     if lever:
         recs, bad = records(spec, tmax)
@@ -413,6 +418,10 @@ def m_pose_bad(lines):   # an unknown pw form: not a shape the code prints
 CASES = [
     ("m_f0_switch", {"s4p_on3": {"cmd_drop": "-det_synth_pose_npc %s" % NPC}}, {"F0": "FAIL"}, 1, ()),
     ("m_f0_pose_line", {"s4p_on2a": {"no_pose_line": True}}, {"F0": "FAIL"}, 1, ("engine pose witness line",)),
+    ("m_f0_item_switch_partA", {"s4p_o2": {"cmd_drop": "-det_synth_item"}}, {"F0": "FAIL"}, 1, ("missing switch -det_synth_item",)),
+    ("m_f0_item_none", {"s4p_s2": {"item": "NONE"}}, {"F0": "FAIL"}, 1, ("item NONE",)),
+    ("m_f0_item_line_missing", {"s4p_b1off2": {"item": None}}, {"F0": "FAIL"}, 1, ("0 'det_synth stimulus: item' lines",)),
+    ("m_f0_item_differs", {"s4p_on2b": {"item": "slot 2 section wpn_pm"}}, {"F0": "FAIL"}, 1, ("runs took different items",)),
     ("m_a1", {"s4p_s2": {"counter_change": 2}}, {"A1": "FAIL", "A2": "NO VERDICT", "A3": "NO VERDICT", "A4": "NO VERDICT"}, 3, ()),
     ("m_a2", {"s4p_o2": {"counter_change": 3}}, {"A2": "FAIL"}, 1, ()),
     ("m_a3", {t: {"cp_shift": 20} for t in ("s4p_o1", "s4p_o2", "s4p_o3")}, {"A3": "FAIL"}, 1, ()),
@@ -540,7 +549,8 @@ CONSTS = ('"PROBE_P_LERP": 198,', '"PROBE_P_TICK": 99,', '"PROBE_UPLOADS": 300,'
           '"PROBE_TOL_LD": 0.001,')
 probe_case("probe_go", 0, must=CONSTS + ("S4D2 PROBE: GO", "(b) F5: render-only recalcs byte-different 0, byte-equal 198",
            "form I (parent moved, bones as read; NOT counted as a correction): 20 pa lines, 20 n=0 moved",
-           "-> branch a", "W2 hand link: 297 comparable lines, max |pa hd - pj| 0.00000"))
+           "-> branch a", "W2 hand link: 297 comparable lines, max |pa hd - pj| 0.00000",
+           "item (-det_synth_item): slot 3 section wpn_ak74"))
 probe_case("probe_go_crlf", 0, must=CONSTS[:3] + ("S4D2 PROBE: GO",), crlf_log=False, crlf_wit=True)
 probe_case("probe_no_w1_column", 1, must=("PROBE STOP w1",), no_uu=True)
 probe_case("probe_no_skeleton_blended", 1, must=("PROBE STOP pose",), rec_fn=p_noblend)
@@ -555,6 +565,8 @@ probe_case("probe_tol_ld_branch_b", 0, must=('"PROBE_TOL_LD": 0.0001224', "-> br
 probe_case("probe_tol_ld_idle_hand_c", 0, must=('"PROBE_TOL_LD": 0.0,', "-> branch c", "REPORTED only", "S4D2 PROBE: GO"),
            rec_fn=p_idle(0.001, 0.0006))
 probe_case("probe_no_stimulus", 1, must=("PROBE STOP stimulus",), no_stim=True)
+probe_case("probe_item_none", 1, must=("PROBE STOP item: item NONE",), item="NONE")
+probe_case("probe_item_switch_missing", 1, must=("PROBE STOP flags: missing switch -det_synth_item",), cmd_drop="-det_synth_item")
 probe_case("probe_malformed", 1, must=("PROBE STOP input", "malformed witness"), raw_fn=m_pose_bad)
 probe_case("probe_missing", 1, must=("PROBE STOP input", "missing run folder"), skip=True)
 

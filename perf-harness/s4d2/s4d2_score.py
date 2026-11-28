@@ -14,6 +14,7 @@
 # A missing or unreadable input file fails the checks that read it BY NAME (never a silent skip, never read as 0).
 # A malformed witness line (any column in a shape the code does not print) fails every check that reads that witness.
 # A run folder <root>/det_<tag>_r1 (the series' one retry) is read instead of det_<tag> and the substitution is named.
+# -det_synth_item (stimulus 1777fb68..., 2026-11-27) is on every boot; F0 and the probe rule `item` check it took an item.
 # Every reader strips \r (the engine log and the Lua-written files are CRLF under Wine; the witness is LF, but CRLF
 # is accepted everywhere).
 #
@@ -355,6 +356,8 @@ SYN_RE = re.compile(r"\* det_synth: k (\d+) wallclock (\d+) tw (\d+) break (\d+)
 POSE_RE = re.compile(r"\* det_synth: pose witness on, npc (\S+)\s*$")
 TW_RE = re.compile(r"\* tw (s2|s3|pose|attach) BAD (\d+)\s*$")
 FIRED_RE = re.compile(r"det_synth stimulus: (\d+) bullets fired")
+# -det_synth_item (stimulus 1777fb68..., 2026-11-27): "item slot <n> section <s>" or "item NONE (no filled slot)"
+ITEM_RE = re.compile(r"det_synth stimulus: item (?:slot (\d+) section (\S+)\s*$|(NONE)\b)")
 
 
 class Log:
@@ -367,6 +370,7 @@ class Log:
         self.installed = self.started = False
         self.fired = 0
         self.luaerr = []
+        self.items = []
         for l in lines:
             if self.cmd is None and "command line" in l:
                 self.cmd = l.lower().split()
@@ -388,6 +392,9 @@ class Log:
                 self.installed = True
             if "det_synth stimulus: start at update" in l:
                 self.started = True
+            m = ITEM_RE.search(l)
+            if m:
+                self.items.append("NONE" if m.group(3) else (int(m.group(1)), m.group(2)))
             m = FIRED_RE.search(l)
             if m:
                 self.fired = max(self.fired, int(m.group(1)))
@@ -540,7 +547,9 @@ def flag_errors(run, npc):
     if not any(t.endswith(s["exe"]) for t in toks):
         err.append("exe %s not on the command line" % s["exe"])
     want = [[x] for x in BASE if not x[0].isdigit()] + [["-det_tag", run.rtag], ["-det_passes", "100,200,320"]]
-    lever = set()
+    # -det_synth_item is on EVERY s4d2 boot, both arms of every pair, part A included (prereg 2.1, 3, 4)
+    want.append(["-det_synth_item"])
+    lever = {"-det_synth_item"}
     if s["k"]:
         want += [["-det_synth_k", str(s["k"])], ["-sim_4d_mask", str(s["mask"])]]
         lever |= {"-det_synth_k", "-sim_4d_mask"}
@@ -570,6 +579,20 @@ def flag_errors(run, npc):
             err.append("engine pose witness line %s, expected [%s]" % (lg.posel, npc))
     elif lg.posel:
         err.append("engine pose witness line %s in a run whose exe must not print it" % lg.posel)
+    return err
+
+
+def item_errors(run):
+    """The -det_synth_item stimulus took an item: exactly one item line, a filled slot, no script error."""
+    lg, err = run.log(), []
+    if not lg.installed:
+        err.append("no 'det_synth stimulus: installed' line")
+    if len(lg.items) != 1:
+        err.append("%d 'det_synth stimulus: item' lines, expected 1" % len(lg.items))
+    elif lg.items[0] == "NONE":
+        err.append("item NONE: no filled slot of 3,2,1,5,6, so no item is active and the HUD hands are not drawn")
+    if lg.luaerr:
+        err.append("script error line %s" % lg.luaerr[0])
     return err
 
 
@@ -779,13 +802,20 @@ def score(root):
     # F0 flags
     def f0():
         bad = []
+        taken = {}
         for t, r in runs.items():
             try:
-                e = flag_errors(r, NPC)
+                e = flag_errors(r, NPC) + item_errors(r)
+                if len(r.log().items) == 1 and r.log().items[0] != "NONE":
+                    taken[t] = r.log().items[0]
             except Missing as m:
                 e = [str(m)]
             bad += ["%s: %s" % (t, x) for x in e]
-        return not bad, "; ".join(bad[:8]) or "all %d runs carry exactly their registered switches" % len(runs)
+        if len(set(taken.values())) > 1:
+            bad.append("runs took different items: %s" % sorted(set(taken.values())))
+        it = sorted(set(taken.values()))
+        return not bad, "; ".join(bad[:8]) or "all %d runs carry exactly their registered switches; every run took item %s" % (
+            len(runs), "slot %d section %s" % it[0] if it else "?")
     check("F0", f0)
 
     # ---- part A (COPIED from s4d1 section 3)
@@ -1210,6 +1240,8 @@ def probe_mode(root):
         st("w1", "no uu column: the required witness addition W1 is not in this exe; U1 cannot be scored (prereg 1.3)")
     if not (lg.installed and lg.started) or lg.fired < FIRED_MIN or lg.luaerr:
         st("stimulus", "installed %s start %s fired %d script errors %s" % (lg.installed, lg.started, lg.fired, lg.luaerr[:1]))
+    for e in item_errors(r):
+        st("item", e)
     xs = [q.s2x for q in recs if q.s2x is not None]
     rng = max(max(v[i] for v in xs) - min(v[i] for v in xs) for i in (0, 2)) if xs else 0.0
     if rng < WALK_MIN_RANGE:
@@ -1272,7 +1304,7 @@ def probe_mode(root):
     uposed = sum(1 for q in n0 if q.uu is not None and q.uu[3] > 0)
     if all(q.uu is not None for q in recs) and uposed < DROP_MIN:
         st("optin", "%d n=0 frames with an unmarked skeleton posed between ticks < %d: no stand-in for a self-posed model "
-           "on screen (stimulus R1: an active item for the HUD hands, prereg 2.2)" % (uposed, DROP_MIN))
+           "on screen (with -det_synth_item in the stimulus the HUD hands should be drawn; see the item line, prereg 2.2)" % (uposed, DROP_MIN))
     ud = sum(1 for q in recs if q.uu is not None and (q.uu[1] or q.uu[2]))
     vals = {"PROBE_P_LERP": p_lerp, "PROBE_P_TICK": p_tick, "PROBE_UPLOADS": uploads, "PROBE_PA_CR": pa_cr,
             "PROBE_PA_CLUSTERS": mxc_t, "PROBE_JOINT_LERP": 0 if jfall else 1, "PROBE_U_POSED": uposed, "PROBE_NPC": npc,
@@ -1295,6 +1327,7 @@ def probe_mode(root):
     out.append("  joint: form-L lines with jd off the lerp %d of %d; hx != hxe lines %d" % (jfall, len(L), len(hxd)))
     out.append("  (d) build 1's held-item question (s4): parsed for format only, not re-tested here")
     out.append("  highest 'bullets fired': %d; actor x/z range %.3f m; witness lines %d" % (lg.fired, rng, len(recs)))
+    out.append("  item (-det_synth_item): %s" % ("; ".join("NONE" if i == "NONE" else "slot %d section %s" % i for i in lg.items) or "no item line"))
     out.append("CONST values to register:")
     for k_, v in vals.items():
         out.append('    "%s": %r,' % (k_, v))

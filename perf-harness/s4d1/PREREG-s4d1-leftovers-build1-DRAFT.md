@@ -14,6 +14,15 @@ Model copied for form and flags: PREREG-S2-4b-objects-between-ticks-2026-11-26.m
 Labels: **[D]** desk (file:line), **[M]** measured (a number in a file), **[G]** guess, **COPIED** (a bound taken from an
 earlier registration without re-deriving it).
 
+**Change log.**
+- 2026-11-27 (supervisor's decision, after the s4d2 run-script review): **tools/det_run.sh changed** (was 01fb40dc...,
+  now sha256 da66e107b79fb76481c04f7de4d4b079f486941aa00941c8a7f806ff321c6222). Why: it now sources
+  perf-harness/common/box_preflight.sh and refuses to start without it; its fail-open title check is replaced by the
+  shared fail-closed checks (play lock, title, Sober, an engine already running, another claim of ours, EXCLUSIVE,
+  display :0), all before it creates, deletes or moves anything. **New caller rule:** with `DET_NOCLAIM=1` the caller
+  must pass `DET_BOX_TOKEN` (a text in its own claim) and may pass `DET_BOX_CLASS` (shared, the default); the s4d1 series
+  script (not yet written, R2) must do so, and should source the shared file itself as s4d2_run.sh does.
+
 ## 0. Limits, first
 - **The det harness is not exact for online state or for `::Random`.** Two stock det runs of the same exe already differ
   in 15-19 online object positions, in `Random=` and in `det_lua_state` (design section 0, [M]). So the exact gates
@@ -209,7 +218,8 @@ s4d_s3 s4d_o3 -> L: s4d_l2a s4d_l3 s4d_l1 s4d_l2w s4d_l2b -> S: s4d_off2a s4d_on
 s4d_brk1 s4d_brk2 (brk2 only if S3 is registered). The arms of each pair are spread out, not back to back. The breaks
 go last; each boot starts fresh (det_run.sh restores user.ltx and loads the save).
 ### 6.2 Command per boot (series script s4d1_run.sh: TO BE WRITTEN, NOTES.md 4, R2)
-`DET_NOCLAIM=1 BENCH_TIMEOUT=1900 DET_EXTRA="<base> <lever>" tools/det_run.sh <exe> <tag> 60 3`, then
+`DET_NOCLAIM=1 DET_BOX_TOKEN=<the series claim's token> DET_BOX_CLASS=shared BENCH_TIMEOUT=1900 DET_EXTRA="<base> <lever>"
+tools/det_run.sh <exe> <tag> 60 3` (det_run.sh pinned at da66e107b79fb764..., change log), then
 `mv run/appdata/logs/synth_<tag>.txt out/det_<tag>/` (det_run.sh does not move the witness: det_run.sh:44-45).
 `<base>` = `-det_passes 100,200,320 -det_lua_streams -det_counters` (tools/s4c_partA.sh:11, COPIED; "60 3" is ignored
 under -det_passes, PREREG-S2-simtick section 9).
