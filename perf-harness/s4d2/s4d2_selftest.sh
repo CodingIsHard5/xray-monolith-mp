@@ -570,6 +570,189 @@ probe_case("probe_item_switch_missing", 1, must=("PROBE STOP flags: missing swit
 probe_case("probe_malformed", 1, must=("PROBE STOP input", "malformed witness"), raw_fn=m_pose_bad)
 probe_case("probe_missing", 1, must=("PROBE STOP input", "missing run folder"), skip=True)
 
+# the real tails are build 1 witness lines (58 tokens, K 3): read with the b1 layout
+TD_SPEC = {"s4d_probe": S.S(3, 7, exe=S.B1_EXE, b1=1), "s4d_probe15": S.S(3, 15, exe=S.B1_EXE, b1=1)}
+# ---- teardown witness lines (the quit after cp3 writes one line with no actor; scorer teardown_split): REAL bytes
+import hashlib, json
+# ---- REAL bytes (cut 2026-11-28, read only): the last 30 witness lines of out/det_<tag>/synth_<tag>.txt (LF, as in
+# the file) and the matching xray.log lines (CRLF, as in the file): command line, det_synth lines, cp1-cp3, the lines
+# from cp3 to '- Disconnect' and the one after it. The teardown line is the last witness line (F after cp3, s2 dashes).
+REAL = {
+    's4d_probe': (
+        [
+            'F 16221 T 5378 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179432.000 | s2 206.05209 0.02860 88.48257 205.71548 0.02830 88.23655 206.05209 0.02860 88.48257 | s3 1 207.11699 110.21176 -99.26889 207.11700 122.35507 -120.36887 207.11700 104.14011 -88.71890 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16222 T 5378 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179443.000 | s2 205.88379 0.02845 88.35956 205.71548 0.02830 88.23655 205.88379 0.02845 88.35956 | s3 1 207.11700 116.28342 -109.81888 207.11700 122.35507 -120.36887 207.11700 104.14011 -88.71890 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16223 T 5379 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179454.000 | s2 205.71548 0.02830 88.23655 205.65300 0.06273 88.14102 205.71548 0.02830 88.23655 | s3 1 207.11700 122.35507 -120.36887 207.11700 139.83223 -150.75926 207.11700 122.35507 -120.36887 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16224 T 5379 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179465.000 | s2 205.69464 0.03978 88.20470 205.65300 0.06273 88.14102 205.69464 0.03978 88.20470 | s3 1 207.11699 128.18079 -130.49899 207.11700 139.83223 -150.75926 207.11700 122.35507 -120.36887 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16225 T 5379 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179476.000 | s2 205.67383 0.05125 88.17287 205.65300 0.06273 88.14102 205.67383 0.05125 88.17287 | s3 1 207.11700 134.00652 -140.62914 207.11700 139.83223 -150.75926 207.11700 122.35507 -120.36887 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16226 T 5380 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179487.000 | s2 205.65300 0.06273 88.14102 205.68001 0.25653 88.29777 205.65300 0.06273 88.14102 | s3 1 207.11700 139.83223 -150.75926 207.11700 151.76012 -171.51430 207.11700 139.83223 -150.75926 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16227 T 5380 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179498.000 | s2 205.66199 0.12733 88.19327 205.68001 0.25653 88.29777 205.66199 0.12733 88.19327 | s3 1 207.11699 143.80820 -157.67761 207.11700 151.76012 -171.51430 207.11700 139.83223 -150.75926 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16228 T 5380 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179509.000 | s2 205.67101 0.19193 88.24552 205.68001 0.25653 88.29777 205.67101 0.19193 88.24552 | s3 1 207.11700 147.78415 -164.59595 207.11700 151.76012 -171.51430 207.11700 139.83223 -150.75926 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16229 T 5381 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179520.000 | s2 205.68001 0.25653 88.29777 206.22160 0.02574 88.47267 205.68001 0.25653 88.29777 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16230 T 5381 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179531.000 | s2 205.86053 0.17960 88.35606 206.22160 0.02574 88.47267 205.86053 0.17960 88.35606 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16231 T 5381 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179542.000 | s2 206.04108 0.10267 88.41437 206.22160 0.02574 88.47267 206.04108 0.10267 88.41437 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16232 T 5382 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179553.000 | s2 206.22160 0.02574 88.47267 205.68605 0.03019 88.26493 206.22160 0.02574 88.47267 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16233 T 5382 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179564.000 | s2 206.04309 0.02722 88.40342 205.68605 0.03019 88.26493 206.04309 0.02722 88.40342 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16234 T 5382 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179575.000 | s2 205.86456 0.02870 88.33418 205.68605 0.03019 88.26493 205.86456 0.02870 88.33418 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16235 T 5383 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179586.000 | s2 205.68605 0.03019 88.26493 206.26761 0.02933 88.42514 205.68605 0.03019 88.26493 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16236 T 5383 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179597.000 | s2 205.87990 0.02990 88.31833 206.26761 0.02933 88.42514 205.87990 0.02990 88.31833 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16237 T 5383 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179608.000 | s2 206.07376 0.02962 88.37173 206.26761 0.02933 88.42514 206.07376 0.02962 88.37173 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16238 T 5384 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179619.000 | s2 206.26761 0.02933 88.42514 205.70790 0.02483 88.09684 206.26761 0.02933 88.42514 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16239 T 5384 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179630.000 | s2 206.08104 0.02783 88.31570 205.70790 0.02483 88.09684 206.08104 0.02783 88.31570 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16240 T 5384 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179641.000 | s2 205.89447 0.02633 88.20627 205.70790 0.02483 88.09684 205.89447 0.02633 88.20627 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16241 T 5385 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179652.000 | s2 205.70790 0.02483 88.09684 206.19948 0.03344 88.43396 205.70790 0.02483 88.09684 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16242 T 5385 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179663.000 | s2 205.87177 0.02770 88.20921 206.19948 0.03344 88.43396 205.87177 0.02770 88.20921 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16243 T 5385 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179674.000 | s2 206.03561 0.03057 88.32159 206.19948 0.03344 88.43396 206.03561 0.03057 88.32159 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16244 T 5386 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179685.000 | s2 206.19948 0.03344 88.43396 206.83578 0.02741 88.42514 206.19948 0.03344 88.43396 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16245 T 5386 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179696.000 | s2 206.41158 0.03143 88.43102 206.83578 0.02741 88.42514 206.41158 0.03143 88.43102 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16246 T 5386 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179707.000 | s2 206.62369 0.02942 88.42809 206.83578 0.02741 88.42514 206.62369 0.02942 88.42809 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16247 T 5387 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179718.000 | s2 206.83578 0.02741 88.42514 206.33240 0.02586 88.42514 206.83578 0.02741 88.42514 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16248 T 5387 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179729.000 | s2 206.66798 0.02690 88.42514 206.33240 0.02586 88.42514 206.66798 0.02690 88.42514 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16249 T 5387 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179740.000 | s2 206.50018 0.02638 88.42514 206.33240 0.02586 88.42514 206.50018 0.02638 88.42514 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16270 T 5388 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179751.000 | s2 - - - - - - - - - | s3 - - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+        ],
+        [
+            'command line z:\\home\\caden\\projects\\stalkergameengine\\run\\bin\\simtick18.exe -nointro -dbg -start server(bench1/single/alife/load) client(localhost) -det_mode -det_tag s4d_probe -det_interval 60 -det_checkpoints 3 -det_passes 100,200,320 -det_lua_streams -det_counters -det_synth_k 3 -sim_4d_mask 7 -det_synth_tw -det_synth_walk -det_synth_tracer',
+            '* det_synth: k 3 wallclock 0 tw 1 break 0 mask 7',
+            '* det_synth: K 3, witness z:/home/caden/projects/stalkergameengine/run\\appdata\\logs\\synth_s4d_probe.txt',
+            '* det_rng_state cp1: Random=852712388 Random32=0 alife=302455169 crt_next=6334 frame=4982 time_ms=55803 tick=1632',
+            '* det_rng_state cp2: Random=656316615 Random32=0 alife=302455169 crt_next=26500 frame=10112 time_ms=112233 tick=3342',
+            '* det_rng_state cp3: Random=1936983972 Random32=0 alife=302455169 crt_next=19169 frame=16247 time_ms=179718 tick=5387',
+            '* det_lua_state cp3: 937625969',
+            '* eperf dump: checkpoint 3 written, 30464 objects',
+            '* Log file has been saved successfully!',
+            '- Disconnect',
+            '[TutorialMonitor] Ended tutorial state tutorial_campfire_extinguish at 179751',
+        ],
+        '4c4d06c5a07c8c6a68671a40ecc4198a3462035a198eadd6c56ec8bdadfda469', 'be736f00f9db2b21ffc3c0134fbbeee70ddbecbb34580497e1d5b874e4081b96'),
+    's4d_probe15': (
+        [
+            'F 16203 T 5372 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179234.000 | s2 206.25909 0.03165 88.29730 205.88731 0.02466 88.04163 206.25909 0.03165 88.29730 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16204 T 5372 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179245.000 | s2 206.07321 0.02815 88.16946 205.88731 0.02466 88.04163 206.07321 0.02815 88.16946 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16205 T 5373 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179256.000 | s2 205.88731 0.02466 88.04163 206.31953 0.02795 88.48488 205.88731 0.02466 88.04163 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16206 T 5373 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179267.000 | s2 206.03137 0.02576 88.18938 206.31953 0.02795 88.48488 206.03137 0.02576 88.18938 | s3 1 207.11699 14.09166 67.47495 207.11700 23.90241 50.47675 207.11700 9.18629 75.97405 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16207 T 5373 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179278.000 | s2 206.17545 0.02685 88.33713 206.31953 0.02795 88.48488 206.17545 0.02685 88.33713 | s3 1 207.11700 18.99704 58.97585 207.11700 23.90241 50.47675 207.11700 9.18629 75.97405 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16208 T 5374 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179289.000 | s2 206.31953 0.02795 88.48488 205.76857 0.02665 88.14809 206.31953 0.02795 88.48488 | s3 1 207.11700 23.90241 50.47675 207.11700 45.06852 13.78848 207.11700 23.90241 50.47675 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16209 T 5374 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179300.000 | s2 206.13586 0.02752 88.37261 205.76857 0.02665 88.14809 206.13586 0.02752 88.37261 | s3 1 207.11699 30.95778 38.24732 207.11700 45.06852 13.78848 207.11700 23.90241 50.47675 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16210 T 5374 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179311.000 | s2 205.95221 0.02708 88.26035 205.76857 0.02665 88.14809 205.95221 0.02708 88.26035 | s3 1 207.11700 38.01315 26.01790 207.11700 45.06852 13.78848 207.11700 23.90241 50.47675 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16211 T 5375 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179322.000 | s2 205.76857 0.02665 88.14809 206.26228 0.02856 88.57005 205.76857 0.02665 88.14809 | s3 1 207.11700 45.06852 13.78848 207.11700 65.49683 -21.64022 207.11700 45.06852 13.78848 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16212 T 5375 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179333.000 | s2 205.93314 0.02729 88.28874 206.26228 0.02856 88.57005 205.93314 0.02729 88.28874 | s3 1 207.11699 51.87795 1.97891 207.11700 65.49683 -21.64022 207.11700 45.06852 13.78848 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16213 T 5375 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179344.000 | s2 206.09772 0.02792 88.42940 206.26228 0.02856 88.57005 206.09772 0.02792 88.42940 | s3 1 207.11700 58.68740 -9.83066 207.11700 65.49683 -21.64022 207.11700 45.06852 13.78848 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16214 T 5376 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179355.000 | s2 206.26228 0.02856 88.57005 205.70720 0.02859 88.20445 206.26228 0.02856 88.57005 | s3 1 207.11700 65.49683 -21.64022 207.11700 85.18738 -55.80936 207.11700 65.49683 -21.64022 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16215 T 5376 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179366.000 | s2 206.07724 0.02857 88.44818 205.70720 0.02859 88.20445 206.07724 0.02857 88.44818 | s3 1 207.11699 72.06035 -33.02994 207.11700 85.18738 -55.80936 207.11700 65.49683 -21.64022 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16216 T 5376 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179377.000 | s2 205.89223 0.02858 88.32632 205.70720 0.02859 88.20445 205.89223 0.02858 88.32632 | s3 1 207.11700 78.62386 -44.41965 207.11700 85.18738 -55.80936 207.11700 65.49683 -21.64022 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16217 T 5377 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179388.000 | s2 205.70720 0.02859 88.20445 206.27199 0.02952 88.62603 205.70720 0.02859 88.20445 | s3 1 207.11700 85.18738 -55.80936 207.11700 104.14011 -88.71890 207.11700 85.18738 -55.80936 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16218 T 5377 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179399.000 | s2 205.89545 0.02890 88.34497 206.27199 0.02952 88.62603 205.89545 0.02890 88.34497 | s3 1 207.11699 91.50495 -66.77921 207.11700 104.14011 -88.71890 207.11700 85.18738 -55.80936 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16219 T 5377 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179410.000 | s2 206.08372 0.02921 88.48550 206.27199 0.02952 88.62603 206.08372 0.02921 88.48550 | s3 1 207.11700 97.82253 -77.74905 207.11700 104.14011 -88.71890 207.11700 85.18738 -55.80936 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16220 T 5378 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179421.000 | s2 206.27199 0.02952 88.62603 205.75200 0.02659 88.24551 206.27199 0.02952 88.62603 | s3 1 207.11700 104.14011 -88.71890 207.11700 122.35507 -120.36887 207.11700 104.14011 -88.71890 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16221 T 5378 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179432.000 | s2 206.09865 0.02854 88.49919 205.75200 0.02659 88.24551 206.09865 0.02854 88.49919 | s3 1 207.11699 110.21176 -99.26889 207.11700 122.35507 -120.36887 207.11700 104.14011 -88.71890 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16222 T 5378 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179443.000 | s2 205.92532 0.02757 88.37235 205.75200 0.02659 88.24551 205.92532 0.02757 88.37235 | s3 1 207.11700 116.28342 -109.81888 207.11700 122.35507 -120.36887 207.11700 104.14011 -88.71890 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16223 T 5379 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179454.000 | s2 205.75200 0.02659 88.24551 205.65300 0.24626 88.13755 205.75200 0.02659 88.24551 | s3 1 207.11700 122.35507 -120.36887 207.11700 139.83223 -150.75926 207.11700 122.35507 -120.36887 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16224 T 5379 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179465.000 | s2 205.71899 0.09981 88.20952 205.65300 0.24626 88.13755 205.71899 0.09981 88.20952 | s3 1 207.11699 128.18079 -130.49899 207.11700 139.83223 -150.75926 207.11700 122.35507 -120.36887 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16225 T 5379 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179476.000 | s2 205.68600 0.17304 88.17354 205.65300 0.24626 88.13755 205.68600 0.17304 88.17354 | s3 1 207.11700 134.00652 -140.62914 207.11700 139.83223 -150.75926 207.11700 122.35507 -120.36887 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16226 T 5380 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179487.000 | s2 205.65300 0.24626 88.13755 205.68001 0.08178 88.28903 205.65300 0.24626 88.13755 | s3 1 207.11700 139.83223 -150.75926 207.11700 151.76012 -171.51430 207.11700 139.83223 -150.75926 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16227 T 5380 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179498.000 | s2 205.66199 0.19143 88.18804 205.68001 0.08178 88.28903 205.66199 0.19143 88.18804 | s3 1 207.11699 143.80820 -157.67761 207.11700 151.76012 -171.51430 207.11700 139.83223 -150.75926 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16228 T 5380 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179509.000 | s2 205.67101 0.13660 88.23854 205.68001 0.08178 88.28903 205.67101 0.13660 88.23854 | s3 1 207.11700 147.78415 -164.59595 207.11700 151.76012 -171.51430 207.11700 139.83223 -150.75926 1 | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16229 T 5381 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179520.000 | s2 205.68001 0.08178 88.28903 206.07033 0.25164 88.50457 205.68001 0.08178 88.28903 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16230 T 5381 j 1 K 3 n 0 a 0.333333 dt 0.011000 hud 179531.000 | s2 205.81010 0.13840 88.36088 206.07033 0.25164 88.50457 205.81010 0.13840 88.36088 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16231 T 5381 j 2 K 3 n 0 a 0.666667 dt 0.011000 hud 179542.000 | s2 205.94022 0.19502 88.43272 206.07033 0.25164 88.50457 205.94022 0.19502 88.43272 | s3 0 - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+            'F 16252 T 5382 j 0 K 3 n 1 a 0.000000 dt 0.011000 hud 179553.000 | s2 - - - - - - - - - | s3 - - - - - - - - - - - | s1 - - - - - | s4 - - - - - - | tw 0',
+        ],
+        [
+            'command line z:\\home\\caden\\projects\\stalkergameengine\\run\\bin\\simtick18.exe -nointro -dbg -start server(bench1/single/alife/load) client(localhost) -det_mode -det_tag s4d_probe15 -det_interval 60 -det_checkpoints 3 -det_passes 100,200,320 -det_lua_streams -det_counters -det_synth_k 3 -sim_4d_mask 15 -det_synth_tw -det_synth_walk -det_synth_tracer',
+            '* det_synth: k 3 wallclock 0 tw 1 break 0 mask 15',
+            '* det_synth: K 3, witness z:/home/caden/projects/stalkergameengine/run\\appdata\\logs\\synth_s4d_probe15.txt',
+            '* det_rng_state cp1: Random=-1195896386 Random32=0 alife=302455169 crt_next=6334 frame=4982 time_ms=55803 tick=1632',
+            '* det_rng_state cp2: Random=-1324912062 Random32=0 alife=302455169 crt_next=26500 frame=10091 time_ms=112002 tick=3335',
+            '* det_rng_state cp3: Random=-2079694359 Random32=0 alife=302455169 crt_next=19169 frame=16229 time_ms=179520 tick=5381',
+            '* det_lua_state cp3: 920508979',
+            '* eperf dump: checkpoint 3 written, 30462 objects',
+            '* Log file has been saved successfully!',
+            '- Disconnect',
+            '[TutorialMonitor] Ended tutorial state tutorial_campfire_extinguish at 179553',
+        ],
+        'b62958c7f9522dcc4c95b81a298c5df570cb305e0b1cf11974e449bdaa1c847d', '7ecacd8f7fc16e2bbca945a11ba5e6945dac6be4fa7321a0238d25266807f8c3'),
+}
+for tag_, (wl_, xl_, wsha_, xsha_) in REAL.items():   # the literal above is the real bytes, unedited
+    assert hashlib.sha256(("\n".join(wl_) + "\n").encode()).hexdigest() == wsha_, tag_
+    assert hashlib.sha256(("\r\n".join(xl_) + "\r\n").encode()).hexdigest() == xsha_, tag_
+TD = os.path.join(ST, "teardown"); os.makedirs(TD)
+s_ = filled({}); assert s_.count("TEARDOWN_MAX = 2 ") == 1
+SCN = os.path.join(ST, "scorer_filled_noteardown.py")   # mutation: the OLD rule (teardown drop disabled, max 2 -> 0)
+open(SCN, "w").write(s_.replace("TEARDOWN_MAX = 2 ", "TEARDOWN_MAX = 0 "))
+DRV = os.path.join(ST, "teardown_pattern.py")   # runs the scorer copy's pattern_errors on one fixture run folder
+open(DRV, "w").write('''import importlib.util, json, re, sys
+sc, root, tag, spec = sys.argv[1], sys.argv[2], sys.argv[3], json.loads(sys.argv[4])
+sp = importlib.util.spec_from_file_location("sc", sc); M = importlib.util.module_from_spec(sp); sp.loader.exec_module(M)
+r = M.Run(root, tag, spec)
+try:
+    r.wit()
+    print("dropped %d" % r.td)
+    errs = M.pattern_errors(r)
+except M.Missing as m:
+    if r._wit is None:
+        print("dropped %s" % r.td)
+    print("MISSING %s" % m); sys.exit(2)
+# the fixture holds only the last 30 lines: cp1 and cp2 are absent from it by construction (the cut, not the rule)
+cut = [e for e in errs if re.match(r"^cp[12] frame [0-9]+ tick [0-9]+: witness line absent$", e)]
+for e in errs:
+    print("%s %s" % ("CUT" if e in cut else "ERR", e))
+sys.exit(1 if len(errs) > len(cut) else 0)
+''')
+
+def td_folder(name, tag, wit_fn=None, log_fn=None):
+    wl, xl = list(REAL[tag][0]), list(REAL[tag][1])
+    if wit_fn:
+        wit_fn(wl)
+    if log_fn:
+        log_fn(xl)
+    d = os.path.join(TD, name, "det_" + tag); os.makedirs(d)
+    write(os.path.join(d, "synth_%s.txt" % tag), wl, False)     # LF, as the real witness
+    write(os.path.join(d, "xray.log"), xl, True)                # CRLF, as the real engine log
+    if not wit_fn and not log_fn:
+        assert hashlib.sha256(open(os.path.join(d, "synth_%s.txt" % tag), "rb").read()).hexdigest() == REAL[tag][2]
+        assert hashlib.sha256(open(os.path.join(d, "xray.log"), "rb").read()).hexdigest() == REAL[tag][3]
+    return os.path.join(TD, name)
+
+def td_case(name, tag, want_code, must=(), mustnot=(), wit_fn=None, log_fn=None, scorer=SCF):
+    td_folder(name, tag, wit_fn, log_fn)
+    p = subprocess.run([sys.executable, "-I", DRV, scorer, os.path.join(TD, name), tag, json.dumps(TD_SPEC[tag])],
+                       capture_output=True, text=True)
+    txt = p.stdout + p.stderr
+    open(os.path.join(TD, name, "pattern.txt"), "w").write(txt)
+    ok = p.returncode == want_code and all(s in txt for s in must) and not any(s in txt for s in mustnot)
+    results.append((name, ok))
+    print("%-4s %-22s exit %d (want %d) %s" % ("ok" if ok else "BAD", name, p.returncode, want_code,
+          " | ".join(l for l in txt.split("\n") if l.startswith(("dropped", "ERR", "MISSING")))[:300]))
+    if not ok:
+        print("     " + "\n     ".join(txt.split("\n")))
+
+TDL = "teardown witness lines dropped (trailing no-actor lines after cp3, at most 2): "
+def td_no_actor(l, F):    # the real teardown line's columns with frame F
+    t = l.split(); t[1] = str(F); return " ".join(t)
+def td_three(wl):         # (b) three trailing no-actor lines after cp3: one more than TEARDOWN_MAX
+    wl += [td_no_actor(wl[-1], 16271), td_no_actor(wl[-1], 16272)]
+def td_middle(wl):        # (c) the no-actor line in the middle, before the cp3 line: not trailing
+    wl.insert(10, wl.pop())
+def td_at_cp3(wl):        # (c') a trailing no-actor line whose frame is at cp3 (16247), not after it
+    wl[-1] = td_no_actor(wl[-1], 16247)
+def td_actor(wl):         # (d) the trailing line with a frame jump but WITH actor columns (those of F 16249)
+    t, a = wl[-1].split(), wl[-2].split(); t[18:27] = a[18:27]; wl[-1] = " ".join(t)
+def td_nocp3(xl):         # no cp3 line in the engine log: nothing dropped
+    xl[:] = [l for l in xl if not l.startswith("* det_rng_state cp3:")]
+td_case("td_real_probe", "s4d_probe", 0, must=("dropped 1",), mustnot=("ERR", "follows"))
+td_case("td_real_probe15", "s4d_probe15", 0, must=("dropped 1",), mustnot=("ERR", "follows"))
+td_case("td_mut_old_rule", "s4d_probe", 1, must=("dropped 0", "ERR F 16270 follows F 16249", "> TEARDOWN_MAX 0: none dropped"), scorer=SCN)
+td_case("td_mut_old_rule15", "s4d_probe15", 1, must=("dropped 0", "ERR F 16252 follows F 16231"), scorer=SCN)
+td_case("td_three_trailing", "s4d_probe", 1, wit_fn=td_three, must=("dropped 0", "ERR F 16270 follows F 16249",
+        "ERR 3 trailing no-actor lines after cp3 frame 16247 (F 16270..16272) > TEARDOWN_MAX 2: none dropped"))
+td_case("td_middle", "s4d_probe", 1, wit_fn=td_middle, must=("dropped 0", "ERR F 16270 follows F 16230", "ERR F 16231 follows F 16270"))
+td_case("td_trailing_at_cp3", "s4d_probe", 1, wit_fn=td_at_cp3, must=("dropped 0", "ERR F 16247 follows F 16249"))
+td_case("td_jump_with_actor", "s4d_probe", 1, wit_fn=td_actor, must=("dropped 0", "ERR F 16270 follows F 16249"))
+td_case("td_no_cp3", "s4d_probe", 2, log_fn=td_nocp3, must=("dropped 0", "MISSING no det_rng_state cp3 line"))
+# the scorer prints the dropped count itself in score mode (the synthetic good set has no teardown line: 0 per run)
+run_score("good_teardown_count", GOOD, {}, 0, must=(TDL + "s4p_off2a 0, s4p_off2b 0, ",))
+
 n_ok = sum(1 for _, ok in results if ok)
 print("S4D2 SELFTEST: %s (%d/%d)" % ("PASS" if n_ok == len(results) else "FAIL", n_ok, len(results)))
 PYEOF

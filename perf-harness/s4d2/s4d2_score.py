@@ -67,6 +67,9 @@ PWC_MIN_L = 30            # PWC: evidence floor of form-L lines in the wallclock
 F5_DIFF_MAX = 0.5         # probe: share of render-only recalcs that are byte-different above which the series stops
 NPC_MIN_SHARE = 0.5       # probe: pn present on at least half of the lines
 CLUSTERS_MAX = 2          # probe: more ld clusters per group than this stops the series (the record is not the placement)
+TEARDOWN_MAX = 2          # trailing no-actor witness lines after cp3 dropped per run (the quit's teardown frame, not a
+                          # simulated frame): observed 1 per boot on 2 of 2 real boots (out/det_s4d_probe, det_s4d_probe15,
+                          # build 1, 2026-11-28) -> 2x margin. More than this: nothing dropped, the existing rules read them.
 STOCK_EXE = "stance14.exe"
 NEW_EXE = "simtick19.exe"      # build 2 (name proposed; prereg 1.2)
 B1_EXE = "simtick18.exe"       # build 1 (s4d1's exe; prereg 1.2)
@@ -349,6 +352,21 @@ def parse_w(line, layout):
     return r
 
 
+def teardown_split(recs, f3):
+    """(kept, dropped, note): the trailing block of lines after the cp3 frame f3 with no actor (s2 all dashes) is the
+    quit's teardown, not a simulated frame; dropped when it has 1..TEARDOWN_MAX lines. f3 None: nothing dropped."""
+    if f3 is None:
+        return recs, 0, None
+    i = len(recs)
+    while i > 0 and recs[i - 1].F > f3 and recs[i - 1].s2d is None:
+        i -= 1
+    nb = len(recs) - i
+    if nb > TEARDOWN_MAX:
+        return recs, 0, "%d trailing no-actor lines after cp3 frame %d (F %d..%d) > TEARDOWN_MAX %d: none dropped" % (
+            nb, f3, recs[i].F, recs[-1].F, TEARDOWN_MAX)
+    return recs[:i], nb, None
+
+
 # ---------------------------------------------------------------- engine log
 RNG_RE = re.compile(r"det_rng_state (\w+): Random=(-?\d+) Random32=(\d+) alife=(\d+) crt_next=(-?\d+) frame=(\d+) "
                     r"time_ms=(\d+)(?: tick=(\d+))?\s*$")
@@ -412,6 +430,7 @@ class Run:
         else:
             self.dir, self.rtag = d, tag
         self._log = self._wit = None
+        self.td, self.td_note = None, None   # teardown lines dropped from the witness, and why none were (wit())
 
     def p(self, pattern):
         if not os.path.isdir(self.dir):
@@ -435,6 +454,11 @@ class Run:
                     out.append(parse_w(l, layout))
                 except ValueError as e:
                     raise Missing("malformed witness %s line %d: %s" % (path, i + 1, e))
+            try:
+                c3 = self.log().rng.get("cp3")
+            except Missing:
+                c3 = None
+            out, self.td, self.td_note = teardown_split(out, c3[0] if c3 else None)
             if not out:
                 raise Missing("empty witness %s" % path)
             if layout == "pose" and len({q.ntok for q in out}) != 1:
@@ -605,6 +629,8 @@ def pattern_errors(run, ad=True):
             err.append(msg)
         else:
             err[5] = "... more"
+    if run.td_note:
+        e(run.td_note)
     prev, hud_tick, de = None, None, dt_exp(K)
     for r in recs:
         if r.K != K:
@@ -1214,7 +1240,13 @@ def score(root):
                 a, b, od, "IDENTICAL" if same else "DIFFER", C3(runs[a], runs[b])))
         except Missing as m:
             REP.append("online diff %s vs %s: %s" % (a, b, m))
+    REP.append(td_line(runs.values()))
     return V, REP
+
+
+def td_line(runs):
+    return "teardown witness lines dropped (trailing no-actor lines after cp3, at most %d): %s" % (TEARDOWN_MAX, ", ".join(
+        "%s %s" % (r.tag, "witness not read" if r._wit is None else r.td) for r in runs if r.spec["k"]))
 
 
 # ---------------------------------------------------------------- probe readings (mode=probe)
@@ -1331,6 +1363,7 @@ def probe_mode(root):
     out.append("CONST values to register:")
     for k_, v in vals.items():
         out.append('    "%s": %r,' % (k_, v))
+    out.append(td_line((r,)))
     return out, stop
 
 

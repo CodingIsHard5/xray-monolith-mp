@@ -818,7 +818,7 @@ Flags:
 
 **Result 2026-11-27 23:37 (third revision, with the item switch):** `S4D2 SELFTEST: PASS (76/76)`, folder
 s4d2/selftest-runs/20261127-233722-880626 (NOTES.md 7). Hashes at that run (not registered): s4d2_score.py
-76a1ab794ce98047..., s4d2_selftest.sh 4a53bd2d97016fb5.... (Second revision: 70/70.) The shared box checks have their
+76a1ab794ce98047..., s4d2_selftest.sh 4a53bd2d97016fb5.... (Second revision: 70/70.) **2026-11-28 04:16, after the teardown-line change (NOTES.md last section): `S4D2 SELFTEST: PASS (86/86)`, folder s4d2/selftest-runs/20261128-041630-563632; hashes now s4d2_score.py fa79a3f31102c8f2..., s4d2_selftest.sh 8e7e33a93d3e1713.... The scorer drops at most TEARDOWN_MAX = 2 trailing no-actor witness lines after the cp3 frame and prints the count (bound: 1 observed on 2 of 2 real boots of build 1; exactly 2x, flagged).** The shared box checks have their
 own self-test: common/box_preflight_selftest.sh, v2 after the second review `BOX SELFTEST: PASS (143/143)` (2026-11-28
 00:15), folder common/selftest-runs/20261128-001517-1467978. This self-test re-run 2026-11-28 00:19: `S4D2 SELFTEST:
 PASS (76/76)`, folder s4d2/selftest-runs/20261128-001900-1524685 (scorer and self-test unchanged).

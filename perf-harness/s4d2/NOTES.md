@@ -243,3 +243,22 @@ the exe pins kept). Same R-1 change as s4d1_run.sh (s4d1/NOTES.md 9.9), plus the
   gives 180 and passes, 9240 is refused by name (181 min); series preflight refuses the four REG_ME_ values by name;
   renew_call and release_mine alone against a fake claim tool: our id rc 0, a foreign id rc 3, no id rc 3, a refusal
   rc 1, and in every case only our id released. Not tested: the wall cap firing, the real claim tool, any real mode.
+
+## Teardown witness line (2026-11-28 04:16, scorer change after build 1's probe)
+- **What happened:** build 1's probe (s4d1, 2 boots, 03:56-04:08) was stopped by the pattern rule: "F 16270 follows
+  F 16249" (probe15: F 16252 after F 16231). The engine writes ONE witness line during teardown, after "- Disconnect":
+  cp3 was at F 16247, two normal lines follow, then one line 21 frames later with no actor (s2 all dashes). The
+  fixtures never had this real tail. This scorer has the same pattern rule and reads the same witness, so it would have
+  stopped build 2's probe the same way.
+- **Change (both scorers, same code):** TEARDOWN_MAX = 2. The trailing block of witness lines that are after the cp3
+  frame AND have no actor is dropped before any rule reads it, when it has 1 or 2 lines; the count per run is printed.
+  More than 2, no cp3 line, or a no-actor line that is not trailing: nothing dropped, the old rules read them.
+  Bound: observed 1 per boot on 2 of 2 real boots; 2 = exactly 2x (flagged: not above 2x).
+- **Self-test:** fixture = the real last 30 witness lines + matching log lines of both boots (sha256 checked in the
+  test). Cases: real tail passes with 1 dropped; the old rule (TEARDOWN_MAX 0 copy) fails on it with "follows"; 3
+  trailing lines, a no-actor line before cp3 or at cp3, a jump with actor columns, and no cp3 all fail.
+  Result read by me: S4D2 SELFTEST: PASS (86/86), folder selftest-runs/20261128-041630-563632.
+  No existing case was changed. Hashes now (not registered): s4d2_score.py fa79a3f31102c8f2..., s4d2_selftest.sh
+  8e7e33a93d3e1713....
+- **Not covered:** a contiguous no-actor line at or before cp3 passes as before (no new rule). Build 2's own probe has
+  not run; whether its teardown also writes exactly one line is build 1's observation carried over, checked there.
