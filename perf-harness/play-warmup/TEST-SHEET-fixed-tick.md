@@ -22,5 +22,6 @@
 ## Tell me
 - Which feels best: 30, 60 or off? Would you play at 30?
 - Anything that looked wrong, with which setting it was on.
+- If the launcher says "an EnginePerf benchmark holds the machine", one of our tests is using it; try again in a few minutes. (New 2026-11-27: it now also waits when our test holds a shared slot, not only the whole machine.)
 - If the held weapon's shadow jumps or flickers in sunlight (tick on), that's a suspected bug we are looking at; tell us if you see it.
 - Known and not fixed yet, no need to report: your own body and shadow, tracers, particles and lights on moving things, and NPC animation all still step at the tick rate.

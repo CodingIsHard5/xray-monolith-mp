@@ -17,7 +17,7 @@ RES="${SIMTICK_RES:-1920x1080}"; HZ="${SIMTICK_HZ:-30}"; T="$HOME/.claude/overse
 TEST="${SIMTICK_SELFTEST:-0}"   # 1 = EnginePerf's own headless boot test: no pop-up, and its own machine claim does not block the start
 die() { echo "NOT STARTED: $*"; [ "$TEST" = 1 ] || { command -v notify-send >/dev/null && notify-send "Fixed-tick test not started" "$*"; }; exit 2; }
 [ "$(sha256sum "$RUN/bin/$EXE" 2>/dev/null | cut -d' ' -f1)" = "$SHA" ] || die "$EXE is not the tested build"
-[ "$TEST" != 1 ] && "$T/quiet-required.sh" check 2>/dev/null | grep -q '^HELD:.* engineperf ' && die "an EnginePerf benchmark holds the machine; try again in a few minutes"
+[ "$TEST" != 1 ] && "$T/quiet-required.sh" check 2>/dev/null | grep -Eq '^(HELD|SLOT[0-9]+):.* engineperf ' && die "an EnginePerf benchmark holds the machine; try again in a few minutes"   # 2026-11-27: any slot, not only the main claim (a shared test claim sits in a SLOTn line)
 pgrep -f "$RUN/bin/|${RUN//\//\\\\}\\\\bin" >/dev/null && die "an engine from this run tree is already running"
 [ -e "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null && die "the test is already running"
 # Everything the game can WRITE must be a private copy (Overseer 2026-11-26). The engine writes only below run/:
