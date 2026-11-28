@@ -38,6 +38,9 @@
 #include "eatable_item.h"          // GammaVR backpack B2b
 #include "ai_space.h"              // GammaVR backpack B3b2 (the test spawn)
 #include "alife_simulator.h"
+#include "alife_object_registry.h" // GammaVR backpack B3c (the server record of an ammo box)
+#include "xrServer.h"                // GammaVR backpack B3c (a round made as create_ammo makes one)
+#include "xrServer_Objects_ALife_Items.h"
 #include "ai_object_location.h"
 #include "xrServer_Objects_ALife.h"
 #include "PhysicsShellHolder.h"
@@ -1222,8 +1225,14 @@ int vr_bpt_near(CActor* A, const Fvector& p, float reach, LPSTR sect, Fmatrix& x
 	for (CObject* O : A->feel_touch)
 	{
 		CInventoryItem* it = smart_cast<CInventoryItem*>(O);
-		if (!it || O->H_Parent() || !O->getVisible() || O->getDestroy() || !O->Visual() || !it->CanTake())
+		if (!it || O->H_Parent() || O->getDestroy() || !O->Visual() || !it->CanTake())
 			continue;
+		if (!O->getVisible()) // B3c: a lone round's own (box) model is hidden; it is still a thing at the hand
+		{
+			CWeaponAmmo* am = smart_cast<CWeaponAmmo*>(O);
+			if (!am || am->m_boxCurr != 1 || am->m_boxSize < 2)
+				continue;
+		}
 		const Fbox& bb = O->Visual()->getVisData().box;
 		Fmatrix ix;
 		ix.invert(O->XFORM());
@@ -1272,6 +1281,149 @@ bool vr_bpt_take(CActor* A, int id) // the game's own pick-up (the call behind t
 	Game().SendPickUpEvent(A->ID(), u16(id));
 	return true;
 }
+
+// ---- GammaVR backpack B3c (SPIKE_PLAN Amendment 41 notes 34-36): rounds out of a lying box one at a time ----
+// A round taken out of a box is a new ammo object of the box's kind with a count of one, whose model is the round model of
+// its calibre class (gamedata/meshes/gvr/gvr_round_*.ogf, with its own small physics box), set on its server record: the
+// game's save keeps it. An object with a count of one that still has a box model (the last round of a box, a spawned
+// lone round) keeps its physics; its box model is hidden and the hand code draws a round in its place.
+CSE_Abstract* CALifeSimulator__spawn_ammo(CALifeSimulator* self, LPCSTR section, const Fvector& position, u32 level_vertex_id,
+	GameGraph::_GRAPH_ID game_vertex_id, ALife::_OBJECT_ID id_parent, int ammo_to_spawn); // alife_simulator_script.cpp (the script call create_ammo)
+struct vr_rd_obj // as in player_hud.cpp
+{
+	int id, n, size, vis, rv; // vis: its own model is visible; rv: its own model is a round model
+	char sect[64];
+	char model[128];
+	Fmatrix xf;
+	Fvector bc, ext;
+};
+static bool vr_bpt_round_vis(CObject* O) { return O && strstr(O->cNameVisual().c_str(), "gvr_round_") != nullptr; }
+static CWeaponAmmo* vr_bpt_ammo_obj(int id)
+{
+	CObject* O = id >= 0 ? Level().Objects.net_Find(u16(id)) : NULL;
+	return (O && !O->getDestroy()) ? smart_cast<CWeaponAmmo*>(O) : nullptr;
+}
+// the count and the box size of an ammo object, and whether its own model is a round; false when it is not an ammo
+// object (or does not exist yet)
+bool vr_bpt_ammo_n(int id, int& n, int& size, bool& round_vis)
+{
+	CWeaponAmmo* a = vr_bpt_ammo_obj(id);
+	if (!a)
+		return false;
+	n = int(a->m_boxCurr);
+	size = int(a->m_boxSize);
+	round_vis = vr_bpt_round_vis(a);
+	return true;
+}
+static void vr_bpt_ammo_set(CWeaponAmmo* a, int n) // the object's count and its server record's (the save reads the record)
+{
+	a->m_boxCurr = u16(n);
+	if (ai().get_alife())
+		if (CSE_ALifeItemAmmo* sa = smart_cast<CSE_ALifeItemAmmo*>(ai().alife().objects().object(a->ID(), true)))
+			sa->a_elapsed = u16(n);
+}
+// one round out of the box: its count falls by one and a new object of its kind with a count of one and the model given
+// is made, the actor's (as the script call create_ammo makes one for an online parent). The new id or -1; n0 = the box's
+// count before.
+int vr_bpt_round_out(CActor* A, int id, LPCSTR model, int& n0)
+{
+	CWeaponAmmo* a = vr_bpt_ammo_obj(id);
+	n0 = a ? int(a->m_boxCurr) : 0;
+	if (!A || !a || a->H_Parent() || a->m_boxCurr < 2 || a->m_boxSize < 2 || !ai().get_alife())
+		return -1;
+	CALifeSimulator& sim = const_cast<CALifeSimulator&>(ai().alife());
+	NET_Packet packet;
+	packet.w_begin(M_SPAWN);
+	packet.w_stringZ(a->cNameSect().c_str());
+	CSE_Abstract* item = sim.spawn_item(a->cNameSect().c_str(), A->Position(), A->ai_location().level_vertex_id(), A->ai_location().game_vertex_id(), A->ID(), false);
+	CSE_ALifeItemAmmo* ammo = item ? smart_cast<CSE_ALifeItemAmmo*>(item) : nullptr;
+	if (!ammo)
+	{
+		if (item)
+		{
+			sim.server().FreeID(item->ID, 0);
+			F_entity_Destroy(item);
+		}
+		return -1;
+	}
+	ammo->a_elapsed = 1;
+	if (model && model[0] && item->visual())
+		item->visual()->set_visual(model);
+	item->Spawn_Write(packet, FALSE);
+	sim.server().FreeID(item->ID, 0);
+	F_entity_Destroy(item);
+	ClientID clientID;
+	clientID.set(0xffff);
+	u16 dummy;
+	packet.r_begin(dummy);
+	CSE_Abstract* e = sim.server().Process_spawn(packet, clientID);
+	if (!e)
+		return -1;
+	vr_bpt_ammo_set(a, n0 - 1);
+	return int(e->ID);
+}
+// the round (the actor's, count 1) back into the lying box of its kind (an object with a box model): 1 done (the round is
+// destroyed), 0 the box is full, -1 not possible. n0 = the box's count before.
+int vr_bpt_round_back(CActor* A, int rid, int bid, int& n0)
+{
+	CWeaponAmmo* r = vr_bpt_ammo_obj(rid);
+	CWeaponAmmo* b = vr_bpt_ammo_obj(bid);
+	n0 = b ? int(b->m_boxCurr) : 0;
+	if (!A || !r || !b || r == b || b->H_Parent() || !r->H_Parent() || r->H_Parent()->ID() != A->ID() || r->m_boxCurr != 1 || vr_bpt_round_vis(b) ||
+		xr_strcmp(r->cNameSect().c_str(), b->cNameSect().c_str()))
+		return -1;
+	if (b->m_boxCurr >= b->m_boxSize)
+		return 0;
+	vr_bpt_ammo_set(b, n0 + 1);
+	r->DestroyObject();
+	return 1;
+}
+// every free ammo object the actor's own pick-up sees (feel_touch), of a kind whose box holds more than one. With hide,
+// the box model of an object with a count of one is hidden, and any other's is shown again. Returns how many were written.
+int vr_bpt_ammo_list(CActor* A, vr_rd_obj* out, int cap, bool hide)
+{
+	int n = 0;
+	if (!A)
+		return 0;
+	for (CObject* O : A->feel_touch)
+	{
+		CWeaponAmmo* a = O ? smart_cast<CWeaponAmmo*>(O) : nullptr;
+		if (!a || O->H_Parent() || O->getDestroy() || !O->Visual() || a->m_boxSize < 2)
+			continue;
+		const bool rv = vr_bpt_round_vis(O);
+		if (hide)
+		{
+			const bool want = rv || a->m_boxCurr != 1;
+			if (want != !!O->getVisible())
+				O->setVisible(want ? TRUE : FALSE);
+		}
+		if (n >= cap)
+			continue;
+		vr_rd_obj& r = out[n++];
+		r.id = int(O->ID());
+		r.n = int(a->m_boxCurr);
+		r.size = int(a->m_boxSize);
+		r.vis = O->getVisible() ? 1 : 0;
+		r.rv = rv ? 1 : 0;
+		xr_strcpy(r.sect, O->cNameSect().c_str());
+		xr_strcpy(r.model, O->cNameVisual().c_str());
+		r.xf.set(O->XFORM());
+		const Fbox& bb = O->Visual()->getVisData().box;
+		bb.getcenter(r.bc);
+		r.ext.set(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z);
+	}
+	return n;
+}
+int vr_bpt_actor_rounds(CActor* A, LPCSTR sect) // every round of that kind the actor owns
+{
+	int n = 0;
+	if (A && A->m_inventory)
+		for (PIItem it : A->inventory().m_all)
+			if (CWeaponAmmo* am = it ? smart_cast<CWeaponAmmo*>(it) : nullptr)
+				if (!xr_strcmp(am->cNameSect().c_str(), sect))
+					n += int(am->m_boxCurr);
+	return n;
+}
 int vr_bpt_use(CActor* A, int id) // the game's own use: -1 not ours any more, 0 no script gate, 1 gate false (FDDA took it), 2 gate true and Eat called
 {
 	PIItem it = vr_bpt_owned(A, id);
@@ -1301,14 +1453,17 @@ void vr_bpx_probe_step(CActor* A, u32 frame, bool hand_valid, const Fvector& han
 		static bool sp = false;
 		static u32 sf = 0;
 		static string128 ss = "";
+		static int sn = 0;
 		if (!sp)
 		{
 			sp = true;
 			if (LPCSTR q = strstr(Core.Params, "-vr_bpx_spawn "))
 				if (sscanf(q + 14, "%u %127s", &sf, ss) != 2)
 					sf = 0;
+			if (LPCSTR q = strstr(Core.Params, "-vr_bpx_spawn_n ")) // B3c (TEST ONLY): the count of a spawned ammo box
+				sscanf(q + 16, "%d", &sn);
 			if (sf)
-				Msg("* [vr15] B3b2 spawn (TEST ONLY): '%s' at frame %u", ss, sf);
+				Msg("* [vr15] B3b2 spawn (TEST ONLY): '%s' at frame %u, count %d (0 = full)", ss, sf, sn);
 		}
 		if (sf && frame == sf && A)
 		{
@@ -1316,7 +1471,9 @@ void vr_bpx_probe_step(CActor* A, u32 frame, bool hand_valid, const Fvector& han
 				Msg("* [vr15] frame %u spawn: NOT done (%s)", frame, !hand_valid ? "no valid hand pose" : !ai().get_alife() ? "no simulator" : "no such section");
 			else
 			{
-				CSE_Abstract* e = const_cast<CALifeSimulator&>(ai().alife()).spawn_item(ss, hand, A->ai_location().level_vertex_id(), A->ai_location().game_vertex_id(), ALife::_OBJECT_ID(-1));
+				CSE_Abstract* e = sn > 0 && pSettings->line_exist(ss, "box_size") && pSettings->r_s32(ss, "box_size") >= sn
+					? CALifeSimulator__spawn_ammo(&const_cast<CALifeSimulator&>(ai().alife()), ss, hand, A->ai_location().level_vertex_id(), A->ai_location().game_vertex_id(), ALife::_OBJECT_ID(-1), sn)
+					: const_cast<CALifeSimulator&>(ai().alife()).spawn_item(ss, hand, A->ai_location().level_vertex_id(), A->ai_location().game_vertex_id(), ALife::_OBJECT_ID(-1));
 				Msg("* [vr15] frame %u spawn: '%s' id %d at %.4f %.4f %.4f (carried before: %d)", frame, ss, e ? int(e->ID) : -1, hand.x, hand.y, hand.z,
 					A->inventory().GetAny(ss) ? 1 : 0);
 			}

@@ -4451,7 +4451,66 @@ struct vr_bph_state
 	IKinematics* fh_K;
 	bool fh_failed;
 	Fmatrix fh_xf;
+	bool rd_off;        // B3c: -vr_rd_off (TEST ONLY): B3b2 exactly (no round out of a box, no round drawn)
+	bool fh_round;      // B3c: the free hand item is a round (an ammo object with a count of one, of a kind whose box holds more)
+	Fvector fh_doff;    // B3c: where its drawn model sits in the object's frame (a round drawn for an object that has a box model)
+	Fmatrix fh_dxf;
 };
+// B3c (Amendment 41 notes 34-36): rounds out of a lying box one at a time. ActorInput.cpp holds the game-side calls.
+struct vr_rd_obj // as in ActorInput.cpp
+{
+	int id, n, size, vis, rv; // vis: its own model is visible; rv: its own model is a round model
+	char sect[64];
+	char model[128];
+	Fmatrix xf;
+	Fvector bc, ext;
+};
+bool vr_bpt_ammo_n(int id, int& n, int& size, bool& round_vis);
+int vr_bpt_round_out(CActor* A, int id, LPCSTR model, int& n0);
+int vr_bpt_round_back(CActor* A, int rid, int bid, int& n0);
+int vr_bpt_ammo_list(CActor* A, vr_rd_obj* out, int cap, bool hide);
+int vr_bpt_actor_rounds(CActor* A, LPCSTR sect);
+static const int VR_RD_CAP = 24;
+static const float VR_RD_BACK = 0.10f;                                  // put-back reach: the hand this near the box's model box
+static const char* const VR_RD_NAME[3] = {"pistol", "rifle", "shell"};  // the calibre classes and their script-made models
+static const float VR_RD_RAD[3] = {0.00495f, 0.0050f, 0.0111f};         // tools/bl_round.py
+static const float VR_RD_LEN[3] = {0.0297f, 0.0570f, 0.0620f};
+struct vr_rd_state
+{
+	vr_rd_obj list[VR_RD_CAP]; // the free ammo objects the actor's pick-up sees, this VR frame
+	int n;
+	Fmatrix xf[VR_RD_CAP];
+	IRenderVisual* model[3];   // a round drawn in the place of a box model, per class
+	IKinematics* K[3];
+	bool failed[3];
+};
+static vr_rd_state s_vr_rd;
+static void vr_rd_model_name(int cls, LPSTR out) { xr_sprintf(out, 128, "gvr\\gvr_round_%s", VR_RD_NAME[cls]); }
+// the calibre class of an ammo kind: gvr_grips.ltx [vr_round_class], "<part of the section name> = pistol|rifle|shell",
+// the first line that fits; none: rifle, said once in the log
+static int vr_rd_class(LPCSTR sect)
+{
+	static xr_vector<std::pair<shared_str, int>> cache;
+	for (const auto& c : cache)
+		if (!xr_strcmp(c.first.c_str(), sect))
+			return c.second;
+	int cls = -1;
+	const vr_grip_cfg& C = vr_grip_config();
+	if (C.ini && C.ini->section_exist("vr_round_class"))
+	{
+		CInifile::Sect& S = C.ini->r_section("vr_round_class");
+		for (auto it = S.Data.begin(); it != S.Data.end() && cls < 0; ++it)
+			if (it->first.size() && strstr(sect, it->first.c_str()))
+				cls = !xr_strcmp(it->second.c_str(), "pistol") ? 0 : !xr_strcmp(it->second.c_str(), "shell") ? 2 : 1;
+	}
+	if (cls < 0)
+	{
+		cls = 1;
+		Msg("* [vr21] no class for '%s' in gvr_grips.ltx [vr_round_class]: rifle", sect);
+	}
+	cache.push_back(std::make_pair(shared_str(sect), cls));
+	return cls;
+}
 int vr_bpt_where(CActor* A, int id);                               // ActorInput.cpp (B3b2)
 bool vr_bpt_shape(int id, LPSTR vis, Fvector& bc, Fvector& ext);
 // B3b (Amendment 41 note 26): an item let go slowly just over a surface is set down on its base; a set-down or other
@@ -4506,6 +4565,8 @@ static void vr_bph_parse()
 	H.vel_off = !!strstr(Core.Params, "-vr_bp_vel_off");
 	H.set_off = !!strstr(Core.Params, "-vr_bp_set_off");
 	H.free_off = !!strstr(Core.Params, "-vr_bp_free_off");
+	H.rd_off = !!strstr(Core.Params, "-vr_rd_off") || H.free_off || H.set_off || H.out_off;
+	Msg("* [vr21] rounds out of a box one at a time: %s; put-back reach %.2f m", H.rd_off ? "OFF (-vr_rd_off or an older step's switch, TEST ONLY)" : "on", VR_RD_BACK);
 	Msg("* [vr20] the item in the hand is free of the bag: %s", H.free_off ? "OFF (-vr_bp_free_off, TEST ONLY)" : "on");
 	Msg("* [vr19] setting down on a surface and picking up by hand: %s; surface within %.2f m, hand slower than %.2f m/s", H.set_off ? "OFF (-vr_bp_set_off, TEST ONLY)" : "on",
 		VR_SET_SURF, VR_SET_SPEED);
@@ -4730,6 +4791,8 @@ static void vr_bph_fh_start(vr_bph_state& H, u32 frame, int id, LPCSTR sect, LPC
 	xr_strcpy(H.fh_vis, vis ? vis : "");
 	H.fh_bc = bc;
 	H.fh_ext = ext;
+	H.fh_round = false;
+	H.fh_doff.set(0.f, 0.f, 0.f);
 	if (H.fh_model && xr_strcmp(H.fh_model_name, H.fh_vis)) // another model than the last free item's
 	{
 		::Render->model_Delete(H.fh_model);
@@ -4762,8 +4825,40 @@ static bool vr_bph_pick_world(vr_bph_state& H, vr_bpi_state& B, const vr_input_i
 		Msg("* [vr19] frame %u pick up refused: a weapon is in the hand (slot %u); '%s' id %d stays", I.frame, u32(wslot), ws, wid);
 		return true;
 	}
+	// B3c: an ammo box lying in the world. Grip without the trigger: one round out of it. A lone round is picked up whole,
+	// always as a free hand item (never as the bag's box model).
+	int an = 0, asz = 0;
+	bool arv = false;
+	const bool ammo = !H.rd_off && vr_bpt_ammo_n(wid, an, asz, arv) && asz >= 2;
+	if (ammo && an >= 2 && I.trigger[I.gun ? 1 : 0] <= 0.5f)
+	{
+		const int cls = vr_rd_class(ws);
+		string128 mn;
+		vr_rd_model_name(cls, mn);
+		int n0 = 0;
+		const int rid = vr_bpt_round_out(A, wid, mn, n0);
+		if (rid < 0)
+		{
+			Msg("* [vr21] frame %u round out: NOT done for '%s' box id %d (%d rounds)", I.frame, ws, wid, n0);
+			return false;
+		}
+		Fvector rbc, rext;
+		rbc.set(0.f, 0.f, 0.f);
+		rext.set(2.f * VR_RD_RAD[cls], 2.f * VR_RD_RAD[cls], VR_RD_LEN[cls]);
+		Fmatrix wd = wx, rih; // the round at the hand, lying the way the box lies
+		wd.c.set(hand.c);
+		rih.invert(hand);
+		vr_bph_out_clear(H);
+		H.hand_local.mul_43(rih, wd);
+		vr_bph_fh_start(H, I.frame, rid, ws, mn, rbc, rext, false);
+		H.fh_round = true;
+		H.eatable = false;
+		Msg("* [vr21] frame %u round out: '%s' id %d from box id %d, box %d -> %d", I.frame, ws, rid, wid, n0, n0 - 1);
+		return true;
+	}
+	const bool lone = ammo && an == 1;
 	int wi = -1;
-	if (bag_ok)
+	if (bag_ok && !lone)
 		for (int i = 0; i < int(B.list.size()); ++i)
 			if (B.list[i].vis && !xr_strcmp(B.list[i].sect.c_str(), ws))
 				wi = i;
@@ -4797,7 +4892,16 @@ static bool vr_bph_pick_world(vr_bph_state& H, vr_bpi_state& B, const vr_input_i
 	else
 	{
 		H.hand_local.mul_43(wih, wx);
-		vr_bph_fh_start(H, I.frame, wid, ws, wv, wbc, wext, false);
+		if (lone && !arv) // its own model is a box: a round of its class is drawn, lying on the box's bottom
+		{
+			const int cls = vr_rd_class(ws);
+			vr_rd_model_name(cls, wv);
+			vr_bph_fh_start(H, I.frame, wid, ws, wv, wbc, wext, false);
+			H.fh_doff.set(wbc.x, wbc.y - 0.5f * wext.y + VR_RD_RAD[cls], wbc.z);
+		}
+		else
+			vr_bph_fh_start(H, I.frame, wid, ws, wv, wbc, wext, false);
+		H.fh_round = lone;
 	}
 	H.eatable = weat;
 	Msg("* [vr19] frame %u pick up: '%s' id %d", I.frame, ws, wid);
@@ -4873,19 +4977,63 @@ static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
 		vr_pose_matrix(I.grip[gun], t);
 		hand.mul_43(g_vr_track.track_to_world, t);
 	}
+	if (!H.rd_off) // ---- B3c: the ammo objects at the actor, and the rounds the actor owns of their kinds ----
+	{
+		vr_rd_state& S = s_vr_rd;
+		S.n = vr_bpt_ammo_list(A, S.list, VR_RD_CAP, true);
+		string64 kinds[8];
+		int nk = 0;
+		auto kind = [&](LPCSTR ks) {
+			for (int k = 0; k < nk; ++k)
+				if (!xr_strcmp(kinds[k], ks))
+					return;
+			if (nk < 8)
+				xr_strcpy(kinds[nk++], ks);
+		};
+		if (H.fh_id1 > 0)
+		{
+			int rn = 0, rsz = 0;
+			bool rrv = false;
+			if (vr_bpt_ammo_n(H.fh_id1 - 1, rn, rsz, rrv) && rsz >= 2)
+			{
+				Fmatrix hw;
+				hw.mul_43(hand, H.hand_local);
+				Fvector c;
+				hw.transform_tiny(c, H.fh_bc);
+				Msg("* [vr21s] frame %u ammo id %d sect '%s' count %d of %d where hand at %.4f %.4f %.4f", I.frame, H.fh_id1 - 1, H.fh_sect, rn, rsz, c.x, c.y, c.z);
+				kind(H.fh_sect);
+			}
+		}
+		for (int k = 0; k < S.n; ++k)
+		{
+			const vr_rd_obj& o = S.list[k];
+			Fvector c;
+			o.xf.transform_tiny(c, o.bc);
+			Msg("* [vr21s] frame %u ammo id %d sect '%s' count %d of %d where world at %.4f %.4f %.4f", I.frame, o.id, o.sect, o.n, o.size, c.x, c.y, c.z);
+			kind(o.sect);
+		}
+		for (int k = 0; k < nk; ++k)
+			Msg("* [vr21t] frame %u sect '%s' actor_rounds %d", I.frame, kinds[k], vr_bpt_actor_rounds(A, kinds[k]));
+	}
 	if (H.fh_id1 > 0) // ---- B3b2: the free hand item ----
 	{
 		const int id = H.fh_id1 - 1;
 		const int st = vr_bpt_where(A, id);
 		if (st == 1)
 			H.fh_seen = true;
-		if (st == 0 || (st == 2 && (H.fh_seen || I.frame > H.fh_frame + 10)))
+		if ((st == 0 || st == 2) && (H.fh_seen || I.frame > H.fh_frame + 10)) // B3c: a round just made is not there on its first frames
 		{
 			Msg("* [vr20] frame %u gone: '%s' id %d is no longer the actor's; the hand is empty", I.frame, H.fh_sect, id);
 			vr_bph_fh_end(H);
 			return false;
 		}
 		Msg("* [vr20s] frame %u id %d sect '%s' owned %d", I.frame, id, H.fh_sect, st == 1 ? 1 : 0);
+		{
+			int rn = 0, rsz = 0;
+			bool rrv = false;
+			if (vr_bpt_ammo_n(id, rn, rsz, rrv))
+				H.fh_round = !H.rd_off && rn == 1 && rsz >= 2;
+		}
 		if (!I.grip[gun].valid)
 			return grab;
 		Fmatrix w;
@@ -4945,7 +5093,47 @@ static bool vr_bph_update(const vr_input_info& I, CActor* A, bool grab)
 				wi < 0 ? "no model in this bag's list; shown when the bag is next taken" : B.list[wi].count <= 0 ? "it stays where the hand left it" : "it joins its stack");
 		}
 		else
-			vr_bph_let_go(H, I, A, H.fh_sect, id, w, H.fh_bc, H.fh_ext);
+		{
+			bool back = false;
+			if (H.fh_round && !H.rd_off && st == 1) // B3c: a round let go at a lying box of its kind goes back into it
+			{
+				const vr_rd_state& S = s_vr_rd;
+				int bk = -1;
+				float bd = VR_RD_BACK;
+				for (int k = 0; k < S.n; ++k)
+				{
+					const vr_rd_obj& o = S.list[k];
+					if (o.rv || o.id == id || xr_strcmp(o.sect, H.fh_sect))
+						continue;
+					Fmatrix io;
+					io.invert(o.xf);
+					Fvector q;
+					io.transform_tiny(q, hand.c);
+					const float dx = _max(0.f, _abs(q.x - o.bc.x) - 0.5f * o.ext.x), dy = _max(0.f, _abs(q.y - o.bc.y) - 0.5f * o.ext.y),
+								dz = _max(0.f, _abs(q.z - o.bc.z) - 0.5f * o.ext.z);
+					const float d = _sqrt(dx * dx + dy * dy + dz * dz);
+					if (d <= bd)
+					{
+						bd = d;
+						bk = k;
+					}
+				}
+				if (bk >= 0)
+				{
+					int n0 = 0;
+					const int r = vr_bpt_round_back(A, id, S.list[bk].id, n0);
+					if (r == 1)
+					{
+						Msg("* [vr21] frame %u round back: '%s' id %d into box id %d, box %d -> %d", I.frame, H.fh_sect, id, S.list[bk].id, n0, n0 + 1);
+						back = true;
+					}
+					else if (r == 0)
+						Msg("* [vr21] frame %u round back refused: box id %d is full (%d)", I.frame, S.list[bk].id, n0);
+				}
+			}
+			if (!back)
+				vr_bph_let_go(H, I, A, H.fh_sect, id, w, H.fh_bc, H.fh_ext);
+		}
 		vr_bph_fh_end(H);
 		return false;
 	}
@@ -5175,15 +5363,77 @@ static void vr_bph_fh_draw(IDSGraphManager* DM)
 	vr_pose_matrix(G.runtime, t);
 	hand_xf.mul_43(g_vr_track.track_to_world, t);
 	H.fh_xf.mul_43(hand_xf, H.hand_local);
+	H.fh_dxf = H.fh_xf;
+	{
+		Fvector t;
+		H.fh_xf.transform_dir(t, H.fh_doff); // B3c: zero but for a round drawn for an object with a box model
+		H.fh_dxf.c.add(t);
+	}
 	if (H.fh_K)
 	{
 		H.fh_K->CalculateBones_Invalidate();
 		H.fh_K->CalculateBones(TRUE);
 	}
-	DM->add_Dynamic(H.fh_model, &H.fh_xf);
+	DM->add_Dynamic(H.fh_model, &H.fh_dxf);
 	Fvector w;
 	H.fh_xf.transform_tiny(w, H.fh_bc);
 	Msg("* [vr20x] frame %u free item centre %.4f %.4f %.4f", g_vr_track.frame, w.x, w.y, w.z);
+	if (H.fh_round && !H.rd_off)
+		Msg("* [vr21x] frame %u round drawn id %d model '%s' class %s own_visual 0 at %.4f %.4f %.4f", g_vr_track.frame, H.fh_id1 - 1, H.fh_vis,
+			VR_RD_NAME[vr_rd_class(H.fh_sect)], H.fh_dxf.c.x, H.fh_dxf.c.y, H.fh_dxf.c.z);
+}
+// B3c, per eye: a round is drawn in the place of every lying ammo object with a count of one whose own model is a box
+// (that model is hidden); one whose own model is the round is drawn by the game itself and only reported here.
+static void vr_rd_draw_world(IDSGraphManager* DM)
+{
+	vr_bph_state& H = s_vr_bph;
+	vr_rd_state& S = s_vr_rd;
+	if (H.rd_off || H.off || !DM)
+		return;
+	bool calc[3] = {false, false, false};
+	for (int k = 0; k < S.n; ++k)
+	{
+		const vr_rd_obj& o = S.list[k];
+		if (o.n != 1)
+			continue;
+		const int c = vr_rd_class(o.sect);
+		if (o.rv)
+		{
+			Msg("* [vr21x] frame %u round drawn id %d model '%s' class %s own_visual 0 at %.4f %.4f %.4f (its own model, drawn by the game)", g_vr_track.frame, o.id, o.model,
+				VR_RD_NAME[c], o.xf.c.x, o.xf.c.y, o.xf.c.z);
+			continue;
+		}
+		string128 mn;
+		vr_rd_model_name(c, mn);
+		if (!S.model[c] && !S.failed[c])
+		{
+			if (vr_bpi_file(mn))
+			{
+				::Render->hud_loading = true;
+				S.model[c] = ::Render->model_Create(mn);
+				::Render->hud_loading = false;
+			}
+			S.K[c] = S.model[c] ? S.model[c]->dcast_PKinematics() : nullptr;
+			S.failed[c] = !S.model[c];
+			Msg("* [vr21] frame %u round model '%s': %s", g_vr_track.frame, mn, S.model[c] ? "made" : "NOT made; nothing is drawn for it");
+		}
+		if (!S.model[c])
+			continue;
+		Fvector l, t;
+		l.set(o.bc.x, o.bc.y - 0.5f * o.ext.y + VR_RD_RAD[c], o.bc.z);
+		o.xf.transform_dir(t, l);
+		S.xf[k] = o.xf;
+		S.xf[k].c.add(t);
+		if (S.K[c] && !calc[c])
+		{
+			S.K[c]->CalculateBones_Invalidate();
+			S.K[c]->CalculateBones(TRUE);
+			calc[c] = true;
+		}
+		DM->add_Dynamic(S.model[c], &S.xf[k]);
+		Msg("* [vr21x] frame %u round drawn id %d model '%s' class %s own_visual %d at %.4f %.4f %.4f", g_vr_track.frame, o.id, mn, VR_RD_NAME[c], o.vis, S.xf[k].c.x,
+			S.xf[k].c.y, S.xf[k].c.z);
+	}
 }
 static void vr_bpi_reset()
 {
@@ -7137,6 +7387,7 @@ void player_hud::render_hud(IDSGraphManager* DM)
 		vr_item_draw(DM); // GammaVR milestone 11a: a consumable in the off hand
 		vr_bp_draw(DM); // GammaVR milestone 12a: the backpack in the off hand
 		vr_bph_fh_draw(DM); // B3b2: the free hand item
+		vr_rd_draw_world(DM); // B3c: lone rounds lying in the world
 	if (g_vr_track.active && g_vr_track.head0_set)
 		vr_wrist_draw(DM); // GammaVR milestone 10c: the wrist status device
 	bool b_r0 = ((m_attached_items[0] && m_attached_items[0]->need_renderable()) || script_anim_part == 0 || script_anim_part == 2);
