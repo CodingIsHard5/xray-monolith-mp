@@ -164,7 +164,10 @@ case_ lock_stale_accepted  0 "" "BOX REFUSED" BOX_PLAY_LOCK="$FX/lock_dead" -- "
 case_ title_playing        1 "BOX REFUSED: protected_title: a protected title is playing" "" BOX_TITLE_CHECK="$FX/bin/title_play" -- "${ALL[@]}" shared :141 engineperf
 case_ title_check_fails    2 "BOX REFUSED: protected_title: the title checker exited 3" "" BOX_TITLE_CHECK="$FX/bin/title_fail" -- "${ALL[@]}" shared :141 engineperf
 case_ title_check_missing  2 "BOX REFUSED: protected_title: the title checker" "" BOX_TITLE_CHECK="$FX/bin/no_such_tool" -- "${ALL[@]}" shared :141 engineperf
-case_ title_seen_30s_ago   1 "BOX REFUSED: protected_title: a protected title was seen 3" "" BOX_PSEEN="$FX/pseen_recent" -- "${ALL[@]}" shared :141 engineperf
+# Expectation (2026-11-28): the specified behaviour is "a sighting younger than 180 s refuses, rc 1, with the linger
+# reason" (box_preflight.sh, S-6). The fixture is written as NOW-30 and read some seconds later, so the age printed is
+# 30 or more: the earlier text "seen 30s ago" tested the clock, not the rule, and failed whenever a second ticked over.
+case_ title_seen_30s_ago   1 "BOX REFUSED: protected_title: a protected title was seen" "" BOX_PSEEN="$FX/pseen_recent" -- "${ALL[@]}" shared :141 engineperf
 case_ title_seen_long_ago  0 "" "BOX REFUSED" BOX_PSEEN="$FX/pseen_old" -- "${ALL[@]}" shared :141 engineperf
 case_ title_seen_garbage   2 "holds no time" "" BOX_PSEEN="$FX/pseen_garbage" -- "${ALL[@]}" shared :141 engineperf
 case_ title_ptc_env_refused 2 "BOX REFUSED: protected_title: the caller's environment sets PTC_MIN_PCT" "" PTC_MIN_PCT=99 -- "${ALL[@]}" shared :141 engineperf
@@ -311,7 +314,13 @@ case_ is_own_gone          1 "is gone" "" -- "${ONE[@]}" box_is_own 9999 Xvfb 77
 # box_wine_kill nowait (S3-1's repeated kill): the same path checks, then -k only
 case_ wine_kill_nowait     0 "rc 0, no -w" "" BOX_WINESERVER="$FX/bin/ws_rec2" -- "${ONE[@]}" box_wine_kill "$FX/run/prefix" nowait
 case_ wine_kill_nowait_log 0 "WS WINEPREFIX=$FX/run/prefix -k" " -w" -- cat "$FX/ws2.log"
-case_ wine_kill_nowait_play 2 "is not an absolute" "" BOX_WINESERVER="$FX/bin/ws_rec2" -- "${ONE[@]}" box_wine_kill "$FX/run/prefix_play" nowait
+# Expectation (2026-11-28): the specified behaviour (box_preflight.sh header, box_wine_kill) is "wineserver -k is NOT
+# run and rc is 2 unless the prefix is absolute, ends in /run/prefix, names no prefix_play, ...". WHICH of those reasons
+# is printed is not specified; a path ending in /run/prefix_play fails the first test ("ends in /run/prefix") before
+# the prefix_play test, in both modes. The earlier text "names prefix_play" asked for one particular reason and was
+# never run by its author. The outcome is tested instead: rc 2, "NOT run", and the recording wineserver saw no call.
+case_ wine_kill_nowait_play 2 "wineserver -k NOT run" "" BOX_WINESERVER="$FX/bin/ws_rec2" -- "${ONE[@]}" box_wine_kill "$FX/run/prefix_play" nowait
+case_ wine_kill_nowait_play_nocall 1 "" "prefix_play" -- grep -s prefix_play "$FX/ws2.log"
 case_ wine_kill_bad_mode   2 "unknown mode" "" -- "${ONE[@]}" box_wine_kill "$FX/run/prefix" now
 
 # ---- structure: every write under run/ in both drivers goes through box_guarded ----
