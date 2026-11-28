@@ -65,9 +65,12 @@ ENGINE_API void sim_pose_release(IKinematics* K);
 // switches, parsed once by the device (sim_tick_plan's once-block) under -det_mode only
 ENGINE_API void sim_pose_parse_switches();
 // one skinned bone matrix handed to the shader (CSkeletonX::_Render's upload loop, only while g_sim_synth_pose): mid of
-// count, M = the matrix actually passed to set_ca. Feeds the "pw" hu and the "up" witness columns.
+// count, M = the matrix actually passed to set_ca. Feeds the "pw" hu, the "up" and the "uu" (W1: unmarked skeletons:
+// leaves uploaded, of them not handed the live bones, of them with storage, skeletons posed since the previous frame's
+// upload; a 32-slot static table, main thread) witness columns.
 ENGINE_API void sim_pose_wit_upload(IKinematics* K, u32 mid, u32 count, const Fmatrix& M);
-// witness: reset before a gated frame; print this frame's columns (p, pw, up, pn) to the witness line (lever only)
+// witness: reset before a gated frame; print this frame's columns (p, pw, up, pn, pa, uu, pj) to the witness line (lever
+// only). pj (W2): the witness NPC's bip01_r_hand joint as its mesh is drawn, in world.
 ENGINE_API void sim_pose_witness_reset();
 ENGINE_API void sim_pose_witness_print(FILE* f);
 // S4b (test-only): tripwire checksum of every bone field of K the simulation reads (as the S4a tripwire); caller holds
@@ -82,8 +85,11 @@ struct SimPoseAttachWit
 	char kind; // the child's record: B one bone, T bone position only, W two hands (CWeapon), N two hands, unit axes
 	           // (CMissile, CArtefact); X = record stale (XFORM() placed some other way since); '-' = no record
 	char form; // C corrected (the placement redone from the drawn bones), R corrected by the right hand alone (two-hand
-	           // frame unavailable), O not corrected: the placement read bones of neither drawn capture, P the 4b rule
-	           // alone (no correction needed or possible), S stock (drawn at its XFORM())
+	           // frame unavailable), I corrected with C = identity: the bones are drawn bitwise as the placement read
+	           // them, only the parent's XFORM() changed since the placement (c216081fd S1: the recorded parent is used
+	           // instead of the current one; NOT a bone correction, review F1), O not corrected: the placement read
+	           // bones of neither drawn capture, P the 4b rule alone (no correction needed or possible), S stock (drawn
+	           // at its XFORM())
 	char cls; // which capture the placement read: c the newest (or both equal), p the previous one, o neither,
 	          // '-' not classified (no valid record, or the parent's pose is not drawn between ticks)
 	u16 ba, bb; // the record's bones (BI_NONE = none)
@@ -93,7 +99,7 @@ struct SimPoseAttachWit
 	Fvector ws; // where the 4b rule alone would draw it (world): the stock placement relative to the drawn root
 	Fvector hd; // bone ba's joint as drawn, through the parent's drawn root (world)
 	Fvector hr; // bone ba's joint as the placement read it, through the parent's drawn root (world)
-	bool have_l; // forms C and R: ld, ls set
+	bool have_l; // forms C, R and I: ld, ls set
 	Fvector ld, ls; // the child's origin in its placement frame: drawn (wd in parent_draw * drawn frame) and as placed
 	                // (the recorded placement in parent_draw * recorded frame); equal when the item follows the frame
 	u64 hx; // checksum of the child's XFORM() at the child rule

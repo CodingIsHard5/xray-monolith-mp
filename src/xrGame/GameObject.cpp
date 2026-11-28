@@ -960,7 +960,10 @@ bool CGameObject::sim_attach_correction(CObject* P, Fmatrix& C, Fmatrix& L, Fmat
 	// u = 0), the 4b rule would use the wrong parent matrix: go on with C = identity and the recorded parent.
 	if (same_frame && 0 == memcmp(&r.parent, &P->XFORM(), sizeof(Fmatrix)))
 		return false;
-	info.form = (r.kind == SIM_ATTACH_HANDS || r.kind == SIM_ATTACH_HANDS_N) && !framed ? 'R' : 'C';
+	// witness form: I = this S1 path (C = identity, no bone correction; review F1), else C, or R for an unframed
+	// two-hand kind
+	info.form = same_frame ? 'I' : ((r.kind == SIM_ATTACH_HANDS || r.kind == SIM_ATTACH_HANDS_N) && !framed ? 'R' : 'C');
+	info.c_identity = same_frame; // the caller draws parent_draw * L, without the multiply by C (review N5: exact)
 	Fmatrix inv;
 	if (same_frame)
 		C.identity();
@@ -1104,7 +1107,9 @@ Fmatrix* CGameObject::sim_render_world_calc()
 			Fmatrix parent_inv;
 			parent_inv.invert(parent_xform); // 4x3 invert: handles scale
 			local.mul_43(parent_inv, XFORM());
-			if (corrected)
+			if (corrected && info.c_identity)
+				s.draw.mul_43(*parent_draw, L); // C = identity (the bones as read, the recorded parent): exactly L
+			else if (corrected)
 			{
 				Fmatrix moved; // the placement redone from the drawn bones, in model space
 				moved.mul_43(C, L);

@@ -246,7 +246,8 @@ public:
 	struct SimAttachInfo
 	{
 		char kind = '-';
-		char form = 'P'; // C, R, O or P (sim_pose.h SimPoseAttachWit::form; S is decided by the caller)
+		char form = 'P'; // C, R, I, O or P (sim_pose.h SimPoseAttachWit::form; S is decided by the caller)
+		bool c_identity = false; // a true return with C = identity (form I): the draw is parent_draw * L (review N5)
 		char cls = '-';
 		u16 ba = u16(-1), bb = u16(-1); // the record's bones
 		bool have_u = false;

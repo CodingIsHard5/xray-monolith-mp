@@ -16,6 +16,11 @@
 // - players' bodies are not marked (GameObject.cpp OnChangeVisual): stock.
 // - a bone written after the frame's first evaluation without a capture is not re-checked in that frame.
 //
+// Behaviour with S4b, intended (c216081fd re-review N6): when the render is clamped at alpha = 1 (it runs a tick or more
+// behind real time) and the item was placed in the tick before its parent moved, the item now sits on the drawn hand.
+// Stock (and S4b before c216081fd) drew it trailing the hand by the parent's in-tick root motion (about 5 cm walking,
+// 17 cm running at a 30 Hz tick). That is the S4b design (review C3), not a regression.
+//
 // Rule One: nothing here writes a field the simulation reads. Writes: this file's storage (opaque to every other
 // file: IKinematics::m_sim_pose, friend SimPoseAccess below) and the witness statics. The only exception is the
 // test-only must-fail break (g_sim_4d_break & SIM4D_POSE, det_mode only).
@@ -99,8 +104,27 @@ struct SimPoseWitness
 	bool up_active = false, up_done = false;
 	IKinematics* up_k = nullptr;
 	u64 up_hu = 0, up_hl = 0;
+	// uu (W1): skinned-leaf uploads of UNMARKED skeletons this frame: leaves uploaded, of them handed anything but the
+	// live bones, of them with storage; and unmarked skeletons whose live pose changed since their upload in the
+	// previous frame (sim_pose_wit_unmarked_first)
+	u32 uu_nu = 0, uu_nud = 0, uu_nus = 0, uu_nposed = 0;
+	IKinematics* uu_k = nullptr; // the unmarked leaf being uploaded (from its mid 0 to its last matrix)
+	bool uu_diff = false; // a matrix of that leaf was not the live bone itself
 };
 static SimPoseWitness s_wit;
+// W1 (test-only): each unmarked skeleton's live-pose hash at its first upload of a frame. Fixed static slots, no heap
+// (the off arm must not allocate where build 1 does not: LB); never reset per frame (the previous frame is the point).
+// Main thread only: written from CSkeletonX::_Render's upload loop, which runs only while g_sim_synth_pose (det mode,
+// serial render). A full table evicts the oldest slot, so a missed lookup can only lower nposed, never raise it.
+struct SimPoseUnmarkedSlot
+{
+	IKinematics* k = nullptr;
+	u32 frame = 0; // Device.dwFrame of the stored hash
+	u64 h = 0; // hash of mRenderTransform over all n bones
+	u16 n = 0; // LL_BoneCount() (part of the key: a reused address with another bone count is another skeleton)
+};
+static const u32 SIM_POSE_UU_SLOTS = 32;
+static SimPoseUnmarkedSlot s_wit_uu[SIM_POSE_UU_SLOTS];
 // render-only-frame captures (design 12, belt and braces): bytes differ from cur (history dropped) / byte-equal (no-op).
 // Atomic: captures may run on the worker threads outside det serial mode.
 static std::atomic<u32> s_wit_ro_diff{0};
@@ -528,11 +552,71 @@ ENGINE_API void sim_pose_parse_switches()
 	Msg("* det_synth: pose witness on, npc %s", s_wit_npc_name);
 }
 
+// W1 (test-only): once per unmarked skeleton per frame (at the mid 0 of its first leaf uploaded in the frame): nposed++
+// when its live pose differs from the one stored at its upload in the PREVIOUS frame (consecutive frames only, so on a
+// render-only frame the change happened after the last tick: posed between ticks). Then stores this frame's hash.
+static void sim_pose_wit_unmarked_first(IKinematics* K)
+{
+	const u16 n = K->LL_BoneCount();
+	const u32 fr = Device.dwFrame;
+	SimPoseUnmarkedSlot* hit = nullptr;
+	SimPoseUnmarkedSlot* old = &s_wit_uu[0];
+	for (u32 i = 0; i < SIM_POSE_UU_SLOTS; ++i)
+	{
+		SimPoseUnmarkedSlot& e = s_wit_uu[i];
+		if (e.k == K && e.n == n)
+		{
+			hit = &e;
+			break;
+		}
+		if (e.frame < old->frame)
+			old = &e; // the oldest (an unused slot has frame 0)
+	}
+	if (hit && hit->frame == fr)
+		return; // another leaf or pass of K in this frame: counted once
+	const u64 h = sim_pose_hash_live(K, n);
+	if (hit && hit->frame + 1 == fr && hit->h != h)
+		s_wit.uu_nposed++;
+	SimPoseUnmarkedSlot& e = hit ? *hit : *old;
+	e.k = K;
+	e.n = n;
+	e.frame = fr;
+	e.h = h;
+}
+
 ENGINE_API void sim_pose_wit_upload(IKinematics* K, u32 mid, u32 count, const Fmatrix& M)
 {
 	if (!g_sim_synth_pose)
 		return;
 	SimPoseWitness& w = s_wit;
+	const bool last = mid + 1 == count;
+	// uu (W1): an unmarked skeleton (decided once per leaf, at its mid 0)
+	if (mid == 0)
+	{
+		w.uu_k = nullptr;
+		if (!K->LL_GetSimObjectVisual())
+		{
+			w.uu_k = K;
+			w.uu_diff = false;
+			sim_pose_wit_unmarked_first(K);
+		}
+	}
+	if (w.uu_k == K)
+	{
+		// stock hands set_ca the live bone itself (LL_GetTransform_R = mRenderTransform, SkeletonCustom.h:309); any other
+		// address (a draw array) counts, even when its bytes happen to be equal
+		if (&M != &K->LL_GetBoneInstance(u16(mid)).mRenderTransform)
+			w.uu_diff = true;
+		if (last)
+		{
+			w.uu_nu++;
+			if (w.uu_diff)
+				w.uu_nud++;
+			if (K->has_sim_pose())
+				w.uu_nus++;
+			w.uu_k = nullptr;
+		}
+	}
 	if (mid == 0)
 	{
 		if (!w.up_done && !w.up_active)
@@ -548,7 +632,6 @@ ENGINE_API void sim_pose_wit_upload(IKinematics* K, u32 mid, u32 count, const Fm
 			w.pw_hu = sim_4d_hash_seed;
 		}
 	}
-	const bool last = mid + 1 == count;
 	if (w.up_active && w.up_k == K)
 	{
 		w.up_hu = sim_4d_hash(w.up_hu, &M, sizeof(Fmatrix));
@@ -622,11 +705,13 @@ static void sim_pose_print_vec(FILE* f, bool ok, const Fvector& v)
 
 static void sim_pose_print_pn(FILE* f);
 static void sim_pose_print_pa(FILE* f);
+static void sim_pose_print_pj(FILE* f);
 
 // " p <neval> <nlerp> <nguard> <nsnap> <nro_diff> <nro_equal> | pw <form> <u> <ptick> <ctick> <hd> <hl> <hp> <hc> <hu>
 // <hdu> <jd xyz> <jp xyz> <jc xyz> | up <hu> <hl> | pn <form> <u> <hd> <hl> <hsim> |
-// pa <kind> <form> <cls> <ba> <bb> <u> <wd xyz> <ws xyz> <hd xyz> <hr xyz> <ld xyz> <ls xyz> <hx> <hxe> |"
-// (one "-" per absent value; pa is S4b's)
+// pa <kind> <form> <cls> <ba> <bb> <u> <wd xyz> <ws xyz> <hd xyz> <hr xyz> <ld xyz> <ls xyz> <hx> <hxe> |
+// uu <nu> <nud> <nus> <nposed> | pj <bone> <jw xyz> |"
+// (one "-" per absent value; pa is S4b's; uu (W1) and pj (W2) are the s4d2 witness additions, always printed)
 ENGINE_API void sim_pose_witness_print(FILE* f)
 {
 	if (!g_sim_synth_pose)
@@ -667,17 +752,56 @@ ENGINE_API void sim_pose_witness_print(FILE* f)
 
 	sim_pose_print_pn(f);
 	sim_pose_print_pa(f);
+	// uu (W1): always 4 counts (0 0 0 0 when no unmarked skeleton was uploaded)
+	fprintf(f, " uu %u %u %u %u |", w.uu_nu, w.uu_nud, w.uu_nus, w.uu_nposed);
+	sim_pose_print_pj(f);
+}
+
+// the witness NPC and its skeleton (main thread, after the render's join; looked up by name every frame, so no pointer
+// is kept across frames). K is nullptr when the NPC is not found or has no skeleton.
+static CObject* sim_pose_wit_npc_object(IKinematics*& K)
+{
+	K = nullptr;
+	CObject* O = (g_pGameLevel && s_wit_npc.size()) ? g_pGameLevel->Objects.FindObjectByName(s_wit_npc) : nullptr;
+	if (O)
+		if (IRenderVisual* V = O->Visual())
+			K = V->dcast_PKinematics();
+	return O;
+}
+
+// pj (W2, test-only): the witness NPC's bip01_r_hand joint (else its last bone, as pw) as the mesh is drawn in this
+// frame, in world: the NPC's drawn matrix of this frame (sim_render.ptr, the matrix renderable_Render handed over and
+// its items' child rule used as parent_draw) times draw[b] applied to the bone's joint. " pj <bone> <x y z> |"; four
+// dashes unless pn is form L and the NPC's drawn matrix was set in this frame.
+static void sim_pose_print_pj(FILE* f)
+{
+	IKinematics* K = nullptr;
+	CObject* O = sim_pose_wit_npc_object(K);
+	if (K)
+	{
+		xrCriticalSectionGuard guard(&K->UCalc_Mutex);
+		SimPoseState* s = SimPoseAccess::get(K);
+		const CObject::SimRenderState& r = O->sim_render;
+		if (s && s->n && s->draw_frame == Device.dwFrame && s->form == SPF_LERP && r.ptr && r.frame == Device.dwFrame)
+		{
+			if (s->wit_bone == u16(-2))
+				s->wit_bone = K->LL_BoneID("bip01_r_hand");
+			const u16 b = (s->wit_bone < s->n) ? s->wit_bone : u16(s->n - 1);
+			Fvector jm, jw;
+			s->draw[b].transform_tiny(jm, s->joint[b]);
+			r.ptr->transform_tiny(jw, jm);
+			fprintf(f, " pj %u %.5f %.5f %.5f |", u32(b), jw.x, jw.y, jw.z);
+			return;
+		}
+	}
+	fprintf(f, " pj - - - - |");
 }
 
 static void sim_pose_print_pn(FILE* f)
 {
-	// pn: the named NPC (reported only). Main thread, after the render's join; looked up by name every frame, so no
-	// pointer is kept across frames.
+	// pn: the named NPC (reported only).
 	IKinematics* K = nullptr;
-	if (g_pGameLevel && s_wit_npc.size())
-		if (CObject* O = g_pGameLevel->Objects.FindObjectByName(s_wit_npc))
-			if (IRenderVisual* V = O->Visual())
-				K = V->dcast_PKinematics();
+	sim_pose_wit_npc_object(K);
 	if (!K)
 	{
 		fprintf(f, " pn - - - - - |");
